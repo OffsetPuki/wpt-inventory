@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(extract-text \"C:\\\\Users\\\\AsusF\\\\OneDrive\\\\Desktop\\\\Code\\\\Inventory\\\\wpt-inventory-spec.docx\")",
+      "Bash(which pandoc *)",
+      "PowerShell(& \"C:\\\\Users\\\\AsusF\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python314\\\\python.exe\" extract_spec.py)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(npm --version)",
+      "Bash(fnm list *)",
+      "PowerShell(node --version; Write-Output \"where node:\"; \\(Get-Command node\\).Source)",
+      "Bash(npm view *)",
+      "Bash(python -c \"import sys,json; v=json.load\\(sys.stdin\\); print\\(v[-12:]\\)\")",
+      "Bash(curl -s http://localhost:5000/api/equipment-presets)",
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell($conns = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue; if \\($conns\\) { $conns.OwningProcess | Select-Object -Unique | ForEach-Object { Write-Output \"killing PID $_\"; Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } else { Write-Output \"nothing on 5000\" }; Start-Sleep -Milliseconds 500; if \\(Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue\\) { Write-Output \"STILL IN USE\" } else { Write-Output \"PORT 5000 FREE\" })",
+      "Bash(rm -f spec-extracted.txt extract_spec.py tsc-out.txt)",
+      "Bash(ls *.txt *.py)",
+      "Bash(curl -s http://localhost:5000/api/settings)",
+      "Bash(git --version)",
+      "Bash(echo \"git: $\\(git --version\\)\")",
+      "Bash(git config *)",
+      "Bash(echo \"name: $\\(git config --global user.name\\)\")",
+      "Bash(echo \"email: $\\(git config --global user.email\\)\")",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(grep -E \"node_modules|^data/|^dist/|\\\\.db$|\\\\.env\")"
+    ]
+  }
+}
