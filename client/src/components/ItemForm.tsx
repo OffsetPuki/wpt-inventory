@@ -1,23 +1,17 @@
-import { useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useState, type ReactNode } from "react";
 import {
   CATEGORIES,
   AREAS,
-  SHOP_AREAS,
   ITEM_TYPES,
   type Category,
   type Area,
   type ItemType,
-  type EquipmentPreset,
-  type CustomField,
 } from "@shared/schema";
 import { CATEGORY_LABELS, AREA_LABELS, ITEM_TYPE_LABELS, itemAttrs } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
 import PhotoSlots from "./PhotoSlots";
-import LucideIcon from "./LucideIcon";
 import { cn } from "@/lib/utils";
-import { Zap, Flame, Cpu, Package, Wrench, X, Loader2 } from "lucide-react";
+import { Zap, Flame, Cpu, Package, Wrench, Loader2 } from "lucide-react";
 
 const CATEGORY_ICON: Record<Category, typeof Zap> = {
   electric: Zap,
@@ -77,46 +71,22 @@ interface ItemFormProps {
   onSubmit: (payload: Record<string, any>) => void | Promise<void>;
 }
 
-function pruneAttrs(
-  fields: CustomField[],
-  attrs: Record<string, any>
-): Record<string, string | number> {
-  const out: Record<string, string | number> = {};
-  for (const f of fields) {
-    const v = attrs[f.key];
-    if (v === undefined || v === null) continue;
-    if (typeof v === "number") {
-      out[f.key] = v;
-    } else if (typeof v === "string") {
-      const trimmed = v.trim();
-      if (trimmed === "") continue;
-      if (f.kind === "number") {
-        const n = Number(trimmed);
-        if (!isNaN(n)) out[f.key] = n;
-      } else {
-        out[f.key] = trimmed;
-      }
-    }
-  }
-  return out;
-}
-
 export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFormProps) {
   const seed = initial ?? {};
   const { isManager } = useAuth();
+
+  // Equipment-type details are no longer edited in this form, but we preserve any
+  // existing values so editing an item never wipes them.
+  const initialEquipmentType = seed.equipmentType ?? null;
+  const initialAttrs =
+    typeof seed.customAttrs === "string"
+      ? itemAttrs({ customAttrs: seed.customAttrs })
+      : (seed.customAttrs as Record<string, any>) ?? {};
 
   const [name, setName] = useState(seed.name ?? "");
   const [partNumber, setPartNumber] = useState(seed.partNumber ?? "");
   const [mfgPartNumber, setMfgPartNumber] = useState(seed.mfgPartNumber ?? "");
   const [category, setCategory] = useState<Category>(seed.category ?? "tools");
-  const categoryTouched = useRef(false);
-
-  const [equipmentType, setEquipmentType] = useState<string | null>(seed.equipmentType ?? null);
-  const [attrs, setAttrs] = useState<Record<string, any>>(() =>
-    typeof seed.customAttrs === "string"
-      ? itemAttrs({ customAttrs: seed.customAttrs })
-      : (seed.customAttrs as Record<string, any>) ?? {}
-  );
 
   const [photos, setPhotos] = useState<string[]>(() => {
     let arr: string[] = [];
@@ -153,37 +123,8 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
   );
   const [notes, setNotes] = useState(seed.notes ?? "");
 
-  const { data: presets = [] } = useQuery<EquipmentPreset[]>({
-    queryKey: ["equipment-presets"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/equipment-presets");
-      return res.json();
-    },
-  });
-
-  const enabledPresets = presets.filter((p) => p.enabled);
-  const activePreset = presets.find((p) => p.key === equipmentType);
-  const activeFields: CustomField[] = activePreset
-    ? (() => {
-        try {
-          return JSON.parse(activePreset.customFields as unknown as string);
-        } catch {
-          return [];
-        }
-      })()
-    : [];
-
-  const isShopArea = area !== "" && (SHOP_AREAS as readonly string[]).includes(area);
-
-  function selectPreset(p: EquipmentPreset) {
-    setEquipmentType(p.key);
-    if (!categoryTouched.current) setCategory(p.defaultCategory);
-  }
-
-  function chooseCategory(c: Category) {
-    categoryTouched.current = true;
-    setCategory(c);
-  }
+  // Every area gets full location detail (rack / level / sub-location / shelf).
+  const showLocation = area !== "";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -192,15 +133,15 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
       partNumber: partNumber.trim() || null,
       mfgPartNumber: mfgPartNumber.trim() || null,
       category,
-      equipmentType: equipmentType || null,
-      customAttrs: equipmentType ? pruneAttrs(activeFields, attrs) : {},
+      equipmentType: initialEquipmentType,
+      customAttrs: initialAttrs,
       photos,
       photoUrl: photos.find(Boolean) ?? null,
       area: area || null,
-      rackLetter: isShopArea ? rackLetter.trim() || null : null,
-      rackLevel: isShopArea && rackLevel ? Number(rackLevel) : null,
-      subLocation: isShopArea ? subLocation.trim() || null : null,
-      shelf: isShopArea ? shelf.trim() || null : null,
+      rackLetter: showLocation ? rackLetter.trim() || null : null,
+      rackLevel: showLocation && rackLevel ? Number(rackLevel) : null,
+      subLocation: showLocation ? subLocation.trim() || null : null,
+      shelf: showLocation ? shelf.trim() || null : null,
       quantity: Number(quantity) || 0,
       lowStockThreshold: Number(lowStockThreshold) || 0,
       itemType,
@@ -261,7 +202,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
               <button
                 type="button"
                 key={c}
-                onClick={() => chooseCategory(c)}
+                onClick={() => setCategory(c)}
                 className={cn(
                   "flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-colors",
                   selected
@@ -275,74 +216,6 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
             );
           })}
         </div>
-      </Section>
-
-      {/* Equipment type */}
-      <Section title="Equipment type">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {enabledPresets.map((p) => {
-            const selected = equipmentType === p.key;
-            return (
-              <button
-                type="button"
-                key={p.key}
-                onClick={() => selectPreset(p)}
-                className={cn(
-                  "flex items-center gap-2 rounded-xl border-2 p-3 text-left transition-colors",
-                  selected
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:border-primary/40"
-                )}
-              >
-                <LucideIcon name={p.icon} className="h-5 w-5 shrink-0 text-primary" />
-                <span className="text-sm font-medium text-foreground">{p.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {activePreset && (
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={() => setEquipmentType(null)}
-              className="mb-4 inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground hover:bg-destructive hover:text-destructive-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-              Clear {activePreset.label}
-            </button>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {activeFields.map((f) => (
-                <Field key={f.key} label={f.unit ? `${f.label} (${f.unit})` : f.label}>
-                  {f.kind === "select" ? (
-                    <select
-                      className={inputCls}
-                      value={attrs[f.key] ?? ""}
-                      onChange={(e) => setAttrs({ ...attrs, [f.key]: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {(f.options ?? []).map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      className={inputCls}
-                      type={f.kind === "number" ? "number" : "text"}
-                      step="any"
-                      placeholder={f.placeholder}
-                      value={attrs[f.key] ?? ""}
-                      onChange={(e) => setAttrs({ ...attrs, [f.key]: e.target.value })}
-                    />
-                  )}
-                </Field>
-              ))}
-            </div>
-          </div>
-        )}
       </Section>
 
       {/* Location */}
@@ -364,7 +237,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
           </Field>
         </div>
 
-        {isShopArea && (
+        {showLocation && (
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
             <Field label="Rack letter">
               <input

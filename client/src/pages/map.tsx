@@ -326,6 +326,19 @@ export default function MapPage() {
             onPointerUp={endDrag}
             onPointerLeave={endDrag}
           >
+            {/* Blueprint-style blue grid */}
+            <defs>
+              <pattern id="mapGridMinor" width={40} height={40} patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="hsl(205 90% 60% / 0.16)" strokeWidth={1} />
+              </pattern>
+              <pattern id="mapGrid" width={200} height={200} patternUnits="userSpaceOnUse">
+                <rect width={200} height={200} fill="url(#mapGridMinor)" />
+                <path d="M 200 0 L 0 0 0 200" fill="none" stroke="hsl(205 95% 65% / 0.32)" strokeWidth={1.5} />
+              </pattern>
+            </defs>
+            <rect x={0} y={0} width={VW} height={VH} fill="hsl(210 80% 50% / 0.05)" />
+            <rect x={0} y={0} width={VW} height={VH} fill="url(#mapGrid)" />
+
             {nodes.map((n) => {
               const matched = active
                 ? items.filter((i) => i.area === active.area && nodeMatches(n, i))
@@ -334,8 +347,12 @@ export default function MapPage() {
               const low = matched.some((i) => isLowStock(i));
               const hasItems = matched.length > 0;
 
+              // Doors and machines are structural — no storage label.
+              const structural = n.kind === "door" || n.kind === "machine";
               let countLine: string;
-              if (editMode) {
+              if (structural) {
+                countLine = "";
+              } else if (editMode) {
                 countLine = n.matchRack
                   ? `Rack ${n.matchRack}`
                   : n.matchSubLocation
