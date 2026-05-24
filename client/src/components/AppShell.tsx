@@ -12,7 +12,6 @@ import {
   FolderKanban,
   Map,
   Users,
-  Layers,
   Sparkles,
   Settings,
   LogOut,
@@ -51,7 +50,6 @@ const NAV: NavEntry[] = [
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/map", label: "Shop Map", icon: Map },
   { to: "/users", label: "Users", icon: Users, manager: true },
-  { to: "/admin/presets", label: "Equipment Types", icon: Layers, manager: true },
   { to: "/admin/templates", label: "Job Templates", icon: Sparkles, manager: true },
   { to: "/settings", label: "Settings", icon: Settings, manager: true },
 ];

@@ -18,7 +18,6 @@ import ProjectDetailPage from "./pages/project-detail";
 import MapPage from "./pages/map";
 import UsersPage from "./pages/users";
 import SettingsPage from "./pages/settings";
-import AdminPresetsPage from "./pages/admin-presets";
 import AdminTemplatesPage from "./pages/admin-templates";
 import NotFoundPage from "./pages/not-found";
 
@@ -138,12 +137,6 @@ export default function App() {
           <Route path="/settings">
             <ManagerRoute>
               <SettingsPage />
-            </ManagerRoute>
-          </Route>
-
-          <Route path="/admin/presets">
-            <ManagerRoute>
-              <AdminPresetsPage />
             </ManagerRoute>
           </Route>
 
