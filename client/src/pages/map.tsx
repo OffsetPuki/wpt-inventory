@@ -56,9 +56,13 @@ function parseNodes(layout: MapLayout): MapNode[] {
   }
 }
 
+// Normalize so "Front Left", "Front · Left", "front-left" all compare equal.
+const normLoc = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
 function nodeMatches(node: MapNode, item: Item): boolean {
   if (node.matchRack && item.rackLetter === node.matchRack) return true;
-  if (node.matchSubLocation && item.subLocation === node.matchSubLocation) return true;
+  if (node.matchSubLocation && item.subLocation && normLoc(node.matchSubLocation) === normLoc(item.subLocation))
+    return true;
   return false;
 }
 

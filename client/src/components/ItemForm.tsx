@@ -114,12 +114,16 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
   const [shelf, setShelf] = useState(seed.shelf ?? "");
 
   // Containers use Front/Middle/Back + Left/Right instead of rack letter/level,
-  // stored together in subLocation as e.g. "Front · Left".
+  // stored together in subLocation as e.g. "Front Left".
   const seedIsContainer =
     seed.area === "shipping_container_1" || seed.area === "shipping_container_2";
-  const [seedPos, seedSide] = seedIsContainer ? (seed.subLocation ?? "").split(" · ") : [];
-  const [containerPos, setContainerPos] = useState(seedPos ?? "");
-  const [containerSide, setContainerSide] = useState(seedSide ?? "");
+  const seedTokens = seedIsContainer
+    ? (seed.subLocation ?? "").split(/[^a-zA-Z0-9]+/).filter(Boolean)
+    : [];
+  const findToken = (opts: string[]) =>
+    opts.find((o) => seedTokens.some((t) => t.toLowerCase() === o.toLowerCase())) ?? "";
+  const [containerPos, setContainerPos] = useState(findToken(["Front", "Middle", "Back"]));
+  const [containerSide, setContainerSide] = useState(findToken(["Left", "Right"]));
 
   const [quantity, setQuantity] = useState<string>(String(seed.quantity ?? 0));
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(
@@ -151,7 +155,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
       rackLevel: showLocation && !isContainer && rackLevel ? Number(rackLevel) : null,
       subLocation: showLocation
         ? isContainer
-          ? [containerPos, containerSide].filter(Boolean).join(" · ") || null
+          ? [containerPos, containerSide].filter(Boolean).join(" ") || null
           : subLocation.trim() || null
         : null,
       shelf: showLocation && !isContainer ? shelf.trim() || null : null,
