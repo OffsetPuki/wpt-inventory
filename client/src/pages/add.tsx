@@ -18,6 +18,33 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+// Downscale to a small JPEG before sending to the AI — fewer image tokens = lower
+// cost. Only the AI copy is shrunk; the photo stored on the item stays full-res.
+function downscaleToDataUrl(file: File, maxDim = 768, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas unsupported"));
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Image load failed"));
+    };
+    img.src = url;
+  });
+}
+
 export default function AddItemPage() {
   const [, setLocation] = useLocation();
   const { isManager } = useAuth();
@@ -46,7 +73,14 @@ export default function AddItemPage() {
     if (!file) return;
     setIdentifying(true);
     try {
-      const photoBase64 = await fileToDataUrl(file);
+      // Send a downscaled copy to the AI (cheaper); fall back to the original if
+      // the browser can't process the image (e.g. some HEIC files).
+      let photoBase64: string;
+      try {
+        photoBase64 = await downscaleToDataUrl(file);
+      } catch {
+        photoBase64 = await fileToDataUrl(file);
+      }
       const res = await apiRequest("POST", "/api/ai/identify-item", { photoBase64 });
       const data = await res.json();
 

@@ -73,7 +73,9 @@ def identify(payload):
         "respond with ONLY a JSON object, no prose, no markdown fences, with keys:\n"
         '  "name": a short, specific item name,\n'
         f'  "category": one of {json.dumps(categories)},\n'
-        '  "notes": one short sentence describing the item.\n'
+        '  "notes": ONE concise factual sentence, max 15 words — what the item is '
+        "plus its single most useful detail (material, size, type, or rating). "
+        "No marketing, no filler, no hashtags.\n"
         "Return only the JSON object."
     )
 
