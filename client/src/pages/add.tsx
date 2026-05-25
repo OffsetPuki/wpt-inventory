@@ -69,9 +69,9 @@ export default function AddItemPage() {
       setSeed({
         name: data.name ?? "",
         category: data.category ?? "tools",
-        equipmentType: data.equipmentType ?? null,
-        customAttrs: data.customAttrs ?? {},
-        partNumber: data.partNumber ?? null,
+        notes: data.notes ?? "",
+        equipmentType: null,
+        customAttrs: {},
         photos: photoUrl ? [photoUrl] : [],
       });
       setFormKey((k) => k + 1);

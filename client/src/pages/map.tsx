@@ -5,7 +5,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import { AREAS, type Item, type MapLayout, type MapNode, type Area } from "@shared/schema";
-import { isLowStock, AREA_LABELS, locationString } from "@/lib/format";
+import { isLowStock, AREA_LABELS, locationString, itemPhotos } from "@/lib/format";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
@@ -704,13 +704,24 @@ export default function MapPage() {
                 {sub ? ` · ${sub}` : ""}
               </p>
               <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-                {matched.map((i) => (
+                {matched.map((i) => {
+                  const photo = itemPhotos(i)[0];
+                  return (
                   <Link
                     key={i.id}
                     href={`/item/${i.id}`}
                     onClick={() => setViewNode(null)}
-                    className="flex items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:border-primary"
+                    className="flex items-center gap-3 rounded-lg border border-border p-2 transition-colors hover:border-primary"
                   >
+                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+                      {photo ? (
+                        <img src={photo} alt={i.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                          <Package className="h-5 w-5" />
+                        </div>
+                      )}
+                    </div>
                     <span className="flex-1 min-w-0">
                       <span className="block truncate font-medium text-foreground">{i.name}</span>
                       <span className="block truncate text-xs text-muted-foreground">{locationString(i)}</span>
@@ -720,7 +731,8 @@ export default function MapPage() {
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   </Link>
-                ))}
+                  );
+                })}
               </ul>
             </>
           );

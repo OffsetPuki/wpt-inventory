@@ -30,9 +30,7 @@ def fallback(categories):
     return {
         "name": "Unidentified Item",
         "category": cat,
-        "equipmentType": None,
-        "customAttrs": {},
-        "partNumber": None,
+        "notes": "",
     }
 
 
@@ -44,7 +42,7 @@ def parse_data_url(data_url):
     return "image/jpeg", data_url
 
 
-def coerce_result(raw, categories, equipment_keys):
+def coerce_result(raw, categories):
     """Validate/normalize the model's JSON into our shape."""
     out = fallback(categories)
     if isinstance(raw.get("name"), str) and raw["name"].strip():
@@ -52,20 +50,15 @@ def coerce_result(raw, categories, equipment_keys):
     cat = raw.get("category")
     if isinstance(cat, str) and cat in categories:
         out["category"] = cat
-    eq = raw.get("equipmentType")
-    out["equipmentType"] = eq if isinstance(eq, str) and eq in equipment_keys else None
-    pn = raw.get("partNumber")
-    out["partNumber"] = pn.strip() if isinstance(pn, str) and pn.strip() else None
-    attrs = raw.get("customAttrs")
-    out["customAttrs"] = attrs if isinstance(attrs, dict) else {}
+    notes = raw.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        out["notes"] = notes.strip()
     return out
 
 
 def identify(payload):
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     categories = payload.get("categories") or ["electric", "welder", "it", "raw_materials", "tools"]
-    equipment = payload.get("equipmentTypes") or []
-    equipment_keys = [e.get("key") for e in equipment if isinstance(e, dict)]
 
     if not api_key:
         return fallback(categories)
@@ -74,16 +67,13 @@ def identify(payload):
     if not b64:
         return fallback(categories)
 
-    eq_desc = ", ".join(f'{e.get("key")} ({e.get("label")})' for e in equipment) or "none"
     prompt = (
-        "You are identifying an industrial part for an ASME pressure-equipment "
+        "You are identifying an inventory item for an ASME pressure-equipment "
         "manufacturer (autoclaves, ovens, presses, controls). Look at the photo and "
         "respond with ONLY a JSON object, no prose, no markdown fences, with keys:\n"
-        '  "name": short descriptive name,\n'
+        '  "name": a short, specific item name,\n'
         f'  "category": one of {json.dumps(categories)},\n'
-        f'  "equipmentType": one of these keys or null: {eq_desc},\n'
-        '  "partNumber": visible part number or null,\n'
-        '  "customAttrs": object of any readable specs (may be empty {}).\n'
+        '  "notes": one short sentence describing the item.\n'
         "Return only the JSON object."
     )
 
@@ -111,7 +101,7 @@ def identify(payload):
     text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
     raw = json.loads(text)
-    return coerce_result(raw, categories, equipment_keys)
+    return coerce_result(raw, categories)
 
 
 def main():
@@ -121,8 +111,16 @@ def main():
         payload = {}
     try:
         result = identify(payload)
-    except Exception:
-        # Any failure (network, parse, auth) degrades gracefully to the stub.
+    except Exception as e:
+        # Any failure (network, parse, auth) degrades gracefully to the stub,
+        # but log the reason to stderr so the server can surface what went wrong.
+        detail = ""
+        try:
+            if hasattr(e, "read"):
+                detail = " :: " + e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        print(f"[identify_item] {type(e).__name__}: {e}{detail}", file=sys.stderr)
         result = fallback(payload.get("categories"))
     print(json.dumps(result))
 

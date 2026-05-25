@@ -469,19 +469,13 @@ export function registerRoutes(app: Express): void {
     const fallback = {
       name: "Unidentified Item",
       category: "tools",
-      equipmentType: null,
-      customAttrs: {},
-      partNumber: null,
+      notes: "",
     };
 
     const photoBase64 = req.body?.photoBase64;
     if (!photoBase64) return res.status(400).json({ message: "photoBase64 required" });
 
-    const equipmentTypes = storage
-      .getPresets()
-      .filter((p) => p.enabled)
-      .map((p) => ({ key: p.key, label: p.label }));
-    const input = JSON.stringify({ photoBase64, categories: CATEGORIES, equipmentTypes });
+    const input = JSON.stringify({ photoBase64, categories: CATEGORIES });
 
     const pythonBin = process.env.PYTHON_BIN || (process.platform === "win32" ? "py" : "python3");
     const scriptPath = path.resolve(process.cwd(), "server", "identify_item.py");
@@ -501,9 +495,15 @@ export function registerRoutes(app: Express): void {
     }
 
     let out = "";
+    let err = "";
     child.on("error", () => done(fallback));
     child.stdout?.on("data", (d) => (out += d.toString()));
+    child.stderr?.on("data", (d) => (err += d.toString()));
     child.on("close", () => {
+      if (err.trim()) console.error("[ai/identify]", err.trim());
+      if (!process.env.ANTHROPIC_API_KEY) {
+        console.warn("[ai/identify] ANTHROPIC_API_KEY not set — returning placeholder.");
+      }
       try {
         done(JSON.parse(out.trim()));
       } catch {

@@ -1,3 +1,4 @@
+import "dotenv/config"; // loads .env (e.g. ANTHROPIC_API_KEY) before anything reads env
 import express from "express";
 import http from "http";
 import { seedDefaults } from "./seed";
