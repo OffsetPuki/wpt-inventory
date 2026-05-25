@@ -113,6 +113,14 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
   const [subLocation, setSubLocation] = useState(seed.subLocation ?? "");
   const [shelf, setShelf] = useState(seed.shelf ?? "");
 
+  // Containers use Front/Middle/Back + Left/Right instead of rack letter/level,
+  // stored together in subLocation as e.g. "Front · Left".
+  const seedIsContainer =
+    seed.area === "shipping_container_1" || seed.area === "shipping_container_2";
+  const [seedPos, seedSide] = seedIsContainer ? (seed.subLocation ?? "").split(" · ") : [];
+  const [containerPos, setContainerPos] = useState(seedPos ?? "");
+  const [containerSide, setContainerSide] = useState(seedSide ?? "");
+
   const [quantity, setQuantity] = useState<string>(String(seed.quantity ?? 0));
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(
     String(seed.lowStockThreshold ?? 0)
@@ -125,6 +133,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
 
   // Every area gets full location detail (rack / level / sub-location / shelf).
   const showLocation = area !== "";
+  const isContainer = area === "shipping_container_1" || area === "shipping_container_2";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -138,10 +147,14 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
       photos,
       photoUrl: photos.find(Boolean) ?? null,
       area: area || null,
-      rackLetter: showLocation ? rackLetter.trim() || null : null,
-      rackLevel: showLocation && rackLevel ? Number(rackLevel) : null,
-      subLocation: showLocation ? subLocation.trim() || null : null,
-      shelf: showLocation ? shelf.trim() || null : null,
+      rackLetter: showLocation && !isContainer ? rackLetter.trim() || null : null,
+      rackLevel: showLocation && !isContainer && rackLevel ? Number(rackLevel) : null,
+      subLocation: showLocation
+        ? isContainer
+          ? [containerPos, containerSide].filter(Boolean).join(" · ") || null
+          : subLocation.trim() || null
+        : null,
+      shelf: showLocation && !isContainer ? shelf.trim() || null : null,
       quantity: Number(quantity) || 0,
       lowStockThreshold: Number(lowStockThreshold) || 0,
       itemType,
@@ -237,7 +250,37 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
           </Field>
         </div>
 
-        {showLocation && (
+        {showLocation && isContainer && (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Position in container">
+              <select
+                className={inputCls}
+                value={containerPos}
+                onChange={(e) => setContainerPos(e.target.value)}
+              >
+                <option value="">— Select —</option>
+                <option value="Front">Front</option>
+                <option value="Middle">Middle</option>
+                <option value="Back">Back</option>
+              </select>
+            </Field>
+            {containerPos && (
+              <Field label="Side of container">
+                <select
+                  className={inputCls}
+                  value={containerSide}
+                  onChange={(e) => setContainerSide(e.target.value)}
+                >
+                  <option value="">— Select —</option>
+                  <option value="Left">Left</option>
+                  <option value="Right">Right</option>
+                </select>
+              </Field>
+            )}
+          </div>
+        )}
+
+        {showLocation && !isContainer && (
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
             <Field label="Rack letter">
               <input
