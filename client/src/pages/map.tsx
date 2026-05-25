@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
-import type { Item, MapLayout, MapNode } from "@shared/schema";
-import { isLowStock } from "@/lib/format";
+import { AREAS, type Item, type MapLayout, type MapNode, type Area } from "@shared/schema";
+import { isLowStock, AREA_LABELS } from "@/lib/format";
 import Header from "@/components/Header";
+import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
 import {
   Pencil,
@@ -20,8 +21,8 @@ import {
   Maximize,
 } from "lucide-react";
 
-const VW = 1000;
-const VH = 600;
+const VW = 1500;
+const VH = 900;
 const MIN_W = VW * 0.35; // most zoomed-in
 const MAX_W = VW; // most zoomed-out = the full floor (no empty margin)
 
@@ -58,6 +59,132 @@ function nodeMatches(node: MapNode, item: Item): boolean {
   return false;
 }
 
+const slugify = (s: string) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
+// Add / rename / delete a floor (map layout). Backed by the /api/map-layouts CRUD.
+function FloorDialog({
+  open,
+  editing,
+  onClose,
+  onSaved,
+  onDeleted,
+}: {
+  open: boolean;
+  editing: MapLayout | null;
+  onClose: () => void;
+  onSaved: (key: string) => void;
+  onDeleted: () => void;
+}) {
+  const qc = useQueryClient();
+  const [label, setLabel] = useState("");
+  const [area, setArea] = useState<Area>("main_shop");
+
+  useEffect(() => {
+    if (open) {
+      setLabel(editing?.label ?? "");
+      setArea((editing?.area as Area) ?? "main_shop");
+    }
+  }, [open, editing]);
+
+  const save = useMutation({
+    mutationFn: async (): Promise<string> => {
+      if (editing) {
+        await apiRequest("PUT", `/api/map-layouts/${editing.key}`, { label: label.trim(), area });
+        return editing.key;
+      }
+      const key = `${slugify(label) || "floor"}_${Date.now().toString(36)}`;
+      await apiRequest("POST", "/api/map-layouts", { key, label: label.trim(), area, nodes: [] });
+      return key;
+    },
+    onSuccess: (key) => {
+      qc.invalidateQueries({ queryKey: ["map-layouts"] });
+      toast({ variant: "success", title: editing ? "Floor updated" : "Floor added" });
+      onSaved(key);
+    },
+    onError: (e: any) => toast({ variant: "destructive", title: "Save failed", description: e?.message }),
+  });
+
+  const del = useMutation({
+    mutationFn: async () => apiRequest("DELETE", `/api/map-layouts/${editing!.key}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["map-layouts"] });
+      toast({ variant: "success", title: "Floor deleted" });
+      onDeleted();
+    },
+    onError: (e: any) => toast({ variant: "destructive", title: "Delete failed", description: e?.message }),
+  });
+
+  const fieldCls =
+    "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
+
+  return (
+    <Modal open={open} onClose={onClose} title={editing ? "Edit floor" : "Add floor"}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!label.trim()) {
+            toast({ variant: "destructive", title: "Floor name is required" });
+            return;
+          }
+          save.mutate();
+        }}
+        className="flex flex-col gap-4"
+      >
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Floor name</span>
+          <input
+            className={fieldCls}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. North Yard"
+            autoFocus
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Storage area</span>
+          <select className={fieldCls} value={area} onChange={(e) => setArea(e.target.value as Area)}>
+            {AREAS.map((a) => (
+              <option key={a} value={a}>
+                {AREA_LABELS[a]}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted-foreground">
+            Items assigned to this area appear on this floor's map.
+          </span>
+        </label>
+
+        <div className="mt-1 flex items-center justify-between gap-3">
+          {editing ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Delete floor "${editing.label}"? Any nodes placed on it will be removed.`))
+                  del.mutate();
+              }}
+              disabled={del.isPending}
+              className="flex items-center gap-2 rounded-lg border border-destructive/40 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+            >
+              <Trash2 className="h-4 w-4" /> Delete floor
+            </button>
+          ) : (
+            <span />
+          )}
+          <button
+            type="submit"
+            disabled={save.isPending}
+            className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+          >
+            {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {editing ? "Save" : "Add floor"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export default function MapPage() {
   const { isManager } = useAuth();
   const qc = useQueryClient();
@@ -73,6 +200,10 @@ export default function MapPage() {
   const [nodes, setNodes] = useState<MapNode[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>(FULL_VIEW);
+  const [floorDialog, setFloorDialog] = useState<{ open: boolean; editing: MapLayout | null }>({
+    open: false,
+    editing: null,
+  });
 
   const { data: layouts = [] } = useQuery<MapLayout[]>({
     queryKey: ["map-layouts"],
@@ -285,6 +416,25 @@ export default function MapPage() {
             {l.label}
           </button>
         ))}
+        {isManager && (
+          <>
+            <button
+              onClick={() => setFloorDialog({ open: true, editing: null })}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              <Plus className="h-4 w-4" /> Add floor
+            </button>
+            {active && (
+              <button
+                onClick={() => setFloorDialog({ open: true, editing: active })}
+                title={`Rename or delete ${active.label}`}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+              >
+                <Pencil className="h-4 w-4" /> Edit floor
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
@@ -512,6 +662,20 @@ export default function MapPage() {
           </div>
         )}
       </div>
+
+      <FloorDialog
+        open={floorDialog.open}
+        editing={floorDialog.editing}
+        onClose={() => setFloorDialog({ open: false, editing: null })}
+        onSaved={(key) => {
+          setActiveKey(key);
+          setFloorDialog({ open: false, editing: null });
+        }}
+        onDeleted={() => {
+          setActiveKey("");
+          setFloorDialog({ open: false, editing: null });
+        }}
+      />
     </div>
   );
 }

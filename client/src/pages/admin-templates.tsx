@@ -8,7 +8,6 @@ import {
   type JobTemplate,
   type TemplateParam,
   type TemplatePart,
-  type EquipmentPreset,
 } from "@shared/schema";
 import { CATEGORY_LABELS } from "@/lib/format";
 import Header from "@/components/Header";
@@ -27,7 +26,7 @@ function parseParts(t: JobTemplate): TemplatePart[] {
   try { return JSON.parse(t.parts as unknown as string); } catch { return []; }
 }
 
-function TemplateCard({ tpl, presets }: { tpl: JobTemplate; presets: EquipmentPreset[] }) {
+function TemplateCard({ tpl }: { tpl: JobTemplate }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState(tpl.label);
@@ -121,12 +120,8 @@ function TemplateCard({ tpl, presets }: { tpl: JobTemplate; presets: EquipmentPr
             <p className="mb-1.5 text-sm font-medium text-foreground">Parts</p>
             <div className="flex flex-col gap-2">
               {parts.map((p, i) => (
-                <div key={i} className="grid items-center gap-2 rounded-lg border border-border p-2 sm:grid-cols-[1.5fr_1fr_1fr_1fr_70px_auto]">
+                <div key={i} className="grid items-center gap-2 rounded-lg border border-border p-2 sm:grid-cols-[1.5fr_1fr_1fr_70px_auto]">
                   <input className={inputCls} placeholder="Label" value={p.label} onChange={(e) => updatePart(i, { label: e.target.value })} />
-                  <select className={inputCls} value={p.equipmentType ?? NONE} onChange={(e) => updatePart(i, { equipmentType: e.target.value === NONE ? undefined : e.target.value })}>
-                    <option value={NONE}>No equipment</option>
-                    {presets.map((pr) => <option key={pr.key} value={pr.key}>{pr.label}</option>)}
-                  </select>
                   <select className={inputCls} value={p.category ?? NONE} onChange={(e) => updatePart(i, { category: e.target.value === NONE ? undefined : (e.target.value as Category) })}>
                     <option value={NONE}>No category</option>
                     {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
@@ -184,11 +179,6 @@ export default function AdminTemplatesPage() {
     queryKey: ["job-templates"],
     queryFn: async () => (await apiRequest("GET", "/api/job-templates")).json(),
   });
-  const { data: presets = [] } = useQuery<EquipmentPreset[]>({
-    queryKey: ["equipment-presets"],
-    queryFn: async () => (await apiRequest("GET", "/api/equipment-presets")).json(),
-  });
-
   const create = useMutation({
     mutationFn: async () => apiRequest("POST", "/api/job-templates", { key: key.trim(), label: label.trim() }),
     onSuccess: () => {
@@ -207,7 +197,7 @@ export default function AdminTemplatesPage() {
         <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="h-8 w-8 animate-spin" /></div>
       ) : (
         <div className="flex flex-col gap-3">
-          {templates.map((t) => <TemplateCard key={t.key} tpl={t} presets={presets} />)}
+          {templates.map((t) => <TemplateCard key={t.key} tpl={t} />)}
         </div>
       )}
 
