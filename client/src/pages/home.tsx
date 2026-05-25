@@ -34,10 +34,14 @@ function Chip({
 }
 
 export default function HomePage() {
+  // Deep-link support: dashboard KPIs can pre-apply filters via ?lowStock=1, ?category=, ?area=
+  const urlParams = new URLSearchParams(window.location.search);
   const [q, setQ] = useState("");
-  const [category, setCategory] = useState<Category | "">("");
-  const [area, setArea] = useState<Area | "">("");
-  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [category, setCategory] = useState<Category | "">(
+    (urlParams.get("category") as Category) || ""
+  );
+  const [area, setArea] = useState<Area | "">((urlParams.get("area") as Area) || "");
+  const [lowStockOnly, setLowStockOnly] = useState(urlParams.get("lowStock") === "1");
 
   const { data: items = [], isLoading } = useQuery<Item[]>({
     queryKey: ["items", { q, category, area, lowStockOnly }],

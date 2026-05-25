@@ -34,8 +34,13 @@ type FeedItem =
 
 type Filter = "all" | "check_out" | "check_in" | "adjust";
 
+function initialFilter(): Filter {
+  const f = new URLSearchParams(window.location.search).get("filter");
+  return f === "check_out" || f === "check_in" || f === "adjust" ? f : "all";
+}
+
 export default function ActivityPage() {
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>(initialFilter);
   const [q, setQ] = useState("");
 
   const { data: txns = [], isLoading: l1 } = useQuery<TxnRow[]>({

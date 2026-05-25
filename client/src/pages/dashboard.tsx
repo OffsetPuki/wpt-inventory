@@ -52,11 +52,13 @@ function Kpi({
   label,
   value,
   tone = "primary",
+  href,
 }: {
   icon: typeof Package;
   label: string;
   value: number;
   tone?: "primary" | "warn" | "danger";
+  href: string;
 }) {
   const toneCls =
     tone === "danger"
@@ -65,11 +67,14 @@ function Kpi({
         ? "text-orange-400"
         : "text-primary";
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <Link
+      href={href}
+      className="group rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/50"
+    >
       <Icon className={`h-5 w-5 ${toneCls}`} />
-      <p className="mt-2 text-2xl font-bold text-foreground">{value}</p>
+      <p className="mt-2 text-2xl font-bold text-foreground group-hover:text-primary">{value}</p>
       <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
+    </Link>
   );
 }
 
@@ -108,13 +113,13 @@ export default function DashboardPage() {
       <Header title="Dashboard" description="Inventory health at a glance" />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-        <Kpi icon={Package} label="Total items" value={stats.totalItems} />
-        <Kpi icon={Layers} label="Total quantity" value={stats.totalQty} />
-        <Kpi icon={AlertTriangle} label="Low stock" value={stats.lowStock} tone="warn" />
-        <Kpi icon={FolderKanban} label="Active projects" value={stats.activeProjects} />
-        <Kpi icon={PlusCircle} label="Added (7d)" value={stats.itemsAdded7d} />
-        <Kpi icon={PackageMinus} label="Checkouts (7d)" value={stats.checkouts7d} />
-        <Kpi icon={TrendingDown} label="Shrinkage (7d)" value={stats.shrinkage7d} tone="danger" />
+        <Kpi icon={Package} label="Total items" value={stats.totalItems} href="/home" />
+        <Kpi icon={Layers} label="Total quantity" value={stats.totalQty} href="/home" />
+        <Kpi icon={AlertTriangle} label="Low stock" value={stats.lowStock} tone="warn" href="/home?lowStock=1" />
+        <Kpi icon={FolderKanban} label="Active projects" value={stats.activeProjects} href="/projects" />
+        <Kpi icon={PlusCircle} label="Added (7d)" value={stats.itemsAdded7d} href="/home" />
+        <Kpi icon={PackageMinus} label="Checkouts (7d)" value={stats.checkouts7d} href="/activity?filter=check_out" />
+        <Kpi icon={TrendingDown} label="Shrinkage (7d)" value={stats.shrinkage7d} tone="danger" href="/activity?filter=adjust" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">

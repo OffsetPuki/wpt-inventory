@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import { AREAS, type Item, type MapLayout, type MapNode, type Area } from "@shared/schema";
-import { isLowStock, AREA_LABELS } from "@/lib/format";
+import { isLowStock, AREA_LABELS, locationString } from "@/lib/format";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,8 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  Package,
+  ChevronRight,
 } from "lucide-react";
 
 const VW = 1500;
@@ -194,12 +197,16 @@ export default function MapPage() {
     | { mode: "move" | "resize"; id: string; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number }
   >(null);
   const pan = useRef<null | { sx: number; sy: number; ox: number; oy: number }>(null);
+  // Tracks whether the last pointer interaction was a drag, so a drag-to-pan
+  // doesn't get mistaken for a click that opens a rack's contents.
+  const didPan = useRef(false);
 
   const [activeKey, setActiveKey] = useState<string>("");
   const [editMode, setEditMode] = useState(false);
   const [nodes, setNodes] = useState<MapNode[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>(FULL_VIEW);
+  const [viewNode, setViewNode] = useState<MapNode | null>(null);
   const [floorDialog, setFloorDialog] = useState<{ open: boolean; editing: MapLayout | null }>({
     open: false,
     editing: null,
@@ -293,11 +300,13 @@ export default function MapPage() {
   function startPan(e: React.PointerEvent) {
     if (drag.current) return; // a node interaction is in progress
     pan.current = { sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+    didPan.current = false;
   }
   function onMove(e: React.PointerEvent) {
     if (pan.current) {
       const rect = svgRef.current!.getBoundingClientRect();
       const p = pan.current; // capture before setView so the updater stays pure
+      if (Math.abs(e.clientX - p.sx) > 4 || Math.abs(e.clientY - p.sy) > 4) didPan.current = true;
       const nx = p.ox - (e.clientX - p.sx) * (view.w / rect.width);
       const ny = p.oy - (e.clientY - p.sy) * (view.h / rect.height);
       setView((v) => clampView({ ...v, x: nx, y: ny }));
@@ -536,7 +545,10 @@ export default function MapPage() {
                 <g
                   key={n.id}
                   onPointerDown={(e) => startMove(e, n)}
-                  style={{ cursor: editMode ? "move" : "inherit" }}
+                  onClick={() => {
+                    if (!editMode && !didPan.current) setViewNode(n);
+                  }}
+                  style={{ cursor: editMode ? "move" : structural ? "inherit" : "pointer" }}
                 >
                   <rect
                     x={n.x}
@@ -662,6 +674,58 @@ export default function MapPage() {
           </div>
         )}
       </div>
+
+      {/* Rack contents (view mode: click a node to see what's in it) */}
+      <Modal
+        open={!!viewNode}
+        onClose={() => setViewNode(null)}
+        title={viewNode?.label ?? "Rack"}
+      >
+        {(() => {
+          if (!viewNode) return null;
+          const matched = active
+            ? items.filter((i) => i.area === active.area && nodeMatches(viewNode, i))
+            : [];
+          const sub = viewNode.matchRack
+            ? `Rack ${viewNode.matchRack}`
+            : viewNode.matchSubLocation ?? "";
+          if (matched.length === 0) {
+            return (
+              <div className="flex flex-col items-center gap-2 py-6 text-center text-muted-foreground">
+                <Package className="h-8 w-8" />
+                <p className="text-sm">Nothing stored here yet{sub ? ` (${sub})` : ""}.</p>
+              </div>
+            );
+          }
+          return (
+            <>
+              <p className="mb-3 text-sm text-muted-foreground">
+                {matched.length} item{matched.length === 1 ? "" : "s"}
+                {sub ? ` · ${sub}` : ""}
+              </p>
+              <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+                {matched.map((i) => (
+                  <Link
+                    key={i.id}
+                    href={`/item/${i.id}`}
+                    onClick={() => setViewNode(null)}
+                    className="flex items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:border-primary"
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate font-medium text-foreground">{i.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{locationString(i)}</span>
+                    </span>
+                    <span className={cn("text-sm font-semibold", isLowStock(i) ? "text-orange-400" : "text-foreground")}>
+                      {i.quantity}
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </Link>
+                ))}
+              </ul>
+            </>
+          );
+        })()}
+      </Modal>
 
       <FloorDialog
         open={floorDialog.open}

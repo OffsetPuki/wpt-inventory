@@ -16,6 +16,7 @@ import {
 import PhotoGallery from "@/components/PhotoGallery";
 import CategoryBadge from "@/components/CategoryBadge";
 import EquipmentAttrsCard from "@/components/EquipmentAttrsCard";
+import ItemLocationMap from "@/components/ItemLocationMap";
 import CheckDialog from "@/components/CheckDialog";
 import AdjustDialog from "@/components/AdjustDialog";
 import QRDialog from "@/components/QRDialog";
@@ -192,6 +193,8 @@ export default function ItemDetailPage({ id }: { id: string }) {
       </div>
 
       <div className="mt-6 flex flex-col gap-6">
+        <ItemLocationMap item={item} />
+
         <EquipmentAttrsCard item={item} />
 
         {item.notes && (

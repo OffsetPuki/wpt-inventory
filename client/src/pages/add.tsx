@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
+import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import type { Item } from "@shared/schema";
 import Header from "@/components/Header";
@@ -19,6 +20,7 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export default function AddItemPage() {
   const [, setLocation] = useLocation();
+  const { isManager } = useAuth();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [identifying, setIdentifying] = useState(false);
@@ -33,7 +35,8 @@ export default function AddItemPage() {
     onSuccess: (item) => {
       qc.invalidateQueries({ queryKey: ["items"] });
       toast({ variant: "success", title: "Item added" });
-      setLocation(`/item/${item.id}`);
+      // Managers land on the edit screen to fine-tune location/details right away.
+      setLocation(isManager ? `/item/${item.id}/edit` : `/item/${item.id}`);
     },
     onError: (e: any) =>
       toast({ variant: "destructive", title: "Could not add item", description: e?.message }),

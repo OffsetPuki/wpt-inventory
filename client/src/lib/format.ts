@@ -71,9 +71,8 @@ export function itemAttrs(
 export function locationString(item: Item): string {
   const parts: string[] = [];
   if (item.area) parts.push(AREA_LABELS[item.area as Area] ?? item.area);
-  if (item.rackLetter) {
-    parts.push(`Rack ${item.rackLetter}${item.rackLevel ? `-${item.rackLevel}` : ""}`);
-  }
+  if (item.rackLetter) parts.push(`Rack ${item.rackLetter}`);
+  if (item.rackLevel) parts.push(`Level ${item.rackLevel}`);
   if (item.subLocation) parts.push(item.subLocation);
   if (item.shelf) parts.push(`Shelf ${item.shelf}`);
   if (item.bin) parts.push(`Bin ${item.bin}`);
