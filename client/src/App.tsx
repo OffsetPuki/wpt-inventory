@@ -89,11 +89,7 @@ export default function App() {
           </Route>
 
           <Route path="/item/:id/edit">
-            {(params) => (
-              <ManagerRoute>
-                <ItemEditPage id={params.id} />
-              </ManagerRoute>
-            )}
+            {(params) => <ItemEditPage id={params.id} />}
           </Route>
 
           <Route path="/item/:id">

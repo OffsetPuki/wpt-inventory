@@ -182,9 +182,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
             <ActionBtn onClick={() => setCheckMode("check_in")} icon={PackagePlus} label="Check in" />
             {isManager && <ActionBtn onClick={() => setAdjustOpen(true)} icon={Sliders} label="Adjust" />}
             <ActionBtn onClick={() => setQrOpen(true)} icon={QrCode} label="QR" />
-            {isManager && (
-              <ActionBtn onClick={() => setLocation(`/item/${itemId}/edit`)} icon={Pencil} label="Edit" />
-            )}
+            <ActionBtn onClick={() => setLocation(`/item/${itemId}/edit`)} icon={Pencil} label="Edit" />
             {isManager && (
               <ActionBtn onClick={() => setConfirmDelete(true)} icon={Trash2} label="Delete" danger />
             )}

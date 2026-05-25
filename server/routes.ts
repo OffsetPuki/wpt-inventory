@@ -134,7 +134,7 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.patch("/api/items/:id", requireManager, (req, res) => {
+  app.patch("/api/items/:id", requireAuth, (req, res) => {
     const item = storage.updateItem(pid(req.params.id), req.body);
     if (!item) return res.status(404).json({ message: "Item not found" });
     res.json(item);
