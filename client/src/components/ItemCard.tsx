@@ -1,67 +1,67 @@
 import { Link } from "wouter";
 import type { Item } from "@shared/schema";
 import { itemPhotos, locationString, isLowStock } from "@/lib/format";
-import CategoryBadge from "./CategoryBadge";
+import CategoryBadge, { CATEGORY_STYLES } from "./CategoryBadge";
 import { cn } from "@/lib/utils";
-import { Package, MapPin, AlertTriangle } from "lucide-react";
+import { MapPin } from "lucide-react";
 
 export default function ItemCard({ item }: { item: Item }) {
   const photo = itemPhotos(item)[0];
   const low = isLowStock(item);
+  const cat = CATEGORY_STYLES[item.category] ?? CATEGORY_STYLES.tools;
 
   return (
     <Link
       href={`/item/${item.id}`}
-      className="group flex gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/50"
+      className={cn(
+        "group flex flex-col overflow-hidden rounded-xl border bg-card transition-all hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-lg",
+        cat.border
+      )}
     >
-      <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+      {/* Photo */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
         {photo ? (
-          <img src={photo} alt={item.name} className="h-full w-full object-cover" />
+          <img
+            src={photo}
+            alt={item.name}
+            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+          />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-            <Package className="h-7 w-7" />
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-4 text-center">
+            <span className="line-clamp-2 text-sm font-medium text-muted-foreground/60">{item.name}</span>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/40">
+              no photo
+            </span>
           </div>
         )}
-        {low && (
-          <span className="absolute right-1 top-1 h-3 w-3 rounded-full bg-orange-500 ring-2 ring-card" />
-        )}
+
+        {/* Category badge */}
+        <div className="absolute left-2 top-2">
+          <CategoryBadge category={item.category} overlay />
+        </div>
+
+        {/* Stock badge */}
+        <span
+          className={cn(
+            "absolute right-2 top-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide shadow-sm ring-1 backdrop-blur-sm",
+            low
+              ? "bg-orange-100/90 text-orange-800 ring-orange-900/10"
+              : "bg-emerald-100/90 text-emerald-800 ring-emerald-900/10"
+          )}
+        >
+          {low ? "Low" : "In stock"} ×{item.quantity}
+        </span>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col justify-between">
-        <div>
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="truncate text-base font-semibold text-foreground group-hover:text-primary">
-              {item.name}
-            </h3>
-            <CategoryBadge category={item.category} />
-          </div>
-          <p className="mt-1 flex items-center gap-1 truncate text-sm text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5 shrink-0" />
-            {locationString(item)}
-          </p>
-          {(item.partNumber || item.mfgPartNumber) && (
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {item.partNumber || item.mfgPartNumber}
-            </p>
-          )}
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span
-            className={cn(
-              "text-lg font-bold",
-              low ? "text-orange-400" : "text-foreground"
-            )}
-          >
-            {item.quantity}
-          </span>
-          <span className="text-sm text-muted-foreground">in stock</span>
-          {low && (
-            <span className="ml-auto flex items-center gap-1 text-xs font-medium text-orange-400">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              Low
-            </span>
-          )}
-        </div>
+      {/* Body */}
+      <div className="flex flex-col gap-1 p-3">
+        <p className="flex items-start gap-1 text-xs text-muted-foreground">
+          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+          <span className="line-clamp-2">{locationString(item)}</span>
+        </p>
+        <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground group-hover:text-primary">
+          {item.name}
+        </h3>
       </div>
     </Link>
   );

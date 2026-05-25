@@ -69,7 +69,7 @@ function Kpi({
   return (
     <Link
       href={href}
-      className="group rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/50"
+      className="group rounded-xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-lg"
     >
       <Icon className={`h-5 w-5 ${toneCls}`} />
       <p className="mt-2 text-2xl font-bold text-foreground group-hover:text-primary">{value}</p>
