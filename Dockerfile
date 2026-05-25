@@ -2,7 +2,10 @@
 FROM node:22-bookworm-slim
 
 # Python powers the optional AI "Identify by photo" helper (server/identify_item.py).
-RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+# ca-certificates is required so Python's HTTPS call to the Anthropic API can
+# verify SSL certificates (otherwise: CERTIFICATE_VERIFY_FAILED).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates \
+  && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
