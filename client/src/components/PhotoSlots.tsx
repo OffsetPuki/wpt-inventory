@@ -25,6 +25,43 @@ async function uploadPhoto(file: File): Promise<string> {
   return (await res.json()).url as string;
 }
 
+// Resize a phone-sized photo (5-10 MB) to ~1600px JPEG before upload — typically
+// 5-10x smaller payload with no visible quality loss for inventory shots.
+function downscaleImage(file: File, maxDim = 1600, quality = 0.85): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      // Already small enough and already JPEG — skip re-encoding.
+      if (scale === 1 && /^image\/jpe?g$/i.test(file.type)) return resolve(file);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas unsupported"));
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("Encode failed"));
+          const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+          resolve(new File([blob], name, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Image load failed"));
+    };
+    img.src = url;
+  });
+}
+
 /**
  * Five fixed, labelled photo slots that guide the worker to capture the same
  * shots every time. `photos` is positional (index 0 = main); empty slots hold "".
@@ -49,7 +86,15 @@ export default function PhotoSlots({
     if (!file) return;
     setUploadingIdx(idx);
     try {
-      const url = await uploadPhoto(file);
+      // Shrink before upload (huge speedup); fall back to the original on any error
+      // (e.g. some HEIC files that the browser can't decode into a canvas).
+      let toUpload: File = file;
+      try {
+        toUpload = await downscaleImage(file);
+      } catch {
+        /* keep original */
+      }
+      const url = await uploadPhoto(toUpload);
       const next = padded();
       next[idx] = url;
       onChange(next);
