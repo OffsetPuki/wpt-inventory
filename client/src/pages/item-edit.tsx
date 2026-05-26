@@ -24,6 +24,7 @@ export default function ItemEditPage({ id }: { id: string }) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["item", itemId] });
+      qc.invalidateQueries({ queryKey: ["item-detail", itemId] });
       qc.invalidateQueries({ queryKey: ["items"] });
       toast({ variant: "success", title: "Changes saved" });
       setLocation(`/item/${itemId}`);

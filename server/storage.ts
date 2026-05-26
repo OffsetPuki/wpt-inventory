@@ -162,6 +162,18 @@ sqlite.exec(`
     order_index INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
+
+  -- Indexes for hot read paths (Find Items filters, Dashboard stats, item history).
+  CREATE INDEX IF NOT EXISTS idx_items_area ON items(area);
+  CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
+  CREATE INDEX IF NOT EXISTS idx_items_low_stock ON items(low_stock_threshold, quantity);
+  CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
+  CREATE INDEX IF NOT EXISTS idx_transactions_item ON transactions(item_id);
+  CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
+  CREATE INDEX IF NOT EXISTS idx_transactions_project ON transactions(project_id);
+  CREATE INDEX IF NOT EXISTS idx_adjustments_item ON adjustments(item_id);
+  CREATE INDEX IF NOT EXISTS idx_adjustments_created ON adjustments(created_at);
+  CREATE INDEX IF NOT EXISTS idx_checklist_project ON project_checklist(project_id);
 `);
 
 // ─── Helper: strip pin from user ─────────────────────────────────────────────

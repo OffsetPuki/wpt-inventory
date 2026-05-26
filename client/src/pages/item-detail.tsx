@@ -54,21 +54,19 @@ export default function ItemDetailPage({ id }: { id: string }) {
   const [qrOpen, setQrOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const { data: item, isLoading } = useQuery<Item>({
-    queryKey: ["item", itemId],
-    queryFn: async () => (await apiRequest("GET", `/api/items/${itemId}`)).json(),
+  // One combined fetch: item + recent transactions + adjustments. Saves two
+  // round-trips per page load (which matters most on slow connections).
+  const { data: detail, isLoading } = useQuery<{
+    item: Item;
+    transactions: TxnRow[];
+    adjustments: Adjustment[];
+  }>({
+    queryKey: ["item-detail", itemId],
+    queryFn: async () => (await apiRequest("GET", `/api/items/${itemId}/detail`)).json(),
   });
-
-  const { data: txns = [] } = useQuery<TxnRow[]>({
-    queryKey: ["transactions", { itemId }],
-    queryFn: async () =>
-      (await apiRequest("GET", `/api/transactions?itemId=${itemId}&limit=10`)).json(),
-  });
-
-  const { data: adjustments = [] } = useQuery<Adjustment[]>({
-    queryKey: ["adjustments", itemId],
-    queryFn: async () => (await apiRequest("GET", `/api/items/${itemId}/adjustments`)).json(),
-  });
+  const item = detail?.item;
+  const txns = detail?.transactions ?? [];
+  const adjustments = detail?.adjustments ?? [];
 
   const del = useMutation({
     mutationFn: async () => apiRequest("DELETE", `/api/items/${itemId}`),

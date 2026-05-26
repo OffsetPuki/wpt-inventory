@@ -43,6 +43,7 @@ export default function AdjustDialog({ item, open, onClose }: AdjustDialogProps)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["item", item.id] });
+      qc.invalidateQueries({ queryKey: ["item-detail", item.id] });
       qc.invalidateQueries({ queryKey: ["items"] });
       qc.invalidateQueries({ queryKey: ["adjustments", item.id] });
       toast({ variant: "success", title: "Stock adjusted" });

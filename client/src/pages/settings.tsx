@@ -30,6 +30,7 @@ function BrandingTab() {
   const { data: settings } = useQuery<Settings>({
     queryKey: ["settings"],
     queryFn: async () => (await apiRequest("GET", "/api/settings")).json(),
+    refetchInterval: false,
   });
 
   useEffect(() => {

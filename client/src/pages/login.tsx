@@ -19,11 +19,13 @@ export default function LoginPage() {
       const res = await apiRequest("GET", "/api/users/list-names");
       return res.json();
     },
+    refetchInterval: false,
   });
 
   const { data: settings } = useQuery<{ companyName: string; companyTagline?: string }>({
     queryKey: ["settings"],
     queryFn: async () => (await apiRequest("GET", "/api/settings")).json(),
+    refetchInterval: false,
   });
 
   async function attemptLogin() {

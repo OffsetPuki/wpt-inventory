@@ -1,12 +1,13 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useState,
   useCallback,
   type ReactNode,
 } from "react";
 import type { PublicUser } from "@shared/schema";
-import { apiRequest, queryClient, setAuthToken } from "./queryClient";
+import { apiRequest, getAuthToken, queryClient, setAuthToken } from "./queryClient";
 
 // ─── Context shape ──────────────────────────────────────────────────────────
 
@@ -25,9 +26,49 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // ─── Provider ───────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const initialToken = getAuthToken();
   const [user, setUser] = useState<PublicUser | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [token, setToken] = useState<string | null>(initialToken);
+  // If we found a saved token, we're "loading" until we've validated it.
+  const [isLoading, setIsLoading] = useState<boolean>(!!initialToken);
+
+  // Rehydrate the session on first mount: if a token was saved last time,
+  // ask the server who it belongs to. A 401 (e.g. server restarted) clears it.
+  useEffect(() => {
+    if (!initialToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiRequest("GET", "/api/auth/me");
+        const me = (await res.json()) as PublicUser;
+        if (cancelled) return;
+        setUser(me);
+      } catch {
+        if (cancelled) return;
+        setAuthToken(null);
+        setToken(null);
+        setUser(null);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // initialToken is captured once at mount on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // React to mid-session token invalidations (apiRequest dispatches this on 401).
+  useEffect(() => {
+    const onInvalidated = () => {
+      setToken(null);
+      setUser(null);
+      queryClient.clear();
+    };
+    window.addEventListener("auth-invalidated", onInvalidated);
+    return () => window.removeEventListener("auth-invalidated", onInvalidated);
+  }, []);
 
   const login = useCallback(async (name: string, pin: string) => {
     setIsLoading(true);
@@ -37,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const newToken: string = data.token;
       const loggedInUser: PublicUser = data.user;
 
-      setAuthToken(newToken);
+      setAuthToken(newToken); // also persists to localStorage
       setToken(newToken);
       setUser(loggedInUser);
     } finally {
@@ -51,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Even if server logout fails, clear client state
     }
-    setAuthToken(null);
+    setAuthToken(null); // also clears localStorage
     setToken(null);
     setUser(null);
     queryClient.clear();

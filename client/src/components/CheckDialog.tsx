@@ -49,6 +49,7 @@ export default function CheckDialog({ item, mode, open, onClose }: CheckDialogPr
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["item", item.id] });
+      qc.invalidateQueries({ queryKey: ["item-detail", item.id] });
       qc.invalidateQueries({ queryKey: ["items"] });
       qc.invalidateQueries({ queryKey: ["transactions"] });
       toast({ variant: "success", title: isOut ? "Checked out" : "Checked in" });

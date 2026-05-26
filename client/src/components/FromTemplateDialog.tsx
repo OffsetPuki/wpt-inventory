@@ -37,6 +37,7 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
     queryKey: ["job-templates"],
     queryFn: async () => (await apiRequest("GET", "/api/job-templates")).json(),
     enabled: open,
+    refetchInterval: false,
   });
 
   function reset() {

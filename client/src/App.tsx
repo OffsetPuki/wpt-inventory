@@ -1,25 +1,27 @@
 import { Router, Route, Switch, Redirect } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useAuth } from "./lib/auth";
-import { type ReactNode } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 
 // ─── Page imports ────────────────────────────────────────────────────────────
+// Pages are lazy so each route ships its own chunk — the initial bundle stays
+// small and the user only downloads code for the screens they actually open.
 
 import AppShell from "./components/AppShell";
-import LoginPage from "./pages/login";
-import HomePage from "./pages/home";
-import AddItemPage from "./pages/add";
-import ItemDetailPage from "./pages/item-detail";
-import ItemEditPage from "./pages/item-edit";
-import DashboardPage from "./pages/dashboard";
-import ActivityPage from "./pages/activity";
-import ProjectsPage from "./pages/projects";
-import ProjectDetailPage from "./pages/project-detail";
-import MapPage from "./pages/map";
-import UsersPage from "./pages/users";
-import SettingsPage from "./pages/settings";
-import AdminTemplatesPage from "./pages/admin-templates";
-import NotFoundPage from "./pages/not-found";
+const LoginPage = lazy(() => import("./pages/login"));
+const HomePage = lazy(() => import("./pages/home"));
+const AddItemPage = lazy(() => import("./pages/add"));
+const ItemDetailPage = lazy(() => import("./pages/item-detail"));
+const ItemEditPage = lazy(() => import("./pages/item-edit"));
+const DashboardPage = lazy(() => import("./pages/dashboard"));
+const ActivityPage = lazy(() => import("./pages/activity"));
+const ProjectsPage = lazy(() => import("./pages/projects"));
+const ProjectDetailPage = lazy(() => import("./pages/project-detail"));
+const MapPage = lazy(() => import("./pages/map"));
+const UsersPage = lazy(() => import("./pages/users"));
+const SettingsPage = lazy(() => import("./pages/settings"));
+const AdminTemplatesPage = lazy(() => import("./pages/admin-templates"));
+const NotFoundPage = lazy(() => import("./pages/not-found"));
 
 // ─── Loading spinner ────────────────────────────────────────────────────────
 
@@ -62,14 +64,16 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <Router hook={useHashLocation}>
-        <Switch>
-          <Route path="/">
-            <LoginPage />
-          </Route>
-          <Route>
-            <Redirect to="/" />
-          </Route>
-        </Switch>
+        <Suspense fallback={<LoadingSpinner />}>
+          <Switch>
+            <Route path="/">
+              <LoginPage />
+            </Route>
+            <Route>
+              <Redirect to="/" />
+            </Route>
+          </Switch>
+        </Suspense>
       </Router>
     );
   }
@@ -77,6 +81,7 @@ export default function App() {
   return (
     <Router hook={useHashLocation}>
       <AppShell>
+        <Suspense fallback={<LoadingSpinner />}>
         <Switch>
           {/* Root redirect */}
           <Route path="/">
@@ -147,6 +152,7 @@ export default function App() {
             <NotFoundPage />
           </Route>
         </Switch>
+        </Suspense>
       </AppShell>
     </Router>
   );

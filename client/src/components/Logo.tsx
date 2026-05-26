@@ -13,6 +13,7 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
     queryKey: ["settings"],
     queryFn: async () => (await apiRequest("GET", "/api/settings")).json(),
     staleTime: 60_000,
+    refetchInterval: false,
   });
 
   const name = settings?.companyName || "WPT";

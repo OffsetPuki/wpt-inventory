@@ -11,6 +11,7 @@ export default function EquipmentAttrsCard({ item }: { item: Item }) {
       const res = await apiRequest("GET", "/api/equipment-presets");
       return res.json();
     },
+    refetchInterval: false,
   });
 
   if (!item.equipmentType) return null;

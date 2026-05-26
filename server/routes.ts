@@ -113,6 +113,19 @@ export function registerRoutes(app: Express): void {
     res.json(items);
   });
 
+  // Combined item-detail payload: the item + recent transactions + adjustments
+  // in one round-trip (replaces 3 separate calls on the item detail page).
+  app.get("/api/items/:id/detail", requireAuth, (req, res) => {
+    const id = pid(req.params.id);
+    const item = storage.getItemById(id);
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    res.json({
+      item,
+      transactions: storage.getTransactions({ itemId: id, limit: 10 }),
+      adjustments: storage.getAdjustments(id),
+    });
+  });
+
   app.get("/api/items/:id", requireAuth, (req, res) => {
     const item = storage.getItemById(pid(req.params.id));
     if (!item) return res.status(404).json({ message: "Item not found" });
@@ -552,6 +565,9 @@ export function registerRoutes(app: Express): void {
   app.use("/uploads", (req, res, next) => {
     const filePath = path.join(uploadDir, path.basename(req.path));
     if (fs.existsSync(filePath)) {
+      // Uploaded photos are content-addressed (the filename includes a unique id),
+      // so the file at a given URL never changes — safe to cache aggressively.
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       return res.sendFile(filePath);
     }
     next();

@@ -46,6 +46,7 @@ export default function ThemeProvider({ children }: { children: ReactNode }) {
     queryKey: ["settings"],
     queryFn: async () => (await apiRequest("GET", "/api/settings")).json(),
     staleTime: 60_000,
+    refetchInterval: false,
   });
 
   useEffect(() => {

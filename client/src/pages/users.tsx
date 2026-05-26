@@ -22,6 +22,7 @@ export default function UsersPage() {
   const { data: users = [], isLoading } = useQuery<PublicUser[]>({
     queryKey: ["users"],
     queryFn: async () => (await apiRequest("GET", "/api/users")).json(),
+    refetchInterval: false,
   });
 
   const create = useMutation({

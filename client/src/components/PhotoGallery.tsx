@@ -136,11 +136,15 @@ export default function PhotoGallery({ photos, onChange, max = 5 }: PhotoGallery
               src={url}
               alt=""
               aria-hidden
+              loading="lazy"
+              decoding="async"
               className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl"
             />
             <img
               src={url}
               alt={`Photo ${i + 1}`}
+              loading={i === 0 ? "eager" : "lazy"}
+              decoding="async"
               className="relative z-10 h-full w-full object-contain"
             />
           </div>

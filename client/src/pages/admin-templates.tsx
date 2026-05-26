@@ -178,6 +178,7 @@ export default function AdminTemplatesPage() {
   const { data: templates = [], isLoading } = useQuery<JobTemplate[]>({
     queryKey: ["job-templates"],
     queryFn: async () => (await apiRequest("GET", "/api/job-templates")).json(),
+    refetchInterval: false,
   });
   const create = useMutation({
     mutationFn: async () => apiRequest("POST", "/api/job-templates", { key: key.trim(), label: label.trim() }),

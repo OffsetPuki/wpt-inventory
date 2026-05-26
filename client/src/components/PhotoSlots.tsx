@@ -122,7 +122,7 @@ export default function PhotoSlots({
             <div className="relative aspect-square">
               {url ? (
                 <div className="h-full w-full overflow-hidden rounded-xl border border-border bg-muted">
-                  <img src={url} alt={slot.label} className="h-full w-full object-cover" />
+                  <img src={url} alt={slot.label} loading="lazy" decoding="async" className="h-full w-full object-cover" />
                   <button
                     type="button"
                     onClick={() => remove(i)}

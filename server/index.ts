@@ -1,6 +1,7 @@
 import "dotenv/config"; // loads .env (e.g. ANTHROPIC_API_KEY) before anything reads env
 import express from "express";
 import http from "http";
+import compression from "compression";
 import { seedDefaults } from "./seed";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -19,6 +20,9 @@ app.use((_req, res, next) => {
   }
   next();
 });
+
+// ── gzip/brotli responses (big bandwidth win on API JSON + initial HTML/JS) ──
+app.use(compression());
 
 // ── Body parser (50MB for base64 photos) ──
 app.use(express.json({ limit: "50mb" }));
