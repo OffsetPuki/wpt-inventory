@@ -1,22 +1,8 @@
 import { useRef, useState } from "react";
-import { getAuthToken } from "@/lib/queryClient";
+import { shrinkAndUpload } from "@/lib/uploadPhoto";
 import { toast } from "@/components/ui/toaster";
 import { cn } from "@/lib/utils";
 import { ImagePlus, X, Loader2, ImageOff, ChevronLeft, ChevronRight } from "lucide-react";
-
-async function uploadPhoto(file: File): Promise<string> {
-  const fd = new FormData();
-  fd.append("photo", file);
-  const token = getAuthToken();
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    headers: token ? { "X-Auth": token } : {},
-    body: fd,
-  });
-  if (!res.ok) throw new Error("Upload failed");
-  const data = await res.json();
-  return data.url as string;
-}
 
 interface PhotoGalleryProps {
   photos: string[];
@@ -51,8 +37,9 @@ export default function PhotoGallery({ photos, onChange, max = 5 }: PhotoGallery
     if (toUpload.length === 0) return;
     setUploading(true);
     try {
-      const urls: string[] = [];
-      for (const f of toUpload) urls.push(await uploadPhoto(f));
+      // Shrink + upload all picked files in parallel rather than one at a
+      // time — for N photos this is ~Nx faster on a normal connection.
+      const urls = await Promise.all(toUpload.map((f) => shrinkAndUpload(f)));
       onChange([...photos, ...urls]);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Upload failed", description: e?.message });
