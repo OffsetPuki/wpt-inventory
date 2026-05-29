@@ -1,5 +1,30 @@
+import bcrypt from "bcryptjs";
 import { storage } from "./storage";
 import { DEFAULT_EQUIPMENT_PRESETS, DEFAULT_JOB_TEMPLATES } from "../shared/wpt-presets";
+
+const BCRYPT_ROUNDS = 10;
+const BCRYPT_PREFIX = /^\$2[aby]\$/;
+
+function randomPin(): string {
+  return Math.floor(Math.random() * 10000).toString().padStart(4, "0");
+}
+
+/**
+ * One-time silent migration: existing installs stored PINs as plaintext. Hash
+ * any user whose `pin` doesn't look like a bcrypt digest. Login then works
+ * unchanged — the user types their PIN, we bcrypt.compare against the hash.
+ */
+function migratePlaintextPins(): void {
+  const all = storage.getAllUsersWithPin();
+  let migrated = 0;
+  for (const u of all) {
+    if (!BCRYPT_PREFIX.test(u.pin)) {
+      storage.setUserPin(u.id, bcrypt.hashSync(u.pin, BCRYPT_ROUNDS));
+      migrated++;
+    }
+  }
+  if (migrated > 0) console.log(`[seed] Hashed ${migrated} plaintext PIN(s)`);
+}
 
 /**
  * Seed default data on first run.
@@ -8,10 +33,32 @@ import { DEFAULT_EQUIPMENT_PRESETS, DEFAULT_JOB_TEMPLATES } from "../shared/wpt-
 export function seedDefaults(): void {
   // ── Users ──────────────────────────────────────────────────────────────
   if (storage.getUserCount() === 0) {
+    // In production, seed with random PINs and log them ONCE so the operator
+    // can sign in — never bake the publicly-known dev defaults into prod.
+    const isProd = process.env.NODE_ENV === "production";
+    const managerPin = isProd ? randomPin() : "1234";
+    const workerPin = isProd ? randomPin() : "0000";
     console.log("[seed] Creating default Manager user");
-    storage.createUser({ name: "Manager", pin: "1234", role: "manager" });
+    storage.createUser({
+      name: "Manager",
+      pin: bcrypt.hashSync(managerPin, BCRYPT_ROUNDS),
+      role: "manager",
+    });
     console.log("[seed] Creating default Worker user");
-    storage.createUser({ name: "Worker", pin: "0000", role: "worker" });
+    storage.createUser({
+      name: "Worker",
+      pin: bcrypt.hashSync(workerPin, BCRYPT_ROUNDS),
+      role: "worker",
+    });
+    if (isProd) {
+      console.log("[seed] ────────────────────────────────────────────────");
+      console.log("[seed]  First-run credentials — SAVE THESE NOW:");
+      console.log(`[seed]    Manager / ${managerPin}`);
+      console.log(`[seed]    Worker  / ${workerPin}`);
+      console.log("[seed] ────────────────────────────────────────────────");
+    }
+  } else {
+    migratePlaintextPins();
   }
 
   // ── Settings ───────────────────────────────────────────────────────────

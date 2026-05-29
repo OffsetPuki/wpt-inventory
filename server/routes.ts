@@ -1,7 +1,9 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
 import { storage } from "./storage";
 import { requireAuth, requireManager, createSession, destroySession } from "./auth";
@@ -11,6 +13,8 @@ import {
   fromTemplateSchema, CATEGORIES, type TemplatePart, type TemplateParam,
 } from "../shared/schema";
 
+const BCRYPT_ROUNDS = 10;
+
 // ── Photo upload via multer ──────────────────────────────────────────────────
 
 const dataDir = process.env.DATA_DIR
@@ -19,15 +23,60 @@ const dataDir = process.env.DATA_DIR
 const uploadDir = path.resolve(dataDir, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
+// Allowlist of image extensions + mime types we'll accept. JPEG covers the
+// downscaled output from the browser; the others let users paste an existing
+// PNG/WebP/HEIC without the upload silently failing. PDFs, HTML, JS etc. are
+// rejected — otherwise an attacker could upload `evil.html` and have the
+// browser render it from this origin, stealing a worker's localStorage token.
+const ALLOWED_IMAGE_MIME = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+]);
+const ALLOWED_IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, uploadDir),
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname) || ".jpg";
+      const rawExt = path.extname(file.originalname).toLowerCase();
+      const ext = ALLOWED_IMAGE_EXT.has(rawExt) ? rawExt : ".jpg";
       cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_MIME.has(file.mimetype.toLowerCase())) return cb(null, true);
+    cb(new Error("Only image uploads are allowed"));
+  },
+});
+
+// Map a saved upload's extension back to a safe Content-Type so the browser
+// can't be tricked into sniffing an uploaded file as HTML/JS.
+const EXT_TO_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+};
+
+// 5 login attempts per IP per 5 minutes — a 4-digit PIN has only 10k
+// combinations, so without a limiter the entire space is brute-forceable in
+// seconds. `skipSuccessfulRequests` so a legit user mistyping then succeeding
+// doesn't burn through the quota.
+const loginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { message: "Too many login attempts — try again in a few minutes." },
 });
 
 export function registerRoutes(app: Express): void {
@@ -37,11 +86,14 @@ export function registerRoutes(app: Express): void {
   const pid = (v: string | string[]): number => parseInt(v as string, 10);
   const pkey = (v: string | string[]): string => v as string;
 
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", loginLimiter, (req, res) => {
     try {
       const body = loginSchema.parse(req.body);
       const user = storage.getUserByName(body.name);
-      if (!user || user.pin !== body.pin) {
+      // bcrypt.compareSync handles both freshly-hashed and migrated hashes
+      // (any plaintext is converted on boot — see seed.migratePlaintextPins).
+      const ok = user && bcrypt.compareSync(body.pin, user.pin);
+      if (!user || !ok) {
         return res.status(401).json({ message: "Invalid name or PIN" });
       }
       const token = createSession(user.id, user.role, user.name);
@@ -78,10 +130,17 @@ export function registerRoutes(app: Express): void {
     try {
       const { name, pin, role } = req.body;
       if (!name || !pin) return res.status(400).json({ message: "Name and PIN required" });
+      if (typeof pin !== "string" || !/^\d{4}$/.test(pin)) {
+        return res.status(400).json({ message: "PIN must be 4 digits" });
+      }
       if (storage.getUserByName(name)) {
         return res.status(409).json({ message: "User already exists" });
       }
-      const user = storage.createUser({ name, pin, role: role || "worker" });
+      const user = storage.createUser({
+        name,
+        pin: bcrypt.hashSync(pin, BCRYPT_ROUNDS),
+        role: role || "worker",
+      });
       res.status(201).json(user);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -467,11 +526,23 @@ export function registerRoutes(app: Express): void {
 
   // ─── Photo upload ──────────────────────────────────────────────────────
 
-  app.post("/api/upload", requireAuth, upload.single("photo"), (req, res) => {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const url = `/uploads/${req.file.filename}`;
-    res.json({ url });
-  });
+  app.post(
+    "/api/upload",
+    requireAuth,
+    (req, res, next) => {
+      upload.single("photo")(req, res, (err: any) => {
+        if (err) {
+          return res.status(400).json({ message: err.message || "Upload rejected" });
+        }
+        next();
+      });
+    },
+    (req, res) => {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const url = `/uploads/${req.file.filename}`;
+      res.json({ url });
+    }
+  );
 
   // ─── AI identify ───────────────────────────────────────────────────────
   // Spawns identify_item.py, which calls Claude vision when ANTHROPIC_API_KEY
@@ -563,13 +634,26 @@ export function registerRoutes(app: Express): void {
   // ─── Serve uploaded files ──────────────────────────────────────────────
 
   app.use("/uploads", (req, res, next) => {
-    const filePath = path.join(uploadDir, path.basename(req.path));
-    if (fs.existsSync(filePath)) {
-      // Uploaded photos are content-addressed (the filename includes a unique id),
-      // so the file at a given URL never changes — safe to cache aggressively.
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      return res.sendFile(filePath);
-    }
-    next();
+    // path.basename strips any path traversal (`../`) the client might try.
+    const safeName = path.basename(req.path);
+    const ext = path.extname(safeName).toLowerCase();
+    // Only serve files whose extension we recognise as an image. An unknown
+    // extension means either (a) someone bypassed the upload filter, or
+    // (b) it's not ours — either way, refuse to serve it.
+    const mime = EXT_TO_MIME[ext];
+    if (!mime) return next();
+    const filePath = path.join(uploadDir, safeName);
+    if (!fs.existsSync(filePath)) return next();
+
+    // Force a safe Content-Type and forbid the browser from sniffing the
+    // body. Combined, these prevent a malicious upload from being executed
+    // as HTML/JS in the same origin as the app — which would otherwise let
+    // it read any worker's localStorage token.
+    res.setHeader("Content-Type", mime);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // Content-addressed filenames (unique id baked in) never change, so the
+    // long immutable cache is safe.
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.sendFile(filePath);
   });
 }

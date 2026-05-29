@@ -40,10 +40,22 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    pin TEXT NOT NULL,
+    pin TEXT NOT NULL, -- bcrypt hash; pre-migration installs may contain plaintext
     role TEXT NOT NULL DEFAULT 'worker',
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
+
+  -- Persistent sessions so a restart doesn't log everyone out.
+  -- expires_at is updated on each authenticated request (sliding TTL).
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
   CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,6 +232,14 @@ export const storage = {
     return toPublicUser(result);
   },
 
+  setUserPin(id: number, pinHash: string): void {
+    sqlite.prepare("UPDATE users SET pin = ? WHERE id = ?").run(pinHash, id);
+  },
+
+  getAllUsersWithPin(): User[] {
+    return db.select().from(users).all();
+  },
+
   deleteUser(id: number): void {
     db.delete(users).where(eq(users.id, id)).run();
   },
@@ -231,6 +251,34 @@ export const storage = {
   getUserCount(): number {
     const row = sqlite.prepare("SELECT COUNT(*) as count FROM users").get() as any;
     return row?.count ?? 0;
+  },
+
+  // ── Sessions ─────────────────────────────────────────────────────────────
+  // Persisted so a server restart doesn't sign everyone out, with a sliding
+  // TTL so a long-stale token can't be reused indefinitely.
+  insertSession(token: string, userId: number, role: string, name: string, expiresAt: number): void {
+    sqlite.prepare(
+      "INSERT INTO sessions (token, user_id, role, name, expires_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(token, userId, role, name, expiresAt);
+  },
+
+  getSession(token: string): { userId: number; role: string; name: string; expiresAt: number } | null {
+    const row = sqlite.prepare(
+      "SELECT user_id as userId, role, name, expires_at as expiresAt FROM sessions WHERE token = ?"
+    ).get(token) as any;
+    return row || null;
+  },
+
+  touchSession(token: string, expiresAt: number): void {
+    sqlite.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?").run(expiresAt, token);
+  },
+
+  deleteSession(token: string): void {
+    sqlite.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  },
+
+  purgeExpiredSessions(now: number): void {
+    sqlite.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
   },
 
   // ── Items ────────────────────────────────────────────────────────────────

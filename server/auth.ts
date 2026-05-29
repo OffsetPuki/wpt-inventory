@@ -1,7 +1,13 @@
 import crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
+import { storage } from "./storage";
 
-// ─── In-memory session store ─────────────────────────────────────────────────
+// ─── Session config ──────────────────────────────────────────────────────────
+
+// 30-day sliding TTL: every authenticated request bumps the expiry, so a token
+// that's actively used keeps working; a token that's idle for 30 days expires
+// and the user has to sign in again.
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface SessionData {
   userId: number;
@@ -9,20 +15,36 @@ interface SessionData {
   name: string;
 }
 
-const sessions = new Map<string, SessionData>();
+// ─── Session API (persisted to SQLite) ───────────────────────────────────────
 
 export function createSession(userId: number, role: string, name: string): string {
   const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, { userId, role, name });
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  storage.insertSession(token, userId, role, name, expiresAt);
   return token;
 }
 
 export function getSession(token: string): SessionData | null {
-  return sessions.get(token) ?? null;
+  const row = storage.getSession(token);
+  if (!row) return null;
+  if (row.expiresAt < Date.now()) {
+    storage.deleteSession(token);
+    return null;
+  }
+  // Sliding TTL — bump expiry so an active session never abruptly times out.
+  storage.touchSession(token, Date.now() + SESSION_TTL_MS);
+  return { userId: row.userId, role: row.role, name: row.name };
 }
 
 export function destroySession(token: string): void {
-  sessions.delete(token);
+  storage.deleteSession(token);
+}
+
+// Run hourly to drop expired rows so the table doesn't grow unbounded.
+export function startSessionReaper(): void {
+  const tick = () => storage.purgeExpiredSessions(Date.now());
+  tick();
+  setInterval(tick, 60 * 60 * 1000).unref();
 }
 
 // ─── Express request extension ───────────────────────────────────────────────
