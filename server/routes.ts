@@ -6,11 +6,11 @@ import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
 import { storage } from "./storage";
-import { requireAuth, requireManager, createSession, destroySession } from "./auth";
+import { requireAuth, requireTechnician, requireElevated, createSession, destroySession } from "./auth";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
-  fromTemplateSchema, CATEGORIES, type TemplatePart, type TemplateParam,
+  fromTemplateSchema, CATEGORIES, ROLES, type TemplatePart, type TemplateParam,
 } from "../shared/schema";
 
 const BCRYPT_ROUNDS = 10;
@@ -122,16 +122,20 @@ export function registerRoutes(app: Express): void {
 
   // ─── Users (manager-only) ───────────────────────────────────────────────
 
-  app.get("/api/users", requireManager, (_req, res) => {
+  app.get("/api/users", requireElevated, (_req, res) => {
     res.json(storage.getUsers());
   });
 
-  app.post("/api/users", requireManager, (req, res) => {
+  app.post("/api/users", requireElevated, (req, res) => {
     try {
       const { name, pin, role } = req.body;
       if (!name || !pin) return res.status(400).json({ message: "Name and PIN required" });
       if (typeof pin !== "string" || !/^\d{4}$/.test(pin)) {
         return res.status(400).json({ message: "PIN must be 4 digits" });
+      }
+      const finalRole = role || "worker";
+      if (!ROLES.includes(finalRole)) {
+        return res.status(400).json({ message: `Role must be one of: ${ROLES.join(", ")}` });
       }
       if (storage.getUserByName(name)) {
         return res.status(409).json({ message: "User already exists" });
@@ -139,7 +143,7 @@ export function registerRoutes(app: Express): void {
       const user = storage.createUser({
         name,
         pin: bcrypt.hashSync(pin, BCRYPT_ROUNDS),
-        role: role || "worker",
+        role: finalRole,
       });
       res.status(201).json(user);
     } catch (e: any) {
@@ -147,7 +151,7 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/users/:id", requireManager, (req, res) => {
+  app.delete("/api/users/:id", requireElevated, (req, res) => {
     storage.deleteUser(pid(req.params.id));
     res.json({ ok: true });
   });
@@ -212,14 +216,14 @@ export function registerRoutes(app: Express): void {
     res.json(item);
   });
 
-  app.delete("/api/items/:id", requireManager, (req, res) => {
+  app.delete("/api/items/:id", requireTechnician, (req, res) => {
     storage.deleteItem(pid(req.params.id));
     res.json({ ok: true });
   });
 
   // ─── Adjustments ────────────────────────────────────────────────────────
 
-  app.post("/api/items/:id/adjust", requireManager, (req, res) => {
+  app.post("/api/items/:id/adjust", requireTechnician, (req, res) => {
     try {
       const data = insertAdjustmentSchema.parse(req.body);
       const adj = storage.createAdjustment(
@@ -308,7 +312,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getProjectUsage(pid(req.params.id)));
   });
 
-  app.post("/api/projects", requireManager, (req, res) => {
+  app.post("/api/projects", requireElevated, (req, res) => {
     try {
       const project = storage.createProject(req.body);
       res.status(201).json(project);
@@ -317,13 +321,13 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.patch("/api/projects/:id", requireManager, (req, res) => {
+  app.patch("/api/projects/:id", requireElevated, (req, res) => {
     const project = storage.updateProject(pid(req.params.id), req.body);
     if (!project) return res.status(404).json({ message: "Project not found" });
     res.json(project);
   });
 
-  app.delete("/api/projects/:id", requireManager, (req, res) => {
+  app.delete("/api/projects/:id", requireElevated, (req, res) => {
     storage.deleteProject(pid(req.params.id));
     res.json({ ok: true });
   });
@@ -334,7 +338,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getPresets());
   });
 
-  app.post("/api/equipment-presets", requireManager, (req, res) => {
+  app.post("/api/equipment-presets", requireTechnician, (req, res) => {
     try {
       const preset = storage.createPreset(req.body);
       res.status(201).json(preset);
@@ -343,13 +347,13 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.put("/api/equipment-presets/:key", requireManager, (req, res) => {
+  app.put("/api/equipment-presets/:key", requireTechnician, (req, res) => {
     const preset = storage.updatePreset(pkey(req.params.key), req.body);
     if (!preset) return res.status(404).json({ message: "Preset not found" });
     res.json(preset);
   });
 
-  app.delete("/api/equipment-presets/:key", requireManager, (req, res) => {
+  app.delete("/api/equipment-presets/:key", requireTechnician, (req, res) => {
     storage.deletePreset(pkey(req.params.key));
     res.json({ ok: true });
   });
@@ -360,7 +364,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getTemplates());
   });
 
-  app.post("/api/job-templates", requireManager, (req, res) => {
+  app.post("/api/job-templates", requireTechnician, (req, res) => {
     try {
       const tpl = storage.createTemplate(req.body);
       res.status(201).json(tpl);
@@ -369,18 +373,18 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.put("/api/job-templates/:key", requireManager, (req, res) => {
+  app.put("/api/job-templates/:key", requireTechnician, (req, res) => {
     const tpl = storage.updateTemplate(pkey(req.params.key), req.body);
     if (!tpl) return res.status(404).json({ message: "Template not found" });
     res.json(tpl);
   });
 
-  app.delete("/api/job-templates/:key", requireManager, (req, res) => {
+  app.delete("/api/job-templates/:key", requireTechnician, (req, res) => {
     storage.deleteTemplate(pkey(req.params.key));
     res.json({ ok: true });
   });
 
-  app.post("/api/job-templates/:key/preview", requireManager, (req, res) => {
+  app.post("/api/job-templates/:key/preview", requireTechnician, (req, res) => {
     const tpl = storage.getTemplateByKey(pkey(req.params.key));
     if (!tpl) return res.status(404).json({ message: "Template not found" });
 
@@ -405,7 +409,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getChecklist(pid(req.params.id)));
   });
 
-  app.post("/api/projects/from-template", requireManager, (req, res) => {
+  app.post("/api/projects/from-template", requireElevated, (req, res) => {
     try {
       const body = fromTemplateSchema.parse(req.body);
       const tpl = storage.getTemplateByKey(body.templateKey);
@@ -452,7 +456,7 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/projects/:id/checklist", requireManager, (req, res) => {
+  app.post("/api/projects/:id/checklist", requireElevated, (req, res) => {
     try {
       const row = storage.createChecklistRow(pid(req.params.id), req.body);
       res.status(201).json(row);
@@ -462,15 +466,16 @@ export function registerRoutes(app: Express): void {
   });
 
   app.patch("/api/checklist/:id", requireAuth, (req, res) => {
-    // Workers may check items off (status only); managers may edit everything.
-    const patch =
-      req.user?.role === "manager" ? req.body : { status: req.body?.status };
+    // Workers may check items off (status only); manager + technician may edit everything.
+    const role = req.user?.role;
+    const elevated = role === "manager" || role === "technician";
+    const patch = elevated ? req.body : { status: req.body?.status };
     const row = storage.updateChecklistRow(pid(req.params.id), patch);
     if (!row) return res.status(404).json({ message: "Checklist row not found" });
     res.json(row);
   });
 
-  app.delete("/api/checklist/:id", requireManager, (req, res) => {
+  app.delete("/api/checklist/:id", requireElevated, (req, res) => {
     storage.deleteChecklistRow(pid(req.params.id));
     res.json({ ok: true });
   });
@@ -481,7 +486,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getSettings());
   });
 
-  app.put("/api/settings", requireManager, (req, res) => {
+  app.put("/api/settings", requireTechnician, (req, res) => {
     const s = storage.updateSettings(req.body);
     res.json(s);
   });
@@ -498,7 +503,7 @@ export function registerRoutes(app: Express): void {
     res.json(layout);
   });
 
-  app.post("/api/map-layouts", requireManager, (req, res) => {
+  app.post("/api/map-layouts", requireTechnician, (req, res) => {
     try {
       const layout = storage.createMapLayout(req.body);
       res.status(201).json(layout);
@@ -507,20 +512,20 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.put("/api/map-layouts/:key", requireManager, (req, res) => {
+  app.put("/api/map-layouts/:key", requireTechnician, (req, res) => {
     const layout = storage.updateMapLayout(pkey(req.params.key), req.body);
     if (!layout) return res.status(404).json({ message: "Layout not found" });
     res.json(layout);
   });
 
-  app.delete("/api/map-layouts/:key", requireManager, (req, res) => {
+  app.delete("/api/map-layouts/:key", requireTechnician, (req, res) => {
     storage.deleteMapLayout(pkey(req.params.key));
     res.json({ ok: true });
   });
 
   // ─── Stats ─────────────────────────────────────────────────────────────
 
-  app.get("/api/stats", requireManager, (_req, res) => {
+  app.get("/api/stats", requireElevated, (_req, res) => {
     res.json(storage.getStats());
   });
 
@@ -549,7 +554,7 @@ export function registerRoutes(app: Express): void {
   // is set and otherwise returns a safe placeholder. Any failure degrades to
   // the placeholder so the form still prefills.
 
-  app.post("/api/ai/identify-item", requireManager, (req, res) => {
+  app.post("/api/ai/identify-item", requireElevated, (req, res) => {
     const fallback = {
       name: "Unidentified Item",
       category: "tools",

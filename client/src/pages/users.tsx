@@ -7,7 +7,29 @@ import type { PublicUser, Role } from "@shared/schema";
 import { formatDate } from "@/lib/format";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
-import { UserPlus, Trash2, Loader2, ShieldCheck, HardHat } from "lucide-react";
+import { UserPlus, Trash2, Loader2, ShieldCheck, Wrench, HardHat } from "lucide-react";
+
+// One source of truth for how each role is labelled and badged in the UI.
+const ROLE_LABELS: Record<Role, string> = {
+  manager: "Manager",
+  technician: "Technician",
+  worker: "Worker",
+};
+const ROLE_ICON: Record<Role, typeof ShieldCheck> = {
+  manager: ShieldCheck,
+  technician: Wrench,
+  worker: HardHat,
+};
+const ROLE_BADGE: Record<Role, string> = {
+  manager: "bg-primary/15 text-primary",
+  technician: "bg-amber-500/15 text-amber-500",
+  worker: "bg-secondary text-secondary-foreground",
+};
+const ROLE_HELP: Record<Role, string> = {
+  manager: "Oversight — dashboard, projects, users. Simpler UI.",
+  technician: "Full operational control — items, stock, map, settings.",
+  worker: "Floor user — find / add items, check in/out, view projects.",
+};
 
 const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
@@ -80,8 +102,10 @@ export default function UsersPage() {
           <span className="text-sm font-medium text-foreground">Role</span>
           <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="worker">Worker</option>
+            <option value="technician">Technician</option>
             <option value="manager">Manager</option>
           </select>
+          <span className="text-xs text-muted-foreground">{ROLE_HELP[role]}</span>
         </label>
         <button
           type="submit"
@@ -108,15 +132,18 @@ export default function UsersPage() {
                 <span
                   className={cn(
                     "flex h-10 w-10 items-center justify-center rounded-full",
-                    u.role === "manager" ? "bg-primary/15 text-primary" : "bg-secondary text-secondary-foreground"
+                    ROLE_BADGE[u.role as Role] ?? ROLE_BADGE.worker
                   )}
                 >
-                  {u.role === "manager" ? <ShieldCheck className="h-5 w-5" /> : <HardHat className="h-5 w-5" />}
+                  {(() => {
+                    const Icon = ROLE_ICON[u.role as Role] ?? HardHat;
+                    return <Icon className="h-5 w-5" />;
+                  })()}
                 </span>
                 <div>
                   <p className="font-semibold text-foreground">{u.name}</p>
-                  <p className="text-xs capitalize text-muted-foreground">
-                    {u.role} · added {formatDate(u.createdAt as unknown as string)}
+                  <p className="text-xs text-muted-foreground">
+                    {ROLE_LABELS[u.role as Role] ?? u.role} · added {formatDate(u.createdAt as unknown as string)}
                   </p>
                 </div>
               </div>

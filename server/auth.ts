@@ -74,10 +74,25 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-export function requireManager(req: Request, res: Response, next: NextFunction): void {
+// Technical/operational endpoints — only technicians get through.
+// (Item edit/delete, stock adjustments, map layouts, settings, templates.)
+export function requireTechnician(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
-    if (req.user?.role !== "manager") {
-      res.status(403).json({ message: "Manager access required" });
+    if (req.user?.role !== "technician") {
+      res.status(403).json({ message: "Technician access required" });
+      return;
+    }
+    next();
+  });
+}
+
+// Managerial endpoints — manager OR technician. Used for things both should
+// be able to do (dashboard stats, user CRUD, project CRUD, AI identify).
+export function requireElevated(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    const role = req.user?.role;
+    if (role !== "manager" && role !== "technician") {
+      res.status(403).json({ message: "Manager or technician access required" });
       return;
     }
     next();

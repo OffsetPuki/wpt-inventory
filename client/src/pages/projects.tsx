@@ -96,7 +96,8 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
 }
 
 export default function ProjectsPage() {
-  const { isManager } = useAuth();
+  // Manager + technician both create / manage projects.
+  const { isElevated: isManager } = useAuth();
   const [, setLocation] = useLocation();
   const [q, setQ] = useState("");
   const [templateOpen, setTemplateOpen] = useState(false);

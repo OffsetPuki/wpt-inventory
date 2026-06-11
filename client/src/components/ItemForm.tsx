@@ -73,7 +73,7 @@ interface ItemFormProps {
 
 export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFormProps) {
   const seed = initial ?? {};
-  const { isManager } = useAuth();
+  const { isTechnician } = useAuth();
 
   // Equipment-type details are no longer edited in this form, but we preserve any
   // existing values so editing an item never wipes them.
@@ -333,7 +333,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
               onChange={(e) => setQuantity(e.target.value)}
             />
           </Field>
-          {isManager && (
+          {isTechnician && (
             <Field label="Low-stock threshold">
               <input
                 className={inputCls}
@@ -356,7 +356,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
               ))}
             </select>
           </Field>
-          {isManager && (
+          {isTechnician && (
             <Field label="Reserved quantity">
               <input
                 className={inputCls}

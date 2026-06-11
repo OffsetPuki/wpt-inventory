@@ -4,12 +4,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
-import { PROJECT_STATUSES, type Project, type ProjectStatus, type Category } from "@shared/schema";
-import { CATEGORY_LABELS, formatDateTime } from "@/lib/format";
+import { PROJECT_STATUSES, type Project, type ProjectStatus } from "@shared/schema";
+import { formatDateTime } from "@/lib/format";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import ProjectChecklist from "@/components/ProjectChecklist";
-import { ArrowLeft, Loader2, PackageMinus, PackagePlus, Trash2 } from "lucide-react";
+import { ArrowLeft, ImageOff, Loader2, PackageMinus, PackagePlus, Trash2 } from "lucide-react";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   active: "Active",
@@ -17,23 +17,46 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   on_hold: "On hold",
 };
 
+interface UsageTransaction {
+  id: number;
+  type: "check_out" | "check_in";
+  quantity: number;
+  item_id?: number;
+  item_name?: string;
+  item_photo_url?: string | null;
+  item_photos?: string | null;
+  user_name?: string;
+  created_at: number;
+}
+
 interface Usage {
   totalItems: number;
   byCategory: Record<string, number>;
   topItems: { name: string; count: number }[];
-  transactions: {
-    id: number;
-    type: "check_out" | "check_in";
-    quantity: number;
-    item_name?: string;
-    user_name?: string;
-    created_at: number;
-  }[];
+  transactions: UsageTransaction[];
+}
+
+// Items store photos in two columns (legacy `photo_url` + the newer `photos`
+// JSON array). Same precedence as the rest of the app.
+function firstItemPhoto(t: UsageTransaction): string | null {
+  if (t.item_photos) {
+    try {
+      const arr = JSON.parse(t.item_photos);
+      if (Array.isArray(arr)) {
+        const first = arr.find((p) => typeof p === "string" && p);
+        if (first) return first;
+      }
+    } catch {
+      /* malformed JSON — fall through to legacy column */
+    }
+  }
+  return t.item_photo_url || null;
 }
 
 export default function ProjectDetailPage({ id }: { id: string }) {
   const projectId = Number(id);
-  const { isManager } = useAuth();
+  // Manager + technician both manage project status / checklist / deletion.
+  const { isElevated: isManager } = useAuth();
   const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -77,9 +100,6 @@ export default function ProjectDetailPage({ id }: { id: string }) {
       </div>
     );
   }
-
-  const catEntries = usage ? Object.entries(usage.byCategory) : [];
-  const maxCat = catEntries.reduce((m, [, v]) => Math.max(m, v), 0) || 1;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -126,36 +146,10 @@ export default function ProjectDetailPage({ id }: { id: string }) {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Totals */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h2 className="mb-1 text-base font-semibold text-foreground">Items used</h2>
-          <p className="text-3xl font-bold text-foreground">{usage?.totalItems ?? 0}</p>
-          <div className="mt-4 flex flex-col gap-2">
-            {catEntries.map(([cat, count]) => (
-              <div key={cat}>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{CATEGORY_LABELS[cat as Category] ?? cat}</span>
-                  <span>{count}</span>
-                </div>
-                <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary"
-                    style={{ width: `${(count / maxCat) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <ProjectChecklist projectId={projectId} />
 
-        {/* Checklist spans 2 cols */}
-        <div className="lg:col-span-2">
-          <ProjectChecklist projectId={projectId} />
-        </div>
-      </div>
-
-      {/* Items used / transactions */}
+      {/* Recent item activity — each row shows the item's photo and links to
+          its detail page, so you can jump straight to it from the project. */}
       <div className="mt-6 rounded-xl border border-border bg-card p-5">
         <h2 className="mb-3 text-base font-semibold text-foreground">Recent item activity</h2>
         {!usage || usage.transactions.length === 0 ? (
@@ -164,24 +158,57 @@ export default function ProjectDetailPage({ id }: { id: string }) {
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {usage.transactions.map((t) => (
-              <li key={t.id} className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2">
-                  {t.type === "check_out" ? (
-                    <PackageMinus className="h-4 w-4 text-orange-400" />
-                  ) : (
-                    <PackagePlus className="h-4 w-4 text-green-400" />
-                  )}
-                  <span className="text-foreground">
-                    {t.type === "check_out" ? "−" : "+"}
-                    {t.quantity}
+            {usage.transactions.map((t) => {
+              const photo = firstItemPhoto(t);
+              const row = (
+                <div className="flex items-center gap-3 rounded-lg border border-transparent p-2 transition-colors hover:border-border hover:bg-accent">
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+                    {photo ? (
+                      <img
+                        src={photo}
+                        alt={t.item_name ?? "Item"}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                        <ImageOff className="h-5 w-5" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                    {t.type === "check_out" ? (
+                      <PackageMinus className="h-4 w-4 shrink-0 text-orange-400" />
+                    ) : (
+                      <PackagePlus className="h-4 w-4 shrink-0 text-green-400" />
+                    )}
+                    <span className="shrink-0 font-medium text-foreground">
+                      {t.type === "check_out" ? "−" : "+"}
+                      {t.quantity}
+                    </span>
+                    <span className="truncate text-foreground">{t.item_name}</span>
+                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                      {t.user_name}
+                    </span>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {formatDateTime(t.created_at)}
                   </span>
-                  <span className="text-foreground">{t.item_name}</span>
-                  <span className="text-muted-foreground">{t.user_name}</span>
-                </span>
-                <span className="text-xs text-muted-foreground">{formatDateTime(t.created_at)}</span>
-              </li>
-            ))}
+                </div>
+              );
+              return (
+                <li key={t.id}>
+                  {t.item_id ? (
+                    <Link href={`/item/${t.item_id}`} className="block">
+                      {row}
+                    </Link>
+                  ) : (
+                    row
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

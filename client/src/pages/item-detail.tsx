@@ -45,7 +45,7 @@ type TxnRow = {
 
 export default function ItemDetailPage({ id }: { id: string }) {
   const itemId = Number(id);
-  const { isManager } = useAuth();
+  const { isTechnician } = useAuth();
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
 
@@ -178,10 +178,10 @@ export default function ItemDetailPage({ id }: { id: string }) {
           <div className="flex flex-wrap gap-2">
             <ActionBtn onClick={() => setCheckMode("check_out")} icon={PackageMinus} label="Check out" />
             <ActionBtn onClick={() => setCheckMode("check_in")} icon={PackagePlus} label="Check in" />
-            {isManager && <ActionBtn onClick={() => setAdjustOpen(true)} icon={Sliders} label="Adjust" />}
+            {isTechnician && <ActionBtn onClick={() => setAdjustOpen(true)} icon={Sliders} label="Adjust" />}
             <ActionBtn onClick={() => setQrOpen(true)} icon={QrCode} label="QR" />
             <ActionBtn onClick={() => setLocation(`/item/${itemId}/edit`)} icon={Pencil} label="Edit" />
-            {isManager && (
+            {isTechnician && (
               <ActionBtn onClick={() => setConfirmDelete(true)} icon={Trash2} label="Delete" danger />
             )}
           </div>

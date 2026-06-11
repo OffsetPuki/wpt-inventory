@@ -16,7 +16,13 @@ interface AuthContextValue {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  // Strict role flags
   isManager: boolean;
+  isTechnician: boolean;
+  isWorker: boolean;
+  // Convenience: anything above worker. Use this for "managerial OR technical
+  // power" gates — most editing/decision controls fall here.
+  isElevated: boolean;
   login: (name: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -100,6 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAuthenticated = !!user;
   const isManager = user?.role === "manager";
+  const isTechnician = user?.role === "technician";
+  const isWorker = user?.role === "worker";
+  const isElevated = isManager || isTechnician;
 
   return (
     <AuthContext.Provider
@@ -109,6 +118,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         isAuthenticated,
         isManager,
+        isTechnician,
+        isWorker,
+        isElevated,
         login,
         logout,
       }}

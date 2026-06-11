@@ -39,26 +39,35 @@ interface NavEntry {
   to: string;
   label: string;
   icon: typeof Search;
-  manager?: boolean;
+  // "elevated" = manager + technician (oversight). "technician" = tech only.
+  // Undefined = visible to everyone signed in.
+  needs?: "elevated" | "technician";
 }
 
+// Managers see a curated subset: oversight (dashboard, projects, users) plus
+// read-only floor screens (find items, map). Add Item and operational
+// settings are hidden so the UI doesn't drown them in detail-level controls.
 const NAV: NavEntry[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, manager: true },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, needs: "elevated" },
   { to: "/home", label: "Find Items", icon: Search },
-  { to: "/add", label: "Add Item", icon: Plus },
+  { to: "/add", label: "Add Item", icon: Plus, needs: "technician" },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/map", label: "Shop Map", icon: Map },
-  { to: "/users", label: "Users", icon: Users, manager: true },
-  { to: "/admin/templates", label: "Job Templates", icon: Sparkles, manager: true },
-  { to: "/settings", label: "Settings", icon: Settings, manager: true },
+  { to: "/users", label: "Users", icon: Users, needs: "elevated" },
+  { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "technician" },
+  { to: "/settings", label: "Settings", icon: Settings, needs: "technician" },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
-  const { isManager } = useAuth();
+  const { isElevated, isTechnician } = useAuth();
   const [location] = useLocation();
 
-  const entries = NAV.filter((e) => !e.manager || isManager);
+  const entries = NAV.filter((e) => {
+    if (e.needs === "technician") return isTechnician;
+    if (e.needs === "elevated") return isElevated;
+    return true;
+  });
 
   return (
     <nav className="flex flex-col gap-1 px-3">

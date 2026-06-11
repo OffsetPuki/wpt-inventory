@@ -240,6 +240,18 @@ export const storage = {
     return db.select().from(users).all();
   },
 
+  // One-time rename of the old "manager" role (which was the operational
+  // power-user role) to its new name "technician". Returns rows affected.
+  // Also updates already-issued sessions so active tokens reflect the new
+  // role without forcing every user to sign in again.
+  renameManagerRoleToTechnician(): number {
+    const info = sqlite.prepare(
+      "UPDATE users SET role = 'technician' WHERE role = 'manager'"
+    ).run();
+    sqlite.prepare("UPDATE sessions SET role = 'technician' WHERE role = 'manager'").run();
+    return Number(info.changes ?? 0);
+  },
+
   deleteUser(id: number): void {
     db.delete(users).where(eq(users.id, id)).run();
   },
@@ -498,7 +510,9 @@ export const storage = {
 
   getProjectUsage(projectId: number) {
     const txns = sqlite.prepare(`
-      SELECT t.*, i.name as item_name, i.category as item_category, u.name as user_name
+      SELECT t.*, i.name as item_name, i.category as item_category,
+             i.photo_url as item_photo_url, i.photos as item_photos,
+             u.name as user_name
       FROM transactions t
       LEFT JOIN items i ON t.item_id = i.id
       LEFT JOIN users u ON t.user_id = u.id

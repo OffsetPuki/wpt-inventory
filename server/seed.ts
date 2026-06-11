@@ -10,6 +10,18 @@ function randomPin(): string {
 }
 
 /**
+ * The old "manager" role was the operational power user (edit items, adjust
+ * stock, edit map). It's been renamed to "technician". The new "manager" role
+ * is high-level oversight (dashboard / projects / users) with a simpler UI.
+ *
+ * Anyone who had the old role keeps the same powers under the new name.
+ */
+function migrateManagerToTechnician(): void {
+  const moved = storage.renameManagerRoleToTechnician();
+  if (moved > 0) console.log(`[seed] Migrated ${moved} user(s) from manager → technician`);
+}
+
+/**
  * One-time silent migration: existing installs stored PINs as plaintext. Hash
  * any user whose `pin` doesn't look like a bcrypt digest. Login then works
  * unchanged — the user types their PIN, we bcrypt.compare against the hash.
@@ -36,13 +48,20 @@ export function seedDefaults(): void {
     // In production, seed with random PINs and log them ONCE so the operator
     // can sign in — never bake the publicly-known dev defaults into prod.
     const isProd = process.env.NODE_ENV === "production";
-    const managerPin = isProd ? randomPin() : "1234";
+    const managerPin = isProd ? randomPin() : "5678";
+    const techPin = isProd ? randomPin() : "1234";
     const workerPin = isProd ? randomPin() : "0000";
     console.log("[seed] Creating default Manager user");
     storage.createUser({
       name: "Manager",
       pin: bcrypt.hashSync(managerPin, BCRYPT_ROUNDS),
       role: "manager",
+    });
+    console.log("[seed] Creating default Technician user");
+    storage.createUser({
+      name: "Technician",
+      pin: bcrypt.hashSync(techPin, BCRYPT_ROUNDS),
+      role: "technician",
     });
     console.log("[seed] Creating default Worker user");
     storage.createUser({
@@ -53,11 +72,13 @@ export function seedDefaults(): void {
     if (isProd) {
       console.log("[seed] ────────────────────────────────────────────────");
       console.log("[seed]  First-run credentials — SAVE THESE NOW:");
-      console.log(`[seed]    Manager / ${managerPin}`);
-      console.log(`[seed]    Worker  / ${workerPin}`);
+      console.log(`[seed]    Manager    / ${managerPin}`);
+      console.log(`[seed]    Technician / ${techPin}`);
+      console.log(`[seed]    Worker     / ${workerPin}`);
       console.log("[seed] ────────────────────────────────────────────────");
     }
   } else {
+    migrateManagerToTechnician();
     migratePlaintextPins();
   }
 

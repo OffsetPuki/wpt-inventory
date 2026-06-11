@@ -33,23 +33,29 @@ function LoadingSpinner() {
   );
 }
 
-// ─── Route guard: Manager ───────────────────────────────────────────────────
+// ─── Route guards ───────────────────────────────────────────────────────────
 
-function ManagerRoute({ children }: { children: ReactNode }) {
-  const { isManager } = useAuth();
+// Dashboard, users, projects (and other oversight screens) — visible to both
+// the new Manager role and Technicians.
+function ElevatedRoute({ children }: { children: ReactNode }) {
+  const { isElevated } = useAuth();
+  if (!isElevated) return <Redirect to="/home" />;
+  return <>{children}</>;
+}
 
-  if (!isManager) {
-    return <Redirect to="/home" />;
-  }
-
+// Settings, job templates (and other low-level operational screens) — kept
+// out of the manager's nav to avoid overwhelming them with technical knobs.
+function TechnicianRoute({ children }: { children: ReactNode }) {
+  const { isTechnician } = useAuth();
+  if (!isTechnician) return <Redirect to="/home" />;
   return <>{children}</>;
 }
 
 // ─── Root redirect based on role ────────────────────────────────────────────
 
 function RoleRedirect() {
-  const { isManager } = useAuth();
-  return <Redirect to={isManager ? "/dashboard" : "/home"} />;
+  const { isElevated } = useAuth();
+  return <Redirect to={isElevated ? "/dashboard" : "/home"} />;
 }
 
 // ─── Root app component ─────────────────────────────────────────────────────
@@ -122,29 +128,30 @@ export default function App() {
             <AddItemPage />
           </Route>
 
-          {/* Manager routes */}
+          {/* Manager + Technician routes */}
           <Route path="/dashboard">
-            <ManagerRoute>
+            <ElevatedRoute>
               <DashboardPage />
-            </ManagerRoute>
+            </ElevatedRoute>
           </Route>
 
           <Route path="/users">
-            <ManagerRoute>
+            <ElevatedRoute>
               <UsersPage />
-            </ManagerRoute>
+            </ElevatedRoute>
           </Route>
 
+          {/* Technician-only routes */}
           <Route path="/settings">
-            <ManagerRoute>
+            <TechnicianRoute>
               <SettingsPage />
-            </ManagerRoute>
+            </TechnicianRoute>
           </Route>
 
           <Route path="/admin/templates">
-            <ManagerRoute>
+            <TechnicianRoute>
               <AdminTemplatesPage />
-            </ManagerRoute>
+            </TechnicianRoute>
           </Route>
 
           {/* 404 fallback */}

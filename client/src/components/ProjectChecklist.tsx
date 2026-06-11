@@ -26,7 +26,8 @@ const inputCls =
   "h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 
 export default function ProjectChecklist({ projectId }: { projectId: number }) {
-  const { isManager } = useAuth();
+  // Manager + technician both edit checklists. Workers can only tick rows off.
+  const { isElevated: isManager } = useAuth();
   const qc = useQueryClient();
   const [newLabel, setNewLabel] = useState("");
   const [newQty, setNewQty] = useState("1");

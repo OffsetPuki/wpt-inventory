@@ -26,7 +26,10 @@ export type Area = (typeof AREAS)[number];
 export const SHOP_AREAS = ["main_shop", "machine_shop", "panel_shop"] as const;
 export type ShopArea = (typeof SHOP_AREAS)[number];
 
-export const ROLES = ["manager", "worker"] as const;
+// "manager"   = high-level oversight (projects, users, dashboard) — simpler UI
+// "technician" = full operational control (edit items, adjust stock, map, settings)
+// "worker"    = floor user (find/add items, check in/out, view projects)
+export const ROLES = ["manager", "technician", "worker"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const TRANSACTION_TYPES = ["check_out", "check_in"] as const;

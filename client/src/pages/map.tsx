@@ -193,7 +193,8 @@ function FloorDialog({
 }
 
 export default function MapPage() {
-  const { isManager } = useAuth();
+  // Map editing (placing/moving rack nodes) is a technician-only operation.
+  const { isTechnician: isManager } = useAuth();
   const qc = useQueryClient();
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<

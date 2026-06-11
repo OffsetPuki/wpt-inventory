@@ -47,7 +47,7 @@ function downscaleToDataUrl(file: File, maxDim = 768, quality = 0.8): Promise<st
 
 export default function AddItemPage() {
   const [, setLocation] = useLocation();
-  const { isManager } = useAuth();
+  const { isTechnician } = useAuth();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [identifying, setIdentifying] = useState(false);
@@ -62,8 +62,8 @@ export default function AddItemPage() {
     onSuccess: (item) => {
       qc.invalidateQueries({ queryKey: ["items"] });
       toast({ variant: "success", title: "Item added" });
-      // Managers land on the edit screen to fine-tune location/details right away.
-      setLocation(isManager ? `/item/${item.id}/edit` : `/item/${item.id}`);
+      // Technicians land on the edit screen to fine-tune location/details right away.
+      setLocation(isTechnician ? `/item/${item.id}/edit` : `/item/${item.id}`);
     },
     onError: (e: any) =>
       toast({ variant: "destructive", title: "Could not add item", description: e?.message }),
