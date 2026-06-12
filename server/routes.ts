@@ -10,7 +10,7 @@ import { requireAuth, requireTechnician, requireElevated, createSession, destroy
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
-  fromTemplateSchema, CATEGORIES, ROLES, type TemplatePart, type TemplateParam,
+  fromTemplateSchema, CATEGORIES, ROLES, type TemplatePart,
 } from "../shared/schema";
 
 const BCRYPT_ROUNDS = 10;
@@ -416,23 +416,15 @@ export function registerRoutes(app: Express): void {
       if (!tpl) return res.status(404).json({ message: "Template not found" });
 
       const parts: TemplatePart[] = JSON.parse(tpl.parts as string);
-      const tplParams: TemplateParam[] = JSON.parse(tpl.params as string);
 
-      // Build audit trail note
-      const paramStr = Object.entries(body.params)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(" · ");
-      const auditBlock = `Template: ${tpl.label}\nParams: ${paramStr}`;
-      const notes = body.notes
-        ? `${auditBlock}\n${body.notes}`
-        : auditBlock;
-
-      // Create project
+      // Create project — only the user's own notes are stored. The template /
+      // params used to be prepended as an "audit block" but that surfaced as a
+      // noisy box on the project page (Template: X / Params: ...), so we drop it.
       const project = storage.createProject({
         jobNumber: body.jobNumber,
         name: body.name,
         customer: body.customer,
-        notes,
+        notes: body.notes,
       });
 
       // Evaluate and create checklist rows

@@ -80,6 +80,8 @@ export function seedDefaults(): void {
   } else {
     migrateManagerToTechnician();
     migratePlaintextPins();
+    const cleaned = storage.stripTemplateAuditFromProjectNotes();
+    if (cleaned > 0) console.log(`[seed] Cleaned template/params block from ${cleaned} project(s)`);
   }
 
   // ── Settings ───────────────────────────────────────────────────────────

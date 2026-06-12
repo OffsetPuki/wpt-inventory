@@ -240,11 +240,43 @@ export const storage = {
     return db.select().from(users).all();
   },
 
+  // One-time cleanup of the auto-prefixed "Template: X\nParams: ..." block
+  // that the from-template endpoint used to dump into project notes. The
+  // block surfaced as an unhelpful box on the project page. Strips just
+  // the leading header; any user-entered notes underneath are kept. If
+  // nothing is left after the strip, the notes column is set to NULL so
+  // the project page's notes card hides entirely.
+  stripTemplateAuditFromProjectNotes(): number {
+    const rows = sqlite.prepare(
+      "SELECT id, notes FROM projects WHERE notes LIKE 'Template:%' OR notes LIKE 'Template:%' || char(10) || 'Params:%'"
+    ).all() as { id: number; notes: string }[];
+    let changed = 0;
+    const update = sqlite.prepare("UPDATE projects SET notes = ? WHERE id = ?");
+    for (const row of rows) {
+      const cleaned = row.notes.replace(/^Template:[^\n]*\nParams:[^\n]*\n?/, "").trim();
+      const next = cleaned.length > 0 ? cleaned : null;
+      if (next !== row.notes) {
+        update.run(next, row.id);
+        changed++;
+      }
+    }
+    return changed;
+  },
+
   // One-time rename of the old "manager" role (which was the operational
   // power-user role) to its new name "technician". Returns rows affected.
   // Also updates already-issued sessions so active tokens reflect the new
   // role without forcing every user to sign in again.
+  //
+  // GATE: only runs if there are no technician users yet. Once the very
+  // first run completes, at least one technician exists (the migrated user),
+  // so subsequent boots skip this — protecting any newly-created Manager
+  // users from being re-flipped to technicians.
   renameManagerRoleToTechnician(): number {
+    const techCount = (sqlite.prepare(
+      "SELECT COUNT(*) as c FROM users WHERE role = 'technician'"
+    ).get() as any).c;
+    if (techCount > 0) return 0;
     const info = sqlite.prepare(
       "UPDATE users SET role = 'technician' WHERE role = 'manager'"
     ).run();
