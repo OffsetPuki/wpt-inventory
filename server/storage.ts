@@ -57,6 +57,36 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
+  -- Per-account login throttling. IP-based rate limit lives in memory and
+  -- can be bypassed via VPN/Tor; this table tracks failures per username
+  -- (lowercased) so a brute-forcer can't just rotate IPs.
+  CREATE TABLE IF NOT EXISTS login_attempts (
+    name_lc TEXT PRIMARY KEY,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    last_failed_at INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Forensic trail of who did what. Inventory moves stay in the transactions
+  -- and adjustments tables; this one covers destructive / privileged actions
+  -- (item delete, user create/delete, settings change, login outcomes, etc).
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    user_name TEXT,
+    role TEXT,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id INTEGER,
+    target_name TEXT,
+    ip TEXT,
+    details TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+
   CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -78,7 +108,9 @@ sqlite.exec(`
     quantity_reserved INTEGER NOT NULL DEFAULT 0,
     equipment_type TEXT,
     custom_attrs TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    -- Soft delete: NULL = active. Reaper hard-purges after 30 days.
+    deleted_at INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS adjustments (
@@ -109,7 +141,9 @@ sqlite.exec(`
     customer TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     notes TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    -- Soft delete: NULL = active. Reaper hard-purges after 30 days.
+    deleted_at INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -187,6 +221,23 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_adjustments_created ON adjustments(created_at);
   CREATE INDEX IF NOT EXISTS idx_checklist_project ON project_checklist(project_id);
 `);
+
+// ─── Idempotent column additions ─────────────────────────────────────────────
+// CREATE TABLE IF NOT EXISTS doesn't add columns to pre-existing tables, so
+// new columns on shipped tables go here. Each addition checks PRAGMA first
+// so it only runs when the column is actually missing.
+
+function addColumnIfMissing(table: string, column: string, ddl: string): void {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+
+addColumnIfMissing("items", "deleted_at", "deleted_at INTEGER");
+addColumnIfMissing("projects", "deleted_at", "deleted_at INTEGER");
+sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
+sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
 
 // ─── Helper: strip pin from user ─────────────────────────────────────────────
 
@@ -285,11 +336,23 @@ export const storage = {
   },
 
   deleteUser(id: number): void {
+    // Revoke any active sessions BEFORE deleting the user — otherwise a fired
+    // worker stays signed in until the next /api/auth/me round-trip notices
+    // their user row is gone. With this, the next protected request returns
+    // 401 immediately and they're booted to the login screen.
+    sqlite.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+    // Also clear lockout state so re-creating an account with the same name
+    // doesn't inherit the old lockout counter.
+    const u = db.select().from(users).where(eq(users.id, id)).get();
+    if (u) sqlite.prepare("DELETE FROM login_attempts WHERE name_lc = ?").run(u.name.toLowerCase());
     db.delete(users).where(eq(users.id, id)).run();
   },
 
-  listUserNames(): string[] {
-    return db.select({ name: users.name }).from(users).all().map((r) => r.name);
+  // Used by the explicit "log this user out everywhere" flow without removing
+  // the account — handy for ending a stolen session after a password reset.
+  revokeAllSessionsForUser(id: number): number {
+    const info = sqlite.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+    return Number(info.changes ?? 0);
   },
 
   getUserCount(): number {
@@ -325,14 +388,99 @@ export const storage = {
     sqlite.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
   },
 
+  // ── Login attempts (per-account lockout) ─────────────────────────────────
+  getLoginAttempt(name: string): { failedCount: number; lockedUntil: number } | null {
+    const row = sqlite.prepare(
+      "SELECT failed_count as failedCount, locked_until as lockedUntil FROM login_attempts WHERE name_lc = ?"
+    ).get(name.toLowerCase()) as any;
+    return row || null;
+  },
+
+  recordLoginFailure(name: string, now: number, threshold: number, lockMs: number): { lockedUntil: number; failedCount: number } {
+    const nameLc = name.toLowerCase();
+    sqlite.prepare(
+      "INSERT INTO login_attempts (name_lc, failed_count, last_failed_at) VALUES (?, 1, ?) " +
+      "ON CONFLICT(name_lc) DO UPDATE SET failed_count = failed_count + 1, last_failed_at = excluded.last_failed_at"
+    ).run(nameLc, now);
+    const row = sqlite.prepare(
+      "SELECT failed_count as failedCount FROM login_attempts WHERE name_lc = ?"
+    ).get(nameLc) as any;
+    let lockedUntil = 0;
+    if (row.failedCount >= threshold) {
+      lockedUntil = now + lockMs;
+      sqlite.prepare(
+        "UPDATE login_attempts SET locked_until = ?, failed_count = 0 WHERE name_lc = ?"
+      ).run(lockedUntil, nameLc);
+    }
+    return { lockedUntil, failedCount: row.failedCount };
+  },
+
+  clearLoginAttempts(name: string): void {
+    sqlite.prepare("DELETE FROM login_attempts WHERE name_lc = ?").run(name.toLowerCase());
+  },
+
+  purgeStaleLoginAttempts(now: number): void {
+    // Drop rows that are neither currently locked nor recently failed.
+    sqlite.prepare(
+      "DELETE FROM login_attempts WHERE locked_until < ? AND last_failed_at < ?"
+    ).run(now, now - 24 * 60 * 60 * 1000);
+  },
+
+  // ── Audit log ────────────────────────────────────────────────────────────
+  appendAudit(entry: {
+    userId?: number | null;
+    userName?: string | null;
+    role?: string | null;
+    action: string;
+    targetType?: string | null;
+    targetId?: number | null;
+    targetName?: string | null;
+    ip?: string | null;
+    details?: Record<string, unknown> | null;
+  }): void {
+    sqlite.prepare(
+      "INSERT INTO audit_log (user_id, user_name, role, action, target_type, target_id, target_name, ip, details) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      entry.userId ?? null,
+      entry.userName ?? null,
+      entry.role ?? null,
+      entry.action,
+      entry.targetType ?? null,
+      entry.targetId ?? null,
+      entry.targetName ?? null,
+      entry.ip ?? null,
+      entry.details ? JSON.stringify(entry.details) : null
+    );
+  },
+
+  getAuditLog(opts: { limit?: number; action?: string; userId?: number } = {}): any[] {
+    const limit = Math.min(opts.limit ?? 100, 500);
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (opts.action) { conditions.push("action = ?"); params.push(opts.action); }
+    if (opts.userId) { conditions.push("user_id = ?"); params.push(opts.userId); }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(limit);
+    return sqlite.prepare(
+      `SELECT id, user_id as userId, user_name as userName, role, action,
+              target_type as targetType, target_id as targetId, target_name as targetName,
+              ip, details, created_at as createdAt
+       FROM audit_log ${where} ORDER BY id DESC LIMIT ?`
+    ).all(...params);
+  },
+
   // ── Items ────────────────────────────────────────────────────────────────
+  // All read paths filter out soft-deleted rows (deleted_at IS NOT NULL) so
+  // a deletion immediately disappears from the active UI. The Trash page
+  // reads via getDeletedItems() to surface them for restore.
   getItems(opts: {
     q?: string;
     category?: string;
     area?: string;
     lowStockOnly?: boolean;
   } = {}): Item[] {
-    const conditions: any[] = [];
+    const conditions: any[] = [sql`${items.deletedAt} IS NULL`];
 
     if (opts.q) {
       const pattern = `%${opts.q}%`;
@@ -356,23 +504,22 @@ export const storage = {
       );
     }
 
-    const query = conditions.length > 0
-      ? db.select().from(items).where(and(...conditions)).orderBy(desc(items.createdAt))
-      : db.select().from(items).orderBy(desc(items.createdAt));
-
-    return query.all();
+    return db.select().from(items).where(and(...conditions)).orderBy(desc(items.createdAt)).all();
   },
 
+  // For active-page lookups; the trash page uses getDeletedItemById instead.
   getItemById(id: number): Item | undefined {
+    return db.select().from(items).where(and(eq(items.id, id), sql`${items.deletedAt} IS NULL`)).get();
+  },
+
+  // Used by restore + audit-trail callers that need to look up a deleted item.
+  getItemByIdIncludingDeleted(id: number): Item | undefined {
     return db.select().from(items).where(eq(items.id, id)).get();
   },
 
-  getItemDuplicates(name: string, category?: string): Item[] {
-    const conditions = [like(items.name, `%${name}%`)];
-    if (category) {
-      conditions.push(eq(items.category, category as any));
-    }
-    return db.select().from(items).where(and(...conditions)).all();
+  getDeletedItems(): Item[] {
+    return db.select().from(items).where(sql`${items.deletedAt} IS NOT NULL`)
+      .orderBy(desc(items.deletedAt)).all();
   },
 
   createItem(data: any): Item {
@@ -423,7 +570,18 @@ export const storage = {
   },
 
   deleteItem(id: number): void {
-    db.delete(items).where(eq(items.id, id)).run();
+    sqlite.prepare("UPDATE items SET deleted_at = ? WHERE id = ?").run(Date.now(), id);
+  },
+
+  restoreItem(id: number): void {
+    sqlite.prepare("UPDATE items SET deleted_at = NULL WHERE id = ?").run(id);
+  },
+
+  // Hard-delete rows that have been soft-deleted longer than the retention
+  // window. Cascading foreign keys clean up adjustments + transactions.
+  purgeOldDeletedItems(cutoff: number): number {
+    const info = sqlite.prepare("DELETE FROM items WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(cutoff);
+    return Number(info.changes ?? 0);
   },
 
   // ── Adjustments ──────────────────────────────────────────────────────────
@@ -507,12 +665,24 @@ export const storage = {
   },
 
   // ── Projects ─────────────────────────────────────────────────────────────
+  // Soft-deletes mirror the items table: read paths exclude rows with
+  // deleted_at set; Trash page surfaces them for restore.
   getProjects(): Project[] {
-    return db.select().from(projects).orderBy(desc(projects.createdAt)).all();
+    return db.select().from(projects).where(sql`${projects.deletedAt} IS NULL`)
+      .orderBy(desc(projects.createdAt)).all();
   },
 
   getProjectById(id: number): Project | undefined {
+    return db.select().from(projects).where(and(eq(projects.id, id), sql`${projects.deletedAt} IS NULL`)).get();
+  },
+
+  getProjectByIdIncludingDeleted(id: number): Project | undefined {
     return db.select().from(projects).where(eq(projects.id, id)).get();
+  },
+
+  getDeletedProjects(): Project[] {
+    return db.select().from(projects).where(sql`${projects.deletedAt} IS NOT NULL`)
+      .orderBy(desc(projects.deletedAt)).all();
   },
 
   createProject(data: { jobNumber: string; name: string; customer?: string; status?: string; notes?: string }): Project {
@@ -537,12 +707,24 @@ export const storage = {
   },
 
   deleteProject(id: number): void {
-    db.delete(projects).where(eq(projects.id, id)).run();
+    sqlite.prepare("UPDATE projects SET deleted_at = ? WHERE id = ?").run(Date.now(), id);
+  },
+
+  restoreProject(id: number): void {
+    sqlite.prepare("UPDATE projects SET deleted_at = NULL WHERE id = ?").run(id);
+  },
+
+  purgeOldDeletedProjects(cutoff: number): number {
+    const info = sqlite.prepare("DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(cutoff);
+    return Number(info.changes ?? 0);
   },
 
   getProjectUsage(projectId: number) {
-    const txns = sqlite.prepare(`
-      SELECT t.*, i.name as item_name, i.category as item_category,
+    // Project page only renders the recent transaction list with item photos.
+    // The old totalItems / byCategory / topItems aggregates were removed when
+    // the "Items used" card was dropped, so we don't compute them anymore.
+    const transactions = sqlite.prepare(`
+      SELECT t.*, i.name as item_name,
              i.photo_url as item_photo_url, i.photos as item_photos,
              u.name as user_name
       FROM transactions t
@@ -550,34 +732,9 @@ export const storage = {
       LEFT JOIN users u ON t.user_id = u.id
       WHERE t.project_id = ?
       ORDER BY t.created_at DESC
+      LIMIT 20
     `).all(projectId) as any[];
-
-    const byCategory: Record<string, number> = {};
-    let totalItems = 0;
-    for (const t of txns) {
-      if (t.type === "check_out") {
-        totalItems += t.quantity;
-        const cat = t.item_category || "other";
-        byCategory[cat] = (byCategory[cat] || 0) + t.quantity;
-      }
-    }
-
-    // Top items
-    const itemCounts: Record<number, { name: string; count: number }> = {};
-    for (const t of txns) {
-      if (t.type === "check_out") {
-        if (!itemCounts[t.item_id]) itemCounts[t.item_id] = { name: t.item_name, count: 0 };
-        itemCounts[t.item_id].count += t.quantity;
-      }
-    }
-    const topItems = Object.values(itemCounts).sort((a, b) => b.count - a.count).slice(0, 10);
-
-    return {
-      totalItems,
-      byCategory,
-      topItems,
-      transactions: txns.slice(0, 20),
-    };
+    return { transactions };
   },
 
   // ── Settings ─────────────────────────────────────────────────────────────
@@ -781,16 +938,18 @@ export const storage = {
     const now = Date.now();
     const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
 
-    const totalItems = (sqlite.prepare("SELECT COUNT(*) as c FROM items").get() as any).c;
-    const totalQty = (sqlite.prepare("SELECT COALESCE(SUM(quantity),0) as c FROM items").get() as any).c;
+    // All item/project stats exclude soft-deleted rows so the dashboard
+    // matches what's actually visible in Find Items / Projects.
+    const totalItems = (sqlite.prepare("SELECT COUNT(*) as c FROM items WHERE deleted_at IS NULL").get() as any).c;
+    const totalQty = (sqlite.prepare("SELECT COALESCE(SUM(quantity),0) as c FROM items WHERE deleted_at IS NULL").get() as any).c;
     const lowStock = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM items WHERE low_stock_threshold > 0 AND quantity <= low_stock_threshold"
+      "SELECT COUNT(*) as c FROM items WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold"
     ).get() as any).c;
     const activeProjects = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM projects WHERE status = 'active'"
+      "SELECT COUNT(*) as c FROM projects WHERE deleted_at IS NULL AND status = 'active'"
     ).get() as any).c;
     const itemsAdded7d = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM items WHERE created_at >= ?"
+      "SELECT COUNT(*) as c FROM items WHERE deleted_at IS NULL AND created_at >= ?"
     ).get(sevenDaysAgo) as any).c;
     const checkouts7d = (sqlite.prepare(
       "SELECT COALESCE(SUM(quantity),0) as c FROM transactions WHERE type = 'check_out' AND created_at >= ?"
@@ -801,7 +960,7 @@ export const storage = {
 
     // Items per category
     const byCategory = sqlite.prepare(
-      "SELECT category, COUNT(*) as count FROM items GROUP BY category"
+      "SELECT category, COUNT(*) as count FROM items WHERE deleted_at IS NULL GROUP BY category"
     ).all() as any[];
 
     // Weekly checkouts (last 8 weeks)
@@ -839,7 +998,7 @@ export const storage = {
 
     // Low stock items for reorder list
     const lowStockItems = sqlite.prepare(
-      "SELECT id, name, quantity, low_stock_threshold, category FROM items WHERE low_stock_threshold > 0 AND quantity <= low_stock_threshold ORDER BY (quantity - low_stock_threshold) ASC LIMIT 20"
+      "SELECT id, name, quantity, low_stock_threshold, category FROM items WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold ORDER BY (quantity - low_stock_threshold) ASC LIMIT 20"
     ).all() as any[];
 
     return {

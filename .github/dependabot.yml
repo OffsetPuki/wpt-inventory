@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # Weekly check for npm vulnerabilities and routine updates. Grouped so
+  # we don't get one PR per Radix package; reviewing 1 PR / week is the
+  # sustainable cadence.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      radix:
+        patterns: ["@radix-ui/*"]
+      types:
+        patterns: ["@types/*"]
+      drizzle:
+        patterns: ["drizzle-*"]
+    # Security updates always get their own PR (ungrouped) so they're easy
+    # to triage and merge fast.
+    labels: ["dependencies"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels: ["dependencies", "ci"]

@@ -21,6 +21,8 @@ const MapPage = lazy(() => import("./pages/map"));
 const UsersPage = lazy(() => import("./pages/users"));
 const SettingsPage = lazy(() => import("./pages/settings"));
 const AdminTemplatesPage = lazy(() => import("./pages/admin-templates"));
+const AuditLogPage = lazy(() => import("./pages/audit-log"));
+const TrashPage = lazy(() => import("./pages/trash"));
 const NotFoundPage = lazy(() => import("./pages/not-found"));
 
 // ─── Loading spinner ────────────────────────────────────────────────────────
@@ -123,7 +125,8 @@ export default function App() {
             <MapPage />
           </Route>
 
-          {/* Add item — available to workers and managers */}
+          {/* Add item — available to workers and technicians; nav hides it
+              for managers (kept reachable by direct URL for now). */}
           <Route path="/add">
             <AddItemPage />
           </Route>
@@ -138,6 +141,18 @@ export default function App() {
           <Route path="/users">
             <ElevatedRoute>
               <UsersPage />
+            </ElevatedRoute>
+          </Route>
+
+          <Route path="/audit">
+            <ElevatedRoute>
+              <AuditLogPage />
+            </ElevatedRoute>
+          </Route>
+
+          <Route path="/trash">
+            <ElevatedRoute>
+              <TrashPage />
             </ElevatedRoute>
           </Route>
 

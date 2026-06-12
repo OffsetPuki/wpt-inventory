@@ -40,9 +40,25 @@ export function destroySession(token: string): void {
   storage.deleteSession(token);
 }
 
-// Run hourly to drop expired rows so the table doesn't grow unbounded.
+// Hard-purge soft-deleted items / projects after this long. 30 days gives
+// enough runway for "oops, I deleted the wrong thing yesterday" without
+// letting the trash grow forever.
+const SOFT_DELETE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Run hourly to drop expired rows (sessions, stale lockout entries) and
+// hard-purge soft-deleted items/projects past retention.
 export function startSessionReaper(): void {
-  const tick = () => storage.purgeExpiredSessions(Date.now());
+  const tick = () => {
+    const now = Date.now();
+    storage.purgeExpiredSessions(now);
+    storage.purgeStaleLoginAttempts(now);
+    const cutoff = now - SOFT_DELETE_RETENTION_MS;
+    const purgedItems = storage.purgeOldDeletedItems(cutoff);
+    const purgedProjects = storage.purgeOldDeletedProjects(cutoff);
+    if (purgedItems || purgedProjects) {
+      console.log(`[reaper] Hard-purged ${purgedItems} item(s), ${purgedProjects} project(s) past 30-day retention`);
+    }
+  };
   tick();
   setInterval(tick, 60 * 60 * 1000).unref();
 }

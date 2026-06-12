@@ -30,9 +30,6 @@ interface UsageTransaction {
 }
 
 interface Usage {
-  totalItems: number;
-  byCategory: Record<string, number>;
-  topItems: { name: string; count: number }[];
   transactions: UsageTransaction[];
 }
 

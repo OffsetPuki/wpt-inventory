@@ -14,6 +14,8 @@ import {
   Users,
   Sparkles,
   Settings,
+  ShieldCheck,
+  Trash2,
   LogOut,
   Menu,
   X,
@@ -55,6 +57,8 @@ const NAV: NavEntry[] = [
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/map", label: "Shop Map", icon: Map },
   { to: "/users", label: "Users", icon: Users, needs: "elevated" },
+  { to: "/audit", label: "Audit Log", icon: ShieldCheck, needs: "elevated" },
+  { to: "/trash", label: "Trash", icon: Trash2, needs: "elevated" },
   { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "technician" },
   { to: "/settings", label: "Settings", icon: Settings, needs: "technician" },
 ];

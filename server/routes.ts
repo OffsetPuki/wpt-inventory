@@ -2,6 +2,7 @@ import type { Express, Request } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
@@ -44,7 +45,10 @@ const upload = multer({
     filename: (_req, file, cb) => {
       const rawExt = path.extname(file.originalname).toLowerCase();
       const ext = ALLOWED_IMAGE_EXT.has(rawExt) ? rawExt : ".jpg";
-      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+      // 128 bits of crypto-grade randomness so filenames are unguessable
+      // even if an attacker can observe the timestamp prefix.
+      const rand = crypto.randomBytes(16).toString("hex");
+      cb(null, `${Date.now()}-${rand}${ext}`);
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
@@ -79,6 +83,43 @@ const loginLimiter = rateLimit({
   message: { message: "Too many login attempts — try again in a few minutes." },
 });
 
+// Per-account lockout: stronger than IP-based, since an attacker can rotate
+// IPs (VPN / Tor) but the username is the target. 10 failures in any window
+// lock the account for 15 minutes regardless of where the requests come from.
+const ACCOUNT_LOCKOUT_THRESHOLD = 10;
+const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
+
+// Pre-computed bcrypt hash of an impossible PIN — compared against when the
+// supplied username doesn't exist, so an attacker can't tell from response
+// timing whether a username is real.
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
+
+// Express's req.ip falls back to the socket address. Behind a proxy
+// (Railway / nginx), trust-proxy must be enabled in index.ts so this is
+// the real client IP, not the proxy's.
+function clientIp(req: Request): string {
+  return (req.ip || req.socket?.remoteAddress || "?") as string;
+}
+
+function audit(req: Request, action: string, extras: {
+  targetType?: string | null;
+  targetId?: number | null;
+  targetName?: string | null;
+  details?: Record<string, unknown> | null;
+} = {}): void {
+  storage.appendAudit({
+    userId: req.user?.userId ?? null,
+    userName: req.user?.name ?? null,
+    role: req.user?.role ?? null,
+    action,
+    targetType: extras.targetType ?? null,
+    targetId: extras.targetId ?? null,
+    targetName: extras.targetName ?? null,
+    ip: clientIp(req),
+    details: extras.details ?? null,
+  });
+}
+
 export function registerRoutes(app: Express): void {
   // ─── Auth ────────────────────────────────────────────────────────────────
 
@@ -86,26 +127,67 @@ export function registerRoutes(app: Express): void {
   const pid = (v: string | string[]): number => parseInt(v as string, 10);
   const pkey = (v: string | string[]): string => v as string;
 
-  app.post("/api/auth/login", loginLimiter, (req, res) => {
+  app.post("/api/auth/login", loginLimiter, async (req, res) => {
+    let body;
     try {
-      const body = loginSchema.parse(req.body);
-      const user = storage.getUserByName(body.name);
-      // bcrypt.compareSync handles both freshly-hashed and migrated hashes
-      // (any plaintext is converted on boot — see seed.migratePlaintextPins).
-      const ok = user && bcrypt.compareSync(body.pin, user.pin);
-      if (!user || !ok) {
-        return res.status(401).json({ message: "Invalid name or PIN" });
-      }
-      const token = createSession(user.id, user.role, user.name);
-      const { pin, ...publicUser } = user;
-      res.json({ token, user: publicUser });
+      body = loginSchema.parse(req.body);
     } catch (e: any) {
-      res.status(400).json({ message: e.message || "Invalid request" });
+      return res.status(400).json({ message: e.message || "Invalid request" });
     }
+
+    const now = Date.now();
+    const attempt = storage.getLoginAttempt(body.name);
+    if (attempt && attempt.lockedUntil > now) {
+      const mins = Math.ceil((attempt.lockedUntil - now) / 60000);
+      return res.status(423).json({
+        message: `Account temporarily locked — try again in ~${mins} minute(s).`,
+      });
+    }
+
+    const user = storage.getUserByName(body.name);
+    // Always run bcrypt.compare even when the user is unknown, against a
+    // dummy hash, so an attacker can't tell from response timing whether
+    // a username exists. bcrypt.compare (async) frees the event loop
+    // during the ~80ms hash so concurrent logins don't queue behind it.
+    const hashToCheck = user ? user.pin : DUMMY_BCRYPT_HASH;
+    const matched = await bcrypt.compare(body.pin, hashToCheck);
+    const ok = !!user && matched;
+
+    if (!ok) {
+      // Only track failures for known usernames — counting bogus usernames
+      // would let an attacker DoS by locking out fictional accounts.
+      if (user) {
+        const r = storage.recordLoginFailure(
+          body.name, now, ACCOUNT_LOCKOUT_THRESHOLD, ACCOUNT_LOCKOUT_MS
+        );
+        storage.appendAudit({
+          userId: user.id, userName: user.name, role: user.role,
+          action: "auth.login_fail",
+          ip: clientIp(req),
+          details: { failedCount: r.failedCount, locked: r.lockedUntil > 0 },
+        });
+        if (r.lockedUntil > 0) {
+          return res.status(423).json({
+            message: `Too many failed attempts — account locked for ${Math.round(ACCOUNT_LOCKOUT_MS / 60000)} minutes.`,
+          });
+        }
+      }
+      return res.status(401).json({ message: "Invalid name or PIN" });
+    }
+
+    storage.clearLoginAttempts(body.name);
+    const token = createSession(user.id, user.role, user.name);
+    storage.appendAudit({
+      userId: user.id, userName: user.name, role: user.role,
+      action: "auth.login_success", ip: clientIp(req),
+    });
+    const { pin, ...publicUser } = user;
+    res.json({ token, user: publicUser });
   });
 
   app.post("/api/auth/logout", requireAuth, (req, res) => {
     if (req.user?.token) destroySession(req.user.token);
+    audit(req, "auth.logout");
     res.json({ ok: true });
   });
 
@@ -116,9 +198,10 @@ export function registerRoutes(app: Express): void {
     res.json(publicUser);
   });
 
-  app.get("/api/users/list-names", (_req, res) => {
-    res.json(storage.listUserNames());
-  });
+  // The old GET /api/users/list-names was unauthenticated and returned every
+  // username on the system. That handed an attacker the first half of every
+  // credential pair, so it's been removed; the login form now just lets the
+  // user type their name freely.
 
   // ─── Users (manager-only) ───────────────────────────────────────────────
 
@@ -145,6 +228,10 @@ export function registerRoutes(app: Express): void {
         pin: bcrypt.hashSync(pin, BCRYPT_ROUNDS),
         role: finalRole,
       });
+      audit(req, "user.create", {
+        targetType: "user", targetId: user.id, targetName: user.name,
+        details: { role: user.role },
+      });
       res.status(201).json(user);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -152,7 +239,13 @@ export function registerRoutes(app: Express): void {
   });
 
   app.delete("/api/users/:id", requireElevated, (req, res) => {
-    storage.deleteUser(pid(req.params.id));
+    const id = pid(req.params.id);
+    const target = storage.getUserById(id);
+    storage.deleteUser(id);
+    audit(req, "user.delete", {
+      targetType: "user", targetId: id, targetName: target?.name ?? null,
+      details: { role: target?.role ?? null },
+    });
     res.json({ ok: true });
   });
 
@@ -168,12 +261,10 @@ export function registerRoutes(app: Express): void {
     res.json(items);
   });
 
-  app.get("/api/items/duplicates", requireAuth, (req, res) => {
-    const items = storage.getItemDuplicates(
-      req.query.name as string,
-      req.query.category as string
-    );
-    res.json(items);
+  // Trash listing has to live ABOVE /api/items/:id so the literal "deleted"
+  // segment isn't captured as a numeric id parameter.
+  app.get("/api/items/deleted", requireTechnician, (_req, res) => {
+    res.json(storage.getDeletedItems());
   });
 
   // Combined item-detail payload: the item + recent transactions + adjustments
@@ -198,12 +289,15 @@ export function registerRoutes(app: Express): void {
   app.post("/api/items", requireAuth, (req, res) => {
     try {
       const body = { ...req.body };
-      // Only managers may set the low-stock threshold and reserved quantity.
-      if (req.user?.role !== "manager") {
+      // Only technicians may set the low-stock threshold and reserved quantity.
+      if (req.user?.role !== "technician") {
         delete body.lowStockThreshold;
         delete body.quantityReserved;
       }
       const item = storage.createItem(body);
+      audit(req, "item.create", {
+        targetType: "item", targetId: item.id, targetName: item.name,
+      });
       res.status(201).json(item);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -217,7 +311,26 @@ export function registerRoutes(app: Express): void {
   });
 
   app.delete("/api/items/:id", requireTechnician, (req, res) => {
-    storage.deleteItem(pid(req.params.id));
+    const id = pid(req.params.id);
+    const target = storage.getItemById(id);
+    storage.deleteItem(id);
+    audit(req, "item.delete", {
+      targetType: "item", targetId: id, targetName: target?.name ?? null,
+    });
+    res.json({ ok: true });
+  });
+
+  // Restore endpoint for items soft-deleted in the last 30 days. The
+  // listing endpoint is registered higher up so /deleted isn't captured
+  // as :id by /api/items/:id.
+  app.post("/api/items/:id/restore", requireTechnician, (req, res) => {
+    const id = pid(req.params.id);
+    const target = storage.getItemByIdIncludingDeleted(id);
+    if (!target) return res.status(404).json({ message: "Item not found" });
+    storage.restoreItem(id);
+    audit(req, "item.restore", {
+      targetType: "item", targetId: id, targetName: target.name,
+    });
     res.json({ ok: true });
   });
 
@@ -226,11 +339,13 @@ export function registerRoutes(app: Express): void {
   app.post("/api/items/:id/adjust", requireTechnician, (req, res) => {
     try {
       const data = insertAdjustmentSchema.parse(req.body);
-      const adj = storage.createAdjustment(
-        pid(req.params.id),
-        req.user!.userId,
-        data
-      );
+      const id = pid(req.params.id);
+      const target = storage.getItemById(id);
+      const adj = storage.createAdjustment(id, req.user!.userId, data);
+      audit(req, "item.adjust", {
+        targetType: "item", targetId: id, targetName: target?.name ?? null,
+        details: { delta: data.delta, reason: data.reason },
+      });
       res.status(201).json(adj);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -302,6 +417,11 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getProjects());
   });
 
+  // Same path-ordering reason as /api/items/deleted: must come before :id.
+  app.get("/api/projects/deleted", requireElevated, (_req, res) => {
+    res.json(storage.getDeletedProjects());
+  });
+
   app.get("/api/projects/:id", requireAuth, (req, res) => {
     const project = storage.getProjectById(pid(req.params.id));
     if (!project) return res.status(404).json({ message: "Project not found" });
@@ -315,6 +435,10 @@ export function registerRoutes(app: Express): void {
   app.post("/api/projects", requireElevated, (req, res) => {
     try {
       const project = storage.createProject(req.body);
+      audit(req, "project.create", {
+        targetType: "project", targetId: project.id, targetName: project.name,
+        details: { jobNumber: project.jobNumber },
+      });
       res.status(201).json(project);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -322,13 +446,39 @@ export function registerRoutes(app: Express): void {
   });
 
   app.patch("/api/projects/:id", requireElevated, (req, res) => {
-    const project = storage.updateProject(pid(req.params.id), req.body);
+    const id = pid(req.params.id);
+    const before = storage.getProjectById(id);
+    const project = storage.updateProject(id, req.body);
     if (!project) return res.status(404).json({ message: "Project not found" });
+    // Log status changes specifically; other field edits are less interesting.
+    if (req.body?.status && before && before.status !== project.status) {
+      audit(req, "project.status_change", {
+        targetType: "project", targetId: id, targetName: project.name,
+        details: { from: before.status, to: project.status },
+      });
+    }
     res.json(project);
   });
 
   app.delete("/api/projects/:id", requireElevated, (req, res) => {
-    storage.deleteProject(pid(req.params.id));
+    const id = pid(req.params.id);
+    const target = storage.getProjectById(id);
+    storage.deleteProject(id);
+    audit(req, "project.delete", {
+      targetType: "project", targetId: id, targetName: target?.name ?? null,
+      details: { jobNumber: target?.jobNumber ?? null },
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/projects/:id/restore", requireElevated, (req, res) => {
+    const id = pid(req.params.id);
+    const target = storage.getProjectByIdIncludingDeleted(id);
+    if (!target) return res.status(404).json({ message: "Project not found" });
+    storage.restoreProject(id);
+    audit(req, "project.restore", {
+      targetType: "project", targetId: id, targetName: target.name,
+    });
     res.json({ ok: true });
   });
 
@@ -480,7 +630,19 @@ export function registerRoutes(app: Express): void {
 
   app.put("/api/settings", requireTechnician, (req, res) => {
     const s = storage.updateSettings(req.body);
+    audit(req, "settings.update", {
+      details: { fields: Object.keys(req.body || {}) },
+    });
     res.json(s);
+  });
+
+  // ─── Audit log ─────────────────────────────────────────────────────────
+  // Forensic view of who did what — visible to elevated roles for review.
+  app.get("/api/audit-log", requireElevated, (req, res) => {
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+    const action = req.query.action ? String(req.query.action) : undefined;
+    const userId = req.query.userId ? parseInt(req.query.userId as string) : undefined;
+    res.json(storage.getAuditLog({ limit, action, userId }));
   });
 
   // ─── Map Layouts ───────────────────────────────────────────────────────

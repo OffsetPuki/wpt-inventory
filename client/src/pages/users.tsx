@@ -92,7 +92,9 @@ export default function UsersPage() {
           <span className="text-sm font-medium text-foreground">PIN</span>
           <input
             className={inputCls}
+            type="password"
             inputMode="numeric"
+            autoComplete="new-password"
             maxLength={4}
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}

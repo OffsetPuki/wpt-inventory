@@ -12,15 +12,9 @@ export default function LoginPage() {
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Suggestions only — the field stays a free-text input (never a dropdown).
-  const { data: names = [] } = useQuery<string[]>({
-    queryKey: ["users", "list-names"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/users/list-names");
-      return res.json();
-    },
-    refetchInterval: false,
-  });
+  // The username autocomplete used to call an unauthenticated endpoint
+  // that listed every user — removed because it handed an attacker half
+  // of every credential pair. The field is just a typed name now.
 
   const { data: settings } = useQuery<{ companyName: string; companyTagline?: string }>({
     queryKey: ["settings"],
@@ -88,18 +82,12 @@ export default function LoginPage() {
             </label>
             <input
               id="name"
-              list="user-names"
               autoComplete="off"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Type your name"
               className="h-14 rounded-xl border border-input bg-background px-4 text-lg text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
             />
-            <datalist id="user-names">
-              {names.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
           </div>
 
           <div className="flex flex-col gap-2">

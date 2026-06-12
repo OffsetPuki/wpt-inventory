@@ -1,0 +1,28 @@
+name: npm audit
+
+# Catches new vuln advisories without waiting for a Dependabot PR. Runs on
+# every PR and once a week so a high-severity disclosure surfaces fast.
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci --ignore-scripts
+      # Fail on high or critical advisories. Moderate/low are surfaced in the
+      # output but don't break the build (avoids noisy PR blocks for dev-only
+      # esbuild-style advisories).
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

@@ -106,6 +106,9 @@ export const items = sqliteTable("items", {
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
+  // Soft delete — null = active, otherwise the unix-ms when DELETE was called.
+  // Hard purge runs in the reaper after a 30-day retention window.
+  deletedAt: integer("deleted_at"),
 });
 
 export const adjustments = sqliteTable("adjustments", {
@@ -155,6 +158,8 @@ export const projects = sqliteTable("projects", {
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
+  // Soft delete — see items.deletedAt for the retention behavior.
+  deletedAt: integer("deleted_at"),
 });
 
 export const settings = sqliteTable("settings", {
