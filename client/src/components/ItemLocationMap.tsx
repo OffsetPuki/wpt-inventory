@@ -28,6 +28,8 @@ export default function ItemLocationMap({ item }: { item: Item }) {
   const { data: layouts = [] } = useQuery<MapLayout[]>({
     queryKey: ["map-layouts"],
     queryFn: async () => (await apiRequest("GET", "/api/map-layouts")).json(),
+    // Admin-managed config — basically never changes during a user's session.
+    staleTime: 5 * 60_000,
   });
 
   if (!item.area) return null;

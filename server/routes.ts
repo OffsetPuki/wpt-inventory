@@ -107,7 +107,12 @@ function audit(req: Request, action: string, extras: {
   targetName?: string | null;
   details?: Record<string, unknown> | null;
 } = {}): void {
-  storage.appendAudit({
+  // Snapshot the request-derived fields synchronously — req may be recycled by
+  // the time setImmediate fires — then defer the actual DB insert off the
+  // response path. Audit is a forensic, best-effort log: shaving the INSERT
+  // off the request latency is worth the (vanishingly small) risk that a
+  // hard process crash between response and write loses one entry.
+  const entry = {
     userId: req.user?.userId ?? null,
     userName: req.user?.name ?? null,
     role: req.user?.role ?? null,
@@ -117,6 +122,13 @@ function audit(req: Request, action: string, extras: {
     targetName: extras.targetName ?? null,
     ip: clientIp(req),
     details: extras.details ?? null,
+  };
+  setImmediate(() => {
+    try {
+      storage.appendAudit(entry);
+    } catch (e) {
+      console.error("[audit] failed to write entry", e);
+    }
   });
 }
 
@@ -257,6 +269,8 @@ export function registerRoutes(app: Express): void {
       category: req.query.category as string,
       area: req.query.area as string,
       lowStockOnly: req.query.lowStockOnly === "1",
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
     });
     res.json(items);
   });
@@ -391,12 +405,15 @@ export function registerRoutes(app: Express): void {
   // ─── Transactions ───────────────────────────────────────────────────────
 
   app.get("/api/transactions", requireAuth, (req, res) => {
+    const type = req.query.type as string | undefined;
     res.json(
       storage.getTransactions({
         limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
         userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
         itemId: req.query.itemId ? parseInt(req.query.itemId as string) : undefined,
         projectId: req.query.projectId ? parseInt(req.query.projectId as string) : undefined,
+        type: type === "check_out" || type === "check_in" ? type : undefined,
+        q: typeof req.query.q === "string" && req.query.q ? req.query.q : undefined,
       })
     );
   });
@@ -407,6 +424,7 @@ export function registerRoutes(app: Express): void {
         limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
         userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
         itemId: req.query.itemId ? parseInt(req.query.itemId as string) : undefined,
+        q: typeof req.query.q === "string" && req.query.q ? req.query.q : undefined,
       })
     );
   });

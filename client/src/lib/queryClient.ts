@@ -71,12 +71,14 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: false,
-      // Live updates: poll every 15s while the tab is visible, and refetch
-      // immediately when the user comes back to the tab. Small staleTime keeps
-      // mutations' invalidations responsive without thrashing the network.
-      staleTime: 10_000,
-      refetchInterval: 15_000,
-      refetchIntervalInBackground: false,
+      // Mutations invalidate the relevant query keys themselves, so we don't
+      // need a global poll — that was firing every 15s on every page and was
+      // by far the largest source of wasted requests. A generous staleTime
+      // keeps the cache warm between navigations; refetchOnWindowFocus stays
+      // on so a tab that was away for a while still gets fresh data, but only
+      // for queries whose staleTime has elapsed (the React Query default).
+      staleTime: 60_000,
+      refetchInterval: false,
       refetchOnWindowFocus: true,
     },
   },

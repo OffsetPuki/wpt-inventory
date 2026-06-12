@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -42,18 +42,48 @@ function initialFilter(): Filter {
 export default function ActivityPage() {
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [q, setQ] = useState("");
+  // Debounce the text filter so keystrokes don't fire a refetch per character.
+  const [qDebounced, setQDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  // Push filter into the query string so SQL does the work and the wire payload
+  // only carries what the user actually wants to see.
+  const txnUrl = useMemo(() => {
+    const p = new URLSearchParams({ limit: "200" });
+    if (filter === "check_out" || filter === "check_in") p.set("type", filter);
+    if (qDebounced) p.set("q", qDebounced);
+    return `/api/transactions?${p.toString()}`;
+  }, [filter, qDebounced]);
+
+  const adjUrl = useMemo(() => {
+    const p = new URLSearchParams({ limit: "200" });
+    if (qDebounced) p.set("q", qDebounced);
+    return `/api/adjustments?${p.toString()}`;
+  }, [qDebounced]);
+
+  // Adjustments are check_out/check_in's "other category" — skip the fetch
+  // entirely when the user has narrowed to one of those.
+  const wantAdjustments = filter === "all" || filter === "adjust";
+  // Transactions don't include adjustments, so skip them when only adjustments
+  // are wanted.
+  const wantTxns = filter !== "adjust";
 
   const { data: txns = [], isLoading: l1 } = useQuery<TxnRow[]>({
-    queryKey: ["transactions", { all: true }],
-    queryFn: async () => (await apiRequest("GET", "/api/transactions?limit=200")).json(),
+    queryKey: ["transactions", { url: txnUrl }],
+    queryFn: async () => (await apiRequest("GET", txnUrl)).json(),
+    enabled: wantTxns,
   });
   const { data: adjs = [], isLoading: l2 } = useQuery<AdjRow[]>({
-    queryKey: ["adjustments", { all: true }],
-    queryFn: async () => (await apiRequest("GET", "/api/adjustments?limit=200")).json(),
+    queryKey: ["adjustments", { url: adjUrl }],
+    queryFn: async () => (await apiRequest("GET", adjUrl)).json(),
+    enabled: wantAdjustments,
   });
 
   const feed: FeedItem[] = useMemo(() => {
-    const t: FeedItem[] = txns.map((x) => ({
+    const t: FeedItem[] = wantTxns ? txns.map((x) => ({
       kind: x.type,
       id: x.id,
       qty: x.quantity,
@@ -61,8 +91,8 @@ export default function ActivityPage() {
       itemName: x.item_name,
       userName: x.user_name,
       at: x.created_at,
-    }));
-    const a: FeedItem[] = adjs.map((x) => ({
+    })) : [];
+    const a: FeedItem[] = wantAdjustments ? adjs.map((x) => ({
       kind: "adjust",
       id: x.id + 1_000_000_000,
       delta: x.delta,
@@ -71,18 +101,12 @@ export default function ActivityPage() {
       itemName: x.item_name,
       userName: x.user_name,
       at: x.created_at,
-    }));
+    })) : [];
     return [...t, ...a].sort((p, q2) => q2.at - p.at);
-  }, [txns, adjs]);
+  }, [txns, adjs, wantTxns, wantAdjustments]);
 
-  const filtered = feed.filter((f) => {
-    if (filter !== "all" && f.kind !== filter) return false;
-    if (q) {
-      const hay = `${f.itemName ?? ""} ${f.userName ?? ""}`.toLowerCase();
-      if (!hay.includes(q.toLowerCase())) return false;
-    }
-    return true;
-  });
+  // Server already applied the filter; nothing left to do here.
+  const filtered = feed;
 
   const tabs: { key: Filter; label: string }[] = [
     { key: "all", label: "All" },

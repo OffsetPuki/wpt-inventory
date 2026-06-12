@@ -18,6 +18,13 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+// Strip the `data:<mime>;base64,` scaffolding — the server-side Python handles
+// either form, and the raw payload is ~22 bytes smaller per request.
+function stripDataUrlPrefix(dataUrl: string): string {
+  const i = dataUrl.indexOf(",");
+  return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
+}
+
 // Downscale to a small JPEG before sending to the AI — fewer image tokens = lower
 // cost. Only the AI copy is shrunk; the photo stored on the item stays full-res.
 function downscaleToDataUrl(file: File, maxDim = 768, quality = 0.8): Promise<string> {
@@ -81,24 +88,33 @@ export default function AddItemPage() {
       } catch {
         photoBase64 = await fileToDataUrl(file);
       }
-      const res = await apiRequest("POST", "/api/ai/identify-item", { photoBase64 });
-      const data = await res.json();
+      // Strip the data-URL prefix — the AI route accepts raw base64 and it
+      // shaves a small amount off every payload.
+      const rawBase64 = stripDataUrlPrefix(photoBase64);
 
-      // Also upload the photo so it's attached to the new item.
-      let photoUrl: string | null = null;
-      try {
-        const fd = new FormData();
-        fd.append("photo", file);
-        const token = getAuthToken();
-        const up = await fetch("/api/upload", {
-          method: "POST",
-          headers: token ? { "X-Auth": token } : {},
-          body: fd,
-        });
-        if (up.ok) photoUrl = (await up.json()).url;
-      } catch {
-        /* photo upload is best-effort */
-      }
+      // Kick off the photo upload in parallel with the AI call so the user
+      // doesn't wait for two sequential round-trips.
+      const identifyP = apiRequest("POST", "/api/ai/identify-item", { photoBase64: rawBase64 })
+        .then((r) => r.json());
+
+      const uploadP: Promise<string | null> = (async () => {
+        try {
+          const fd = new FormData();
+          fd.append("photo", file);
+          const token = getAuthToken();
+          const up = await fetch("/api/upload", {
+            method: "POST",
+            headers: token ? { "X-Auth": token } : {},
+            body: fd,
+          });
+          if (up.ok) return (await up.json()).url as string;
+        } catch {
+          /* photo upload is best-effort */
+        }
+        return null;
+      })();
+
+      const [data, photoUrl] = await Promise.all([identifyP, uploadP]);
 
       setSeed({
         name: data.name ?? "",

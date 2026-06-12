@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -24,6 +24,68 @@ const STATUS_LABEL: Record<ChecklistStatus, string> = {
 
 const inputCls =
   "h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
+
+// A single checklist row, memoized so that flipping one row's status doesn't
+// re-render every other row. The parent passes stable callbacks (useCallback)
+// so React.memo's referential equality check actually holds.
+const ChecklistRow = memo(function ChecklistRow({
+  row,
+  isManager,
+  onStatusChange,
+  onDelete,
+}: {
+  row: ChecklistRowWithItem;
+  isManager: boolean;
+  onStatusChange: (id: number, status: ChecklistStatus) => void;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <tr className="border-b border-border/50">
+      <td className="py-2 pr-3">
+        {/* Workers and managers can both check items off while prepping. */}
+        <select
+          value={row.status}
+          onChange={(e) => onStatusChange(row.id, e.target.value as ChecklistStatus)}
+          className={cn(
+            "cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium outline-none",
+            STATUS_STYLE[row.status]
+          )}
+        >
+          {CHECKLIST_STATUS.map((s) => (
+            <option key={s} value={s}>
+              {STATUS_LABEL[s]}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="py-2 pr-3">
+        {row.item ? (
+          <Link href={`/item/${row.item.id}`} className="text-primary hover:underline">
+            {row.label}
+          </Link>
+        ) : (
+          <span className="text-foreground">{row.label}</span>
+        )}
+      </td>
+      <td className="py-2 pr-3 text-muted-foreground">
+        {row.qty}
+        {row.unit ? ` ${row.unit}` : ""}
+      </td>
+      <td className="py-2 pr-3 text-muted-foreground">{row.notes}</td>
+      {isManager && (
+        <td className="py-2 text-right">
+          <button
+            onClick={() => onDelete(row.id)}
+            className="text-muted-foreground transition-colors hover:text-destructive"
+            aria-label="Delete row"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </td>
+      )}
+    </tr>
+  );
+});
 
 export default function ProjectChecklist({ projectId }: { projectId: number }) {
   // Manager + technician both edit checklists. Workers can only tick rows off.
@@ -69,6 +131,13 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
     onSuccess: invalidate,
   });
 
+  // Stable callbacks so ChecklistRow's memo prop check actually holds.
+  const handleStatusChange = useCallback(
+    (id: number, status: ChecklistStatus) => setStatus.mutate({ id, status }),
+    [setStatus],
+  );
+  const handleDelete = useCallback((id: number) => delRow.mutate(id), [delRow]);
+
   const total = rows.length;
   const skipped = rows.filter((r) => r.status === "skipped").length;
   const done = rows.filter((r) => r.status === "done").length;
@@ -103,52 +172,13 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-b border-border/50">
-                  <td className="py-2 pr-3">
-                    {/* Workers and managers can both check items off while prepping. */}
-                    <select
-                      value={r.status}
-                      onChange={(e) =>
-                        setStatus.mutate({ id: r.id, status: e.target.value as ChecklistStatus })
-                      }
-                      className={cn(
-                        "cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium outline-none",
-                        STATUS_STYLE[r.status]
-                      )}
-                    >
-                      {CHECKLIST_STATUS.map((s) => (
-                        <option key={s} value={s}>
-                          {STATUS_LABEL[s]}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="py-2 pr-3">
-                    {r.item ? (
-                      <Link href={`/item/${r.item.id}`} className="text-primary hover:underline">
-                        {r.label}
-                      </Link>
-                    ) : (
-                      <span className="text-foreground">{r.label}</span>
-                    )}
-                  </td>
-                  <td className="py-2 pr-3 text-muted-foreground">
-                    {r.qty}
-                    {r.unit ? ` ${r.unit}` : ""}
-                  </td>
-                  <td className="py-2 pr-3 text-muted-foreground">{r.notes}</td>
-                  {isManager && (
-                    <td className="py-2 text-right">
-                      <button
-                        onClick={() => delRow.mutate(r.id)}
-                        className="text-muted-foreground transition-colors hover:text-destructive"
-                        aria-label="Delete row"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  )}
-                </tr>
+                <ChecklistRow
+                  key={r.id}
+                  row={r}
+                  isManager={isManager}
+                  onStatusChange={handleStatusChange}
+                  onDelete={handleDelete}
+                />
               ))}
             </tbody>
           </table>

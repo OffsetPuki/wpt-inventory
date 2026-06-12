@@ -31,6 +31,15 @@ if (!fs.existsSync(uploadsDir)) {
 const sqlite = new Database(path.join(dataDir, "inventory.db"));
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
+// Standard SQLite perf tuning. NORMAL is the recommended companion to WAL —
+// still durable across app crashes, just not across OS-level power loss
+// (which is fine for this app). The cache/temp/mmap pragmas keep more of the
+// working set in memory so common reads avoid disk hits.
+sqlite.pragma("synchronous = NORMAL");
+sqlite.pragma("temp_store = MEMORY");
+sqlite.pragma("cache_size = -65536");      // ~64 MB page cache
+sqlite.pragma("mmap_size = 268435456");    // 256 MB memory map
+sqlite.pragma("busy_timeout = 5000");      // wait up to 5s on lock contention
 
 const db = drizzle(sqlite);
 
@@ -210,10 +219,15 @@ sqlite.exec(`
   );
 
   -- Indexes for hot read paths (Find Items filters, Dashboard stats, item history).
+  -- Composite indexes lead with deleted_at so a single index lookup satisfies the
+  -- "active rows + filter" pattern that drives Find Items and the dashboard.
   CREATE INDEX IF NOT EXISTS idx_items_area ON items(area);
   CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
   CREATE INDEX IF NOT EXISTS idx_items_low_stock ON items(low_stock_threshold, quantity);
   CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
+  CREATE INDEX IF NOT EXISTS idx_items_deleted_category ON items(deleted_at, category);
+  CREATE INDEX IF NOT EXISTS idx_items_deleted_area ON items(deleted_at, area);
+  CREATE INDEX IF NOT EXISTS idx_items_deleted_created ON items(deleted_at, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_transactions_item ON transactions(item_id);
   CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
   CREATE INDEX IF NOT EXISTS idx_transactions_project ON transactions(project_id);
@@ -479,6 +493,8 @@ export const storage = {
     category?: string;
     area?: string;
     lowStockOnly?: boolean;
+    limit?: number;
+    offset?: number;
   } = {}): Item[] {
     const conditions: any[] = [sql`${items.deletedAt} IS NULL`];
 
@@ -504,7 +520,18 @@ export const storage = {
       );
     }
 
-    return db.select().from(items).where(and(...conditions)).orderBy(desc(items.createdAt)).all();
+    // Default cap so a growing inventory doesn't quietly blow up Find Items.
+    // Clamp into a sane window — 1..1000 — so a bad query string can't ask
+    // for the whole table either.
+    const limit = Math.min(Math.max(opts.limit ?? 500, 1), 1000);
+    const offset = Math.max(opts.offset ?? 0, 0);
+
+    return db.select().from(items)
+      .where(and(...conditions))
+      .orderBy(desc(items.createdAt))
+      .limit(limit)
+      .offset(offset)
+      .all();
   },
 
   // For active-page lookups; the trash page uses getDeletedItemById instead.
@@ -604,7 +631,7 @@ export const storage = {
       .all();
   },
 
-  getRecentAdjustments(opts: { limit?: number; userId?: number; itemId?: number } = {}):
+  getRecentAdjustments(opts: { limit?: number; userId?: number; itemId?: number; q?: string } = {}):
     (Adjustment & { userName?: string; itemName?: string })[] {
     let query = `
       SELECT a.*, u.name as user_name, i.name as item_name
@@ -616,6 +643,11 @@ export const storage = {
     const params: any[] = [];
     if (opts.userId) { query += " AND a.user_id = ?"; params.push(opts.userId); }
     if (opts.itemId) { query += " AND a.item_id = ?"; params.push(opts.itemId); }
+    if (opts.q) {
+      query += " AND (i.name LIKE ? OR u.name LIKE ?)";
+      const pat = `%${opts.q}%`;
+      params.push(pat, pat);
+    }
     query += " ORDER BY a.created_at DESC";
     if (opts.limit) { query += " LIMIT ?"; params.push(opts.limit); }
     return sqlite.prepare(query).all(...params) as any[];
@@ -645,6 +677,8 @@ export const storage = {
     userId?: number;
     itemId?: number;
     projectId?: number;
+    type?: "check_out" | "check_in";
+    q?: string;
   } = {}): (Transaction & { userName?: string; itemName?: string })[] {
     let query = `
       SELECT t.*, u.name as user_name, i.name as item_name
@@ -658,6 +692,12 @@ export const storage = {
     if (opts.userId) { query += " AND t.user_id = ?"; params.push(opts.userId); }
     if (opts.itemId) { query += " AND t.item_id = ?"; params.push(opts.itemId); }
     if (opts.projectId) { query += " AND t.project_id = ?"; params.push(opts.projectId); }
+    if (opts.type) { query += " AND t.type = ?"; params.push(opts.type); }
+    if (opts.q) {
+      query += " AND (i.name LIKE ? OR u.name LIKE ?)";
+      const pat = `%${opts.q}%`;
+      params.push(pat, pat);
+    }
     query += " ORDER BY t.created_at DESC";
     if (opts.limit) { query += " LIMIT ?"; params.push(opts.limit); }
 
@@ -720,12 +760,17 @@ export const storage = {
   },
 
   getProjectUsage(projectId: number) {
-    // Project page only renders the recent transaction list with item photos.
-    // The old totalItems / byCategory / topItems aggregates were removed when
-    // the "Items used" card was dropped, so we don't compute them anymore.
+    // Project page only renders the recent transaction list with a single
+    // thumbnail per row. Pulling the full photos JSON array across the join is
+    // wasted bytes — extract the first photo in SQL and only return that.
+    // json_valid() guards against legacy / corrupt rows so the query never
+    // explodes on a bad photos blob.
     const transactions = sqlite.prepare(`
       SELECT t.*, i.name as item_name,
-             i.photo_url as item_photo_url, i.photos as item_photos,
+             COALESCE(
+               CASE WHEN json_valid(i.photos) THEN json_extract(i.photos, '$[0]') END,
+               i.photo_url
+             ) as item_photo,
              u.name as user_name
       FROM transactions t
       LEFT JOIN items i ON t.item_id = i.id
@@ -937,26 +982,24 @@ export const storage = {
   getStats() {
     const now = Date.now();
     const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const eightWeeksAgo = now - 56 * 24 * 60 * 60 * 1000;
 
     // All item/project stats exclude soft-deleted rows so the dashboard
     // matches what's actually visible in Find Items / Projects.
-    const totalItems = (sqlite.prepare("SELECT COUNT(*) as c FROM items WHERE deleted_at IS NULL").get() as any).c;
-    const totalQty = (sqlite.prepare("SELECT COALESCE(SUM(quantity),0) as c FROM items WHERE deleted_at IS NULL").get() as any).c;
-    const lowStock = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM items WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold"
-    ).get() as any).c;
-    const activeProjects = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM projects WHERE deleted_at IS NULL AND status = 'active'"
-    ).get() as any).c;
-    const itemsAdded7d = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM items WHERE deleted_at IS NULL AND created_at >= ?"
-    ).get(sevenDaysAgo) as any).c;
-    const checkouts7d = (sqlite.prepare(
-      "SELECT COALESCE(SUM(quantity),0) as c FROM transactions WHERE type = 'check_out' AND created_at >= ?"
-    ).get(sevenDaysAgo) as any).c;
-    const shrinkage7d = (sqlite.prepare(
-      "SELECT COALESCE(SUM(ABS(delta)),0) as c FROM adjustments WHERE delta < 0 AND created_at >= ?"
-    ).get(sevenDaysAgo) as any).c;
+    //
+    // The four cheap scalars (item-table counts/sums + active projects) used
+    // to be four separate prepares. Collapse them into one round-trip — SQLite
+    // happily evaluates correlated subqueries in a single statement.
+    const scalars = sqlite.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL) as totalItems,
+        (SELECT COALESCE(SUM(quantity),0) FROM items WHERE deleted_at IS NULL) as totalQty,
+        (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold) as lowStock,
+        (SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL AND status = 'active') as activeProjects,
+        (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND created_at >= ?) as itemsAdded7d,
+        (SELECT COALESCE(SUM(quantity),0) FROM transactions WHERE type = 'check_out' AND created_at >= ?) as checkouts7d,
+        (SELECT COALESCE(SUM(ABS(delta)),0) FROM adjustments WHERE delta < 0 AND created_at >= ?) as shrinkage7d
+    `).get(sevenDaysAgo, sevenDaysAgo, sevenDaysAgo) as any;
 
     // Items per category
     const byCategory = sqlite.prepare(
@@ -972,7 +1015,7 @@ export const storage = {
       WHERE type = 'check_out' AND created_at >= ?
       GROUP BY week
       ORDER BY week
-    `).all(now - 56 * 24 * 60 * 60 * 1000) as any[];
+    `).all(eightWeeksAgo) as any[];
 
     // Top workers by checkouts
     const topWorkers = sqlite.prepare(`
@@ -1002,13 +1045,13 @@ export const storage = {
     ).all() as any[];
 
     return {
-      totalItems,
-      totalQty,
-      lowStock,
-      activeProjects,
-      itemsAdded7d,
-      checkouts7d,
-      shrinkage7d,
+      totalItems: scalars.totalItems,
+      totalQty: scalars.totalQty,
+      lowStock: scalars.lowStock,
+      activeProjects: scalars.activeProjects,
+      itemsAdded7d: scalars.itemsAdded7d,
+      checkouts7d: scalars.checkouts7d,
+      shrinkage7d: scalars.shrinkage7d,
       byCategory,
       weeklyCheckouts,
       topWorkers,

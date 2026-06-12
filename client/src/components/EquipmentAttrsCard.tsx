@@ -11,6 +11,8 @@ export default function EquipmentAttrsCard({ item }: { item: Item }) {
       const res = await apiRequest("GET", "/api/equipment-presets");
       return res.json();
     },
+    // Admin-managed config — basically never changes during a user's session.
+    staleTime: 5 * 60_000,
     refetchInterval: false,
   });
 

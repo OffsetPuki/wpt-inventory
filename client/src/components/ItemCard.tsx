@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link } from "wouter";
 import type { Item } from "@shared/schema";
 import { itemPhotos, locationString, isLowStock } from "@/lib/format";
@@ -5,7 +6,7 @@ import CategoryBadge, { CATEGORY_STYLES } from "./CategoryBadge";
 import { cn } from "@/lib/utils";
 import { MapPin } from "lucide-react";
 
-export default function ItemCard({ item }: { item: Item }) {
+function ItemCard({ item }: { item: Item }) {
   const photo = itemPhotos(item)[0];
   const low = isLowStock(item);
   const cat = CATEGORY_STYLES[item.category] ?? CATEGORY_STYLES.tools;
@@ -68,3 +69,7 @@ export default function ItemCard({ item }: { item: Item }) {
     </Link>
   );
 }
+
+// Memoize so re-renders of the parent (filter typing, scroll position) don't
+// re-run itemPhotos JSON.parse + locationString for every card in a long list.
+export default memo(ItemCard);

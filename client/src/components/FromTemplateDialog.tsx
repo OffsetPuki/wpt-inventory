@@ -37,6 +37,8 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
     queryKey: ["job-templates"],
     queryFn: async () => (await apiRequest("GET", "/api/job-templates")).json(),
     enabled: open,
+    // Admin-managed config — basically never changes during a user's session.
+    staleTime: 5 * 60_000,
     refetchInterval: false,
   });
 

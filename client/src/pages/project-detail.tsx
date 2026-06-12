@@ -23,8 +23,9 @@ interface UsageTransaction {
   quantity: number;
   item_id?: number;
   item_name?: string;
-  item_photo_url?: string | null;
-  item_photos?: string | null;
+  // Server pre-extracts the first available photo (json array or legacy column)
+  // so the client doesn't have to parse or fall back.
+  item_photo?: string | null;
   user_name?: string;
   created_at: number;
 }
@@ -33,21 +34,8 @@ interface Usage {
   transactions: UsageTransaction[];
 }
 
-// Items store photos in two columns (legacy `photo_url` + the newer `photos`
-// JSON array). Same precedence as the rest of the app.
 function firstItemPhoto(t: UsageTransaction): string | null {
-  if (t.item_photos) {
-    try {
-      const arr = JSON.parse(t.item_photos);
-      if (Array.isArray(arr)) {
-        const first = arr.find((p) => typeof p === "string" && p);
-        if (first) return first;
-      }
-    } catch {
-      /* malformed JSON — fall through to legacy column */
-    }
-  }
-  return t.item_photo_url || null;
+  return t.item_photo || null;
 }
 
 export default function ProjectDetailPage({ id }: { id: string }) {
