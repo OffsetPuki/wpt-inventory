@@ -192,16 +192,11 @@ function QuickBooksCard() {
     window.history.replaceState(null, "", window.location.pathname + window.location.hash);
   }, [qc]);
 
-  async function connect() {
+  function connect() {
     setBusy(true);
-    try {
-      const res = await apiRequest("GET", "/api/qb/connect-url");
-      const { url } = await res.json();
-      window.location.href = url; // full-page hop to Intuit's consent screen
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Could not start connection", description: e?.message });
-      setBusy(false);
-    }
+    // Full-page hop to the public connect endpoint, which 302s to Intuit's
+    // consent screen. Same URL we give Intuit as the Connect/Reconnect URL.
+    window.location.href = "/api/qb/connect";
   }
 
   async function syncNow() {

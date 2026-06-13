@@ -2,6 +2,7 @@ import crypto from "crypto";
 import type { Express, Request } from "express";
 import { storage } from "./storage";
 import { requireAuth, requireElevated } from "./auth";
+import { renderPublicPage } from "./legal";
 
 // ─── QuickBooks Online integration ───────────────────────────────────────────
 // Direction of truth: QBO owns the books (bookkeeper enters POs and Bills);
@@ -16,6 +17,7 @@ const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
 const SCOPE = "com.intuit.quickbooks.accounting";
 const MINORVERSION = "75";
+const APP_NAME = "WPT Inventory Locator";
 
 function qbEnv() {
   return {
@@ -493,12 +495,15 @@ export function registerQbRoutes(app: Express): void {
     });
   });
 
-  // Browser can't send the X-Auth header on a full-page navigation, so the
-  // client fetches this URL via XHR and then navigates to it.
-  app.get("/api/qb/connect-url", requireElevated, (_req, res) => {
+  // Connect / Reconnect entry point. Public 302 into Intuit's consent screen —
+  // this is the URL given to Intuit as the app's "Connect/Reconnect URL," and
+  // the in-app Connect button navigates here too. A full-page navigation can't
+  // carry the X-Auth header, so this can't be auth-gated; the state nonce it
+  // mints is what protects the callback that actually stores tokens.
+  app.get("/api/qb/connect", (_req, res) => {
     const { clientId, redirectUri } = qbEnv();
     if (!clientId) {
-      return res.status(400).json({ message: "QB_CLIENT_ID is not set in .env" });
+      return res.redirect("/?qb=error&qbmsg=" + encodeURIComponent("QB_CLIENT_ID is not set in .env") + "#/settings");
     }
     const url = new URL(AUTHORIZE_URL);
     url.searchParams.set("client_id", clientId);
@@ -506,7 +511,23 @@ export function registerQbRoutes(app: Express): void {
     url.searchParams.set("scope", SCOPE);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("state", newState());
-    res.json({ url: url.toString() });
+    res.redirect(url.toString());
+  });
+
+  // Public landing page Intuit sends a user to when they disconnect the app
+  // from the QuickBooks side (the "Disconnect URL"). Intuit-side disconnects
+  // invalidate our tokens; the connection self-heals to a "reconnect needed"
+  // state on the next refresh attempt, and an admin can fully clear it from
+  // Settings. This page just explains what happened and how to reconnect.
+  app.get("/disconnected", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(renderPublicPage("Disconnected from QuickBooks", `
+      <p class="lead">Your QuickBooks Online connection has been removed.</p>
+      <p>${APP_NAME} will stop syncing with QuickBooks until it is reconnected. Your inventory data in the app is unaffected.</p>
+      <h2>Reconnect</h2>
+      <p>To reconnect, sign in to the app, open <strong>Settings &rarr; QuickBooks</strong>, and choose <strong>Connect to QuickBooks</strong>.</p>
+      <p style="margin-top:24px"><a href="/">Return to ${APP_NAME}</a></p>
+    `, { effective: false }));
   });
 
   // Unauthenticated by necessity (Intuit redirects the bare browser here);

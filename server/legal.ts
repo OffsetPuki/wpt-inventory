@@ -14,14 +14,19 @@ const LEGAL = {
   appName: "WPT Inventory Locator",
   // A real, monitored inbox. Intuit (and users) use this to reach you about
   // privacy questions and data requests.
-  contactEmail: "privacy@example.com",
-  // e.g. "the State of Texas, United States". Used by the EULA's governing law.
-  governingLaw: "the United States and the state in which the Company is organized",
+  contactEmail: "jehupena852@gmail.com",
+  // Used by the EULA's governing law / exclusive-jurisdiction clause.
+  governingLaw: "the State of Texas, United States",
   effectiveDate: "June 13, 2026",
 };
 // ▲▲▲ EDIT THESE before going to production ▲▲▲
 
-function layout(title: string, body: string): string {
+export function renderPublicPage(
+  title: string,
+  body: string,
+  opts: { effective?: boolean } = {}
+): string {
+  const showEffective = opts.effective !== false;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,7 +75,7 @@ function layout(title: string, body: string): string {
     <header class="doc">
       <div class="brand">${LEGAL.companyName}</div>
       <h1>${title}</h1>
-      <p class="eff">Effective ${LEGAL.effectiveDate}</p>
+      ${showEffective ? `<p class="eff">Effective ${LEGAL.effectiveDate}</p>` : ""}
     </header>
     ${body}
     <footer class="doc">
@@ -279,8 +284,8 @@ export function registerLegalRoutes(app: Express): void {
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.send(html);
   };
-  const privacy = send(layout("Privacy Policy", privacyBody()));
-  const eula = send(layout("End User License Agreement", eulaBody()));
+  const privacy = send(renderPublicPage("Privacy Policy", privacyBody()));
+  const eula = send(renderPublicPage("End User License Agreement", eulaBody()));
 
   app.get("/privacy", privacy);
   app.get("/legal/privacy", privacy);
