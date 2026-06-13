@@ -8,6 +8,7 @@ import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
 import { storage } from "./storage";
 import { requireAuth, requireTechnician, requireElevated, createSession, destroySession } from "./auth";
+import { registerQbRoutes, qbEnqueueIssue, qbEnqueueAdjust } from "./qb";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
@@ -291,6 +292,7 @@ export function registerRoutes(app: Express): void {
       item,
       transactions: storage.getTransactions({ itemId: id, limit: 10 }),
       adjustments: storage.getAdjustments(id),
+      onOrder: storage.getItemOnOrder(id),
     });
   });
 
@@ -360,6 +362,9 @@ export function registerRoutes(app: Express): void {
         targetType: "item", targetId: id, targetName: target?.name ?? null,
         details: { delta: data.delta, reason: data.reason },
       });
+      // Pushed to QBO as an InventoryAdjustment (or flagged for manual entry
+      // when the QBO plan doesn't allow API adjustments).
+      qbEnqueueAdjust({ id: adj.id, itemId: id, itemName: target?.name, delta: data.delta, reason: data.reason });
       res.status(201).json(adj);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -375,12 +380,10 @@ export function registerRoutes(app: Express): void {
   app.post("/api/items/:id/checkout", requireAuth, (req, res) => {
     try {
       const data = insertTransactionSchema.parse(req.body);
-      const txn = storage.createTransaction(
-        pid(req.params.id),
-        req.user!.userId,
-        "check_out",
-        data
-      );
+      const itemId = pid(req.params.id);
+      const txn = storage.createTransaction(itemId, req.user!.userId, "check_out", data);
+      // Project-linked issues flow to QuickBooks as $0 job-cost documents.
+      qbEnqueueIssue({ id: txn.id, itemId, projectId: txn.projectId, quantity: txn.quantity, type: "check_out" });
       res.status(201).json(txn);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -390,12 +393,9 @@ export function registerRoutes(app: Express): void {
   app.post("/api/items/:id/checkin", requireAuth, (req, res) => {
     try {
       const data = insertTransactionSchema.parse(req.body);
-      const txn = storage.createTransaction(
-        pid(req.params.id),
-        req.user!.userId,
-        "check_in",
-        data
-      );
+      const itemId = pid(req.params.id);
+      const txn = storage.createTransaction(itemId, req.user!.userId, "check_in", data);
+      qbEnqueueIssue({ id: txn.id, itemId, projectId: txn.projectId, quantity: txn.quantity, type: "check_in" });
       res.status(201).json(txn);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -807,6 +807,10 @@ export function registerRoutes(app: Express): void {
 
     res.json({ category: "tools" });
   });
+
+  // ─── QuickBooks Online ─────────────────────────────────────────────────
+
+  registerQbRoutes(app);
 
   // ─── Serve uploaded files ──────────────────────────────────────────────
 

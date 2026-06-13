@@ -60,6 +60,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
     item: Item;
     transactions: TxnRow[];
     adjustments: Adjustment[];
+    onOrder?: number;
   }>({
     queryKey: ["item-detail", itemId],
     queryFn: async () => (await apiRequest("GET", `/api/items/${itemId}/detail`)).json(),
@@ -167,11 +168,14 @@ export default function ItemDetailPage({ id }: { id: string }) {
               {item.quantity}
             </span>
             <span className="text-muted-foreground">in stock</span>
-            {item.quantityReserved > 0 && (
-              <span className="ml-auto text-sm text-muted-foreground">
-                {item.quantityReserved} reserved
-              </span>
-            )}
+            <span className="ml-auto flex items-baseline gap-3 text-sm text-muted-foreground">
+              {(detail?.onOrder ?? 0) > 0 && (
+                <Link href="/pos" className="text-blue-400 hover:underline">
+                  {detail!.onOrder} on order
+                </Link>
+              )}
+              {item.quantityReserved > 0 && <span>{item.quantityReserved} reserved</span>}
+            </span>
           </div>
 
           {/* Actions */}
