@@ -323,6 +323,12 @@ function QuickBooksCard() {
         <span className="mx-1.5">·</span>
         <a href="/eula" target="_blank" rel="noopener" className="text-primary hover:underline">EULA</a>
       </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Need help?{" "}
+        <a href="mailto:jehupena852@gmail.com?subject=WPT%20Inventory%20support" className="text-primary hover:underline">
+          Contact support
+        </a>
+      </p>
     </div>
   );
 }

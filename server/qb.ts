@@ -181,7 +181,11 @@ async function qbFetch(pathname: string, init: { method?: string; body?: unknown
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`QuickBooks API ${init.method || "GET"} ${pathname} failed (${res.status}): ${body.slice(0, 400)}`);
+    // intuit_tid is Intuit's per-request trace id from the response headers —
+    // capturing it in the error makes it land in the push queue's last_error
+    // and the logs, so Intuit support can pinpoint the exact failed call.
+    const tid = res.headers.get("intuit_tid") || res.headers.get("intuit-tid") || "n/a";
+    throw new Error(`QuickBooks API ${init.method || "GET"} ${pathname} failed (${res.status}, intuit_tid=${tid}): ${body.slice(0, 400)}`);
   }
   return res.json();
 }

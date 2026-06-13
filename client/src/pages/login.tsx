@@ -132,6 +132,10 @@ export default function LoginPage() {
           <a href="/eula" target="_blank" rel="noopener" className="hover:text-foreground hover:underline">
             Terms (EULA)
           </a>
+          <span className="mx-2">·</span>
+          <a href="mailto:jehupena852@gmail.com?subject=WPT%20Inventory%20support" className="hover:text-foreground hover:underline">
+            Contact support
+          </a>
         </p>
       </div>
     </div>
