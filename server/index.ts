@@ -20,6 +20,20 @@ const isProd = process.env.NODE_ENV === "production";
 // from the same IP, and the audit log records useless proxy addresses.
 app.set("trust proxy", 1);
 
+// Force HTTPS in production. The host (e.g. Railway) terminates TLS and tells
+// us the original scheme via x-forwarded-proto; if a request arrived over
+// plain HTTP, 308-redirect it to https so a session token in localStorage is
+// never sent in the clear. Paired with helmet's HSTS below. No-op in dev.
+if (isProd) {
+  app.use((req, res, next) => {
+    const proto = req.headers["x-forwarded-proto"];
+    if (proto && proto !== "https") {
+      return res.redirect(308, `https://${req.headers.host}${req.originalUrl}`);
+    }
+    next();
+  });
+}
+
 // ── Security headers (helmet) ─────────────────────────────────────────────
 // In dev, Vite injects inline scripts and a websocket for HMR, so a strict
 // CSP would break the page. We use a loose dev CSP and a tight prod CSP.

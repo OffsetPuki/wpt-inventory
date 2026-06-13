@@ -548,7 +548,9 @@ export function registerQbRoutes(app: Express): void {
       saveTokens(tokens, realmId);
       res.redirect("/?qb=connected#/settings");
     } catch (e: any) {
-      console.error("[qb] token exchange failed", e);
+      // Log only the message, never the raw error/response — the token
+      // endpoint's payload is the most credential-adjacent thing we touch.
+      console.error("[qb] token exchange failed:", e?.message ?? "unknown error");
       fail("Token exchange failed — check the redirect URI matches the Intuit app settings");
     }
   });
