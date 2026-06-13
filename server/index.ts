@@ -5,6 +5,7 @@ import compression from "compression";
 import helmet from "helmet";
 import { seedDefaults } from "./seed";
 import { registerRoutes } from "./routes";
+import { registerLegalRoutes } from "./legal";
 import { startSessionReaper } from "./auth";
 import { serveStatic } from "./static";
 import { setupVite } from "./vite";
@@ -103,6 +104,11 @@ startSessionReaper();
 
 // ── Register routes ──
 registerRoutes(app);
+
+// Public legal pages (/privacy, /eula). Registered before the SPA catch-all
+// so they return real HTML — Intuit's reviewer needs a public Privacy Policy
+// URL, and these must resolve without auth or the React shell.
+registerLegalRoutes(app);
 
 // ── Serve frontend ──
 

@@ -122,6 +122,17 @@ export default function LoginPage() {
             Sign in
           </button>
         </form>
+
+        {/* Public legal pages — server-rendered routes, open in a new tab. */}
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          <a href="/privacy" target="_blank" rel="noopener" className="hover:text-foreground hover:underline">
+            Privacy Policy
+          </a>
+          <span className="mx-2">·</span>
+          <a href="/eula" target="_blank" rel="noopener" className="hover:text-foreground hover:underline">
+            Terms (EULA)
+          </a>
+        </p>
       </div>
     </div>
   );

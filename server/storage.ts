@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { eq, like, and, or, sql, desc, asc, inArray } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
+import { encryptSecret, decryptSecret } from "./crypto";
 import {
   users, items, adjustments, transactions, projects, settings,
   mapLayouts, equipmentPresets, jobTemplates, projectChecklist,
@@ -1147,8 +1148,15 @@ export const storage = {
   },
 
   // ── QuickBooks: connection ─────────────────────────────────────────────────
+  // Tokens + realm id are encrypted at rest (AES-256-GCM) per Intuit's security
+  // requirements; decrypted transparently on read so callers see plaintext.
   qbGetConnection(): any | undefined {
-    return sqlite.prepare("SELECT * FROM qb_connection WHERE id = 1").get() as any;
+    const row = sqlite.prepare("SELECT * FROM qb_connection WHERE id = 1").get() as any;
+    if (!row) return undefined;
+    row.realm_id = decryptSecret(row.realm_id);
+    row.access_token = decryptSecret(row.access_token);
+    row.refresh_token = decryptSecret(row.refresh_token);
+    return row;
   },
 
   qbSaveConnection(c: {
@@ -1170,7 +1178,10 @@ export const storage = {
         refresh_expires_at = excluded.refresh_expires_at,
         environment = excluded.environment,
         connected_at = excluded.connected_at
-    `).run(c.realmId, c.accessToken, c.refreshToken, c.accessExpiresAt, c.refreshExpiresAt, c.environment, Date.now());
+    `).run(
+      encryptSecret(c.realmId), encryptSecret(c.accessToken), encryptSecret(c.refreshToken),
+      c.accessExpiresAt, c.refreshExpiresAt, c.environment, Date.now()
+    );
   },
 
   // Refresh-token rotation: QBO returns a NEW refresh token on every refresh
@@ -1178,7 +1189,7 @@ export const storage = {
   qbUpdateTokens(t: { accessToken: string; refreshToken: string; accessExpiresAt: number; refreshExpiresAt: number }): void {
     sqlite.prepare(`
       UPDATE qb_connection SET access_token = ?, refresh_token = ?, access_expires_at = ?, refresh_expires_at = ? WHERE id = 1
-    `).run(t.accessToken, t.refreshToken, t.accessExpiresAt, t.refreshExpiresAt);
+    `).run(encryptSecret(t.accessToken), encryptSecret(t.refreshToken), t.accessExpiresAt, t.refreshExpiresAt);
   },
 
   qbClearConnection(): void {

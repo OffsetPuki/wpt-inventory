@@ -319,6 +319,15 @@ function QuickBooksCard() {
           </p>
         )}
       </div>
+
+      {/* Intuit requires public Privacy Policy and EULA URLs when applying for
+          production keys — these are the links to hand them. */}
+      <p className="mt-4 text-sm text-muted-foreground">
+        Public legal pages (give these URLs to Intuit):{" "}
+        <a href="/privacy" target="_blank" rel="noopener" className="text-primary hover:underline">Privacy Policy</a>
+        <span className="mx-1.5">·</span>
+        <a href="/eula" target="_blank" rel="noopener" className="text-primary hover:underline">EULA</a>
+      </p>
     </div>
   );
 }
