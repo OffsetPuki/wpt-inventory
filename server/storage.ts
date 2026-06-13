@@ -1196,6 +1196,12 @@ export const storage = {
     sqlite.prepare("DELETE FROM qb_connection WHERE id = 1").run();
   },
 
+  // Flag the refresh token as dead so qbGetConnection's reconnectNeeded check
+  // (refresh_expires_at < now) fires and the UI prompts a reconnect.
+  qbMarkRefreshExpired(): void {
+    sqlite.prepare("UPDATE qb_connection SET refresh_expires_at = 0 WHERE id = 1").run();
+  },
+
   qbTouchLastSync(): void {
     sqlite.prepare("UPDATE qb_connection SET last_sync_at = ? WHERE id = 1").run(Date.now());
   },

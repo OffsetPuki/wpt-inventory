@@ -132,6 +132,16 @@ async function ensureFreshAccessToken(): Promise<{ accessToken: string; realmId:
   if (!refreshInFlight) {
     refreshInFlight = tokenRequest({ grant_type: "refresh_token", refresh_token: conn.refresh_token })
       .then((t) => saveTokens(t))
+      .catch((e) => {
+        // invalid_grant means the refresh token is dead (revoked, expired, or
+        // already rotated) and won't recover on retry. Mark the connection so
+        // the status endpoint reports reconnectNeeded and the UI prompts the
+        // admin to reconnect, instead of silently failing every later call.
+        if (/invalid_grant/i.test(String(e?.message ?? e))) {
+          storage.qbMarkRefreshExpired();
+        }
+        throw e;
+      })
       .finally(() => { refreshInFlight = null; });
   }
   await refreshInFlight;
