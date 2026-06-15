@@ -338,6 +338,15 @@ sqlite.exec(`
     processed_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_qb_queue_status ON qb_push_queue(status);
+
+  -- Back the hot mapping lookups so they're point probes, not table scans:
+  -- qbItemIdForLocal / getItemOnOrder filter qb_items.item_id; the push path
+  -- hits qbCustomerIdForProject on qb_customers.project_id; qbListPOs and the
+  -- on-order filter scan purchase_orders by status (composite also serves the
+  -- ORDER BY txn_date DESC).
+  CREATE INDEX IF NOT EXISTS idx_qb_items_item ON qb_items(item_id);
+  CREATE INDEX IF NOT EXISTS idx_qb_customers_project ON qb_customers(project_id);
+  CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(qb_status, txn_date DESC);
 `);
 
 // ─── Helper: strip pin from user ─────────────────────────────────────────────
@@ -1159,6 +1168,13 @@ export const storage = {
     return row;
   },
 
+  // Cheap presence check — for the enqueue/processing gates that only need to
+  // know a connection exists, not its tokens. Avoids 3 AES-GCM decrypts per
+  // shop-floor checkout/checkin/adjust on the connected path.
+  qbHasConnection(): boolean {
+    return !!sqlite.prepare("SELECT 1 FROM qb_connection WHERE id = 1").get();
+  },
+
   qbSaveConnection(c: {
     realmId: string;
     accessToken: string;
@@ -1208,19 +1224,33 @@ export const storage = {
 
   // ── QuickBooks: item cache + mapping ───────────────────────────────────────
   qbUpsertItem(i: { qbId: string; name: string; sku: string | null; type: string | null; active: boolean }): void {
-    // Mapping fields (item_id, map_status) survive re-syncs.
-    sqlite.prepare(`
+    this.qbUpsertItems([i]);
+  },
+
+  // Bulk upsert: prepare the statement once and wrap the whole loop in a single
+  // transaction so a full sync of N items is one commit + one SQL compile
+  // instead of N implicit commits. Mapping fields (item_id, map_status) survive
+  // re-syncs via the unchanged ON CONFLICT clause.
+  qbUpsertItems(items: { qbId: string; name: string; sku: string | null; type: string | null; active: boolean }[]): void {
+    if (items.length === 0) return;
+    const stmt = sqlite.prepare(`
       INSERT INTO qb_items (qb_id, name, sku, type, active, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(qb_id) DO UPDATE SET
         name = excluded.name, sku = excluded.sku, type = excluded.type,
         active = excluded.active, updated_at = excluded.updated_at
-    `).run(i.qbId, i.name, i.sku, i.type, i.active ? 1 : 0, Date.now());
+    `);
+    const now = Date.now();
+    const run = sqlite.transaction((rows: typeof items) => {
+      for (const i of rows) stmt.run(i.qbId, i.name, i.sku, i.type, i.active ? 1 : 0, now);
+    });
+    run(items);
   },
 
   qbListItems(): any[] {
     return sqlite.prepare(`
-      SELECT q.*, i.name as local_item_name
+      SELECT q.qb_id, q.name, q.sku, q.type, q.item_id, q.map_status,
+             i.name as local_item_name
       FROM qb_items q LEFT JOIN items i ON q.item_id = i.id
       WHERE q.active = 1
       ORDER BY q.map_status = 'unmatched' DESC, q.name COLLATE NOCASE
@@ -1267,18 +1297,29 @@ export const storage = {
 
   // ── QuickBooks: customer/project cache + mapping ──────────────────────────
   qbUpsertCustomer(c: { qbId: string; displayName: string; isProject: boolean; active: boolean }): void {
-    sqlite.prepare(`
+    this.qbUpsertCustomers([c]);
+  },
+
+  qbUpsertCustomers(customers: { qbId: string; displayName: string; isProject: boolean; active: boolean }[]): void {
+    if (customers.length === 0) return;
+    const stmt = sqlite.prepare(`
       INSERT INTO qb_customers (qb_id, display_name, is_project, active, updated_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(qb_id) DO UPDATE SET
         display_name = excluded.display_name, is_project = excluded.is_project,
         active = excluded.active, updated_at = excluded.updated_at
-    `).run(c.qbId, c.displayName, c.isProject ? 1 : 0, c.active ? 1 : 0, Date.now());
+    `);
+    const now = Date.now();
+    const run = sqlite.transaction((rows: typeof customers) => {
+      for (const c of rows) stmt.run(c.qbId, c.displayName, c.isProject ? 1 : 0, c.active ? 1 : 0, now);
+    });
+    run(customers);
   },
 
   qbListCustomers(): any[] {
     return sqlite.prepare(`
-      SELECT q.*, p.name as project_name, p.job_number
+      SELECT q.qb_id, q.display_name, q.is_project, q.project_id,
+             p.name as project_name, p.job_number
       FROM qb_customers q LEFT JOIN projects p ON q.project_id = p.id
       WHERE q.active = 1
       ORDER BY q.display_name COLLATE NOCASE
@@ -1379,15 +1420,21 @@ export const storage = {
       LIMIT 100
     `).all() as any[];
     if (pos.length === 0) return [];
-    const lineStmt = sqlite.prepare(`
+    // One query for all lines across the page's POs, then bucket by po_id —
+    // avoids running the line+join query once per PO (N+1). idx_po_lines_po
+    // backs the IN filter; every PO gets a lines array (incl. line-less ones).
+    const placeholders = pos.map(() => "?").join(",");
+    const lines = sqlite.prepare(`
       SELECT l.*, qi.name as qb_item_name, qi.item_id as local_item_id, i.name as local_item_name
       FROM po_lines l
       LEFT JOIN qb_items qi ON l.qb_item_id = qi.qb_id
       LEFT JOIN items i ON qi.item_id = i.id
-      WHERE l.po_id = ?
-      ORDER BY l.id
-    `);
-    return pos.map((po) => ({ ...po, lines: lineStmt.all(po.id) }));
+      WHERE l.po_id IN (${placeholders})
+      ORDER BY l.po_id, l.id
+    `).all(...pos.map((p) => p.id)) as any[];
+    const byPo = new Map<number, any[]>(pos.map((p) => [p.id, []]));
+    for (const l of lines) byPo.get(l.po_id)?.push(l);
+    return pos.map((po) => ({ ...po, lines: byPo.get(po.id) ?? [] }));
   },
 
   qbGetPoLine(lineId: number): any | undefined {

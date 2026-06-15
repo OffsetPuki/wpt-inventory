@@ -133,6 +133,16 @@ function audit(req: Request, action: string, extras: {
   });
 }
 
+// Static keyword → category rules for the /api/categorize heuristic. Hoisted to
+// module scope so they're built once, not re-allocated on every request.
+const CATEGORIZE_RULES: [string[], string][] = [
+  [["wire", "cable", "motor", "relay", "contactor", "vfd", "transformer", "breaker", "fuse"], "electric"],
+  [["welder", "welding", "mig", "tig", "stick", "electrode", "wire feed"], "welder"],
+  [["plc", "hmi", "sensor", "network", "switch", "ethernet", "computer", "monitor", "software"], "it"],
+  [["steel", "plate", "tube", "tubing", "pipe", "sheet", "gasket", "seal", "bolt", "nut", "stud", "flange", "fitting"], "raw_materials"],
+  [["wrench", "drill", "saw", "hammer", "screwdriver", "pliers", "tool", "tape", "level", "clamp"], "tools"],
+];
+
 export function registerRoutes(app: Express): void {
   // ─── Auth ────────────────────────────────────────────────────────────────
 
@@ -791,15 +801,7 @@ export function registerRoutes(app: Express): void {
   app.post("/api/categorize", requireAuth, (req, res) => {
     const name = (req.body.name || "").toLowerCase();
 
-    const rules: [string[], string][] = [
-      [["wire", "cable", "motor", "relay", "contactor", "vfd", "transformer", "breaker", "fuse"], "electric"],
-      [["welder", "welding", "mig", "tig", "stick", "electrode", "wire feed"], "welder"],
-      [["plc", "hmi", "sensor", "network", "switch", "ethernet", "computer", "monitor", "software"], "it"],
-      [["steel", "plate", "tube", "tubing", "pipe", "sheet", "gasket", "seal", "bolt", "nut", "stud", "flange", "fitting"], "raw_materials"],
-      [["wrench", "drill", "saw", "hammer", "screwdriver", "pliers", "tool", "tape", "level", "clamp"], "tools"],
-    ];
-
-    for (const [keywords, category] of rules) {
+    for (const [keywords, category] of CATEGORIZE_RULES) {
       if (keywords.some((kw) => name.includes(kw))) {
         return res.json({ category });
       }

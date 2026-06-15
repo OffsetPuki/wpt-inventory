@@ -44,7 +44,11 @@ export function serveStatic(app: express.Express): void {
     const safeRel = rel.replace(/^\/+/, "");
     if (safeRel.includes("..")) return next();
     const filePath = path.join(distPath, "assets", safeRel);
-    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return next();
+    // One stat instead of existsSync + statSync (both hit the FS) — a missing
+    // file throws and falls through to express.static, same as before.
+    let st: fs.Stats;
+    try { st = fs.statSync(filePath); } catch { return next(); }
+    if (!st.isFile()) return next();
 
     const ext = path.extname(filePath).toLowerCase();
     const mime = MIME[ext] || "application/octet-stream";

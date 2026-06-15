@@ -47,6 +47,9 @@ function ItemMappingSection() {
   const { data: items = [] } = useQuery<Item[]>({
     queryKey: ["items"],
     queryFn: async () => (await apiRequest("GET", "/api/items")).json(),
+    // Only powers dropdown labels here; don't re-pull the full item list on
+    // every window focus while mapping.
+    staleTime: 5 * 60_000,
   });
 
   const map = useMutation({

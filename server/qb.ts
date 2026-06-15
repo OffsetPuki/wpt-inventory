@@ -151,7 +151,22 @@ async function ensureFreshAccessToken(): Promise<{ accessToken: string; realmId:
 
 // ─── API client ──────────────────────────────────────────────────────────────
 
+// Pace QBO calls under the per-realm throttle (10 req/s, 500 req/min). Each
+// call reserves the next time slot synchronously (safe under concurrency since
+// the reservation happens before any await), so a burst of pushes or a sync's
+// chained queries can't fire faster than ~8/s and trip a 429.
+const MIN_QB_CALL_GAP_MS = 120;
+let qbNextSlot = 0;
+async function qbRateGate(): Promise<void> {
+  const now = Date.now();
+  const slot = Math.max(now, qbNextSlot);
+  qbNextSlot = slot + MIN_QB_CALL_GAP_MS;
+  const wait = slot - now;
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+}
+
 async function qbFetch(pathname: string, init: { method?: string; body?: unknown } = {}): Promise<any> {
+  await qbRateGate();
   const doFetch = async () => {
     const { accessToken, realmId, environment } = await ensureFreshAccessToken();
     const url = new URL(`${apiBase(environment)}/v3/company/${realmId}${pathname}`);
@@ -210,30 +225,27 @@ async function pullItems(): Promise<number> {
   // QBO queries exclude inactive rows unless asked — without the explicit
   // filter a deactivation in QBO would never reach us.
   const rows = await qbQueryAll("Item", "Active IN (true, false)");
-  for (const r of rows) {
-    storage.qbUpsertItem({
-      qbId: String(r.Id),
-      name: r.Name ?? "",
-      sku: r.Sku ?? null,
-      type: r.Type ?? null,
-      active: r.Active !== false,
-    });
-  }
+  // One transaction for the whole batch instead of a commit per row.
+  storage.qbUpsertItems(rows.map((r: any) => ({
+    qbId: String(r.Id),
+    name: r.Name ?? "",
+    sku: r.Sku ?? null,
+    type: r.Type ?? null,
+    active: r.Active !== false,
+  })));
   return rows.length;
 }
 
 async function pullCustomers(): Promise<number> {
   const rows = await qbQueryAll("Customer", "Active IN (true, false)");
-  for (const r of rows) {
-    storage.qbUpsertCustomer({
-      qbId: String(r.Id),
-      displayName: r.FullyQualifiedName || r.DisplayName || "",
-      // QBO Projects surface as sub-customers; IsProject needs a recent
-      // minorversion. Jobs (legacy) set Job=true.
-      isProject: r.IsProject === true || r.Job === true,
-      active: r.Active !== false,
-    });
-  }
+  storage.qbUpsertCustomers(rows.map((r: any) => ({
+    qbId: String(r.Id),
+    displayName: r.FullyQualifiedName || r.DisplayName || "",
+    // QBO Projects surface as sub-customers; IsProject needs a recent
+    // minorversion. Jobs (legacy) set Job=true.
+    isProject: r.IsProject === true || r.Job === true,
+    active: r.Active !== false,
+  })));
   return rows.length;
 }
 
@@ -290,7 +302,7 @@ export async function runSync(): Promise<{
 // Called from the checkout/checkin/adjust routes. No-ops when QBO was never
 // connected so the shop-floor flows have zero new failure modes.
 export function qbEnqueueIssue(txn: { id: number; itemId: number; projectId: number | null; quantity: number; type: string }): void {
-  if (!storage.qbGetConnection()) return;
+  if (!storage.qbHasConnection()) return; // presence check only — no token decrypt
   if (!txn.projectId) return; // no project → no QBO customer to cost it to
   storage.qbEnqueue({
     kind: txn.type === "check_in" ? "issue_return" : "issue",
@@ -301,7 +313,7 @@ export function qbEnqueueIssue(txn: { id: number; itemId: number; projectId: num
 }
 
 export function qbEnqueueAdjust(adj: { id: number; itemId: number; itemName?: string | null; delta: number; reason: string }): void {
-  if (!storage.qbGetConnection()) return;
+  if (!storage.qbHasConnection()) return; // presence check only — no token decrypt
   storage.qbEnqueue({
     kind: "adjust",
     localRef: `adj:${adj.id}`,
@@ -357,7 +369,7 @@ export async function processPushQueue(): Promise<{ done: number; errors: number
   // Jobs left 'pending' for retry must not respin within this run.
   const seen = new Set<number>();
   try {
-    if (!storage.qbGetConnection()) return { done, errors };
+    if (!storage.qbHasConnection()) return { done, errors }; // presence check; tokens decrypted later only when a job actually calls the API
     for (;;) {
       const batch = storage.qbQueuePending().filter((j: any) => !seen.has(j.id));
       if (batch.length === 0) break;
