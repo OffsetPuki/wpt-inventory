@@ -10,14 +10,14 @@ import type { Express } from "express";
 // details, and bump effectiveDate when you change the text. companyName/appName
 // match the app's branding defaults.
 const LEGAL = {
-  companyName: "Webber Pressure Technologies",
+  companyName: "Flipnob",
   appName: "WPT Inventory Locator",
   // A real, monitored inbox. Intuit (and users) use this to reach you about
   // privacy questions and data requests.
   contactEmail: "jehupena852@gmail.com",
   // Used by the EULA's governing law / exclusive-jurisdiction clause.
   governingLaw: "the State of Texas, United States",
-  effectiveDate: "June 13, 2026",
+  effectiveDate: "June 14, 2026",
 };
 // ▲▲▲ EDIT THESE before going to production ▲▲▲
 
