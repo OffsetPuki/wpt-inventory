@@ -280,8 +280,10 @@ function eulaBody(): string {
 export function registerLegalRoutes(app: Express): void {
   const send = (html: string) => (_req: any, res: any) => {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    // Public, cacheable for an hour; reviewers and users can always reload.
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    // Don't cache legal pages — edits (company name, effective date, policy
+    // text) must show immediately for users and Intuit's reviewer, not be
+    // served stale from a browser or edge cache for up to an hour.
+    res.setHeader("Cache-Control", "no-store");
     res.send(html);
   };
   const privacy = send(renderPublicPage("Privacy Policy", privacyBody()));
