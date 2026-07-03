@@ -27,6 +27,33 @@ const PurchaseOrdersPage = lazy(() => import("./pages/pos"));
 const QuickBooksPage = lazy(() => import("./pages/qb"));
 const NotFoundPage = lazy(() => import("./pages/not-found"));
 
+// Business-suite modules
+const CrmOverviewPage = lazy(() => import("./pages/crm/index"));
+const CrmLeadsPage = lazy(() => import("./pages/crm/leads"));
+const CrmDealsPage = lazy(() => import("./pages/crm/deals"));
+const CrmClientsPage = lazy(() => import("./pages/crm/clients"));
+const CrmEstimatesPage = lazy(() => import("./pages/crm/estimates"));
+const CrmProductsPage = lazy(() => import("./pages/crm/products"));
+const MarketingPage = lazy(() => import("./pages/marketing/index"));
+const HrOverviewPage = lazy(() => import("./pages/hr/index"));
+const HrEmployeesPage = lazy(() => import("./pages/hr/employees"));
+const HrAttendancePage = lazy(() => import("./pages/hr/attendance"));
+const HrPayrollPage = lazy(() => import("./pages/hr/payroll"));
+const HrLeavePage = lazy(() => import("./pages/hr/leave"));
+const HrRecruitmentPage = lazy(() => import("./pages/hr/recruitment"));
+const HrReviewsPage = lazy(() => import("./pages/hr/reviews"));
+const PmBoardPage = lazy(() => import("./pages/pm/board"));
+const PmGanttPage = lazy(() => import("./pages/pm/gantt"));
+const PmTimePage = lazy(() => import("./pages/pm/time"));
+const PmTimesheetsPage = lazy(() => import("./pages/pm/timesheets"));
+const PmContractsPage = lazy(() => import("./pages/pm/contracts"));
+const PmKbPage = lazy(() => import("./pages/pm/kb"));
+const FinanceOverviewPage = lazy(() => import("./pages/finance/index"));
+const FinanceInvoicesPage = lazy(() => import("./pages/finance/invoices"));
+const FinanceExpensesPage = lazy(() => import("./pages/finance/expenses"));
+const FinancePaymentsPage = lazy(() => import("./pages/finance/payments"));
+const FinancePurchaseOrdersPage = lazy(() => import("./pages/finance/purchase-orders"));
+
 // ─── Loading spinner ────────────────────────────────────────────────────────
 
 function LoadingSpinner() {
@@ -135,6 +162,112 @@ export default function App() {
               for managers (kept reachable by direct URL for now). */}
           <Route path="/add">
             <AddItemPage />
+          </Route>
+
+          {/* CRM & Sales — the whole team works leads and estimates */}
+          <Route path="/crm">
+            <CrmOverviewPage />
+          </Route>
+          <Route path="/crm/leads">
+            <CrmLeadsPage />
+          </Route>
+          <Route path="/crm/deals">
+            <CrmDealsPage />
+          </Route>
+          <Route path="/crm/clients">
+            <CrmClientsPage />
+          </Route>
+          <Route path="/crm/estimates">
+            <CrmEstimatesPage />
+          </Route>
+          <Route path="/crm/products">
+            <CrmProductsPage />
+          </Route>
+
+          {/* Marketing control center — management view */}
+          <Route path="/marketing">
+            <ElevatedRoute>
+              <MarketingPage />
+            </ElevatedRoute>
+          </Route>
+
+          {/* Project management */}
+          <Route path="/pm/board">
+            <PmBoardPage />
+          </Route>
+          <Route path="/pm/gantt">
+            <PmGanttPage />
+          </Route>
+          <Route path="/pm/time">
+            <PmTimePage />
+          </Route>
+          <Route path="/pm/timesheets">
+            <PmTimesheetsPage />
+          </Route>
+          <Route path="/pm/contracts">
+            <PmContractsPage />
+          </Route>
+          <Route path="/pm/kb">
+            <PmKbPage />
+          </Route>
+
+          {/* HR & Payroll — self-service pages open to everyone; the
+              oversight pages are elevated */}
+          <Route path="/hr">
+            <ElevatedRoute>
+              <HrOverviewPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/hr/employees">
+            <ElevatedRoute>
+              <HrEmployeesPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/hr/attendance">
+            <HrAttendancePage />
+          </Route>
+          <Route path="/hr/payroll">
+            <HrPayrollPage />
+          </Route>
+          <Route path="/hr/leave">
+            <HrLeavePage />
+          </Route>
+          <Route path="/hr/recruitment">
+            <ElevatedRoute>
+              <HrRecruitmentPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/hr/reviews">
+            <ElevatedRoute>
+              <HrReviewsPage />
+            </ElevatedRoute>
+          </Route>
+
+          {/* Finance — management only */}
+          <Route path="/finance">
+            <ElevatedRoute>
+              <FinanceOverviewPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/finance/invoices">
+            <ElevatedRoute>
+              <FinanceInvoicesPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/finance/expenses">
+            <ElevatedRoute>
+              <FinanceExpensesPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/finance/payments">
+            <ElevatedRoute>
+              <FinancePaymentsPage />
+            </ElevatedRoute>
+          </Route>
+          <Route path="/finance/purchase-orders">
+            <ElevatedRoute>
+              <FinancePurchaseOrdersPage />
+            </ElevatedRoute>
           </Route>
 
           {/* Manager + Technician routes */}

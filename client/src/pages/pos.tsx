@@ -46,11 +46,11 @@ function ReceiveControl({ line, onDone }: { line: PoLine; onDone: () => void }) 
   });
 
   if (remaining <= 0) {
-    return <span className="text-sm font-medium text-green-400">Fully received</span>;
+    return <span className="text-sm font-medium text-green-600 dark:text-green-400">Fully received</span>;
   }
   if (!line.local_item_id) {
     return (
-      <span className="text-xs text-orange-400">
+      <span className="text-xs text-orange-600 dark:text-orange-400">
         Not mapped — link this item on the QuickBooks page
       </span>
     );
@@ -140,8 +140,8 @@ export default function PurchaseOrdersPage() {
                     className={cn(
                       "ml-auto rounded-full px-2.5 py-1 text-xs font-medium",
                       totalRemaining === 0
-                        ? "bg-green-500/15 text-green-400"
-                        : "bg-blue-500/15 text-blue-400"
+                        ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                        : "bg-blue-500/15 text-blue-700 dark:text-blue-400"
                     )}
                   >
                     {totalRemaining === 0 ? "Fully received" : `${totalRemaining} expected`}

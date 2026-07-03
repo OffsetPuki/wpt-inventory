@@ -1,4 +1,4 @@
-import { Warehouse } from "lucide-react";
+import { Layers } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { Settings } from "@shared/schema";
@@ -16,7 +16,7 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
     refetchInterval: false,
   });
 
-  const name = settings?.companyName || "WPT";
+  const name = settings?.companyName || "CJM Metals";
   const logoUrl = settings?.logoUrl;
 
   const iconSize = size === "sm" ? "h-7 w-7" : size === "lg" ? "h-12 w-12" : "h-9 w-9";
@@ -32,10 +32,7 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
             className={`${iconSize} rounded-lg border border-border object-contain`}
           />
         ) : (
-          <>
-            <div className="absolute inset-0 rounded-full bg-primary/30 blur-lg" />
-            <Warehouse className={`${iconSize} relative z-10 text-primary`} />
-          </>
+          <Layers className={`${iconSize} text-primary`} />
         )}
       </div>
       {showText && (
@@ -44,7 +41,7 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
             {name}
           </span>
           <span className="text-[10px] uppercase leading-none tracking-[0.2em] text-muted-foreground">
-            Inventory
+            {settings?.companyTagline || "Custom Metalwork"}
           </span>
         </div>
       )}

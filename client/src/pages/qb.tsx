@@ -74,7 +74,7 @@ function ItemMappingSection() {
       {isLoading ? (
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       ) : unmatched.length === 0 ? (
-        <p className="text-sm text-green-400">All QuickBooks items are mapped or ignored.</p>
+        <p className="text-sm text-green-600 dark:text-green-400">All QuickBooks items are mapped or ignored.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {unmatched.map((q) => (
@@ -148,7 +148,7 @@ function ProjectMappingSection() {
       {isLoading ? (
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       ) : unmapped.length === 0 ? (
-        <p className="text-sm text-green-400">All QuickBooks customers are mapped.</p>
+        <p className="text-sm text-green-600 dark:text-green-400">All QuickBooks customers are mapped.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {unmapped.map((c) => (
@@ -202,9 +202,9 @@ function QueueSection() {
   };
   const STATUS_STYLE: Record<string, string> = {
     pending: "bg-secondary text-secondary-foreground",
-    done: "bg-green-500/15 text-green-400",
+    done: "bg-green-500/15 text-green-700 dark:text-green-400",
     error: "bg-destructive/15 text-destructive",
-    manual: "bg-orange-500/15 text-orange-400",
+    manual: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
   };
 
   return (

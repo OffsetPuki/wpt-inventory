@@ -164,9 +164,9 @@ export default function ProjectDetailPage({ id }: { id: string }) {
                   </div>
                   <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
                     {t.type === "check_out" ? (
-                      <PackageMinus className="h-4 w-4 shrink-0 text-orange-400" />
+                      <PackageMinus className="h-4 w-4 shrink-0 text-orange-600 dark:text-orange-400" />
                     ) : (
-                      <PackagePlus className="h-4 w-4 shrink-0 text-green-400" />
+                      <PackagePlus className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
                     )}
                     <span className="shrink-0 font-medium text-foreground">
                       {t.type === "check_out" ? "−" : "+"}

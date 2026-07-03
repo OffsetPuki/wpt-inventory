@@ -17,7 +17,7 @@ const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
 const SCOPE = "com.intuit.quickbooks.accounting";
 const MINORVERSION = "75";
-const APP_NAME = "WPT Inventory Locator";
+const APP_NAME = "Flipnob Business Suite";
 
 function qbEnv() {
   return {
@@ -396,10 +396,14 @@ export async function processPushQueue(): Promise<{ done: number; errors: number
             // issues; CreditMemo reverses it when parts come back. DocNumber
             // carries our txn id so a crash between create and mark can be
             // detected instead of double-posting.
-            const docNumber = `WPT-T${payload.txnId}`.slice(0, 21);
+            const docNumber = `FLP-T${payload.txnId}`.slice(0, 21);
+            // Legacy prefix included in the dedup check: jobs that posted as
+            // WPT-T… before the Flipnob rebrand must still be recognized so a
+            // crashed-then-retried job can't double-post.
+            const legacyDocNumber = `WPT-T${payload.txnId}`.slice(0, 21);
             const entity = job.kind === "issue" ? "invoice" : "creditmemo";
             const entityName = job.kind === "issue" ? "Invoice" : "CreditMemo";
-            const existing = await qbQueryAll(entityName, `DocNumber = '${docNumber}'`);
+            const existing = await qbQueryAll(entityName, `DocNumber IN ('${docNumber}', '${legacyDocNumber}')`);
             if (existing.length > 0) {
               storage.qbQueueMark(job.id, "done", { qbDocId: String(existing[0].Id) });
               done++;
@@ -408,7 +412,7 @@ export async function processPushQueue(): Promise<{ done: number; errors: number
             const body = {
               DocNumber: docNumber,
               CustomerRef: { value: qbCustomerId },
-              PrivateNote: `WPT Inventory ${job.kind === "issue" ? "issue" : "return"} (txn #${payload.txnId})`,
+              PrivateNote: `Flipnob ${job.kind === "issue" ? "issue" : "return"} (txn #${payload.txnId})`,
               Line: [{
                 DetailType: "SalesItemLineDetail",
                 Amount: 0,
@@ -436,10 +440,10 @@ export async function processPushQueue(): Promise<{ done: number; errors: number
               const created = await qbFetch("/inventoryadjustment", {
                 method: "POST",
                 body: {
-                  DocNumber: `WPT-${payload.adjId}`.slice(0, 21),
+                  DocNumber: `FLP-${payload.adjId}`.slice(0, 21),
                   AdjustAccountRef: { value: acctId },
                   TxnDate: new Date().toISOString().slice(0, 10),
-                  PrivateNote: `WPT Inventory adjustment #${payload.adjId} (${payload.reason})`,
+                  PrivateNote: `Flipnob adjustment #${payload.adjId} (${payload.reason})`,
                   Line: [{
                     DetailType: "ItemAdjustmentLineDetail",
                     ItemAdjustmentLineDetail: { QtyDiff: payload.delta, ItemRef: { value: qbItemId } },

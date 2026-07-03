@@ -169,7 +169,7 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
                 className={inputCls}
                 value={jobNumber}
                 onChange={(e) => setJobNumber(e.target.value)}
-                placeholder="e.g. WPT-2026-014"
+                placeholder="e.g. FLP-2026-014"
               />
             </label>
             <label className="flex flex-col gap-1.5">

@@ -61,6 +61,11 @@ const config: Config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        // Cards/buttons across the app use rounded-xl/2xl — mapping them to
+        // the token gives the whole suite the big soft-rounded dashboard look
+        // from one knob instead of a thousand class edits.
+        xl: "calc(var(--radius) + 0.25rem)",
+        "2xl": "calc(var(--radius) + 0.5rem)",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],

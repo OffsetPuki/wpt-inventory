@@ -13,8 +13,18 @@ const inputCls =
 
 function applyAccent(h: number, s: number, l: number) {
   const root = document.documentElement;
-  for (const v of ["--primary", "--accent", "--ring", "--sidebar-primary", "--sidebar-ring", "--chart-1"]) {
-    root.style.setProperty(v, `${h} ${s}% ${l}%`);
+  // Mirrors ThemeProvider exactly (neutral --accent, dark-mode lift, and the
+  // ink↔cream inversion for near-black accents) so the live slider preview
+  // matches what actually gets applied after save.
+  const dark = root.classList.contains("dark");
+  const invert = dark && l < 20;
+  const accent = invert ? "40 30% 92%" : `${h} ${s}% ${dark ? Math.min(l + 12, 62) : l}%`;
+  const accentFg = invert ? "0 0% 8%" : l < 20 && !dark ? "40 30% 96%" : "0 0% 100%";
+  for (const v of ["--primary", "--ring", "--sidebar-primary", "--sidebar-ring", "--chart-1"]) {
+    root.style.setProperty(v, accent);
+  }
+  for (const v of ["--primary-foreground", "--sidebar-primary-foreground"]) {
+    root.style.setProperty(v, accentFg);
   }
 }
 
@@ -244,15 +254,15 @@ function QuickBooksCard() {
             "rounded-full px-2.5 py-0.5 text-xs font-medium " +
             (status?.connected
               ? status.reconnectNeeded
-                ? "bg-orange-500/15 text-orange-400"
-                : "bg-green-500/15 text-green-400"
+                ? "bg-orange-500/15 text-orange-700 dark:text-orange-400"
+                : "bg-green-500/15 text-green-700 dark:text-green-400"
               : "bg-secondary text-secondary-foreground")
           }
         >
           {status?.connected ? (status.reconnectNeeded ? "Reconnect needed" : "Connected") : "Not connected"}
         </span>
         {status?.environment === "sandbox" && status?.connected && (
-          <span className="rounded-full bg-blue-500/15 px-2.5 py-0.5 text-xs font-medium text-blue-400">Sandbox</span>
+          <span className="rounded-full bg-blue-500/15 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">Sandbox</span>
         )}
       </div>
       <p className="mb-4 text-sm text-muted-foreground">
@@ -262,7 +272,7 @@ function QuickBooksCard() {
       </p>
 
       {status?.connected && needsAttention > 0 && (
-        <p className="mb-3 text-sm text-orange-400">
+        <p className="mb-3 text-sm text-orange-600 dark:text-orange-400">
           {status.unmapped?.items ? `${status.unmapped.items} unmapped items. ` : ""}
           {status.unmapped?.projects ? `${status.unmapped.projects} unmapped projects. ` : ""}
           {status.queue?.error ? `${status.queue.error} failed pushes. ` : ""}
@@ -325,7 +335,7 @@ function QuickBooksCard() {
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
         Need help?{" "}
-        <a href="mailto:jehupena852@gmail.com?subject=WPT%20Inventory%20support" className="text-primary hover:underline">
+        <a href="mailto:support@cjmmetals.com?subject=CJM%20Metals%20suite%20support" className="text-primary hover:underline">
           Contact support
         </a>
       </p>

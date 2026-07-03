@@ -9,6 +9,14 @@ import { spawn } from "child_process";
 import { storage } from "./storage";
 import { requireAuth, requireTechnician, requireElevated, createSession, destroySession } from "./auth";
 import { registerQbRoutes, qbEnqueueIssue, qbEnqueueAdjust } from "./qb";
+// Business-suite modules. Import order matters for DDL: marketing owns the
+// mk_* tables that CRM's automation hooks insert into, so it loads first.
+import { registerMarketingRoutes } from "./marketing";
+import { registerCrmRoutes } from "./crm";
+import { registerPmRoutes } from "./pm";
+import { registerHrRoutes } from "./hr";
+import { registerFinanceRoutes } from "./finance";
+import { registerSearchRoutes } from "./search";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
@@ -813,6 +821,15 @@ export function registerRoutes(app: Express): void {
   // ─── QuickBooks Online ─────────────────────────────────────────────────
 
   registerQbRoutes(app);
+
+  // ─── Business suite modules ────────────────────────────────────────────
+
+  registerMarketingRoutes(app);
+  registerCrmRoutes(app);
+  registerPmRoutes(app);
+  registerHrRoutes(app);
+  registerFinanceRoutes(app);
+  registerSearchRoutes(app);
 
   // ─── Serve uploaded files ──────────────────────────────────────────────
 

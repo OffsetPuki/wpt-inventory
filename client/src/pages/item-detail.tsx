@@ -147,7 +147,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
                 {ITEM_TYPE_LABELS[item.itemType]}
               </span>
               {low && (
-                <span className="flex items-center gap-1 rounded-full bg-orange-500/15 px-3 py-1 text-sm font-medium text-orange-400">
+                <span className="flex items-center gap-1 rounded-full bg-orange-500/15 px-3 py-1 text-sm font-medium text-orange-700 dark:text-orange-400">
                   <AlertTriangle className="h-4 w-4" />
                   Low stock
                 </span>
@@ -164,13 +164,13 @@ export default function ItemDetailPage({ id }: { id: string }) {
           </div>
 
           <div className="flex items-baseline gap-2 rounded-xl border border-border bg-card p-4">
-            <span className={"text-4xl font-bold " + (low ? "text-orange-400" : "text-foreground")}>
+            <span className={"text-4xl font-bold " + (low ? "text-orange-600 dark:text-orange-400" : "text-foreground")}>
               {item.quantity}
             </span>
             <span className="text-muted-foreground">in stock</span>
             <span className="ml-auto flex items-baseline gap-3 text-sm text-muted-foreground">
               {(detail?.onOrder ?? 0) > 0 && (
-                <Link href="/pos" className="text-blue-400 hover:underline">
+                <Link href="/pos" className="text-blue-600 dark:text-blue-400 hover:underline">
                   {detail!.onOrder} on order
                 </Link>
               )}
@@ -216,9 +216,9 @@ export default function ItemDetailPage({ id }: { id: string }) {
                   <li key={t.id} className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-2">
                       {t.type === "check_out" ? (
-                        <PackageMinus className="h-4 w-4 text-orange-400" />
+                        <PackageMinus className="h-4 w-4 text-orange-600 dark:text-orange-400" />
                       ) : (
-                        <PackagePlus className="h-4 w-4 text-green-400" />
+                        <PackagePlus className="h-4 w-4 text-green-600 dark:text-green-400" />
                       )}
                       <span className="text-foreground">
                         {t.type === "check_out" ? "−" : "+"}
@@ -247,7 +247,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
                     <span className="flex items-center gap-2">
                       <span
                         className={
-                          "font-medium " + (a.delta < 0 ? "text-destructive" : "text-green-400")
+                          "font-medium " + (a.delta < 0 ? "text-destructive" : "text-green-600 dark:text-green-400")
                         }
                       >
                         {a.delta > 0 ? "+" : ""}

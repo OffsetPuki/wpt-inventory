@@ -29,7 +29,7 @@ export function Toaster() {
             <Icon
               className={cn(
                 "mt-0.5 h-5 w-5 shrink-0",
-                t.variant === "success" && "text-green-400",
+                t.variant === "success" && "text-green-600 dark:text-green-400",
                 t.variant === "destructive" && "text-destructive",
                 (!t.variant || t.variant === "default") && "text-primary"
               )}

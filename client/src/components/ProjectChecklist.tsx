@@ -10,8 +10,8 @@ import { Plus, Trash2, Loader2 } from "lucide-react";
 
 const STATUS_STYLE: Record<ChecklistStatus, string> = {
   pending: "bg-secondary text-secondary-foreground",
-  ordered: "bg-blue-500/15 text-blue-400",
-  done: "bg-green-500/15 text-green-400",
+  ordered: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  done: "bg-green-500/15 text-green-700 dark:text-green-400",
   skipped: "bg-muted text-muted-foreground line-through",
 };
 

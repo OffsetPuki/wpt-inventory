@@ -7,6 +7,7 @@ import { seedDefaults } from "./seed";
 import { registerRoutes } from "./routes";
 import { registerLegalRoutes } from "./legal";
 import { startSessionReaper } from "./auth";
+import { startMarketingAutomations } from "./marketing";
 import { serveStatic } from "./static";
 import { setupVite } from "./vite";
 
@@ -78,7 +79,8 @@ app.use(
 app.use((_req, res, next) => {
   res.setHeader(
     "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=(), interest-cohort=()"
+    // geolocation=(self): HR attendance captures clock-in/out GPS coordinates.
+    "camera=(), microphone=(), geolocation=(self), payment=(), usb=(), midi=(), interest-cohort=()"
   );
   next();
 });
@@ -115,6 +117,9 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // ── Seed defaults & start session reaper ──
 seedDefaults();
 startSessionReaper();
+// Hourly marketing sweep: stale-lead flagging, auto follow-up / quote-reminder
+// tasks. Safe to start here: every module's DDL already ran at import time.
+startMarketingAutomations();
 
 // ── Register routes ──
 registerRoutes(app);
@@ -135,7 +140,7 @@ registerLegalRoutes(app);
 
   const PORT = parseInt(process.env.PORT || "5000", 10);
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n  🏭 WPT Inventory Locator`);
+    console.log(`\n  ◆ CJM Metals Business Suite`);
     console.log(`  ➜ Local:   http://localhost:${PORT}`);
     console.log(`  ➜ Mode:    ${isProd ? "production" : "development"}\n`);
   });

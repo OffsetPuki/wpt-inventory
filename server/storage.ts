@@ -29,7 +29,10 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const sqlite = new Database(path.join(dataDir, "inventory.db"));
+// Exported so business-module files (crm.ts, hr.ts, pm.ts, finance.ts,
+// marketing.ts) can run their own DDL and drizzle queries against the same
+// connection instead of threading everything through this file.
+export const sqlite: Database.Database = new Database(path.join(dataDir, "inventory.db"));
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 // Standard SQLite perf tuning. NORMAL is the recommended companion to WAL —
@@ -42,7 +45,7 @@ sqlite.pragma("cache_size = -65536");      // ~64 MB page cache
 sqlite.pragma("mmap_size = 268435456");    // 256 MB memory map
 sqlite.pragma("busy_timeout = 5000");      // wait up to 5s on lock contention
 
-const db = drizzle(sqlite);
+export const db = drizzle(sqlite);
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 
@@ -158,12 +161,12 @@ sqlite.exec(`
 
   CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_name TEXT NOT NULL DEFAULT 'Webber Pressure Technologies',
-    company_tagline TEXT DEFAULT 'ASME Certified Pressure Equipment',
+    company_name TEXT NOT NULL DEFAULT 'CJM Metals',
+    company_tagline TEXT DEFAULT 'Custom metalwork. No shortcuts.',
     logo_url TEXT,
-    accent_hue INTEGER NOT NULL DEFAULT 24,
-    accent_sat INTEGER NOT NULL DEFAULT 90,
-    accent_light INTEGER NOT NULL DEFAULT 50,
+    accent_hue INTEGER NOT NULL DEFAULT 0,
+    accent_sat INTEGER NOT NULL DEFAULT 0,
+    accent_light INTEGER NOT NULL DEFAULT 9,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
 

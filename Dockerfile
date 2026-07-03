@@ -1,4 +1,4 @@
-# WPT Inventory Locator — single-process Node server (API + built client).
+# Flipnob Business Suite — single-process Node server (API + built client).
 FROM node:22-bookworm-slim
 
 # Python powers the optional AI "Identify by photo" helper (server/identify_item.py).

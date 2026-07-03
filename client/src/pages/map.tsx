@@ -731,7 +731,7 @@ export default function MapPage() {
                       <span className="block truncate font-medium text-foreground">{i.name}</span>
                       <span className="block truncate text-xs text-muted-foreground">{locationString(i)}</span>
                     </span>
-                    <span className={cn("text-sm font-semibold", isLowStock(i) ? "text-orange-400" : "text-foreground")}>
+                    <span className={cn("text-sm font-semibold", isLowStock(i) ? "text-orange-600 dark:text-orange-400" : "text-foreground")}>
                       {i.quantity}
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />

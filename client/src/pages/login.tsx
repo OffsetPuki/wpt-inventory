@@ -65,10 +65,10 @@ export default function LoginPage() {
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo size="lg" showText={false} />
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">
-            {settings?.companyName || "WPT"} Inventory
+            {settings?.companyName || "CJM Metals"}
           </h1>
           <p className="mt-1 text-base text-muted-foreground">
-            {settings?.companyTagline || "Sign in to find parts and manage jobs"}
+            {settings?.companyTagline || "Custom metalwork. No shortcuts."}
           </p>
         </div>
 
@@ -133,7 +133,7 @@ export default function LoginPage() {
             Terms (EULA)
           </a>
           <span className="mx-2">·</span>
-          <a href="mailto:jehupena852@gmail.com?subject=WPT%20Inventory%20support" className="hover:text-foreground hover:underline">
+          <a href="mailto:support@cjmmetals.com?subject=CJM%20Metals%20suite%20support" className="hover:text-foreground hover:underline">
             Contact support
           </a>
         </p>

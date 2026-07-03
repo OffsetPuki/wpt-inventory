@@ -1,6 +1,6 @@
 {
-  "name": "wpt-inventory",
-  "version": "6.0.0",
+  "name": "cjm-metals-suite",
+  "version": "8.0.0",
   "private": true,
   "type": "module",
   "scripts": {

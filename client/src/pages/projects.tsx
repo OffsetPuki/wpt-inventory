@@ -12,9 +12,9 @@ import { cn } from "@/lib/utils";
 import { Sparkles, Plus, FolderKanban, Loader2, Search } from "lucide-react";
 
 const STATUS_STYLE: Record<ProjectStatus, string> = {
-  active: "bg-green-500/15 text-green-400",
-  done: "bg-blue-500/15 text-blue-400",
-  on_hold: "bg-orange-500/15 text-orange-400",
+  active: "bg-green-500/15 text-green-700 dark:text-green-400",
+  done: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  on_hold: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
 };
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   active: "Active",

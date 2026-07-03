@@ -11,11 +11,13 @@ export const AREA_LABELS: Record<Area, string> = {
   shipping_container_2: "Plumbing Container",
 };
 
+// Display names only — the underlying enum values are baked into existing
+// item rows, so a metals-shop relabel is purely cosmetic and safe.
 export const CATEGORY_LABELS: Record<Category, string> = {
-  electric: "Electric",
-  welder: "Welder",
-  it: "IT",
-  raw_materials: "Raw Materials",
+  electric: "Electrical & Automation",
+  welder: "Welding",
+  it: "Office & IT",
+  raw_materials: "Steel & Materials",
   tools: "Tools",
 };
 
@@ -87,16 +89,29 @@ export function isLowStock(item: Pick<Item, "lowStockThreshold" | "quantity">): 
 
 // ─── Date formatting ───────────────────────────────────────────────────────────
 
+// Bare "YYYY-MM-DD" strings (the shape of every calendar-date column) must be
+// parsed as LOCAL dates: new Date("2026-07-03") is UTC midnight, which
+// toLocaleDateString renders as July 2 anywhere west of UTC.
+const YMD_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function toLocalDate(value: string | number | Date): Date {
+  if (typeof value === "string" && YMD_ONLY.test(value)) {
+    const [y, m, d] = value.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(value);
+}
+
 export function formatDate(value: string | number | Date | null | undefined): string {
   if (!value) return "";
-  const d = new Date(value);
+  const d = toLocalDate(value);
   if (isNaN(d.getTime())) return "";
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function formatDateTime(value: string | number | Date | null | undefined): string {
   if (!value) return "";
-  const d = new Date(value);
+  const d = toLocalDate(value); // same YMD guard; instants pass through
   if (isNaN(d.getTime())) return "";
   return d.toLocaleString("en-US", {
     month: "short",
@@ -104,4 +119,42 @@ export function formatDateTime(value: string | number | Date | null | undefined)
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+// ─── Money (all amounts are stored as integer cents) ──────────────────────────
+
+export function formatMoney(cents: number | null | undefined): string {
+  const v = (cents ?? 0) / 100;
+  return v.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    // Whole-dollar amounts read cleaner without the trailing .00 in tables.
+    minimumFractionDigits: v % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Parse a user-typed dollar string ("1,250.50", "$99") into integer cents. */
+export function parseMoney(input: string): number {
+  const cleaned = input.replace(/[$,\s]/g, "");
+  const v = parseFloat(cleaned);
+  return isNaN(v) ? 0 : Math.round(v * 100);
+}
+
+export function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value == null || isNaN(value)) return "—";
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+/** Basis points (825 → "8.25%") used for tax rates on estimates/invoices. */
+export function formatBp(bp: number | null | undefined): string {
+  return `${((bp ?? 0) / 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+}
+
+export function formatHours(minutes: number | null | undefined): string {
+  const m = minutes ?? 0;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (h === 0) return `${rest}m`;
+  return rest === 0 ? `${h}h` : `${h}h ${rest}m`;
 }

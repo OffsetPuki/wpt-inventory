@@ -159,9 +159,9 @@ export default function ActivityPage() {
               className="flex items-center gap-3 rounded-xl border border-border bg-card p-3"
             >
               {f.kind === "check_out" ? (
-                <PackageMinus className="h-5 w-5 shrink-0 text-orange-400" />
+                <PackageMinus className="h-5 w-5 shrink-0 text-orange-600 dark:text-orange-400" />
               ) : f.kind === "check_in" ? (
-                <PackagePlus className="h-5 w-5 shrink-0 text-green-400" />
+                <PackagePlus className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" />
               ) : (
                 <Sliders className="h-5 w-5 shrink-0 text-primary" />
               )}
@@ -169,7 +169,7 @@ export default function ActivityPage() {
                 <p className="truncate text-sm text-foreground">
                   {f.kind === "adjust" ? (
                     <>
-                      <span className={f.delta < 0 ? "text-destructive" : "text-green-400"}>
+                      <span className={f.delta < 0 ? "text-destructive" : "text-green-600 dark:text-green-400"}>
                         {f.delta > 0 ? "+" : ""}
                         {f.delta}
                       </span>{" "}

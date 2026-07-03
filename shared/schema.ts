@@ -164,12 +164,13 @@ export const projects = sqliteTable("projects", {
 
 export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  companyName: text("company_name").notNull().default("Webber Pressure Technologies"),
-  companyTagline: text("company_tagline").default("ASME Certified Pressure Equipment"),
+  companyName: text("company_name").notNull().default("CJM Metals"),
+  companyTagline: text("company_tagline").default("Custom metalwork. No shortcuts."),
   logoUrl: text("logo_url"),
-  accentHue: integer("accent_hue").notNull().default(24),
-  accentSat: integer("accent_sat").notNull().default(90),
-  accentLight: integer("accent_light").notNull().default(50),
+  // CJM brand ink — near-black; dark mode inverts it to cream at render time.
+  accentHue: integer("accent_hue").notNull().default(0),
+  accentSat: integer("accent_sat").notNull().default(0),
+  accentLight: integer("accent_light").notNull().default(9),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),

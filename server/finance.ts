@@ -1,0 +1,887 @@
+import type { Express, Request } from "express";
+import { eq, and, or, desc, asc, isNull, inArray, sql } from "drizzle-orm";
+import { sqlite, db, storage } from "./storage";
+import { requireElevated } from "./auth";
+import {
+  invoices, invoicePayments, expenses, paymentGateways, purchaseOrders,
+  insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
+  updateGatewaySchema, insertPurchaseOrderSchema,
+  PAYMENT_GATEWAY_CATALOG,
+  type Invoice, type InvoiceStatus,
+} from "../shared/finance-schema";
+import { clients, estimates, type Estimate } from "../shared/crm-schema";
+import { parseLineItems, lineItemsTotalCents, lineItemsSchema } from "../shared/biz-common";
+
+// ─── Table creation (synchronous DDL) ────────────────────────────────────────
+// Mirrors shared/finance-schema.ts exactly. client_id / estimate_id are soft
+// references into the CRM module — no REFERENCES clause, so this module never
+// depends on crm.ts having created its tables first. project_id points at the
+// core projects table, which storage.ts guarantees exists before we get here.
+
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS fin_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT NOT NULL UNIQUE,
+    client_id INTEGER,
+    client_name TEXT,
+    estimate_id INTEGER,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    issue_date TEXT,
+    due_date TEXT,
+    items TEXT NOT NULL DEFAULT '[]',
+    subtotal_cents INTEGER NOT NULL DEFAULT 0,
+    tax_rate_bp INTEGER NOT NULL DEFAULT 0,
+    tax_cents INTEGER NOT NULL DEFAULT 0,
+    total_cents INTEGER NOT NULL DEFAULT 0,
+    paid_cents INTEGER NOT NULL DEFAULT 0,
+    sent_at INTEGER,
+    notes TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    deleted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_fin_invoices_client ON fin_invoices(client_id);
+  CREATE INDEX IF NOT EXISTS idx_fin_invoices_project ON fin_invoices(project_id);
+  CREATE INDEX IF NOT EXISTS idx_fin_invoices_status ON fin_invoices(status);
+  CREATE INDEX IF NOT EXISTS idx_fin_invoices_due ON fin_invoices(due_date);
+  CREATE INDEX IF NOT EXISTS idx_fin_invoices_created ON fin_invoices(created_at);
+
+  CREATE TABLE IF NOT EXISTS fin_invoice_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL REFERENCES fin_invoices(id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL,
+    method TEXT NOT NULL DEFAULT 'other',
+    gateway_key TEXT,
+    reference TEXT,
+    paid_at TEXT,
+    notes TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_fin_payments_invoice ON fin_invoice_payments(invoice_id);
+  CREATE INDEX IF NOT EXISTS idx_fin_payments_created ON fin_invoice_payments(created_at);
+
+  CREATE TABLE IF NOT EXISTS fin_expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    vendor TEXT,
+    category TEXT NOT NULL DEFAULT 'other',
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    payment_method TEXT NOT NULL DEFAULT 'card',
+    receipt_url TEXT,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    billable INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    deleted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_fin_expenses_date ON fin_expenses(date);
+  CREATE INDEX IF NOT EXISTS idx_fin_expenses_category ON fin_expenses(category);
+  CREATE INDEX IF NOT EXISTS idx_fin_expenses_project ON fin_expenses(project_id);
+  CREATE INDEX IF NOT EXISTS idx_fin_expenses_created ON fin_expenses(created_at);
+
+  CREATE TABLE IF NOT EXISTS fin_gateways (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'card',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    config TEXT NOT NULL DEFAULT '{}',
+    fees_note TEXT,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_fin_gateways_order ON fin_gateways(order_index);
+
+  CREATE TABLE IF NOT EXISTS fin_purchase_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT NOT NULL UNIQUE,
+    vendor TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    items TEXT NOT NULL DEFAULT '[]',
+    total_cents INTEGER NOT NULL DEFAULT 0,
+    expected_date TEXT,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    deleted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_fin_po_status ON fin_purchase_orders(status);
+  CREATE INDEX IF NOT EXISTS idx_fin_po_project ON fin_purchase_orders(project_id);
+  CREATE INDEX IF NOT EXISTS idx_fin_po_created ON fin_purchase_orders(created_at);
+`);
+
+// Seed the gateway registry from the catalog on first boot only — an empty
+// table means "never seeded", so the owner's later edits (toggles, config,
+// deleting nothing since rows are permanent) are never clobbered by a restart.
+{
+  const count = (sqlite.prepare("SELECT COUNT(*) AS c FROM fin_gateways").get() as { c: number }).c;
+  if (count === 0) {
+    const ins = sqlite.prepare(
+      "INSERT INTO fin_gateways (key, name, kind, fees_note, order_index) VALUES (?, ?, ?, ?, ?)"
+    );
+    sqlite.transaction(() => {
+      PAYMENT_GATEWAY_CATALOG.forEach((g, i) => ins.run(g.key, g.name, g.kind, g.feesNote ?? null, i));
+    })();
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Local calendar date — invoices/expenses are dated in the shop's timezone,
+// not UTC, so "overdue" flips at local midnight like the owner expects.
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// Totals are always server-computed from the line items — the client-supplied
+// subtotal/tax/total are ignored so the books can't be desynced by a stale UI.
+// Throws (zod) on malformed line items so callers surface a 400, same as the
+// CRM estimate equivalent.
+function computeTotals(itemsJson: string, taxRateBp: number) {
+  const items = lineItemsSchema.parse(parseLineItems(itemsJson));
+  const subtotalCents = lineItemsTotalCents(items);
+  const taxCents = Math.round((subtotalCents * taxRateBp) / 10000);
+  return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents };
+}
+
+// "overdue" is derived, never stored: a sent/partial invoice past its due date
+// reports as overdue, but the stored status stays untouched so a payment (or a
+// due-date extension) snaps it back without any sweep job.
+function derivedStatus(inv: Invoice, today: string): InvoiceStatus {
+  if ((inv.status === "sent" || inv.status === "partial") && inv.dueDate && inv.dueDate < today) {
+    return "overdue";
+  }
+  return inv.status;
+}
+
+function presentInvoice(inv: Invoice, today: string) {
+  return { ...inv, status: derivedStatus(inv, today), balanceCents: inv.totalCents - inv.paidCents };
+}
+
+// Document numbers: PREFIX-<year>-<4-digit seq>. Seq is derived from max id,
+// which only ever grows, so numbers never reuse after a delete. The UNIQUE
+// constraint on `number` is the arbiter under concurrency — on conflict we
+// bump the seq and retry (bounded, so a pathological table can't spin forever).
+function insertNumbered<T>(
+  table: "fin_invoices" | "fin_purchase_orders",
+  prefix: "INV" | "PO",
+  doInsert: (num: string) => T
+): T {
+  const base =
+    (sqlite.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM ${table}`).get() as { m: number }).m + 1;
+  const year = new Date().getFullYear();
+  for (let i = 0; i < 25; i++) {
+    const num = `${prefix}-${year}-${String(base + i).padStart(4, "0")}`;
+    try {
+      return doInsert(num);
+    } catch (e: any) {
+      if (String(e?.message ?? "").includes("UNIQUE")) continue;
+      throw e;
+    }
+  }
+  throw new Error(`Could not allocate a unique ${prefix} number`);
+}
+
+// Cross-module reads into CRM. The tables belong to crm.ts; if that module
+// isn't wired yet these queries would throw "no such table", so they degrade
+// to "not found" instead of 500ing the whole finance page.
+function clientNameById(id: number): string | null {
+  try {
+    return db.select({ name: clients.name }).from(clients).where(eq(clients.id, id)).get()?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function estimateById(id: number): Estimate | undefined {
+  try {
+    return db.select().from(estimates)
+      .where(and(eq(estimates.id, id), isNull(estimates.deletedAt)))
+      .get();
+  } catch {
+    return undefined;
+  }
+}
+
+function allClientNames(): Map<number, string> {
+  try {
+    return new Map(
+      db.select({ id: clients.id, name: clients.name }).from(clients).all().map((r) => [r.id, r.name])
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+// Statuses that represent money still owed to us (draft/void owe nothing,
+// paid is settled). Stored "overdue" is included for rows a user set manually.
+const RECEIVABLE_STATUSES: InvoiceStatus[] = ["sent", "partial", "overdue"];
+
+function paymentCountFor(invoiceId: number): number {
+  return db.select({ c: sql<number>`COUNT(*)` })
+    .from(invoicePayments)
+    .where(eq(invoicePayments.invoiceId, invoiceId))
+    .get()?.c ?? 0;
+}
+
+function getInvoice(id: number): Invoice | undefined {
+  return db.select().from(invoices)
+    .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)))
+    .get();
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+export function registerFinanceRoutes(app: Express): void {
+  // Express types `req.params.*` as `string | string[]`; narrow to string.
+  const pid = (v: string | string[]): number => parseInt(v as string, 10);
+  const pkey = (v: string | string[]): string => v as string;
+  const qstr = (v: unknown): string | undefined =>
+    typeof v === "string" && v.length > 0 ? v : undefined;
+
+  // Same fire-and-forget audit pattern as routes.ts — snapshot request fields
+  // synchronously, defer the insert off the response path.
+  function audit(req: Request, action: string, extras: {
+    targetType?: string | null;
+    targetId?: number | null;
+    targetName?: string | null;
+    details?: Record<string, unknown> | null;
+  } = {}): void {
+    const entry = {
+      userId: req.user?.userId ?? null,
+      userName: req.user?.name ?? null,
+      role: req.user?.role ?? null,
+      action,
+      targetType: extras.targetType ?? null,
+      targetId: extras.targetId ?? null,
+      targetName: extras.targetName ?? null,
+      ip: req.ip ?? null,
+      details: extras.details ?? null,
+    };
+    setImmediate(() => {
+      try {
+        storage.appendAudit(entry);
+      } catch {}
+    });
+  }
+
+  // ─── Stats (literal path — registered before any /:id routes) ────────────
+
+  app.get("/api/finance/stats", requireElevated, (_req, res) => {
+    const today = todayLocal();
+    const monthPrefix = today.slice(0, 7); // "YYYY-MM"
+    const now = new Date();
+    const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+    const receivableWhere = and(
+      isNull(invoices.deletedAt),
+      inArray(invoices.status, RECEIVABLE_STATUSES)
+    );
+    const outstandingCents = db.select({
+      v: sql<number>`COALESCE(SUM(${invoices.totalCents} - ${invoices.paidCents}), 0)`,
+    }).from(invoices).where(receivableWhere).get()?.v ?? 0;
+
+    const overdueCents = db.select({
+      v: sql<number>`COALESCE(SUM(${invoices.totalCents} - ${invoices.paidCents}), 0)`,
+    }).from(invoices).where(and(
+      receivableWhere,
+      sql`${invoices.dueDate} IS NOT NULL AND ${invoices.dueDate} < ${today}`
+    )).get()?.v ?? 0;
+
+    // A payment counts toward the month it was received (paidAt), falling back
+    // to when it was recorded (createdAt) for rows entered without a date.
+    const paidThisMonthCents = db.select({
+      v: sql<number>`COALESCE(SUM(${invoicePayments.amountCents}), 0)`,
+    }).from(invoicePayments).where(or(
+      sql`${invoicePayments.paidAt} LIKE ${monthPrefix + "%"}`,
+      and(
+        isNull(invoicePayments.paidAt),
+        sql`${invoicePayments.createdAt} >= ${monthStartMs}`
+      )
+    )).get()?.v ?? 0;
+
+    const expensesThisMonthCents = db.select({
+      v: sql<number>`COALESCE(SUM(${expenses.amountCents}), 0)`,
+    }).from(expenses).where(and(
+      isNull(expenses.deletedAt),
+      sql`${expenses.date} LIKE ${monthPrefix + "%"}`
+    )).get()?.v ?? 0;
+
+    const draftInvoices = db.select({ c: sql<number>`COUNT(*)` })
+      .from(invoices)
+      .where(and(isNull(invoices.deletedAt), eq(invoices.status, "draft")))
+      .get()?.c ?? 0;
+
+    const enabledGateways = db.select({ c: sql<number>`COUNT(*)` })
+      .from(paymentGateways)
+      .where(eq(paymentGateways.enabled, true))
+      .get()?.c ?? 0;
+
+    res.json({
+      outstandingCents,
+      overdueCents,
+      paidThisMonthCents,
+      expensesThisMonthCents,
+      netThisMonthCents: paidThisMonthCents - expensesThisMonthCents,
+      draftInvoices,
+      enabledGateways,
+    });
+  });
+
+  // ─── Reports (accounting rollups, all over the trailing 12 months) ───────
+
+  app.get("/api/finance/reports", requireElevated, (_req, res) => {
+    const today = todayLocal();
+    const now = new Date();
+
+    // Trailing 12 calendar months including the current one.
+    const months: string[] = [];
+    for (let i = 11; i >= 0; i--) {
+      months.push(monthKey(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+    }
+    const monthSet = new Set(months);
+    const windowStart = `${months[0]}-01`;
+
+    const paymentsAll = db.select().from(invoicePayments).all();
+    const invoicesAll = db.select().from(invoices).all();
+    const expenseRows = db.select().from(expenses)
+      .where(and(isNull(expenses.deletedAt), sql`${expenses.date} >= ${windowStart}`))
+      .all();
+
+    const paymentMonth = (p: (typeof paymentsAll)[number]): string =>
+      p.paidAt ? p.paidAt.slice(0, 7) : monthKey(p.createdAt);
+
+    // monthly income vs expense
+    const income = new Map<string, number>(months.map((m) => [m, 0]));
+    const expense = new Map<string, number>(months.map((m) => [m, 0]));
+    for (const p of paymentsAll) {
+      const m = paymentMonth(p);
+      if (monthSet.has(m)) income.set(m, (income.get(m) ?? 0) + p.amountCents);
+    }
+    for (const e of expenseRows) {
+      const m = e.date.slice(0, 7);
+      if (monthSet.has(m)) expense.set(m, (expense.get(m) ?? 0) + e.amountCents);
+    }
+    const monthly = months.map((m) => {
+      const incomeCents = income.get(m) ?? 0;
+      const expenseCents = expense.get(m) ?? 0;
+      return { month: m, incomeCents, expenseCents, netCents: incomeCents - expenseCents };
+    });
+
+    // expense breakdown by category
+    const byCategory = new Map<string, number>();
+    for (const e of expenseRows) {
+      byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amountCents);
+    }
+    const expenseByCategory = [...byCategory.entries()]
+      .map(([category, amountCents]) => ({ category, amountCents }))
+      .sort((a, b) => b.amountCents - a.amountCents);
+
+    // AR aging — unpaid balances bucketed by days past due. Undated invoices
+    // and ones not yet due sit in "current".
+    const arAging = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90plus: 0 };
+    const todayMs = Date.parse(today);
+    for (const inv of invoicesAll) {
+      if (inv.deletedAt !== null) continue;
+      if (!RECEIVABLE_STATUSES.includes(inv.status)) continue;
+      const balance = inv.totalCents - inv.paidCents;
+      if (balance <= 0) continue;
+      const daysPast = inv.dueDate
+        ? Math.floor((todayMs - Date.parse(inv.dueDate)) / 86_400_000)
+        : 0;
+      if (daysPast <= 0) arAging.current += balance;
+      else if (daysPast <= 30) arAging.d1_30 += balance;
+      else if (daysPast <= 60) arAging.d31_60 += balance;
+      else if (daysPast <= 90) arAging.d61_90 += balance;
+      else arAging.d90plus += balance;
+    }
+
+    // Top clients by payments received via their invoices (same 12-month
+    // window as the rest of the report).
+    const invoiceById = new Map(invoicesAll.map((i) => [i.id, i]));
+    const clientNames = allClientNames();
+    const revenueByClient = new Map<string, number>();
+    for (const p of paymentsAll) {
+      if (!monthSet.has(paymentMonth(p))) continue;
+      const inv = invoiceById.get(p.invoiceId);
+      const label =
+        inv?.clientName ??
+        (inv?.clientId != null ? clientNames.get(inv.clientId) : undefined) ??
+        "Unassigned";
+      revenueByClient.set(label, (revenueByClient.get(label) ?? 0) + p.amountCents);
+    }
+    const topClients = [...revenueByClient.entries()]
+      .map(([clientName, revenueCents]) => ({ clientName, revenueCents }))
+      .sort((a, b) => b.revenueCents - a.revenueCents)
+      .slice(0, 5);
+
+    res.json({ monthly, expenseByCategory, arAging, topClients });
+  });
+
+  // ─── Invoices ─────────────────────────────────────────────────────────────
+
+  app.get("/api/finance/invoices", requireElevated, (req, res) => {
+    const status = qstr(req.query.status);
+    const clientId = qstr(req.query.clientId);
+    const projectId = qstr(req.query.projectId);
+    const q = qstr(req.query.q);
+
+    const conds = [isNull(invoices.deletedAt)];
+    if (clientId) conds.push(eq(invoices.clientId, parseInt(clientId, 10)));
+    if (projectId) conds.push(eq(invoices.projectId, parseInt(projectId, 10)));
+
+    const today = todayLocal();
+    let rows = db.select().from(invoices)
+      .where(and(...conds))
+      .orderBy(desc(invoices.createdAt), desc(invoices.id))
+      .all()
+      .map((r) => presentInvoice(r, today));
+
+    // Status filter runs against the DERIVED status so ?status=overdue works
+    // (and ?status=sent excludes rows that have tipped overdue).
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (q) {
+      const needle = q.toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          r.number.toLowerCase().includes(needle) ||
+          (r.clientName ?? "").toLowerCase().includes(needle)
+      );
+    }
+    res.json(rows);
+  });
+
+  app.post("/api/finance/invoices", requireElevated, (req, res) => {
+    let body, itemsJson, totals;
+    try {
+      // Items arrive as a JSON string (the column shape) or a raw array —
+      // same tolerance as the CRM estimate endpoints.
+      const raw = { ...req.body };
+      if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
+      body = insertInvoiceSchema.parse(raw);
+      itemsJson = body.items ?? "[]";
+      totals = computeTotals(itemsJson, body.taxRateBp ?? 0);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    // Snapshot the client's name at issue time — the invoice keeps displaying
+    // correctly even if the CRM client is later renamed or deleted.
+    let clientName = body.clientName ?? null;
+    if (!clientName && body.clientId != null) clientName = clientNameById(body.clientId);
+
+    const row = insertNumbered("fin_invoices", "INV", (num) =>
+      db.insert(invoices)
+        .values({ ...body, number: num, items: itemsJson, clientName, ...totals })
+        .returning()
+        .get()
+    );
+    audit(req, "finance.invoice_create", {
+      targetType: "invoice", targetId: row.id, targetName: row.number,
+      details: { totalCents: row.totalCents, clientId: row.clientId },
+    });
+    res.status(201).json(presentInvoice(row, todayLocal()));
+  });
+
+  // Literal segment — must be registered before any /invoices/:id sibling.
+  app.post("/api/finance/invoices/from-estimate/:estimateId", requireElevated, (req, res) => {
+    const est = estimateById(pid(req.params.estimateId));
+    if (!est) return res.status(404).json({ message: "Estimate not found" });
+
+    const totals = computeTotals(est.items, est.taxRateBp);
+    const clientName = est.clientId != null ? clientNameById(est.clientId) : null;
+    const row = insertNumbered("fin_invoices", "INV", (num) =>
+      db.insert(invoices).values({
+        number: num,
+        clientId: est.clientId,
+        clientName,
+        estimateId: est.id,
+        status: "draft",
+        issueDate: todayLocal(),
+        items: est.items,
+        taxRateBp: est.taxRateBp,
+        ...totals,
+        // The estimate's title lives in notes — invoices have no title column.
+        notes: `From estimate ${est.number} — ${est.title}`,
+      }).returning().get()
+    );
+    audit(req, "finance.invoice_create", {
+      targetType: "invoice", targetId: row.id, targetName: row.number,
+      details: { fromEstimate: est.number, totalCents: row.totalCents },
+    });
+    res.status(201).json(presentInvoice(row, todayLocal()));
+  });
+
+  app.get("/api/finance/invoices/:id", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    const payments = db.select().from(invoicePayments)
+      .where(eq(invoicePayments.invoiceId, inv.id))
+      .orderBy(desc(invoicePayments.createdAt), desc(invoicePayments.id))
+      .all();
+    res.json({ invoice: presentInvoice(inv, todayLocal()), payments });
+  });
+
+  app.patch("/api/finance/invoices/:id", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    let body;
+    try {
+      const raw = { ...req.body };
+      if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
+      body = insertInvoiceSchema.partial().parse(raw);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+
+    // Once money has been recorded against an invoice its line items and
+    // totals are immutable — editing them would silently corrupt paid/balance
+    // math. The escape hatch is voiding and reissuing. (Totals themselves are
+    // schema-stripped, so items/taxRateBp are the only money inputs.)
+    const touchesMoney = body.items !== undefined || body.taxRateBp !== undefined;
+    if (touchesMoney && paymentCountFor(inv.id) > 0) {
+      return res.status(400).json({
+        message: "Invoice has recorded payments — items and totals are locked. Void it and issue a new one.",
+      });
+    }
+
+    const updates: Partial<typeof invoices.$inferInsert> = { ...body };
+    if (touchesMoney) {
+      try {
+        Object.assign(
+          updates,
+          computeTotals(body.items ?? inv.items, body.taxRateBp ?? inv.taxRateBp)
+        );
+      } catch (e: any) {
+        return res.status(400).json({ message: e.message });
+      }
+    }
+    // Linking a different CRM client re-snapshots the display name the same
+    // way POST does; unlinking (clientId: null) keeps the old snapshot so the
+    // invoice still reads correctly as free-text.
+    if (body.clientId != null && body.clientName === undefined) {
+      updates.clientName = clientNameById(body.clientId) ?? inv.clientName;
+    }
+    // First transition to "sent" stamps sentAt; re-sending keeps the original.
+    if (body.status === "sent" && inv.status !== "sent" && !inv.sentAt) {
+      updates.sentAt = Date.now();
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.json(presentInvoice(inv, todayLocal()));
+    }
+
+    const row = db.update(invoices).set(updates).where(eq(invoices.id, inv.id)).returning().get();
+    if (body.status && body.status !== inv.status) {
+      audit(req, "finance.invoice_status", {
+        targetType: "invoice", targetId: inv.id, targetName: inv.number,
+        details: { from: inv.status, to: body.status },
+      });
+    }
+    res.json(presentInvoice(row, todayLocal()));
+  });
+
+  app.delete("/api/finance/invoices/:id", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    if (paymentCountFor(inv.id) > 0) {
+      return res.status(400).json({
+        message: "Invoice has recorded payments and cannot be deleted — set its status to void instead.",
+      });
+    }
+    db.update(invoices).set({ deletedAt: Date.now() }).where(eq(invoices.id, inv.id)).run();
+    audit(req, "finance.invoice_delete", {
+      targetType: "invoice", targetId: inv.id, targetName: inv.number,
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/finance/invoices/:id/payments", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    if (inv.status === "void") {
+      return res.status(400).json({ message: "Cannot record a payment on a void invoice" });
+    }
+    let body;
+    try {
+      body = insertInvoicePaymentSchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+
+    const payment = db.insert(invoicePayments)
+      .values({ invoiceId: inv.id, ...body })
+      .returning()
+      .get();
+    // Auto-status from the running paid total: covered → paid, anything → partial.
+    const paidCents = inv.paidCents + body.amountCents;
+    const status: InvoiceStatus = paidCents >= inv.totalCents ? "paid" : "partial";
+    const updated = db.update(invoices)
+      .set({ paidCents, status })
+      .where(eq(invoices.id, inv.id))
+      .returning()
+      .get();
+
+    audit(req, "finance.payment_record", {
+      targetType: "invoice", targetId: inv.id, targetName: inv.number,
+      details: { amountCents: body.amountCents, method: body.method, newStatus: status },
+    });
+    res.status(201).json({ payment, invoice: presentInvoice(updated, todayLocal()) });
+  });
+
+  // Payment reversal — mistyped amount, bounced check. Rewinds the invoice's
+  // paid total and re-derives its status from what remains.
+  app.delete("/api/finance/payments/:id", requireElevated, (req, res) => {
+    const payment = db.select().from(invoicePayments)
+      .where(eq(invoicePayments.id, pid(req.params.id)))
+      .get();
+    if (!payment) return res.status(404).json({ message: "Payment not found" });
+
+    db.delete(invoicePayments).where(eq(invoicePayments.id, payment.id)).run();
+
+    const inv = db.select().from(invoices).where(eq(invoices.id, payment.invoiceId)).get();
+    let updated = inv;
+    if (inv) {
+      const paidCents = Math.max(0, inv.paidCents - payment.amountCents);
+      // void stays void; otherwise: covered → paid, some → partial, none →
+      // back to sent (if it ever went out) or draft.
+      let status = inv.status;
+      if (inv.status !== "void") {
+        status =
+          paidCents >= inv.totalCents && inv.totalCents > 0 ? "paid"
+          : paidCents > 0 ? "partial"
+          : inv.sentAt ? "sent"
+          : "draft";
+      }
+      updated = db.update(invoices)
+        .set({ paidCents, status })
+        .where(eq(invoices.id, inv.id))
+        .returning()
+        .get();
+    }
+    audit(req, "finance.payment_delete", {
+      targetType: "invoice", targetId: payment.invoiceId, targetName: inv?.number ?? null,
+      details: { amountCents: payment.amountCents },
+    });
+    res.json({ ok: true, invoice: updated ? presentInvoice(updated, todayLocal()) : null });
+  });
+
+  // ─── Expenses ────────────────────────────────────────────────────────────
+
+  app.get("/api/finance/expenses", requireElevated, (req, res) => {
+    const category = qstr(req.query.category);
+    const projectId = qstr(req.query.projectId);
+    const from = qstr(req.query.from);
+    const to = qstr(req.query.to);
+    const q = qstr(req.query.q);
+
+    const conds = [isNull(expenses.deletedAt)];
+    if (category) conds.push(eq(expenses.category, category as any));
+    if (projectId) conds.push(eq(expenses.projectId, parseInt(projectId, 10)));
+    if (from) conds.push(sql`${expenses.date} >= ${from}`);
+    if (to) conds.push(sql`${expenses.date} <= ${to}`);
+
+    let rows = db.select().from(expenses)
+      .where(and(...conds))
+      .orderBy(desc(expenses.date), desc(expenses.id))
+      .all();
+    if (q) {
+      const needle = q.toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          (r.vendor ?? "").toLowerCase().includes(needle) ||
+          (r.notes ?? "").toLowerCase().includes(needle)
+      );
+    }
+    // Total is for the FILTERED set — the UI shows "you spent $X on fuel in June".
+    const totalCents = rows.reduce((sum, r) => sum + r.amountCents, 0);
+    res.json({ rows, totalCents });
+  });
+
+  app.post("/api/finance/expenses", requireElevated, (req, res) => {
+    let body;
+    try {
+      body = insertExpenseSchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const row = db.insert(expenses).values(body).returning().get();
+    audit(req, "finance.expense_create", {
+      targetType: "expense", targetId: row.id, targetName: row.vendor ?? row.category,
+      details: { amountCents: row.amountCents, category: row.category },
+    });
+    res.status(201).json(row);
+  });
+
+  app.patch("/api/finance/expenses/:id", requireElevated, (req, res) => {
+    const existing = db.select().from(expenses)
+      .where(and(eq(expenses.id, pid(req.params.id)), isNull(expenses.deletedAt)))
+      .get();
+    if (!existing) return res.status(404).json({ message: "Expense not found" });
+    let body;
+    try {
+      body = insertExpenseSchema.partial().parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    if (Object.keys(body).length === 0) return res.json(existing);
+    const row = db.update(expenses).set(body).where(eq(expenses.id, existing.id)).returning().get();
+    res.json(row);
+  });
+
+  app.delete("/api/finance/expenses/:id", requireElevated, (req, res) => {
+    const existing = db.select().from(expenses)
+      .where(and(eq(expenses.id, pid(req.params.id)), isNull(expenses.deletedAt)))
+      .get();
+    if (!existing) return res.status(404).json({ message: "Expense not found" });
+    db.update(expenses).set({ deletedAt: Date.now() }).where(eq(expenses.id, existing.id)).run();
+    audit(req, "finance.expense_delete", {
+      targetType: "expense", targetId: existing.id, targetName: existing.vendor ?? existing.category,
+      details: { amountCents: existing.amountCents },
+    });
+    res.json({ ok: true });
+  });
+
+  // ─── Payment gateways ────────────────────────────────────────────────────
+
+  app.get("/api/finance/gateways", requireElevated, (_req, res) => {
+    const catalogByKey = new Map(PAYMENT_GATEWAY_CATALOG.map((g) => [g.key, g]));
+    const rows = db.select().from(paymentGateways)
+      .orderBy(asc(paymentGateways.orderIndex), asc(paymentGateways.id))
+      .all();
+    // Fall back to the catalog's fees note so wiping the field in the UI
+    // restores the stock guidance instead of leaving it blank.
+    res.json(rows.map((r) => ({
+      ...r,
+      feesNote: r.feesNote ?? catalogByKey.get(r.key)?.feesNote ?? null,
+    })));
+  });
+
+  app.patch("/api/finance/gateways/:key", requireElevated, (req, res) => {
+    const gw = db.select().from(paymentGateways)
+      .where(eq(paymentGateways.key, pkey(req.params.key)))
+      .get();
+    if (!gw) return res.status(404).json({ message: "Gateway not found" });
+    let body;
+    try {
+      body = updateGatewaySchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    // config is persisted as-is and parsed by the client — reject garbage now
+    // rather than blowing up the settings page later.
+    if (body.config !== undefined) {
+      try {
+        JSON.parse(body.config);
+      } catch {
+        return res.status(400).json({ message: "config must be a valid JSON string" });
+      }
+    }
+
+    const row = db.update(paymentGateways)
+      .set({ ...body, updatedAt: new Date() })
+      .where(eq(paymentGateways.id, gw.id))
+      .returning()
+      .get();
+    if (body.enabled !== undefined && body.enabled !== gw.enabled) {
+      audit(req, "finance.gateway_toggle", {
+        targetType: "gateway", targetId: gw.id, targetName: gw.name,
+        details: { enabled: body.enabled },
+      });
+    }
+    res.json(row);
+  });
+
+  // ─── Purchase orders ─────────────────────────────────────────────────────
+
+  app.get("/api/finance/purchase-orders", requireElevated, (req, res) => {
+    const status = qstr(req.query.status);
+    const q = qstr(req.query.q);
+
+    const conds = [isNull(purchaseOrders.deletedAt)];
+    if (status) conds.push(eq(purchaseOrders.status, status as any));
+
+    let rows = db.select().from(purchaseOrders)
+      .where(and(...conds))
+      .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.id))
+      .all();
+    if (q) {
+      const needle = q.toLowerCase();
+      rows = rows.filter((r) => r.vendor.toLowerCase().includes(needle));
+    }
+    res.json(rows);
+  });
+
+  app.post("/api/finance/purchase-orders", requireElevated, (req, res) => {
+    let body, itemsJson, totalCents;
+    try {
+      const raw = { ...req.body };
+      if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
+      body = insertPurchaseOrderSchema.parse(raw);
+      itemsJson = body.items ?? "[]";
+      totalCents = computeTotals(itemsJson, 0).totalCents; // POs carry no tax
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const row = insertNumbered("fin_purchase_orders", "PO", (num) =>
+      db.insert(purchaseOrders)
+        .values({ ...body, number: num, items: itemsJson, totalCents })
+        .returning()
+        .get()
+    );
+    audit(req, "finance.po_create", {
+      targetType: "purchase_order", targetId: row.id, targetName: row.number,
+      details: { vendor: row.vendor, totalCents: row.totalCents },
+    });
+    res.status(201).json(row);
+  });
+
+  app.patch("/api/finance/purchase-orders/:id", requireElevated, (req, res) => {
+    const existing = db.select().from(purchaseOrders)
+      .where(and(eq(purchaseOrders.id, pid(req.params.id)), isNull(purchaseOrders.deletedAt)))
+      .get();
+    if (!existing) return res.status(404).json({ message: "Purchase order not found" });
+    let body;
+    try {
+      const raw = { ...req.body };
+      if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
+      body = insertPurchaseOrderSchema.partial().parse(raw);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+
+    const updates: Partial<typeof purchaseOrders.$inferInsert> = { ...body };
+    if (body.items !== undefined) {
+      try {
+        updates.totalCents = computeTotals(body.items, 0).totalCents;
+      } catch (e: any) {
+        return res.status(400).json({ message: e.message });
+      }
+    }
+    if (Object.keys(updates).length === 0) return res.json(existing);
+
+    const row = db.update(purchaseOrders).set(updates).where(eq(purchaseOrders.id, existing.id)).returning().get();
+    if (body.status && body.status !== existing.status) {
+      audit(req, "finance.po_status", {
+        targetType: "purchase_order", targetId: existing.id, targetName: existing.number,
+        details: { from: existing.status, to: body.status },
+      });
+    }
+    res.json(row);
+  });
+
+  app.delete("/api/finance/purchase-orders/:id", requireElevated, (req, res) => {
+    const existing = db.select().from(purchaseOrders)
+      .where(and(eq(purchaseOrders.id, pid(req.params.id)), isNull(purchaseOrders.deletedAt)))
+      .get();
+    if (!existing) return res.status(404).json({ message: "Purchase order not found" });
+    db.update(purchaseOrders).set({ deletedAt: Date.now() }).where(eq(purchaseOrders.id, existing.id)).run();
+    audit(req, "finance.po_delete", {
+      targetType: "purchase_order", targetId: existing.id, targetName: existing.number,
+    });
+    res.json({ ok: true });
+  });
+}
