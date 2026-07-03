@@ -3,9 +3,9 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle
 import { sqlite, db, storage } from "./storage";
 import { requireAuth, requireElevated } from "./auth";
 import {
-  campaigns, reviews, mkTasks, marketingSettings,
+  campaigns, reviews, mkTasks, marketingSettings, portfolioItems,
   insertCampaignSchema, insertReviewSchema, insertMkTaskSchema,
-  updateMarketingSettingsSchema,
+  insertPortfolioItemSchema, updateMarketingSettingsSchema,
   CAMPAIGN_CHANNELS, CAMPAIGN_STATUSES, REVIEW_SOURCES,
   MK_TASK_KINDS, MK_TASK_STATUSES,
   type MarketingSettings,
@@ -89,7 +89,27 @@ sqlite.exec(`
     auto_review_request INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
+
+  -- "Recent work" gallery published to www.cjmmetals.com.
+  CREATE TABLE IF NOT EXISTS mk_portfolio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category TEXT,
+    photo_url TEXT NOT NULL,
+    published INTEGER NOT NULL DEFAULT 1,
+    order_index INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_mk_portfolio_pub ON mk_portfolio(published, order_index);
 `);
+
+// Additive migration: mk_reviews.published arrived after installs existed.
+// SQLite has no IF NOT EXISTS for columns — the throw on re-run is expected.
+try {
+  sqlite.exec("ALTER TABLE mk_reviews ADD COLUMN published INTEGER NOT NULL DEFAULT 0");
+} catch {
+  /* column already exists */
+}
 
 // Singleton settings row — the automation sweep and the alert thresholds read
 // it unconditionally, so guarantee it exists at boot rather than lazily.
@@ -700,6 +720,63 @@ export function registerMarketingRoutes(app: Express): void {
     const target = db.select().from(mkTasks).where(eq(mkTasks.id, id)).get();
     if (!target) return res.status(404).json({ message: "Task not found" });
     db.delete(mkTasks).where(eq(mkTasks.id, id)).run();
+    res.json({ ok: true });
+  });
+
+  // ─── Portfolio ("recent work" gallery published to the website) ───────────
+
+  app.get("/api/marketing/portfolio", requireElevated, (_req, res) => {
+    res.json(
+      db.select().from(portfolioItems)
+        .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt))
+        .all(),
+    );
+  });
+
+  app.post("/api/marketing/portfolio", requireElevated, (req, res) => {
+    let body;
+    try {
+      body = insertPortfolioItemSchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const row = db.insert(portfolioItems).values(body).returning().get();
+    audit(req, "marketing.portfolio_create", {
+      targetType: "portfolio", targetId: row.id, targetName: row.title,
+    });
+    res.status(201).json(row);
+  });
+
+  app.patch("/api/marketing/portfolio/:id", requireElevated, (req, res) => {
+    const id = pid(req.params.id);
+    const before = db.select().from(portfolioItems).where(eq(portfolioItems.id, id)).get();
+    if (!before) return res.status(404).json({ message: "Portfolio item not found" });
+    let body;
+    try {
+      body = insertPortfolioItemSchema.partial().parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const updates = stripUndefined(body);
+    if (Object.keys(updates).length === 0) return res.json(before);
+    const row = db.update(portfolioItems).set(updates).where(eq(portfolioItems.id, id)).returning().get();
+    if (body.published !== undefined && body.published !== before.published) {
+      audit(req, "marketing.portfolio_publish", {
+        targetType: "portfolio", targetId: id, targetName: before.title,
+        details: { published: body.published },
+      });
+    }
+    res.json(row);
+  });
+
+  app.delete("/api/marketing/portfolio/:id", requireElevated, (req, res) => {
+    const id = pid(req.params.id);
+    const target = db.select().from(portfolioItems).where(eq(portfolioItems.id, id)).get();
+    if (!target) return res.status(404).json({ message: "Portfolio item not found" });
+    db.delete(portfolioItems).where(eq(portfolioItems.id, id)).run();
+    audit(req, "marketing.portfolio_delete", {
+      targetType: "portfolio", targetId: id, targetName: target.title,
+    });
     res.json({ ok: true });
   });
 }

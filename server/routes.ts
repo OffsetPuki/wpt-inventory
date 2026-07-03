@@ -17,6 +17,7 @@ import { registerPmRoutes } from "./pm";
 import { registerHrRoutes } from "./hr";
 import { registerFinanceRoutes } from "./finance";
 import { registerSearchRoutes } from "./search";
+import { registerPublicRoutes } from "./public-api";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
@@ -830,6 +831,7 @@ export function registerRoutes(app: Express): void {
   registerHrRoutes(app);
   registerFinanceRoutes(app);
   registerSearchRoutes(app);
+  registerPublicRoutes(app);
 
   // ─── Serve uploaded files ──────────────────────────────────────────────
 

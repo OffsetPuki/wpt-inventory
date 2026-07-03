@@ -73,6 +73,9 @@ export const reviews = sqliteTable("mk_reviews", {
   reviewDate: text("review_date"), // "YYYY-MM-DD"
   responded: integer("responded", { mode: "boolean" }).notNull().default(false),
   respondedAt: integer("responded_at"), // unix ms
+  // Published reviews appear on the public testimonials feed that
+  // www.cjmmetals.com renders — opt-in per review.
+  published: integer("published", { mode: "boolean" }).notNull().default(false),
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
@@ -101,6 +104,20 @@ export const mkTasks = sqliteTable("mk_tasks", {
     .notNull()
     .$defaultFn(() => new Date()),
   completedAt: integer("completed_at"), // unix ms
+});
+
+// "Recent work" gallery published to www.cjmmetals.com — photos uploaded via
+// the normal /api/upload flow, curated and ordered here.
+export const portfolioItems = sqliteTable("mk_portfolio", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  category: text("category"), // "Gates", "Fencing", … (free text)
+  photoUrl: text("photo_url").notNull(), // /uploads/… path
+  published: integer("published", { mode: "boolean" }).notNull().default(true),
+  orderIndex: integer("order_index").notNull().default(0),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });
 
 // Singleton row (id=1) with the automation knobs.
@@ -139,6 +156,11 @@ export const insertMkTaskSchema = createInsertSchema(mkTasks).omit({
   autoCreated: true,
 });
 
+export const insertPortfolioItemSchema = createInsertSchema(portfolioItems).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const updateMarketingSettingsSchema = z.object({
   staleLeadDays: z.number().int().min(1).max(365).optional(),
   quoteFollowUpDays: z.number().int().min(1).max(90).optional(),
@@ -152,6 +174,8 @@ export type Campaign = typeof campaigns.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
 export type MkTask = typeof mkTasks.$inferSelect;
 export type MarketingSettings = typeof marketingSettings.$inferSelect;
+export type PortfolioItem = typeof portfolioItems.$inferSelect;
+export type InsertPortfolioItem = z.infer<typeof insertPortfolioItemSchema>;
 
 export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
 export type InsertReview = z.infer<typeof insertReviewSchema>;

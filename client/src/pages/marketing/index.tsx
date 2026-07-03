@@ -23,7 +23,9 @@ import {
   type CampaignStatus,
   type ReviewSource,
   type MkTaskKind,
+  type PortfolioItem,
 } from "@shared/marketing-schema";
+import { uploadPhoto } from "@/lib/uploadPhoto";
 import {
   LEAD_STAGES,
   LEAD_SOURCES,
@@ -40,6 +42,8 @@ import {
   ArrowUpRight,
   Check,
   ClipboardList,
+  Globe,
+  Image as ImageIcon,
   Loader2,
   Megaphone,
   Pause,
@@ -50,6 +54,8 @@ import {
   Settings,
   Square,
   Star,
+  Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -1039,6 +1045,21 @@ function ReviewsTab() {
       toast({ variant: "destructive", title: "Could not update review", description: e.message }),
   });
 
+  const togglePublished = useMutation({
+    mutationFn: async (r: Review) =>
+      (await apiRequest("PATCH", `/api/marketing/reviews/${r.id}`, { published: !r.published })).json(),
+    onSuccess: (row: Review) => {
+      qc.invalidateQueries({ queryKey: ["marketing"] });
+      toast({
+        variant: "success",
+        title: row.published ? "Published to cjmmetals.com" : "Removed from the website",
+        description: row.published ? "The site picks it up within ~5 minutes." : undefined,
+      });
+    },
+    onError: (e: Error) =>
+      toast({ variant: "destructive", title: "Could not update review", description: e.message }),
+  });
+
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1077,18 +1098,33 @@ function ReviewsTab() {
                     {formatDate(r.reviewDate ?? r.createdAt)}
                   </span>
                 </div>
-                <button
-                  onClick={() => toggleResponded.mutate(r)}
-                  disabled={toggleResponded.isPending}
-                  className={cn(
-                    smallBtn,
-                    r.responded &&
-                      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  )}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  {r.responded ? "Responded" : "Mark responded"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => togglePublished.mutate(r)}
+                    disabled={togglePublished.isPending}
+                    title={r.published ? "Shown on cjmmetals.com — click to unpublish" : "Publish to the website testimonials"}
+                    className={cn(
+                      smallBtn,
+                      r.published &&
+                        "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                    )}
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    {r.published ? "On website" : "Publish"}
+                  </button>
+                  <button
+                    onClick={() => toggleResponded.mutate(r)}
+                    disabled={toggleResponded.isPending}
+                    className={cn(
+                      smallBtn,
+                      r.responded &&
+                        "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    )}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    {r.responded ? "Responded" : "Mark responded"}
+                  </button>
+                </div>
               </div>
               {r.text && <p className="mt-2 text-sm text-muted-foreground">{r.text}</p>}
             </div>
@@ -1097,6 +1133,204 @@ function ReviewsTab() {
       )}
 
       {addOpen && <ReviewDialog open={addOpen} onClose={() => setAddOpen(false)} />}
+    </div>
+  );
+}
+
+// ─── Portfolio tab ────────────────────────────────────────────────────────────
+// "Recent work" photos published to the cjmmetals.com gallery feed.
+
+function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("");
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const create = useMutation({
+    mutationFn: async () =>
+      (
+        await apiRequest("POST", "/api/marketing/portfolio", {
+          title: title.trim(),
+          category: category.trim() || null,
+          photoUrl,
+          published: true,
+        })
+      ).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
+      toast({ variant: "success", title: "Added to the portfolio" });
+      onClose();
+    },
+    onError: (e: Error) =>
+      toast({ variant: "destructive", title: "Could not add photo", description: e.message }),
+  });
+
+  const pickPhoto = async (file: File) => {
+    setUploading(true);
+    try {
+      setPhotoUrl(await uploadPhoto(file));
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Upload failed", description: e?.message });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add work photo">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!title.trim() || !photoUrl) {
+            toast({ variant: "destructive", title: "A title and a photo are required" });
+            return;
+          }
+          create.mutate();
+        }}
+        className="flex flex-col gap-4"
+      >
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Title</span>
+          <input
+            className={inputCls}
+            placeholder="e.g. Horizontal slat fence — Mansfield"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Category (optional)</span>
+          <input
+            className={inputCls}
+            placeholder="Gates, Fencing, Carports, Railings, Furniture…"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          />
+        </label>
+        <div className="flex items-center gap-4">
+          {photoUrl ? (
+            <img src={photoUrl} alt="" className="h-24 w-24 rounded-lg border border-border object-cover" />
+          ) : (
+            <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground">
+              <ImageIcon className="h-8 w-8" />
+            </div>
+          )}
+          <label className={cn(secondaryBtn, "cursor-pointer")}>
+            {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
+            {photoUrl ? "Replace photo" : "Upload photo"}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && pickPhoto(e.target.files[0])}
+            />
+          </label>
+        </div>
+        <button type="submit" disabled={create.isPending || uploading} className={cn(primaryBtn, "mt-1 justify-center")}>
+          {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
+          Add to portfolio
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function PortfolioTab() {
+  const qc = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
+
+  const { data: items = [], isLoading } = useQuery<PortfolioItem[]>({
+    queryKey: ["marketing", "portfolio"],
+    queryFn: async () => (await apiRequest("GET", "/api/marketing/portfolio")).json(),
+  });
+
+  const togglePublished = useMutation({
+    mutationFn: async (it: PortfolioItem) =>
+      (await apiRequest("PATCH", `/api/marketing/portfolio/${it.id}`, { published: !it.published })).json(),
+    onSuccess: (row: PortfolioItem) => {
+      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
+      toast({
+        variant: "success",
+        title: row.published ? "Shown on cjmmetals.com" : "Hidden from the website",
+      });
+    },
+    onError: (e: Error) =>
+      toast({ variant: "destructive", title: "Could not update", description: e.message }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (it: PortfolioItem) =>
+      (await apiRequest("DELETE", `/api/marketing/portfolio/${it.id}`)).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
+      toast({ variant: "success", title: "Removed from the portfolio" });
+    },
+    onError: (e: Error) =>
+      toast({ variant: "destructive", title: "Could not remove", description: e.message }),
+  });
+
+  return (
+    <div>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          Published photos appear in the website's "recent work" feed. New photos publish immediately.
+        </p>
+        <button onClick={() => setAddOpen(true)} className={cn(primaryBtn, "shrink-0")}>
+          <Plus className="h-5 w-5" />
+          Add photo
+        </button>
+      </div>
+
+      {isLoading ? (
+        <LoadingBlock />
+      ) : items.length === 0 ? (
+        <EmptyState icon={ImageIcon} message="No work photos yet">
+          <button onClick={() => setAddOpen(true)} className={secondaryBtn}>
+            <Plus className="h-5 w-5" />
+            Add your first photo
+          </button>
+        </EmptyState>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {items.map((it) => (
+            <div key={it.id} className="overflow-hidden rounded-xl border border-border bg-card">
+              <img src={it.photoUrl} alt={it.title} className="aspect-square w-full object-cover" />
+              <div className="flex flex-col gap-2 p-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
+                  {it.category && <p className="text-xs text-muted-foreground">{it.category}</p>}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => togglePublished.mutate(it)}
+                    disabled={togglePublished.isPending}
+                    className={cn(
+                      smallBtn,
+                      it.published &&
+                        "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                    )}
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    {it.published ? "Live" : "Hidden"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Remove "${it.title}" from the portfolio?`)) remove.mutate(it);
+                    }}
+                    className={cn(smallBtn, "text-destructive hover:border-destructive")}
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {addOpen && <PortfolioDialog open={addOpen} onClose={() => setAddOpen(false)} />}
     </div>
   );
 }
@@ -1510,6 +1744,7 @@ const TABS = [
   { id: "campaigns", label: "Campaigns" },
   { id: "pipeline", label: "Pipeline" },
   { id: "reviews", label: "Reviews" },
+  { id: "portfolio", label: "Portfolio" },
   { id: "tasks", label: "Tasks" },
 ] as const;
 
@@ -1550,6 +1785,7 @@ export default function MarketingPage() {
       {tab === "campaigns" && <CampaignsTab />}
       {tab === "pipeline" && <PipelineTab />}
       {tab === "reviews" && <ReviewsTab />}
+      {tab === "portfolio" && <PortfolioTab />}
       {tab === "tasks" && <TasksTab />}
 
       {settingsOpen && <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
