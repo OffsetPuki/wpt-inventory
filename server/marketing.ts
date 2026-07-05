@@ -101,12 +101,38 @@ sqlite.exec(`
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
   CREATE INDEX IF NOT EXISTS idx_mk_portfolio_pub ON mk_portfolio(published, order_index);
+
+  -- One row per "how did we do?" invitation. Created by the finance module
+  -- when an invoice is first paid (see queueReviewRequest in finance.ts);
+  -- consumed by the website's /review/<token> page via the public portal.
+  -- invoice_id / lead_id / review_id are soft refs (no FK: see note above).
+  CREATE TABLE IF NOT EXISTS review_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    name TEXT,
+    email TEXT,
+    invoice_id INTEGER,
+    lead_id INTEGER,
+    sent_at INTEGER,
+    submitted_at INTEGER,
+    review_id INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_review_requests_invoice ON review_requests(invoice_id);
+  CREATE INDEX IF NOT EXISTS idx_review_requests_created ON review_requests(created_at);
 `);
 
 // Additive migration: mk_reviews.published arrived after installs existed.
 // SQLite has no IF NOT EXISTS for columns — the throw on re-run is expected.
 try {
   sqlite.exec("ALTER TABLE mk_reviews ADD COLUMN published INTEGER NOT NULL DEFAULT 0");
+} catch {
+  /* column already exists */
+}
+
+// Additive migration: mk_settings.lead_time_weeks (website banner) — same deal.
+try {
+  sqlite.exec("ALTER TABLE mk_settings ADD COLUMN lead_time_weeks INTEGER");
 } catch {
   /* column already exists */
 }
@@ -450,6 +476,82 @@ export function registerMarketingRoutes(app: Express): void {
     });
   });
 
+  // ─── Attribution (where the leads — and the money — actually come from) ───
+  // All-time rollups over non-deleted leads: by CRM source enum, by linked
+  // campaign, and by the raw utm_source string the website intake preserved.
+  // "won" = stage won; revenue = the closed revenue recorded on those leads.
+
+  app.get("/api/marketing/attribution", requireElevated, (_req, res) => {
+    const allLeads = db.select({
+      source: leads.source,
+      stage: leads.stage,
+      campaignId: leads.campaignId,
+      utmSource: leads.utmSource,
+      revenueClosedCents: leads.revenueClosedCents,
+    }).from(leads).where(isNull(leads.deletedAt)).all();
+
+    type Bucket = { leads: number; won: number; revenueCents: number };
+    const tally = (map: Map<string, Bucket>, key: string, l: (typeof allLeads)[number]) => {
+      let b = map.get(key);
+      if (!b) {
+        b = { leads: 0, won: 0, revenueCents: 0 };
+        map.set(key, b);
+      }
+      b.leads++;
+      if (l.stage === "won") {
+        b.won++;
+        b.revenueCents += l.revenueClosedCents;
+      }
+    };
+
+    const srcMap = new Map<string, Bucket>();
+    const utmMap = new Map<string, Bucket>();
+    const byCampaignId = new Map<number, Bucket>();
+    for (const l of allLeads) {
+      tally(srcMap, l.source, l);
+      // Raw UTM strings vary by case/whitespace ("Facebook" vs "facebook") —
+      // normalize so the report doesn't split one channel into three rows.
+      const utm = (l.utmSource ?? "").trim().toLowerCase();
+      if (utm) tally(utmMap, utm, l);
+      if (l.campaignId != null) {
+        let b = byCampaignId.get(l.campaignId);
+        if (!b) {
+          b = { leads: 0, won: 0, revenueCents: 0 };
+          byCampaignId.set(l.campaignId, b);
+        }
+        b.leads++;
+        if (l.stage === "won") {
+          b.won++;
+          b.revenueCents += l.revenueClosedCents;
+        }
+      }
+    }
+
+    const bySource = [...srcMap.entries()]
+      .map(([source, b]) => ({ source, ...b }))
+      .sort((a, b) => b.leads - a.leads);
+    const byUtmSource = [...utmMap.entries()]
+      .map(([utmSource, b]) => ({ utmSource, ...b }))
+      .sort((a, b) => b.leads - a.leads);
+    const byCampaign = db.select().from(campaigns)
+      .where(isNull(campaigns.deletedAt))
+      .orderBy(desc(campaigns.createdAt))
+      .all()
+      .map((c) => {
+        const b = byCampaignId.get(c.id) ?? { leads: 0, won: 0, revenueCents: 0 };
+        return {
+          id: c.id,
+          name: c.name,
+          channel: c.channel,
+          ...b,
+          spendCents: c.spendCents,
+          cplCents: b.leads > 0 ? Math.round(c.spendCents / b.leads) : null,
+        };
+      });
+
+    res.json({ bySource, byCampaign, byUtmSource });
+  });
+
   // ─── Settings (singleton) ─────────────────────────────────────────────────
 
   app.get("/api/marketing/settings", requireElevated, (_req, res) => {
@@ -778,6 +880,32 @@ export function registerMarketingRoutes(app: Express): void {
       targetType: "portfolio", targetId: id, targetName: target.title,
     });
     res.json({ ok: true });
+  });
+
+  // Publish a finished shop project straight to the website gallery. Projects
+  // carry no photos of their own, so photoUrl must come in the body (an
+  // /uploads path from the normal photo-upload flow); title falls back to the
+  // project's name so one click is usually enough.
+  app.post("/api/projects/:id/publish-portfolio", requireElevated, (req, res) => {
+    const project = storage.getProjectById(pid(req.params.id));
+    if (!project) return res.status(404).json({ message: "Project not found" });
+    let body;
+    try {
+      body = insertPortfolioItemSchema.parse({
+        title: req.body?.title || project.name,
+        category: req.body?.category ?? null,
+        photoUrl: req.body?.photoUrl,
+        published: true,
+      });
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const row = db.insert(portfolioItems).values(body).returning().get();
+    audit(req, "marketing.portfolio_create", {
+      targetType: "portfolio", targetId: row.id, targetName: row.title,
+      details: { fromProject: project.jobNumber },
+    });
+    res.status(201).json(row);
   });
 }
 

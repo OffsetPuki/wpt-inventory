@@ -1,0 +1,404 @@
+import type { Express } from "express";
+import rateLimit from "express-rate-limit";
+import { z } from "zod";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { db, sqlite, storage } from "./storage";
+import { hasLeadKey } from "./public-api";
+import { mailEnabled, sendOwnerMail } from "./mailer";
+import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
+import { reviews, marketingSettings } from "../shared/marketing-schema";
+// The quote builder's own pricing engine — plain JS, pure functions + data
+// (no React, no DOM), imported straight from client/src/quote so the server
+// prices a design with EXACTLY the math the builder and the printed quote use.
+import { deriveItems, lineCost, buildLineState } from "../client/src/quote/lib/estimate.js";
+import { computeTotals } from "../client/src/quote/lib/quote.js";
+import { distributeToTotal } from "../client/src/quote/lib/calc.js";
+import { deepMerge, DEFAULT_SHOP } from "../client/src/quote/lib/store.js";
+import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
+
+// ─── Public portal: the website's customer-facing endpoints ─────────────────
+// No session auth on any of these — the callers are visitors on
+// www.cjmmetals.com (via the site's server-side proxies):
+//   POST /api/public/estimate                — configurator ballpark price
+//   GET  /api/public/status?ref=CJM-XXXX     — "where's my quote" tracker
+//   GET  /api/public/quote/:token            — shared quote page
+//   POST /api/public/quote/:token/accept     — customer accepts online
+//   GET  /api/public/review-request/:token   — review-invitation landing
+//   POST /api/public/review-submit           — review-invitation submit
+//   GET  /api/public/site-info               — lead-time banner feed
+// Companion to public-api.ts (lead intake + feeds) — registered right after it.
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function parseJson<T>(s: unknown, fallback: T): T {
+  if (typeof s !== "string") return fallback;
+  try {
+    const v = JSON.parse(s);
+    return v == null ? fallback : (v as T);
+  } catch {
+    return fallback;
+  }
+}
+
+// The effective price book: stored quote_settings rates deep-merged over the
+// defaults — identical semantics to the builder (QuoteBuilder.jsx), so the
+// public estimate and an owner-built quote always start from the same rates.
+function currentPriceBook(): Record<string, any> {
+  const row = sqlite.prepare(
+    "SELECT price_book FROM quote_settings WHERE id = 1",
+  ).get() as { price_book?: string } | undefined;
+  return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
+}
+
+function currentShop(): { name: string; location: string; phone: string; email: string } {
+  const row = sqlite.prepare(
+    "SELECT shop FROM quote_settings WHERE id = 1",
+  ).get() as { shop?: string } | undefined;
+  const shop = deepMerge(DEFAULT_SHOP, parseJson<Record<string, unknown>>(row?.shop, {}));
+  return { name: shop.name, location: shop.location, phone: shop.phone, email: shop.email };
+}
+
+const iso = (ms: number | null | undefined): string | null =>
+  ms != null ? new Date(ms).toISOString() : null;
+
+// Hourly per-IP limiter, same shape as the intake/design limiters next door.
+// The website's server proxies every visitor through one egress IP — its keyed
+// requests skip these limits (the site throttles per visitor on its side).
+const publicLimiter = (max: number) => rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: hasLeadKey,
+  message: { ok: false, error: "rate limited" },
+});
+
+// quotes.share_token is 24 random bytes hex-encoded.
+const TOKEN_RE = /^[0-9a-f]{48}$/i;
+
+// What calcQuote (lib/calc.js) returns, as far as this module reads it. The
+// engine builds `lines` dynamically, so TypeScript infers it as {} — this
+// pins the shape the printed quote already relies on.
+interface CalcTotals {
+  lines: Record<"material" | "labor" | "finishing" | "delivery", { total: number }>;
+  subtotal: number;
+  tax: number;
+  taxPct: number;
+  total: number;
+}
+
+// ─── Best-effort quote lines ─────────────────────────────────────────────────
+// Rebuild the printed document's rows (material items with markup blended in,
+// then labor / delivery / tax) from the stored builder session. The price
+// book may have moved since the quote was built — the stored total is what
+// the customer was told, so if the rebuild doesn't reconcile to the cent we
+// return null and the page shows the total only. Never the cost basis,
+// markup %, or labor rate.
+
+function bestEffortLines(quote: Quote): { name: string; amountCents: number }[] | null {
+  try {
+    const sess = parseJson<any>(quote.payload, null);
+    if (!sess || typeof sess !== "object" || !sess.state) return null;
+    const lineState = buildLineState(quote.type, sess.state, currentPriceBook(), sess.overrides);
+    // `as` rather than `:` — the engine types `lines` as {} (built dynamically).
+    const totals = computeTotals(lineState, {
+      materialMarkupPct: sess.materialMarkupPct,
+      laborMarkupPct: sess.laborMarkupPct,
+      taxPct: sess.taxPct,
+      deliveryMiles: sess.deliveryMiles,
+      deliveryPerMile: sess.deliveryPerMile,
+    }) as unknown as CalcTotals;
+    if (Math.round(totals.total * 100) !== quote.totalCents) return null;
+
+    // Same construction as PrintQuote.jsx: distribute the marked-up material
+    // total across the items so the parts sum exactly to the material line.
+    const items: any[] = lineState.items || [];
+    const prices = distributeToTotal(items.map((it) => lineCost(it)), totals.lines.material.total);
+    const lines = items
+      .map((it, i) => ({ name: String(it.name), amountCents: Math.round(prices[i] * 100) }))
+      .filter((l) => l.amountCents > 0);
+    if (totals.lines.labor.total > 0) {
+      lines.push({ name: "Labor & fabrication", amountCents: Math.round(totals.lines.labor.total * 100) });
+    }
+    if (totals.lines.delivery.total > 0) {
+      lines.push({ name: "Delivery", amountCents: Math.round(totals.lines.delivery.total * 100) });
+    }
+    if (totals.tax > 0) {
+      lines.push({ name: `Sales tax (${totals.taxPct}%)`, amountCents: Math.round(totals.tax * 100) });
+    }
+    return lines.length > 0 ? lines : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+export function registerPublicPortalRoutes(app: Express): void {
+  // ─── Instant estimate (configurator ballpark) ─────────────────────────────
+  // Returns ONLY a rounded low/high range. Line items, labor hours, rates and
+  // price-book values never leave the server — a competitor hammering this
+  // endpoint learns nothing about how the pricing is built. Tax excluded by
+  // design (the range is pre-tax, like a verbal ballpark). Every failure mode
+  // is a quiet { ok: false } — the website simply hides the range.
+
+  app.post("/api/public/estimate", publicLimiter(60), (req, res) => {
+    try {
+      const type = req.body?.type;
+      const state = req.body?.state;
+      if (!(QUOTE_TYPES as readonly string[]).includes(type)) return res.json({ ok: false });
+      if (state == null || typeof state !== "object" || Array.isArray(state)) {
+        return res.json({ ok: false });
+      }
+      if (JSON.stringify(state).length > 8 * 1024) return res.json({ ok: false });
+
+      const priceBook = currentPriceBook();
+      const { items, laborHours } = deriveItems(type, state, priceBook);
+      const material = (items as any[]).reduce((sum, it) => sum + lineCost(it), 0);
+      const materialPrice = material * (1 + (Number(priceBook.materialMarkupPct) || 0) / 100);
+      const laborPrice = (Number(laborHours) || 0)
+        * (Number(priceBook.laborRatePerHour) || 0)
+        * (1 + (Number(priceBook.laborMarkupPct) || 0) / 100);
+      const base = materialPrice + laborPrice;
+      if (!(base > 0)) return res.json({ ok: false });
+
+      // ±: -10% / +15% (installs surprise upward more often than down), each
+      // end snapped to the nearest $50 so the range reads like a human wrote it.
+      const to50 = (cents: number) => Math.round(cents / 5000) * 5000;
+      res.json({
+        ok: true,
+        lowCents: to50(base * 0.90 * 100),
+        highCents: to50(base * 1.15 * 100),
+      });
+    } catch {
+      // The engine choked on a hand-crafted state — that's a "no estimate",
+      // not a 500 worth alerting anyone over.
+      res.json({ ok: false });
+    }
+  });
+
+  // ─── Design status tracker ────────────────────────────────────────────────
+  // "Where's my quote?" for a design code. Deliberately PII-free: the ref is
+  // semi-public (it's in the customer's confirmation email), so the response
+  // carries only step timestamps — no names, phones or emails.
+
+  app.get("/api/public/status", publicLimiter(60), (req, res) => {
+    const ref = typeof req.query.ref === "string" ? req.query.ref.trim().toUpperCase() : "";
+    if (!ref) return res.json({ ok: false });
+    const design = sqlite.prepare(
+      "SELECT ref, created_at FROM web_designs WHERE upper(ref) = ?",
+    ).get(ref) as { ref: string; created_at: number } | undefined;
+    if (!design) return res.json({ ok: false });
+
+    const quoteRows = db.select({
+      status: quotes.status,
+      sentAt: quotes.sentAt,
+      acceptedAt: quotes.acceptedAt,
+    }).from(quotes)
+      .where(and(
+        isNull(quotes.deletedAt),
+        sql`upper(${quotes.designRef}) = ${ref}`,
+        inArray(quotes.status, ["sent", "accepted"]),
+      ))
+      .orderBy(desc(quotes.createdAt), desc(quotes.id))
+      .all();
+    const accepted = quoteRows.find((q) => q.status === "accepted");
+    const quoted = accepted ?? quoteRows[0];
+
+    res.json({
+      ok: true,
+      ref: design.ref,
+      current: accepted ? "accepted" : quoted ? "quoted" : "received",
+      steps: [
+        { key: "received", at: iso(design.created_at), done: true },
+        { key: "quoted", at: iso(quoted?.sentAt), done: !!quoted },
+        { key: "accepted", at: iso(accepted?.acceptedAt), done: !!accepted },
+      ],
+    });
+  });
+
+  // ─── Shared quote page ────────────────────────────────────────────────────
+  // The link the owner sends from the builder (POST /api/quotes/:id/share).
+  // Drafts stay invisible even if a token somehow exists on one.
+
+  const findSharedQuote = (token: string): Quote | undefined => {
+    if (!TOKEN_RE.test(token)) return undefined;
+    const quote = db.select().from(quotes)
+      .where(and(eq(quotes.shareToken, token), isNull(quotes.deletedAt)))
+      .get();
+    return quote && quote.status !== "draft" ? quote : undefined;
+  };
+
+  app.get("/api/public/quote/:token", publicLimiter(120), (req, res) => {
+    const quote = findSharedQuote(String(req.params.token));
+    if (!quote) return res.status(404).json({ ok: false });
+
+    const sess = parseJson<any>(quote.payload, {});
+    const taxPct = Number(sess?.taxPct);
+    res.json({
+      ok: true,
+      quote: {
+        number: quote.number,
+        type: quote.type,
+        typeLabel: QUOTE_TYPE_LABELS[quote.type],
+        customerName: quote.customerName,
+        status: quote.status,
+        totalCents: quote.totalCents,
+        createdAt: iso(quote.createdAt.getTime()),
+        sentAt: iso(quote.sentAt),
+        acceptedAt: iso(quote.acceptedAt),
+        shop: currentShop(),
+        lines: bestEffortLines(quote),
+        taxNote: Number.isFinite(taxPct) && taxPct > 0
+          ? `Total includes ${taxPct}% sales tax.`
+          : null,
+      },
+    });
+  });
+
+  app.post("/api/public/quote/:token/accept", publicLimiter(30), (req, res) => {
+    const quote = findSharedQuote(String(req.params.token));
+    if (!quote) return res.status(404).json({ ok: false });
+    if (quote.status === "accepted") {
+      return res.json({ ok: true, status: "accepted", alreadyAccepted: true });
+    }
+
+    // Tolerant of junk — a public form must not 400 over a weird note field.
+    const note = typeof req.body?.note === "string"
+      ? req.body.note.trim().slice(0, 1000)
+      : "";
+    const ip = req.ip ?? null;
+    db.update(quotes).set({
+      status: "accepted",
+      acceptedAt: Date.now(),
+      acceptNote: note || null,
+      acceptIp: ip,
+    }).where(eq(quotes.id, quote.id)).run();
+
+    setImmediate(() => {
+      try {
+        storage.appendAudit({
+          userId: null,
+          userName: "cjmmetals.com",
+          role: null,
+          action: "quote.accepted",
+          targetType: "quote",
+          targetId: quote.id,
+          targetName: quote.number,
+          ip,
+          details: { totalCents: quote.totalCents, hasNote: !!note },
+        });
+      } catch {
+        /* audit is best-effort */
+      }
+    });
+    if (mailEnabled()) {
+      const text =
+        `Quote ${quote.number} was accepted on cjmmetals.com.\n\n` +
+        `Customer:  ${quote.customerName || "(no name on quote)"}\n` +
+        `Project:   ${QUOTE_TYPE_LABELS[quote.type]}\n` +
+        `Total:     $${(quote.totalCents / 100).toFixed(2)}\n` +
+        (note ? `\nCustomer note:\n${note}\n` : "") +
+        `\nOpen the suite to schedule the job.`;
+      setImmediate(() => {
+        void sendOwnerMail({
+          subject: `[CJM Suite] Quote accepted — ${quote.number}`,
+          text,
+        });
+      });
+    }
+
+    res.json({ ok: true, status: "accepted" });
+  });
+
+  // ─── Review invitations ───────────────────────────────────────────────────
+  // Landing check + submit for the /review/<token> page. The check returns
+  // the FIRST name only ("Thanks, Maria!") — never the full contact record.
+
+  interface ReviewRequestRow {
+    id: number;
+    token: string;
+    name: string | null;
+    email: string | null;
+    submitted_at: number | null;
+  }
+  const findReviewRequest = (token: string): ReviewRequestRow | undefined =>
+    sqlite.prepare(
+      "SELECT id, token, name, email, submitted_at FROM review_requests WHERE token = ?",
+    ).get(String(token)) as ReviewRequestRow | undefined;
+
+  app.get("/api/public/review-request/:token", publicLimiter(60), (req, res) => {
+    const rr = findReviewRequest(String(req.params.token));
+    if (!rr) return res.json({ ok: false, reason: "unknown" });
+    if (rr.submitted_at != null) return res.json({ ok: false, reason: "used" });
+    res.json({ ok: true, name: (rr.name ?? "").trim().split(/\s+/)[0] || "" });
+  });
+
+  const reviewSubmitSchema = z.object({
+    token: z.string().trim().min(1).max(96),
+    rating: z.number().int().min(1).max(5),
+    text: z.string().trim().max(2000).optional(),
+    author: z.string().trim().max(120).optional(),
+  });
+
+  app.post("/api/public/review-submit", publicLimiter(30), (req, res) => {
+    let body;
+    try {
+      body = reviewSubmitSchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const rr = findReviewRequest(body.token);
+    if (!rr) return res.json({ ok: false, reason: "unknown" });
+    if (rr.submitted_at != null) return res.json({ ok: false, reason: "used" });
+
+    // Unpublished by default — the owner curates what the testimonials feed
+    // shows, exactly like manually logged reviews.
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const author = body.author || rr.name || null;
+    const row = db.insert(reviews).values({
+      source: "website",
+      author,
+      rating: body.rating,
+      text: body.text || null,
+      reviewDate: today,
+      published: false,
+    }).returning().get();
+    sqlite.prepare(
+      "UPDATE review_requests SET submitted_at = ?, review_id = ? WHERE id = ?",
+    ).run(Date.now(), row.id, rr.id);
+
+    if (mailEnabled()) {
+      const text =
+        `A customer just left a review via cjmmetals.com.\n\n` +
+        `From:    ${author || "(anonymous)"}\n` +
+        `Rating:  ${"★".repeat(body.rating)}${"☆".repeat(5 - body.rating)} (${body.rating}/5)\n` +
+        `\n${body.text || "(no written review)"}\n` +
+        `\nIt's unpublished — open Marketing → Reviews to publish it to the site.`;
+      setImmediate(() => {
+        void sendOwnerMail({
+          subject: `[CJM Suite] New review — ${body.rating}/5${author ? ` from ${author}` : ""}`,
+          text,
+        });
+      });
+    }
+
+    res.json({ ok: true });
+  });
+
+  // ─── Site info (lead-time banner) ─────────────────────────────────────────
+  // Same cacheable CORS-open shape as the reviews/portfolio feeds. NULL means
+  // the owner hasn't set a lead time → the website hides its banner.
+
+  app.get("/api/public/site-info", publicLimiter(120), (_req, res) => {
+    // Overrides the global /api no-store: this is a public marketing feed.
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    const row = db.select({ leadTimeWeeks: marketingSettings.leadTimeWeeks })
+      .from(marketingSettings)
+      .where(eq(marketingSettings.id, 1))
+      .get();
+    res.json({ leadTimeWeeks: row?.leadTimeWeeks ?? null });
+  });
+}

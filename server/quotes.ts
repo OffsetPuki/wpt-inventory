@@ -1,9 +1,11 @@
 import type { Express, Request } from "express";
+import crypto from "crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
 import { requireAuth } from "./auth";
 import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-schema";
 import { webDesignRowToLead } from "./public-api";
+import { mailEnabled, sendMail } from "./mailer";
 
 // ─── Quote builder module ────────────────────────────────────────────────────
 // Backs the ported CJM Quote app (client/src/quote). Three responsibilities:
@@ -40,6 +42,25 @@ sqlite.exec(`
     updated_at INTEGER
   );
 `);
+
+// Additive migration: the share/accept lifecycle arrived after installs
+// existed. Existing rows default to 'draft' — exactly right, since none of
+// them were ever shared. SQLite has no IF NOT EXISTS for columns — the throw
+// on re-run is expected.
+for (const col of [
+  "share_token TEXT",
+  "status TEXT NOT NULL DEFAULT 'draft'",
+  "sent_at INTEGER",
+  "accepted_at INTEGER",
+  "accept_note TEXT",
+  "accept_ip TEXT",
+]) {
+  try {
+    sqlite.exec(`ALTER TABLE quotes ADD COLUMN ${col}`);
+  } catch {
+    /* column already exists */
+  }
+}
 
 function clientIp(req: Request): string {
   return (req.ip || req.socket?.remoteAddress || "?") as string;
@@ -205,6 +226,9 @@ export function registerQuoteRoutes(app: Express): void {
         customerName: quotes.customerName,
         designRef: quotes.designRef,
         totalCents: quotes.totalCents,
+        status: quotes.status,
+        sentAt: quotes.sentAt,
+        acceptedAt: quotes.acceptedAt,
         createdAt: quotes.createdAt,
         updatedAt: quotes.updatedAt,
       }).from(quotes)
@@ -270,5 +294,55 @@ export function registerQuoteRoutes(app: Express): void {
       targetType: "quote", targetId: id, targetName: target.number,
     });
     res.status(204).end();
+  });
+
+  // ─── Share (customer-facing link) ─────────────────────────────────────────
+  // Mints the public /quote/<token> URL on the website. First share moves a
+  // draft to 'sent' and stamps sent_at; re-sharing reuses the same token so a
+  // link already in the customer's inbox never goes dead.
+
+  const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com";
+
+  app.post("/api/quotes/:id/share", requireAuth, async (req, res) => {
+    const id = pid(req.params.id);
+    const quote = db.select().from(quotes)
+      .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
+      .get();
+    if (!quote) return res.status(404).json({ message: "Quote not found" });
+
+    const token = quote.shareToken ?? crypto.randomBytes(24).toString("hex");
+    const updates: Partial<typeof quotes.$inferInsert> = { shareToken: token };
+    if (quote.status === "draft") {
+      updates.status = "sent";
+      updates.sentAt = Date.now();
+    }
+    db.update(quotes).set(updates).where(eq(quotes.id, id)).run();
+
+    const url = `${PUBLIC_SITE_URL}/quote/${token}`;
+
+    // Email the customer the link when asked — explicit address wins, else the
+    // one they typed into the builder's customer card (stored in the payload).
+    let emailed = false;
+    const to = (typeof req.body?.email === "string" && req.body.email.trim())
+      || parseJson<{ customer?: { email?: string } }>(quote.payload, {}).customer?.email
+      || "";
+    if (req.body?.sendEmail && to && mailEnabled()) {
+      emailed = await sendMail({
+        to,
+        subject: `Your quote from CJM Metals — ${quote.number}`,
+        text:
+          `Hi ${quote.customerName || "there"},\n\n` +
+          `Your quote ${quote.number} from CJM Metals is ready. View it (and accept it online) here:\n\n` +
+          `${url}\n\n` +
+          `Questions? Just reply to this email or give us a call.\n\n` +
+          `— CJM Metals · Arlington, TX`,
+      });
+    }
+
+    audit(req, "quote.share", {
+      targetType: "quote", targetId: id, targetName: quote.number,
+      details: { emailed, firstShare: quote.status === "draft" },
+    });
+    res.json({ ok: true, token, url, emailed });
   });
 }

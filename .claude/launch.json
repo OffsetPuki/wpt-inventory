@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "C:\\Users\\AsusF\\OneDrive\\Desktop\\Code\\CJM", "--", "--port", "4322"],
       "port": 4322
+    },
+    {
+      "name": "quoteapp",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "npm", "run", "dev", "--prefix", "C:\\Users\\AsusF\\OneDrive\\Desktop\\Code\\QuoteApp\\Quote App", "--", "--port", "5174"],
+      "port": 5174
     }
   ]
 }

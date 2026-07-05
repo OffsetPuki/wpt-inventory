@@ -1,7 +1,9 @@
 import type { Express, Request } from "express";
+import crypto from "crypto";
 import { eq, and, or, desc, asc, isNull, inArray, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
 import { requireElevated } from "./auth";
+import { mailEnabled, sendMail } from "./mailer";
 import {
   invoices, invoicePayments, expenses, paymentGateways, purchaseOrders,
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
@@ -10,6 +12,10 @@ import {
   type Invoice, type InvoiceStatus,
 } from "../shared/finance-schema";
 import { clients, estimates, type Estimate } from "../shared/crm-schema";
+// Cross-module automation hook: a freshly paid invoice queues a review request.
+// The mk_ tables are owned by the marketing module's DDL; every touch below is
+// deferred + try/catch'd so a marketing hiccup can't break payment recording.
+import { marketingSettings, mkTasks } from "../shared/marketing-schema";
 import { parseLineItems, lineItemsTotalCents, lineItemsSchema } from "../shared/biz-common";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
@@ -233,6 +239,78 @@ function getInvoice(id: number): Invoice | undefined {
   return db.select().from(invoices)
     .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)))
     .get();
+}
+
+// ─── Review-request automation ───────────────────────────────────────────────
+// The moment an invoice is settled is the best moment to ask for a review.
+// Called from both places the paid/partial derivation runs (recording a
+// payment, and reversing one — which can also re-land on "paid"). Everything
+// happens in setImmediate + try/catch: recording money must NEVER fail or
+// slow down because a marketing nicety hiccuped.
+
+const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com";
+
+function queueReviewRequest(inv: Invoice): void {
+  setImmediate(async () => {
+    try {
+      // Owner opt-out lives in mk_settings; a missing row/table means default on.
+      const cfg = db.select({ on: marketingSettings.autoReviewRequest })
+        .from(marketingSettings).where(eq(marketingSettings.id, 1)).get();
+      if (cfg && !cfg.on) return;
+      // One ask per invoice, ever — a void/reissue or payment reversal dance
+      // must not spam the customer.
+      const existing = sqlite.prepare(
+        "SELECT id FROM review_requests WHERE invoice_id = ?",
+      ).get(inv.id);
+      if (existing) return;
+
+      const client = inv.clientId != null
+        ? db.select({ name: clients.name, email: clients.email }).from(clients)
+            .where(eq(clients.id, inv.clientId)).get()
+        : undefined;
+      const name = client?.name ?? inv.clientName ?? null;
+      const email = client?.email ?? null;
+
+      const token = crypto.randomBytes(24).toString("hex");
+      const inserted = sqlite.prepare(`
+        INSERT INTO review_requests (token, name, email, invoice_id)
+        VALUES (?, ?, ?, ?)
+      `).run(token, name, email, inv.id);
+
+      if (mailEnabled() && email) {
+        const first = (name ?? "").trim().split(/\s+/)[0] || "there";
+        const ok = await sendMail({
+          to: email,
+          subject: "How did we do? — CJM Metals",
+          text:
+            `Hi ${first},\n\n` +
+            `Thanks for choosing CJM Metals for your project. If you have a ` +
+            `minute, we'd really appreciate a quick review — it takes about ` +
+            `30 seconds:\n\n` +
+            `${PUBLIC_SITE_URL}/review/${token}\n\n` +
+            `Thank you!\n\n` +
+            `— CJM Metals · Arlington, TX`,
+        });
+        if (ok) {
+          sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
+            .run(Date.now(), inserted.lastInsertRowid);
+        }
+      }
+
+      // Always surface the ask in-app too — with no email on file (or no
+      // mailer) the task is the only prompt the owner gets.
+      db.insert(mkTasks).values({
+        title: `Ask ${name ?? `the customer on ${inv.number}`} for a review`,
+        kind: "review_request",
+        status: "open",
+        autoCreated: true,
+        dueAt: Date.now(),
+        notes: `Invoice ${inv.number} paid.`,
+      }).run();
+    } catch (e) {
+      console.error("[finance] review-request hook failed", e);
+    }
+  });
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -625,6 +703,9 @@ export function registerFinanceRoutes(app: Express): void {
       .returning()
       .get();
 
+    // Newly settled → queue the review ask (deferred; can never break this path).
+    if (status === "paid" && inv.status !== "paid") queueReviewRequest(updated);
+
     audit(req, "finance.payment_record", {
       targetType: "invoice", targetId: inv.id, targetName: inv.number,
       details: { amountCents: body.amountCents, method: body.method, newStatus: status },
@@ -661,6 +742,10 @@ export function registerFinanceRoutes(app: Express): void {
         .where(eq(invoices.id, inv.id))
         .returning()
         .get();
+
+      // The re-derivation can also land on "paid" (e.g. reversing an overpaid
+      // duplicate still leaves the total covered) — same newly-paid rule.
+      if (status === "paid" && inv.status !== "paid" && updated) queueReviewRequest(updated);
     }
     audit(req, "finance.payment_delete", {
       targetType: "invoice", targetId: payment.invoiceId, targetName: inv?.number ?? null,

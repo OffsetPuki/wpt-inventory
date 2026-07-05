@@ -1,9 +1,10 @@
 import { summaryLine, typeLabel } from '../data/configurators.js';
 import { fmtMoney } from '../lib/format.js';
+import ShareQuote from './ShareQuote.jsx';
 
 export default function QuoteForm({
-  type, state, totals, designRef, customer, notes, depositPct,
-  onChangeCustomer, onChangeNotes, onChangeDeposit, onBack, onPreview,
+  type, state, totals, designRef, customer, notes, depositPct, quoteId,
+  onChangeCustomer, onChangeNotes, onChangeDeposit, onBack, onPreview, onPersist,
 }) {
   const field = (key, label, props = {}) => (
     <label className="field">
@@ -70,6 +71,14 @@ export default function QuoteForm({
               Preview &amp; download PDF <span aria-hidden="true">→</span>
             </button>
             <p className="hint">The customer PDF shows priced line items, subtotal, tax and total — never your cost basis or markup.</p>
+            {/* quoteId exists once the auto-save returns — that's when there's
+                a row for the website link to point at. */}
+            {quoteId && (
+              <div>
+                <p className="section-title">Send to customer</p>
+                <ShareQuote quoteId={quoteId} customerEmail={customer.email || ''} onBeforeShare={onPersist} />
+              </div>
+            )}
           </div>
         </div>
       </div>

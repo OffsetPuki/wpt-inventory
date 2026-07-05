@@ -114,6 +114,11 @@ app.use(compression());
 // Reduced from 50 MB to 1 MB. The only large payloads were photo uploads,
 // which go through multer (multipart) at 10 MB — they don't pass through
 // express.json. Keeping json/urlencoded at 50 MB was a free DoS vector.
+// Exception: the website's lead intake can carry a designPng data URL
+// (≤ 2M chars ≈ 1.5 MB of PNG). Mounted BEFORE the global parser — body-parser
+// skips a body that's already been parsed, so this scoped 4 MB limit wins for
+// that one route and everything else stays at 1 MB.
+app.use("/api/public/leads", express.json({ limit: "4mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 

@@ -918,6 +918,142 @@ function PipelineTab() {
   );
 }
 
+// ─── Attribution tab ──────────────────────────────────────────────────────────
+// GET /api/marketing/attribution — all-time rollups of where leads (and the
+// closed revenue on them) come from: CRM source, linked campaign, raw UTM.
+
+interface AttributionPayload {
+  bySource: { source: string; leads: number; won: number; revenueCents: number }[];
+  byCampaign: {
+    id: number;
+    name: string;
+    channel: CampaignChannel;
+    leads: number;
+    won: number;
+    revenueCents: number;
+    spendCents: number;
+    cplCents: number | null;
+  }[];
+  byUtmSource: { utmSource: string; leads: number; won: number; revenueCents: number }[];
+}
+
+function AttributionTab() {
+  const { data, isLoading } = useQuery<AttributionPayload>({
+    queryKey: ["marketing", "attribution"],
+    queryFn: async () => (await apiRequest("GET", "/api/marketing/attribution")).json(),
+  });
+
+  if (isLoading || !data) return <LoadingBlock />;
+
+  return (
+    <div>
+      <p className="mb-6 text-sm text-muted-foreground">
+        All-time view of where leads — and the revenue they closed into — actually come from.
+      </p>
+
+      <div className="mb-8 rounded-xl border border-border bg-card p-5">
+        <SectionTitle>By source</SectionTitle>
+        {data.bySource.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No leads to attribute yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className={thCls}>Source</th>
+                  <th className={thRight}>Leads</th>
+                  <th className={thRight}>Won</th>
+                  <th className={thRight}>Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.bySource.map((s) => (
+                  <tr key={s.source}>
+                    <td className={cn(tdCls, "font-medium text-foreground")}>{sourceLabel(s.source)}</td>
+                    <td className={tdRight}>{s.leads}</td>
+                    <td className={tdRight}>{s.won}</td>
+                    <td className={cn(tdRight, "font-medium text-foreground")}>{formatMoney(s.revenueCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-8 rounded-xl border border-border bg-card p-5">
+        <SectionTitle>By campaign</SectionTitle>
+        {data.byCampaign.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No campaigns yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className={thCls}>Campaign</th>
+                  <th className={thCls}>Channel</th>
+                  <th className={thRight}>Leads</th>
+                  <th className={thRight}>Won</th>
+                  <th className={thRight}>Revenue</th>
+                  <th className={thRight}>Spend</th>
+                  <th className={thRight}>CPL</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.byCampaign.map((c) => (
+                  <tr key={c.id}>
+                    <td className={cn(tdCls, "font-medium text-foreground")}>{c.name}</td>
+                    <td className={tdCls}>
+                      <span className={cn(chipCls, neutralChip)}>{CHANNEL_LABELS[c.channel]}</span>
+                    </td>
+                    <td className={tdRight}>{c.leads}</td>
+                    <td className={tdRight}>{c.won}</td>
+                    <td className={cn(tdRight, "font-medium text-foreground")}>{formatMoney(c.revenueCents)}</td>
+                    <td className={tdRight}>{formatMoney(c.spendCents)}</td>
+                    <td className={tdRight}>{c.cplCents == null ? "—" : formatMoney(c.cplCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5">
+        <SectionTitle>By UTM source</SectionTitle>
+        {data.byUtmSource.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No leads with UTM tags yet — they arrive with website leads once the ads link with utm_source.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className={thCls}>UTM source</th>
+                  <th className={thRight}>Leads</th>
+                  <th className={thRight}>Won</th>
+                  <th className={thRight}>Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.byUtmSource.map((u) => (
+                  <tr key={u.utmSource}>
+                    <td className={cn(tdCls, "font-medium text-foreground")}>{u.utmSource}</td>
+                    <td className={tdRight}>{u.leads}</td>
+                    <td className={tdRight}>{u.won}</td>
+                    <td className={cn(tdRight, "font-medium text-foreground")}>{formatMoney(u.revenueCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Reviews tab ──────────────────────────────────────────────────────────────
 
 function Stars({ rating }: { rating: number }) {
@@ -1645,6 +1781,8 @@ function SettingsForm({ settings, onClose }: { settings: MarketingSettings; onCl
   const [followUpDays, setFollowUpDays] = useState(String(settings.quoteFollowUpDays));
   const [cplAlert, setCplAlert] = useState((settings.cplAlertCents / 100).toFixed(2).replace(/\.00$/, ""));
   const [autoReview, setAutoReview] = useState(settings.autoReviewRequest);
+  // Nullable: empty string ⇔ NULL ⇔ the website hides its lead-time banner.
+  const [leadTime, setLeadTime] = useState(settings.leadTimeWeeks == null ? "" : String(settings.leadTimeWeeks));
 
   const save = useMutation({
     mutationFn: async () =>
@@ -1654,6 +1792,7 @@ function SettingsForm({ settings, onClose }: { settings: MarketingSettings; onCl
           quoteFollowUpDays: parseInt(followUpDays, 10) || settings.quoteFollowUpDays,
           cplAlertCents: parseMoney(cplAlert),
           autoReviewRequest: autoReview,
+          leadTimeWeeks: leadTime.trim() === "" ? null : parseInt(leadTime, 10) || 0,
         })
       ).json(),
     onSuccess: () => {
@@ -1699,6 +1838,21 @@ function SettingsForm({ settings, onClose }: { settings: MarketingSettings; onCl
         <span className="text-sm font-medium text-foreground">Cost-per-lead alert threshold ($)</span>
         <input className={inputCls} value={cplAlert} onChange={(e) => setCplAlert(e.target.value)} placeholder="150" />
       </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-foreground">Website lead time (weeks)</span>
+        <input
+          type="number"
+          min={0}
+          max={52}
+          className={inputCls}
+          value={leadTime}
+          onChange={(e) => setLeadTime(e.target.value)}
+          placeholder="e.g. 3"
+        />
+        <span className="text-xs text-muted-foreground">
+          Shown on cjmmetals.com as a booking-lead-time banner. Leave empty to hide it.
+        </span>
+      </label>
       <label className="flex items-center gap-3">
         <input
           type="checkbox"
@@ -1743,6 +1897,7 @@ const TABS = [
   { id: "leads", label: "Leads" },
   { id: "campaigns", label: "Campaigns" },
   { id: "pipeline", label: "Pipeline" },
+  { id: "attribution", label: "Attribution" },
   { id: "reviews", label: "Reviews" },
   { id: "portfolio", label: "Portfolio" },
   { id: "tasks", label: "Tasks" },
@@ -1784,6 +1939,7 @@ export default function MarketingPage() {
       {tab === "leads" && <LeadsTab />}
       {tab === "campaigns" && <CampaignsTab />}
       {tab === "pipeline" && <PipelineTab />}
+      {tab === "attribution" && <AttributionTab />}
       {tab === "reviews" && <ReviewsTab />}
       {tab === "portfolio" && <PortfolioTab />}
       {tab === "tasks" && <TasksTab />}

@@ -1,14 +1,20 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { toast } from '@/components/ui/toaster';
 import { typeLabel } from '../data/configurators.js';
 import { fmtMoney } from '../lib/format.js';
+import ShareQuote from './ShareQuote.jsx';
 
 function fmtDate(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+// Share lifecycle: draft (never shared) → sent (link created) → accepted
+// (customer clicked accept on the website).
+const STATUS_LABEL = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted' };
 
 /**
  * Saved quotes — every quote that reached the details step is stored in the
@@ -17,6 +23,8 @@ function fmtDate(iso) {
  */
 export default function SavedQuotes({ onOpen }) {
   const qc = useQueryClient();
+  // Which row has its send-to-customer panel open (one at a time).
+  const [shareId, setShareId] = useState(null);
 
   const { data: rows = [], isLoading, error } = useQuery({
     queryKey: ['quotes'],
@@ -78,6 +86,7 @@ export default function SavedQuotes({ onOpen }) {
                 <div className="line" key={q.id}>
                   <div className="line-name">
                     <span className="sq-number">{q.number}</span>
+                    <span className={`sq-status ${q.status || 'draft'}`}>{STATUS_LABEL[q.status] || 'Draft'}</span>
                     <span className="sq-meta">
                       {typeLabel(q.type)}{q.customerName ? ` · ${q.customerName}` : ''}{q.designRef ? ` · ${q.designRef}` : ''}
                     </span>
@@ -88,6 +97,9 @@ export default function SavedQuotes({ onOpen }) {
                     <button className="btn ghost sq-btn" onClick={() => openQuote.mutate(q.id)} disabled={openQuote.isPending}>
                       Open
                     </button>
+                    <button className="btn ghost sq-btn" onClick={() => setShareId(shareId === q.id ? null : q.id)}>
+                      {shareId === q.id ? 'Close' : 'Send'}
+                    </button>
                     <button
                       className="btn ghost sq-btn"
                       onClick={() => { if (window.confirm(`Delete quote ${q.number}?`)) deleteQuote.mutate(q.id); }}
@@ -96,6 +108,7 @@ export default function SavedQuotes({ onOpen }) {
                       Delete
                     </button>
                   </div>
+                  {shareId === q.id && <ShareQuote quoteId={q.id} />}
                 </div>
               ))}
             </div>

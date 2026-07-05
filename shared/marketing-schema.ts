@@ -28,7 +28,7 @@ export type CampaignChannel = (typeof CAMPAIGN_CHANNELS)[number];
 export const CAMPAIGN_STATUSES = ["active", "paused", "ended"] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 
-export const REVIEW_SOURCES = ["google", "yelp", "facebook", "other"] as const;
+export const REVIEW_SOURCES = ["google", "yelp", "facebook", "website", "other"] as const;
 export type ReviewSource = (typeof REVIEW_SOURCES)[number];
 
 export const MK_TASK_KINDS = [
@@ -130,6 +130,9 @@ export const marketingSettings = sqliteTable("mk_settings", {
   autoReviewRequest: integer("auto_review_request", { mode: "boolean" })
     .notNull()
     .default(true),
+  // Current shop lead time in weeks, shown as a banner on www.cjmmetals.com
+  // (via GET /api/public/site-info). NULL = unset → the site hides the banner.
+  leadTimeWeeks: integer("lead_time_weeks"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -166,6 +169,7 @@ export const updateMarketingSettingsSchema = z.object({
   quoteFollowUpDays: z.number().int().min(1).max(90).optional(),
   cplAlertCents: z.number().int().min(0).optional(),
   autoReviewRequest: z.boolean().optional(),
+  leadTimeWeeks: z.number().int().min(0).max(52).nullable().optional(),
 });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -207,6 +211,7 @@ export const REVIEW_SOURCE_LABELS: Record<ReviewSource, string> = {
   google: "Google",
   yelp: "Yelp",
   facebook: "Facebook",
+  website: "Website",
   other: "Other",
 };
 

@@ -457,6 +457,46 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .sq-date { font-size: 0.8rem; color: var(--steel); margin-left: auto; padding-left: 12px; white-space: nowrap; }
 .qa .sq-btn { padding: 8px 16px; font-size: 0.6rem; }
 
+/* Share lifecycle badge — draft / sent / accepted */
+.qa .sq-status {
+  padding: 2px 9px;
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--steel);
+  white-space: nowrap;
+}
+.qa .sq-status.sent { background: #f6e0a8; border-color: #f6e0a8; color: #6a4a00; }
+.qa .sq-status.accepted { background: #dcead9; border-color: #dcead9; color: #2f5d31; }
+
+/* Send-to-customer panel (Saved list rows + the details step) */
+.qa .share-panel {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: var(--cream-dark);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.qa .share-check { display: inline-flex; align-items: center; gap: 9px; font-size: 0.85rem; cursor: pointer; }
+.qa .share-check input { accent-color: var(--ink); }
+.qa .share-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.qa .share-url {
+  flex: 1;
+  min-width: 15rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 0.85rem;
+  padding: 6px 0;
+}
+.qa .share-url:focus { outline: none; border-bottom-color: var(--ink); }
+
 /* ---- Misc ----------------------------------------------------------------- */
 
 .qa .hint { font-size: 0.8rem; color: var(--steel); }

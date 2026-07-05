@@ -12,6 +12,11 @@ import { z } from "zod";
 export const QUOTE_TYPES = ["fence", "gate", "carport", "railing"] as const;
 export type QuoteType = (typeof QUOTE_TYPES)[number];
 
+// Share/accept lifecycle: draft (builder only) → sent (share link created) →
+// accepted / declined. Mirrors crm_estimates' statuses minus "expired".
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined"] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
 export const quotes = sqliteTable("quotes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: text("number").notNull().unique(), // "Q-2026-0001", server-assigned
@@ -23,6 +28,14 @@ export const quotes = sqliteTable("quotes", {
   // server-verified financial total.
   totalCents: integer("total_cents").notNull().default(0),
   payload: text("payload").notNull().default("{}"), // JSON: full builder session
+  // Customer-facing share link (cjmmetals.com/quote/<token>). NULL until the
+  // owner shares the quote; 48 hex chars, server-generated, never reused.
+  shareToken: text("share_token"),
+  status: text("status", { enum: QUOTE_STATUSES }).notNull().default("draft"),
+  sentAt: integer("sent_at"), // unix ms — first share
+  acceptedAt: integer("accepted_at"), // unix ms — customer accepted via the link
+  acceptNote: text("accept_note"), // optional message left when accepting
+  acceptIp: text("accept_ip"), // where the acceptance came from (dispute trail)
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -45,6 +58,14 @@ export const quoteSettings = sqliteTable("quote_settings", {
 export const insertQuoteSchema = createInsertSchema(quotes).omit({
   id: true,
   number: true, // server-assigned
+  // Share/accept lifecycle is server-managed (POST /:id/share + the public
+  // accept endpoint) — a client write could forge an acceptance.
+  shareToken: true,
+  status: true,
+  sentAt: true,
+  acceptedAt: true,
+  acceptNote: true,
+  acceptIp: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -67,4 +88,11 @@ export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
   gate: "Gate",
   carport: "Carport",
   railing: "Railing",
+};
+
+export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  accepted: "Accepted",
+  declined: "Declined",
 };

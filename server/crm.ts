@@ -156,6 +156,17 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_crm_activities_created ON crm_activities(created_at);
 `);
 
+// Additive migration: raw UTM columns arrived after installs existed (the
+// website intake writes them for attribution reporting). SQLite has no
+// IF NOT EXISTS for columns — the throw on re-run is expected.
+for (const col of ["utm_source", "utm_medium", "utm_campaign"]) {
+  try {
+    sqlite.exec(`ALTER TABLE crm_leads ADD COLUMN ${col} TEXT`);
+  } catch {
+    /* column already exists */
+  }
+}
+
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
 const DAY_MS = 24 * 60 * 60 * 1000;

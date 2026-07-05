@@ -340,11 +340,13 @@ export default function QuoteBuilder({ initialSettings }) {
             customer={session.customer}
             notes={session.notes}
             depositPct={session.depositPct}
+            quoteId={session.quoteId}
             onChangeCustomer={setCustomer}
             onChangeNotes={(v) => patchSession({ notes: v })}
             onChangeDeposit={(v) => patchSession({ depositPct: v })}
             onBack={() => setView('configure')}
             onPreview={() => { setView('print'); persistQuote(); }}
+            onPersist={persistQuote}
           />
         )}
 

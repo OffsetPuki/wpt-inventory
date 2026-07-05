@@ -115,6 +115,11 @@ export const leads = sqliteTable("crm_leads", {
   stale: integer("stale", { mode: "boolean" }).notNull().default(false),
   winLossReason: text("win_loss_reason", { enum: WIN_LOSS_REASONS }),
   revenueClosedCents: integer("revenue_closed_cents").notNull().default(0),
+  // Raw first-touch UTM params from the website intake — `source` above is the
+  // mapped CRM enum; these keep the unmapped strings for attribution reporting.
+  utmSource: text("utm_source"),
+  utmMedium: text("utm_medium"),
+  utmCampaign: text("utm_campaign"),
   photos: text("photos"), // JSON string[] of /uploads URLs
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
