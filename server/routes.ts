@@ -18,6 +18,9 @@ import { registerHrRoutes } from "./hr";
 import { registerFinanceRoutes } from "./finance";
 import { registerSearchRoutes } from "./search";
 import { registerPublicRoutes } from "./public-api";
+// Quote builder (ported CJM Quote app). Imports public-api's web_designs row
+// mapper, so it loads after public-api's DDL has created that table.
+import { registerQuoteRoutes } from "./quotes";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
@@ -832,6 +835,7 @@ export function registerRoutes(app: Express): void {
   registerFinanceRoutes(app);
   registerSearchRoutes(app);
   registerPublicRoutes(app);
+  registerQuoteRoutes(app);
 
   // ─── Serve uploaded files ──────────────────────────────────────────────
 

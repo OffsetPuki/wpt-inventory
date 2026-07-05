@@ -18,7 +18,10 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <!-- Inter for the suite; Fraunces (with italic) for the quote builder's
+         printable document. Loaded here rather than via CSS @import so the
+         request starts before the stylesheet chunk arrives. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&display=swap" rel="stylesheet" />
   </head>
   <body class="min-h-screen bg-background font-sans antialiased">
     <div id="root"></div>

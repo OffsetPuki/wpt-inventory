@@ -50,10 +50,13 @@ app.use(
             // we can't drop 'unsafe-inline' without a Radix rewrite. Inline
             // *blocks* (<style>...</style>) are still blocked because we'd
             // need 'unsafe-hashes' to allow attribute styles separately.
-            styleSrc: ["'self'", "'unsafe-inline'"],
+            // Google Fonts serves Inter (suite) + Fraunces (quote builder's
+            // printable document) — stylesheet from fonts.googleapis.com,
+            // font files from fonts.gstatic.com.
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             imgSrc: ["'self'", "data:", "blob:"],
             connectSrc: ["'self'"],
-            fontSrc: ["'self'", "data:"],
+            fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
             objectSrc: ["'none'"],
             frameAncestors: ["'none'"],
             baseUri: ["'self'"],

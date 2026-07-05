@@ -46,6 +46,7 @@ import {
   Clock4,
   Users2,
   Link2,
+  PencilRuler,
 } from "lucide-react";
 
 function ThemeToggle() {
@@ -92,6 +93,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/crm/deals", label: "Deals", icon: Handshake },
       { to: "/crm/clients", label: "Clients", icon: Contact },
       { to: "/crm/estimates", label: "Estimates", icon: FileText },
+      { to: "/crm/quotes", label: "Quote Builder", icon: PencilRuler },
       { to: "/crm/products", label: "Products", icon: Package },
     ],
   },

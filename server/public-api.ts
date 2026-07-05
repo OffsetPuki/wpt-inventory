@@ -97,6 +97,28 @@ function findCampaignId(utmCampaign: string | undefined): number | null {
   return row?.id ?? null;
 }
 
+// A web_designs row in the lead envelope the Quote App's fetchLeads expects —
+// shared with the authenticated lookup in quotes.ts (the embedded builder).
+export function webDesignRowToLead(d: any) {
+  return {
+    time: new Date(d.created_at).toISOString(),
+    type: "lead",
+    ref: d.ref,
+    name: d.name ?? "",
+    phone: d.phone ?? "",
+    email: d.email ?? "",
+    contact: d.contact ?? "",
+    bestTime: d.best_time ?? "",
+    service: d.service ?? "",
+    location: d.location ?? "",
+    consent: d.consent ?? "",
+    source: d.source_tool ?? "",
+    designSpec: d.design_spec ?? "",
+    notes: "",
+    lang: d.lang ?? "en",
+  };
+}
+
 // 30 submissions per IP per hour — far above any legitimate visitor, low
 // enough that a runaway bot can't flood the pipeline. The site also keeps its
 // own honeypot in front of this.
@@ -235,32 +257,14 @@ export function registerPublicRoutes(app: Express): void {
       return res.json({ ok: false, error: "bad key" });
     }
 
-    const rowToLead = (d: any) => ({
-      time: new Date(d.created_at).toISOString(),
-      type: "lead",
-      ref: d.ref,
-      name: d.name ?? "",
-      phone: d.phone ?? "",
-      email: d.email ?? "",
-      contact: d.contact ?? "",
-      bestTime: d.best_time ?? "",
-      service: d.service ?? "",
-      location: d.location ?? "",
-      consent: d.consent ?? "",
-      source: d.source_tool ?? "",
-      designSpec: d.design_spec ?? "",
-      notes: "",
-      lang: d.lang ?? "en",
-    });
-
     const ref = typeof req.query.ref === "string" ? req.query.ref.trim().toUpperCase() : "";
     if (ref) {
       const rows = sqlite.prepare("SELECT * FROM web_designs WHERE upper(ref) = ?").all(ref);
-      return res.json({ ok: true, leads: rows.map(rowToLead) });
+      return res.json({ ok: true, leads: rows.map(webDesignRowToLead) });
     }
     const recent = Math.min(Math.max(parseInt(String(req.query.recent ?? "25"), 10) || 25, 1), 100);
     const rows = sqlite.prepare("SELECT * FROM web_designs ORDER BY created_at DESC, id DESC LIMIT ?").all(recent);
-    res.json({ ok: true, leads: rows.map(rowToLead) });
+    res.json({ ok: true, leads: rows.map(webDesignRowToLead) });
   });
 
   // ─── Read-only public feeds ───────────────────────────────────────────────

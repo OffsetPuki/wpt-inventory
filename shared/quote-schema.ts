@@ -1,0 +1,70 @@
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// ─── Quote builder (ported CJM Quote app) ────────────────────────────────────
+// A quote is the full builder session stored as one JSON payload — the
+// configurator state, per-item overrides, markups, customer card, notes. The
+// payload shape is owned by client/src/quote (it evolved through the .exe
+// versions and carries its own migration in QuoteBuilder.migrateSession), so
+// the columns here are just the identity + list-view fields.
+
+export const QUOTE_TYPES = ["fence", "gate", "carport", "railing"] as const;
+export type QuoteType = (typeof QUOTE_TYPES)[number];
+
+export const quotes = sqliteTable("quotes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  number: text("number").notNull().unique(), // "Q-2026-0001", server-assigned
+  type: text("type", { enum: QUOTE_TYPES }).notNull(),
+  customerName: text("customer_name"),
+  designRef: text("design_ref"), // website design code ("CJM-F7K2") if started from one
+  // Display metadata for the list view. Computed by the builder's pricing
+  // engine, which lives client-side — unlike crm_estimates this is not a
+  // server-verified financial total.
+  totalCents: integer("total_cents").notNull().default(0),
+  payload: text("payload").notNull().default("{}"), // JSON: full builder session
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at"), // unix ms
+  deletedAt: integer("deleted_at"),
+});
+
+// Singleton row (id = 1): the shop's price book + identity block for the
+// printed quote. Stored as the builder's own JSON shapes; the client deep-
+// merges them over its defaults so newly added rates appear automatically.
+export const quoteSettings = sqliteTable("quote_settings", {
+  id: integer("id").primaryKey(),
+  priceBook: text("price_book").notNull().default("{}"), // JSON object
+  shop: text("shop").notNull().default("{}"), // JSON { name, location, phone, email }
+  updatedAt: integer("updated_at"), // unix ms
+});
+
+// ─── Zod schemas ─────────────────────────────────────────────────────────────
+
+export const insertQuoteSchema = createInsertSchema(quotes).omit({
+  id: true,
+  number: true, // server-assigned
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+});
+
+export const quoteSettingsSchema = z.object({
+  priceBook: z.record(z.unknown()),
+  shop: z.record(z.unknown()),
+});
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type Quote = typeof quotes.$inferSelect;
+export type InsertQuote = z.infer<typeof insertQuoteSchema>;
+
+// ─── Label maps (client display) ─────────────────────────────────────────────
+
+export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
+  fence: "Fence",
+  gate: "Gate",
+  carport: "Carport",
+  railing: "Railing",
+};
