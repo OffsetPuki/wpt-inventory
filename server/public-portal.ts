@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { hasLeadKey } from "./public-api";
 import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
+import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
 import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
 import { invoices } from "../shared/finance-schema";
@@ -30,16 +31,6 @@ import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 // Companion to public-api.ts (lead intake + feeds) — registered right after it.
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function parseJson<T>(s: unknown, fallback: T): T {
-  if (typeof s !== "string") return fallback;
-  try {
-    const v = JSON.parse(s);
-    return v == null ? fallback : (v as T);
-  } catch {
-    return fallback;
-  }
-}
 
 // The effective price book: stored quote_settings rates deep-merged over the
 // defaults — identical semantics to the builder (QuoteBuilder.jsx), so the

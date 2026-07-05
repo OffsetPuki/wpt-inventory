@@ -45,10 +45,6 @@ interface Usage {
   transactions: UsageTransaction[];
 }
 
-function firstItemPhoto(t: UsageTransaction): string | null {
-  return t.item_photo || null;
-}
-
 // Publish the finished job to the cjmmetals.com "recent work" gallery.
 // Projects carry no photos of their own, so the dialog asks for one — the
 // server requires photoUrl and defaults the title to the project name.
@@ -264,7 +260,7 @@ export default function ProjectDetailPage({ id }: { id: string }) {
         ) : (
           <ul className="flex flex-col gap-2">
             {usage.transactions.map((t) => {
-              const photo = firstItemPhoto(t);
+              const photo = t.item_photo || null;
               const row = (
                 <div className="flex items-center gap-3 rounded-lg border border-transparent p-2 transition-colors hover:border-border hover:bg-accent">
                   <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">

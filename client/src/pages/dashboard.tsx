@@ -20,25 +20,16 @@ interface CrmStats {
   openLeads: number;
   leadsThisWeek: number;
   pipelineValueCents: number;
-  quotesSentLast30: number;
   closeRate: number | null;
-  revenueClosed30dCents: number;
-  topSource: { source: string; count: number } | null;
 }
 
 interface CrmReports {
-  monthlyRevenue: { month: string; revenueCents: number }[];
   monthlyLeads: { month: string; count: number }[];
 }
 
 interface MarketingStats {
-  leadsThisWeek: number;
   cplCents30d: number | null;
-  activeCampaigns: number;
-  openTasks: number;
   overdueTasks: number;
-  avgRating30d: number | null;
-  unrespondedReviews: number;
   alerts: string[];
 }
 
@@ -68,7 +59,6 @@ interface FinanceStats {
   expensesThisMonthCents: number;
   netThisMonthCents: number;
   draftInvoices: number;
-  enabledGateways: number;
 }
 
 interface FinanceReports {

@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { eq, like, and, or, sql, desc, asc, inArray } from "drizzle-orm";
+import { eq, like, and, or, sql, desc, asc } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
 import {
@@ -9,8 +9,7 @@ import {
   type User, type Item, type Adjustment, type Transaction,
   type Project, type Settings, type MapLayout, type EquipmentPreset,
   type JobTemplate, type ProjectChecklistRow, type PublicUser,
-  type InsertItem, type ChecklistRowWithItem,
-  CATEGORIES, AREAS, ROLES,
+  type ChecklistRowWithItem,
 } from "../shared/schema";
 
 // ─── Database initialization ─────────────────────────────────────────────────
@@ -263,17 +262,6 @@ function toPublicUser(u: User): PublicUser {
   return pub;
 }
 
-// ─── Helper: parse JSON fields safely ────────────────────────────────────────
-
-function parseJson<T>(val: string | null | undefined, fallback: T): T {
-  if (!val) return fallback;
-  try {
-    return JSON.parse(val);
-  } catch {
-    return fallback;
-  }
-}
-
 // ─── Storage API ─────────────────────────────────────────────────────────────
 
 export const storage = {
@@ -331,27 +319,6 @@ export const storage = {
     return changed;
   },
 
-  // One-time rename of the old "manager" role (which was the operational
-  // power-user role) to its new name "technician". Returns rows affected.
-  // Also updates already-issued sessions so active tokens reflect the new
-  // role without forcing every user to sign in again.
-  //
-  // GATE: only runs if there are no technician users yet. Once the very
-  // first run completes, at least one technician exists (the migrated user),
-  // so subsequent boots skip this — protecting any newly-created Manager
-  // users from being re-flipped to technicians.
-  renameManagerRoleToTechnician(): number {
-    const techCount = (sqlite.prepare(
-      "SELECT COUNT(*) as c FROM users WHERE role = 'technician'"
-    ).get() as any).c;
-    if (techCount > 0) return 0;
-    const info = sqlite.prepare(
-      "UPDATE users SET role = 'technician' WHERE role = 'manager'"
-    ).run();
-    sqlite.prepare("UPDATE sessions SET role = 'technician' WHERE role = 'manager'").run();
-    return Number(info.changes ?? 0);
-  },
-
   deleteUser(id: number): void {
     // Revoke any active sessions BEFORE deleting the user — otherwise a fired
     // worker stays signed in until the next /api/auth/me round-trip notices
@@ -363,13 +330,6 @@ export const storage = {
     const u = db.select().from(users).where(eq(users.id, id)).get();
     if (u) sqlite.prepare("DELETE FROM login_attempts WHERE name_lc = ?").run(u.name.toLowerCase());
     db.delete(users).where(eq(users.id, id)).run();
-  },
-
-  // Used by the explicit "log this user out everywhere" flow without removing
-  // the account — handy for ending a stolen session after a password reset.
-  revokeAllSessionsForUser(id: number): number {
-    const info = sqlite.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
-    return Number(info.changes ?? 0);
   },
 
   getUserCount(): number {
@@ -837,11 +797,6 @@ export const storage = {
     db.delete(mapLayouts).where(eq(mapLayouts.key, key)).run();
   },
 
-  getMapLayoutCount(): number {
-    const row = sqlite.prepare("SELECT COUNT(*) as count FROM map_layouts").get() as any;
-    return row?.count ?? 0;
-  },
-
   // ── Equipment Presets ────────────────────────────────────────────────────
   getPresets(): EquipmentPreset[] {
     return db.select().from(equipmentPresets).orderBy(asc(equipmentPresets.orderIndex)).all();
@@ -882,11 +837,6 @@ export const storage = {
     db.delete(equipmentPresets).where(eq(equipmentPresets.key, key)).run();
   },
 
-  getPresetCount(): number {
-    const row = sqlite.prepare("SELECT COUNT(*) as count FROM equipment_presets").get() as any;
-    return row?.count ?? 0;
-  },
-
   // ── Job Templates ────────────────────────────────────────────────────────
   getTemplates(): JobTemplate[] {
     return db.select().from(jobTemplates).orderBy(asc(jobTemplates.orderIndex)).all();
@@ -923,11 +873,6 @@ export const storage = {
 
   deleteTemplate(key: string): void {
     db.delete(jobTemplates).where(eq(jobTemplates.key, key)).run();
-  },
-
-  getTemplateCount(): number {
-    const row = sqlite.prepare("SELECT COUNT(*) as count FROM job_templates").get() as any;
-    return row?.count ?? 0;
   },
 
   // ── Project Checklist ────────────────────────────────────────────────────

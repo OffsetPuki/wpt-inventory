@@ -3,7 +3,8 @@ import { z } from "zod";
 import {
   eq, and, desc, isNull, isNotNull, gte, lte, sql, notInArray, getTableColumns,
 } from "drizzle-orm";
-import { sqlite, db, storage } from "./storage";
+import { sqlite, db } from "./storage";
+import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { sendMail, sendOwnerMail } from "./mailer";
 import { queueTaskOnce } from "./marketing";
@@ -208,33 +209,6 @@ function parseDeductions(json: string | null | undefined): PayslipDeduction[] {
   } catch {
     return [];
   }
-}
-
-// Same fire-and-forget audit pattern as routes.ts: snapshot the request-derived
-// fields synchronously (req may be recycled by the time setImmediate fires),
-// then defer the INSERT off the response path.
-function audit(req: Request, action: string, extras: {
-  targetType?: string | null;
-  targetId?: number | null;
-  targetName?: string | null;
-  details?: Record<string, unknown> | null;
-} = {}): void {
-  const entry = {
-    userId: req.user?.userId ?? null,
-    userName: req.user?.name ?? null,
-    role: req.user?.role ?? null,
-    action,
-    targetType: extras.targetType ?? null,
-    targetId: extras.targetId ?? null,
-    targetName: extras.targetName ?? null,
-    ip: req.ip ?? null,
-    details: extras.details ?? null,
-  };
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch {}
-  });
 }
 
 // The employee row backing the signed-in user, if any. Soft-deleted employees

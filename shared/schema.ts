@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -23,9 +23,6 @@ export const AREAS = [
 ] as const;
 export type Area = (typeof AREAS)[number];
 
-export const SHOP_AREAS = ["main_shop", "machine_shop", "panel_shop"] as const;
-export type ShopArea = (typeof SHOP_AREAS)[number];
-
 // "manager"   = high-level oversight (projects, users, dashboard) — simpler UI
 // "technician" = full operational control (edit items, adjust stock, map, settings)
 // "worker"    = floor user (find/add items, check in/out, view projects)
@@ -33,7 +30,6 @@ export const ROLES = ["manager", "technician", "worker"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const TRANSACTION_TYPES = ["check_out", "check_in"] as const;
-export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 
 export const PROJECT_STATUSES = ["active", "done", "on_hold"] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
@@ -246,12 +242,6 @@ export const projectChecklist = sqliteTable("project_checklist", {
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────────────
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  name: true,
-  pin: true,
-  role: true,
-});
-
 export const insertItemSchema = createInsertSchema(items).omit({
   id: true,
   createdAt: true,
@@ -267,43 +257,6 @@ export const insertTransactionSchema = z.object({
   quantity: z.number().int().positive(),
   notes: z.string().optional(),
   projectId: z.number().int().optional(),
-});
-
-export const insertProjectSchema = createInsertSchema(projects).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const updateSettingsSchema = createInsertSchema(settings).omit({
-  id: true,
-  updatedAt: true,
-});
-
-export const insertMapLayoutSchema = createInsertSchema(mapLayouts).omit({
-  id: true,
-  updatedAt: true,
-});
-
-export const insertEquipmentPresetSchema = createInsertSchema(equipmentPresets).omit({
-  id: true,
-  updatedAt: true,
-});
-
-export const insertJobTemplateSchema = createInsertSchema(jobTemplates).omit({
-  id: true,
-  updatedAt: true,
-});
-
-export const insertChecklistSchema = z.object({
-  label: z.string().min(1),
-  qty: z.string().default("1"),
-  unit: z.string().optional(),
-  equipmentType: z.string().optional(),
-  category: z.enum(CATEGORIES).optional(),
-  itemId: z.number().int().optional(),
-  status: z.enum(CHECKLIST_STATUS).optional(),
-  notes: z.string().optional(),
-  orderIndex: z.number().int().optional(),
 });
 
 export const fromTemplateSchema = z.object({
@@ -323,7 +276,6 @@ export const loginSchema = z.object({
 // ─── TypeScript Types ────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
-export type InsertUser = z.infer<typeof insertUserSchema>;
 export type PublicUser = Omit<User, "pin">;
 
 export type Item = typeof items.$inferSelect;
@@ -333,7 +285,6 @@ export type Adjustment = typeof adjustments.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 
 export type Project = typeof projects.$inferSelect;
-export type InsertProject = z.infer<typeof insertProjectSchema>;
 
 export type Settings = typeof settings.$inferSelect;
 export type MapLayout = typeof mapLayouts.$inferSelect;

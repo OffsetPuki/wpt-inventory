@@ -94,7 +94,7 @@ export default function ActivityPage() {
     })) : [];
     const a: FeedItem[] = wantAdjustments ? adjs.map((x) => ({
       kind: "adjust",
-      id: x.id + 1_000_000_000,
+      id: x.id,
       delta: x.delta,
       reason: x.reason,
       itemId: x.item_id,
@@ -104,9 +104,6 @@ export default function ActivityPage() {
     })) : [];
     return [...t, ...a].sort((p, q2) => q2.at - p.at);
   }, [txns, adjs, wantTxns, wantAdjustments]);
-
-  // Server already applied the filter; nothing left to do here.
-  const filtered = feed;
 
   const tabs: { key: Filter; label: string }[] = [
     { key: "all", label: "All" },
@@ -146,14 +143,14 @@ export default function ActivityPage() {
         <div className="flex justify-center py-16 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
-      ) : filtered.length === 0 ? (
+      ) : feed.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <ActivityIcon className="h-12 w-12" />
           <p className="text-lg">No activity yet</p>
         </div>
       ) : (
         <ul className="flex flex-col gap-2">
-          {filtered.map((f) => (
+          {feed.map((f) => (
             <li
               key={`${f.kind}-${f.id}`}
               className="flex items-center gap-3 rounded-xl border border-border bg-card p-3"

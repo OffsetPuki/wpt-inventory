@@ -169,16 +169,6 @@ function fmtUsd(cents: number): string {
   return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
 }
 
-// Drop keys a partial zod parse left undefined — better-sqlite3 can't bind
-// undefined, and we don't want "field absent" to null anything out.
-function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) (out as Record<string, unknown>)[k] = v;
-  }
-  return out;
-}
-
 // Same fire-and-forget audit pattern as routes.ts: snapshot request fields
 // synchronously (req may be recycled by the time setImmediate fires), then
 // defer the insert off the response path.
@@ -519,7 +509,7 @@ export function registerMarketingRoutes(app: Express): void {
     }).from(leads).where(isNull(leads.deletedAt)).all();
 
     type Bucket = { leads: number; won: number; revenueCents: number };
-    const tally = (map: Map<string, Bucket>, key: string, l: (typeof allLeads)[number]) => {
+    const tally = <K,>(map: Map<K, Bucket>, key: K, l: (typeof allLeads)[number]) => {
       let b = map.get(key);
       if (!b) {
         b = { leads: 0, won: 0, revenueCents: 0 };
@@ -541,18 +531,7 @@ export function registerMarketingRoutes(app: Express): void {
       // normalize so the report doesn't split one channel into three rows.
       const utm = (l.utmSource ?? "").trim().toLowerCase();
       if (utm) tally(utmMap, utm, l);
-      if (l.campaignId != null) {
-        let b = byCampaignId.get(l.campaignId);
-        if (!b) {
-          b = { leads: 0, won: 0, revenueCents: 0 };
-          byCampaignId.set(l.campaignId, b);
-        }
-        b.leads++;
-        if (l.stage === "won") {
-          b.won++;
-          b.revenueCents += l.revenueClosedCents;
-        }
-      }
+      if (l.campaignId != null) tally(byCampaignId, l.campaignId, l);
     }
 
     const bySource = [...srcMap.entries()]
@@ -587,13 +566,13 @@ export function registerMarketingRoutes(app: Express): void {
   });
 
   app.put("/api/marketing/settings", requireElevated, (req, res) => {
-    let body;
+    // JSON bodies can't contain undefined, so zod-parsed output binds as-is.
+    let updates;
     try {
-      body = updateMarketingSettingsSchema.parse(req.body);
+      updates = updateMarketingSettingsSchema.parse(req.body);
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const updates = stripUndefined(body);
     const before = getSettingsRow(); // guarantees the row exists before UPDATE
     db.update(marketingSettings)
       .set({ ...updates, updatedAt: new Date() })
@@ -663,13 +642,12 @@ export function registerMarketingRoutes(app: Express): void {
       .where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt)))
       .get();
     if (!before) return res.status(404).json({ message: "Campaign not found" });
-    let body;
+    let updates;
     try {
-      body = insertCampaignSchema.partial().parse(req.body);
+      updates = insertCampaignSchema.partial().parse(req.body);
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const updates = stripUndefined(body);
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: "No fields to update" });
     }
@@ -765,7 +743,7 @@ export function registerMarketingRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const updates: Record<string, unknown> = stripUndefined(body);
+    const updates: Record<string, unknown> = { ...body };
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: "No fields to update" });
     }
@@ -859,7 +837,7 @@ export function registerMarketingRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const updates: Record<string, unknown> = stripUndefined(body);
+    const updates: Record<string, unknown> = { ...body };
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: "No fields to update" });
     }
@@ -914,9 +892,8 @@ export function registerMarketingRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const updates = stripUndefined(body);
-    if (Object.keys(updates).length === 0) return res.json(before);
-    const row = db.update(portfolioItems).set(updates).where(eq(portfolioItems.id, id)).returning().get();
+    if (Object.keys(body).length === 0) return res.json(before);
+    const row = db.update(portfolioItems).set(body).where(eq(portfolioItems.id, id)).returning().get();
     if (body.published !== undefined && body.published !== before.published) {
       audit(req, "marketing.portfolio_publish", {
         targetType: "portfolio", targetId: id, targetName: before.title,

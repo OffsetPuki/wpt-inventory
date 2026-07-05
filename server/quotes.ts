@@ -1,7 +1,8 @@
-import type { Express, Request } from "express";
+import type { Express } from "express";
 import crypto from "crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { sqlite, db, storage } from "./storage";
+import { sqlite, db } from "./storage";
+import { audit } from "./audit";
 import { requireAuth } from "./auth";
 import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-schema";
 import { webDesignRowToLead } from "./public-api";
@@ -62,39 +63,9 @@ for (const col of [
   }
 }
 
-function clientIp(req: Request): string {
-  return (req.ip || req.socket?.remoteAddress || "?") as string;
-}
-
-// Same fire-and-forget audit pattern as routes.ts/crm.ts: snapshot request-
-// derived fields synchronously, then defer the insert off the response path.
-function audit(req: Request, action: string, extras: {
-  targetType?: string | null;
-  targetId?: number | null;
-  targetName?: string | null;
-  details?: Record<string, unknown> | null;
-} = {}): void {
-  const entry = {
-    userId: req.user?.userId ?? null,
-    userName: req.user?.name ?? null,
-    role: req.user?.role ?? null,
-    action,
-    targetType: extras.targetType ?? null,
-    targetId: extras.targetId ?? null,
-    targetName: extras.targetName ?? null,
-    ip: clientIp(req),
-    details: extras.details ?? null,
-  };
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch (e) {
-      console.error("[audit] failed to write entry", e);
-    }
-  });
-}
-
-function parseJson<T>(s: unknown, fallback: T): T {
+// Also used by public-portal.ts — the two modules parse the same stored
+// quote payload / settings JSON.
+export function parseJson<T>(s: unknown, fallback: T): T {
   if (typeof s !== "string") return fallback;
   try {
     const v = JSON.parse(s);

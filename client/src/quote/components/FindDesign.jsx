@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchLeads, normalizeRef } from '../lib/leads.js';
 import { parseLead } from '../lib/designSpec.js';
 import { typeLabel } from '../data/configurators.js';
@@ -80,7 +80,6 @@ export default function FindDesign({ onStartQuote }) {
   const [error, setError] = useState('');
   const [leads, setLeads] = useState(null); // null = nothing loaded yet
   const [heading, setHeading] = useState('');
-  const inputRef = useRef(null);
 
   // An 'alert' row is a backup copy of a lead whose email failed — when its
   // lead twin is also in the results, showing both just looks like a duplicate
@@ -134,7 +133,6 @@ export default function FindDesign({ onStartQuote }) {
 
         <div className="find-bar">
           <input
-            ref={inputRef}
             className="find-input"
             placeholder="CJM-F7K2"
             value={query}

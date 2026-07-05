@@ -44,8 +44,9 @@ export const quotes = sqliteTable("quotes", {
 });
 
 // Singleton row (id = 1): the shop's price book + identity block for the
-// printed quote. Stored as the builder's own JSON shapes; the client deep-
-// merges them over its defaults so newly added rates appear automatically.
+// printed quote. Managed via raw SQL in server/quotes.ts, but the definition
+// must stay in this schema file — drizzle-kit db:push diffs against it and
+// would otherwise propose DROP TABLE quote_settings (the live price book).
 export const quoteSettings = sqliteTable("quote_settings", {
   id: integer("id").primaryKey(),
   priceBook: text("price_book").notNull().default("{}"), // JSON object
@@ -79,7 +80,6 @@ export const quoteSettingsSchema = z.object({
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type Quote = typeof quotes.$inferSelect;
-export type InsertQuote = z.infer<typeof insertQuoteSchema>;
 
 // ─── Label maps (client display) ─────────────────────────────────────────────
 
@@ -88,11 +88,4 @@ export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
   gate: "Gate",
   carport: "Carport",
   railing: "Railing",
-};
-
-export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
-  draft: "Draft",
-  sent: "Sent",
-  accepted: "Accepted",
-  declined: "Declined",
 };

@@ -11,10 +11,7 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./dist",
+    "noEmit": true,
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["./shared/*"],

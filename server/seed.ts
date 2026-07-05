@@ -1,7 +1,6 @@
 import bcrypt from "bcryptjs";
 import { sql } from "drizzle-orm";
 import { storage, db } from "./storage";
-import { DEFAULT_EQUIPMENT_PRESETS, DEFAULT_JOB_TEMPLATES } from "../shared/wpt-presets";
 import {
   DEFAULT_CJM_EQUIPMENT_PRESETS,
   DEFAULT_CJM_JOB_TEMPLATES,
@@ -14,18 +13,6 @@ const BCRYPT_PREFIX = /^\$2[aby]\$/;
 
 function randomPin(): string {
   return Math.floor(Math.random() * 10000).toString().padStart(4, "0");
-}
-
-/**
- * The old "manager" role was the operational power user (edit items, adjust
- * stock, edit map). It's been renamed to "technician". The new "manager" role
- * is high-level oversight (dashboard / projects / users) with a simpler UI.
- *
- * Anyone who had the old role keeps the same powers under the new name.
- */
-function migrateManagerToTechnician(): void {
-  const moved = storage.renameManagerRoleToTechnician();
-  if (moved > 0) console.log(`[seed] Migrated ${moved} user(s) from manager → technician`);
 }
 
 /**
@@ -85,43 +72,13 @@ export function seedDefaults(): void {
       console.log("[seed] ────────────────────────────────────────────────");
     }
   } else {
-    migrateManagerToTechnician();
     migratePlaintextPins();
     const cleaned = storage.stripTemplateAuditFromProjectNotes();
     if (cleaned > 0) console.log(`[seed] Cleaned template/params block from ${cleaned} project(s)`);
   }
 
   // ── Settings ───────────────────────────────────────────────────────────
-  const s = storage.getSettings(); // creates singleton row if missing
-  // One-time rebrand chain. The app started as WPT's inventory tool, briefly
-  // carried the "Flipnob" name, and now belongs to the owner's real business,
-  // CJM Metals (cjmmetals.com). Only rows still holding a known earlier
-  // default move — hand-edited names/taglines stay put.
-  if (
-    s.companyName === "Webber Pressure Technologies" ||
-    s.companyName === "WPT" ||
-    s.companyName === "Flipnob"
-  ) {
-    const taglineIsDefault =
-      !s.companyTagline ||
-      s.companyTagline === "Business Suite" ||
-      s.companyTagline === "ASME Certified Pressure Equipment";
-    storage.updateSettings({
-      companyName: "CJM Metals",
-      ...(taglineIsDefault ? { companyTagline: "Custom metalwork. No shortcuts." } : {}),
-    });
-    console.log(`[seed] Rebranded settings: ${s.companyName} → CJM Metals`);
-  }
-  // Accent chain: the interim blue (first rebrand) and the dashboard green
-  // (restyle) both give way to the CJM brand ink. Dark mode inverts near-black
-  // accents to cream at render time (ThemeProvider), matching the website.
-  const legacyAccent =
-    (s.accentHue === 221 && s.accentSat === 83 && s.accentLight === 53) ||
-    (s.accentHue === 142 && s.accentSat === 72 && s.accentLight === 33);
-  if (legacyAccent) {
-    storage.updateSettings({ accentHue: 0, accentSat: 0, accentLight: 9 });
-    console.log("[seed] Accent migrated to CJM ink");
-  }
+  storage.getSettings(); // creates singleton row if missing
 
   // ── Map Layouts ────────────────────────────────────────────────────────
   // Idempotent: ensure a layout exists for each area, creating only the missing
@@ -140,41 +97,6 @@ export function seedDefaults(): void {
       storage.createMapLayout({ key: l.key, label: l.label, area: l.area, orderIndex: idx, nodes: [] });
     }
   });
-
-  // ── Equipment Presets ──────────────────────────────────────────────────
-  if (storage.getPresetCount() === 0) {
-    console.log("[seed] Seeding equipment presets");
-    DEFAULT_EQUIPMENT_PRESETS.forEach((preset, idx) => {
-      storage.createPreset({
-        key: preset.key,
-        label: preset.label,
-        blurb: preset.blurb,
-        icon: preset.icon,
-        defaultCategory: preset.defaultCategory,
-        examples: preset.examples,
-        customFields: preset.customFields,
-        orderIndex: idx,
-        enabled: true,
-      });
-    });
-  }
-
-  // ── Job Templates ─────────────────────────────────────────────────────
-  if (storage.getTemplateCount() === 0) {
-    console.log("[seed] Seeding job templates");
-    DEFAULT_JOB_TEMPLATES.forEach((tpl, idx) => {
-      storage.createTemplate({
-        key: tpl.key,
-        label: tpl.label,
-        blurb: tpl.blurb,
-        icon: tpl.icon,
-        params: tpl.params,
-        parts: tpl.parts,
-        orderIndex: idx,
-        enabled: true,
-      });
-    });
-  }
 
   // ── CJM Metals seeds ───────────────────────────────────────────────────
   // Key-idempotent (not count-gated): existing installs that already carry

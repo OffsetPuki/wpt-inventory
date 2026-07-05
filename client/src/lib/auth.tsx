@@ -13,13 +13,9 @@ import { apiRequest, getAuthToken, queryClient, setAuthToken } from "./queryClie
 
 interface AuthContextValue {
   user: PublicUser | null;
-  token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  // Strict role flags
-  isManager: boolean;
   isTechnician: boolean;
-  isWorker: boolean;
   // Convenience: anything above worker. Use this for "managerial OR technical
   // power" gates — most editing/decision controls fall here.
   isElevated: boolean;
@@ -34,7 +30,6 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const initialToken = getAuthToken();
   const [user, setUser] = useState<PublicUser | null>(null);
-  const [token, setToken] = useState<string | null>(initialToken);
   // If we found a saved token, we're "loading" until we've validated it.
   const [isLoading, setIsLoading] = useState<boolean>(!!initialToken);
 
@@ -52,7 +47,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         if (cancelled) return;
         setAuthToken(null);
-        setToken(null);
         setUser(null);
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -68,7 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // React to mid-session token invalidations (apiRequest dispatches this on 401).
   useEffect(() => {
     const onInvalidated = () => {
-      setToken(null);
       setUser(null);
       queryClient.clear();
     };
@@ -85,7 +78,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const loggedInUser: PublicUser = data.user;
 
       setAuthToken(newToken); // also persists to localStorage
-      setToken(newToken);
       setUser(loggedInUser);
     } finally {
       setIsLoading(false);
@@ -99,7 +91,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Even if server logout fails, clear client state
     }
     setAuthToken(null); // also clears localStorage
-    setToken(null);
     setUser(null);
     queryClient.clear();
   }, []);
@@ -107,19 +98,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = !!user;
   const isManager = user?.role === "manager";
   const isTechnician = user?.role === "technician";
-  const isWorker = user?.role === "worker";
   const isElevated = isManager || isTechnician;
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
         isLoading,
         isAuthenticated,
-        isManager,
         isTechnician,
-        isWorker,
         isElevated,
         login,
         logout,

@@ -269,12 +269,6 @@ export type Product = typeof products.$inferSelect;
 export type Estimate = typeof estimates.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 
-export type InsertClient = z.infer<typeof insertClientSchema>;
-export type InsertLead = z.infer<typeof insertLeadSchema>;
-export type InsertDeal = z.infer<typeof insertDealSchema>;
-export type InsertProduct = z.infer<typeof insertProductSchema>;
-export type InsertEstimate = z.infer<typeof insertEstimateSchema>;
-
 // ─── Label maps (client display) ─────────────────────────────────────────────
 
 export const LEAD_STAGE_LABELS: Record<LeadStage, string> = {

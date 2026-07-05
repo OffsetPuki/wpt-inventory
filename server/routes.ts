@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
 import { storage } from "./storage";
+import { audit, clientIp } from "./audit";
 import { requireAuth, requireTechnician, requireElevated, createSession, destroySession } from "./auth";
 // Business-suite modules. Import order matters for DDL: marketing owns the
 // mk_* tables that CRM's automation hooks insert into, so it loads first.
@@ -108,44 +109,6 @@ const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
 // supplied username doesn't exist, so an attacker can't tell from response
 // timing whether a username is real.
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
-
-// Express's req.ip falls back to the socket address. Behind a proxy
-// (Railway / nginx), trust-proxy must be enabled in index.ts so this is
-// the real client IP, not the proxy's.
-function clientIp(req: Request): string {
-  return (req.ip || req.socket?.remoteAddress || "?") as string;
-}
-
-function audit(req: Request, action: string, extras: {
-  targetType?: string | null;
-  targetId?: number | null;
-  targetName?: string | null;
-  details?: Record<string, unknown> | null;
-} = {}): void {
-  // Snapshot the request-derived fields synchronously — req may be recycled by
-  // the time setImmediate fires — then defer the actual DB insert off the
-  // response path. Audit is a forensic, best-effort log: shaving the INSERT
-  // off the request latency is worth the (vanishingly small) risk that a
-  // hard process crash between response and write loses one entry.
-  const entry = {
-    userId: req.user?.userId ?? null,
-    userName: req.user?.name ?? null,
-    role: req.user?.role ?? null,
-    action,
-    targetType: extras.targetType ?? null,
-    targetId: extras.targetId ?? null,
-    targetName: extras.targetName ?? null,
-    ip: clientIp(req),
-    details: extras.details ?? null,
-  };
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch (e) {
-      console.error("[audit] failed to write entry", e);
-    }
-  });
-}
 
 // Static keyword → category rules for the /api/categorize heuristic. Hoisted to
 // module scope so they're built once, not re-allocated on every request.

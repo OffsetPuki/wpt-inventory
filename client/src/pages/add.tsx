@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, getAuthToken } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
+import { downscaleImage, uploadPhoto } from "@/lib/uploadPhoto";
 import type { Item } from "@shared/schema";
 import Header from "@/components/Header";
 import ItemForm, { type ItemFormSeed } from "@/components/ItemForm";
@@ -15,40 +16,6 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
     reader.readAsDataURL(file);
-  });
-}
-
-// Strip the `data:<mime>;base64,` scaffolding — the server-side Python handles
-// either form, and the raw payload is ~22 bytes smaller per request.
-function stripDataUrlPrefix(dataUrl: string): string {
-  const i = dataUrl.indexOf(",");
-  return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
-}
-
-// Downscale to a small JPEG before sending to the AI — fewer image tokens = lower
-// cost. Only the AI copy is shrunk; the photo stored on the item stays full-res.
-function downscaleToDataUrl(file: File, maxDim = 768, quality = 0.8): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("Canvas unsupported"));
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/jpeg", quality));
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Image load failed"));
-    };
-    img.src = url;
   });
 }
 
@@ -81,38 +48,20 @@ export default function AddItemPage() {
     setIdentifying(true);
     try {
       // Send a downscaled copy to the AI (cheaper); fall back to the original if
-      // the browser can't process the image (e.g. some HEIC files).
-      let photoBase64: string;
-      try {
-        photoBase64 = await downscaleToDataUrl(file);
-      } catch {
-        photoBase64 = await fileToDataUrl(file);
-      }
+      // the browser can't process the image (e.g. some HEIC files). Only the AI
+      // copy is shrunk; the photo stored on the item stays full-res.
+      const small = await downscaleImage(file, 768, 0.8).catch(() => file);
+      const dataUrl = await fileToDataUrl(small);
       // Strip the data-URL prefix — the AI route accepts raw base64 and it
       // shaves a small amount off every payload.
-      const rawBase64 = stripDataUrlPrefix(photoBase64);
+      const rawBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
 
       // Kick off the photo upload in parallel with the AI call so the user
-      // doesn't wait for two sequential round-trips.
+      // doesn't wait for two sequential round-trips. Upload is best-effort.
       const identifyP = apiRequest("POST", "/api/ai/identify-item", { photoBase64: rawBase64 })
         .then((r) => r.json());
 
-      const uploadP: Promise<string | null> = (async () => {
-        try {
-          const fd = new FormData();
-          fd.append("photo", file);
-          const token = getAuthToken();
-          const up = await fetch("/api/upload", {
-            method: "POST",
-            headers: token ? { "X-Auth": token } : {},
-            body: fd,
-          });
-          if (up.ok) return (await up.json()).url as string;
-        } catch {
-          /* photo upload is best-effort */
-        }
-        return null;
-      })();
+      const uploadP: Promise<string | null> = uploadPhoto(file).catch(() => null);
 
       const [data, photoUrl] = await Promise.all([identifyP, uploadP]);
 

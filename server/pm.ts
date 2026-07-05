@@ -1,7 +1,8 @@
 import type { Express, Request } from "express";
 import { z } from "zod";
 import { eq, and, or, desc, asc, isNull, like, gte, lt, sql, getTableColumns } from "drizzle-orm";
-import { sqlite, db, storage } from "./storage";
+import { sqlite, db } from "./storage";
+import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { users, projects } from "../shared/schema";
 import {
@@ -164,32 +165,6 @@ function qstr(v: unknown): string | undefined {
 function isElevated(req: Request): boolean {
   const role = req.user?.role;
   return role === "manager" || role === "technician";
-}
-
-// Fire-and-forget audit: snapshot request fields synchronously (req may be
-// recycled by the time setImmediate fires), then write off the response path.
-function audit(req: Request, action: string, extras: {
-  targetType?: string | null;
-  targetId?: number | null;
-  targetName?: string | null;
-  details?: Record<string, unknown> | null;
-} = {}): void {
-  const entry = {
-    userId: req.user?.userId ?? null,
-    userName: req.user?.name ?? null,
-    role: req.user?.role ?? null,
-    action,
-    targetType: extras.targetType ?? null,
-    targetId: extras.targetId ?? null,
-    targetName: extras.targetName ?? null,
-    ip: req.ip ?? null,
-    details: extras.details ?? null,
-  };
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch {}
-  });
 }
 
 // ─── Body schemas local to this module ───────────────────────────────────────

@@ -1,7 +1,8 @@
-import type { Express, Request } from "express";
+import type { Express } from "express";
 import crypto from "crypto";
 import { eq, and, or, desc, asc, isNull, inArray, sql } from "drizzle-orm";
-import { sqlite, db, storage } from "./storage";
+import { sqlite, db } from "./storage";
+import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail } from "./mailer";
 import {
@@ -356,32 +357,6 @@ export function registerFinanceRoutes(app: Express): void {
   const pkey = (v: string | string[]): string => v as string;
   const qstr = (v: unknown): string | undefined =>
     typeof v === "string" && v.length > 0 ? v : undefined;
-
-  // Same fire-and-forget audit pattern as routes.ts — snapshot request fields
-  // synchronously, defer the insert off the response path.
-  function audit(req: Request, action: string, extras: {
-    targetType?: string | null;
-    targetId?: number | null;
-    targetName?: string | null;
-    details?: Record<string, unknown> | null;
-  } = {}): void {
-    const entry = {
-      userId: req.user?.userId ?? null,
-      userName: req.user?.name ?? null,
-      role: req.user?.role ?? null,
-      action,
-      targetType: extras.targetType ?? null,
-      targetId: extras.targetId ?? null,
-      targetName: extras.targetName ?? null,
-      ip: req.ip ?? null,
-      details: extras.details ?? null,
-    };
-    setImmediate(() => {
-      try {
-        storage.appendAudit(entry);
-      } catch {}
-    });
-  }
 
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 

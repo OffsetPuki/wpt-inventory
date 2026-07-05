@@ -1,8 +1,9 @@
-import type { Express, Request } from "express";
+import type { Express } from "express";
 import {
   eq, and, or, desc, isNull, sql, like, gte, lte, notInArray, type SQL,
 } from "drizzle-orm";
-import { sqlite, db, storage } from "./storage";
+import { sqlite, db } from "./storage";
+import { audit } from "./audit";
 import { requireAuth } from "./auth";
 import {
   clients, leads, deals, products, estimates, crmActivities,
@@ -170,39 +171,6 @@ for (const col of ["utm_source", "utm_medium", "utm_campaign"]) {
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function clientIp(req: Request): string {
-  return (req.ip || req.socket?.remoteAddress || "?") as string;
-}
-
-// Same fire-and-forget audit pattern as routes.ts: snapshot request-derived
-// fields synchronously (req may be recycled by the time setImmediate fires),
-// then defer the insert off the response path.
-function audit(req: Request, action: string, extras: {
-  targetType?: string | null;
-  targetId?: number | null;
-  targetName?: string | null;
-  details?: Record<string, unknown> | null;
-} = {}): void {
-  const entry = {
-    userId: req.user?.userId ?? null,
-    userName: req.user?.name ?? null,
-    role: req.user?.role ?? null,
-    action,
-    targetType: extras.targetType ?? null,
-    targetId: extras.targetId ?? null,
-    targetName: extras.targetName ?? null,
-    ip: clientIp(req),
-    details: extras.details ?? null,
-  };
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch (e) {
-      console.error("[audit] failed to write entry", e);
-    }
-  });
-}
 
 // Automation knobs live in mk_settings (marketing module). If that module
 // hasn't registered yet (table missing) or the singleton row doesn't exist,

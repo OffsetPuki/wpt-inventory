@@ -23,19 +23,15 @@ export default function TrashPage() {
   const { isTechnician, isElevated } = useAuth();
   const qc = useQueryClient();
 
-  // Trash contents only change on explicit delete/restore — both of which
-  // already invalidate this query on success. Polling adds nothing.
   const items = useQuery<DeletedItem[]>({
     queryKey: ["trash", "items"],
     queryFn: async () => (await apiRequest("GET", "/api/items/deleted")).json(),
     enabled: isTechnician,
-    refetchInterval: false,
   });
   const projects = useQuery<DeletedProject[]>({
     queryKey: ["trash", "projects"],
     queryFn: async () => (await apiRequest("GET", "/api/projects/deleted")).json(),
     enabled: isElevated,
-    refetchInterval: false,
   });
 
   const restoreItem = useMutation({
