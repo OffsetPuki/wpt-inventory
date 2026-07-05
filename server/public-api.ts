@@ -2,17 +2,45 @@ import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
-import { db, storage } from "./storage";
+import { db, sqlite, storage } from "./storage";
 import { leads, type LeadSource } from "../shared/crm-schema";
 import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
 
-// ─── Public API: how www.cjmmetals.com talks to the suite ────────────────────
-// Three endpoints, no session auth:
+// ─── Public API: how the outside world talks to the suite ────────────────────
+// No session auth on any of these:
 //   POST /api/public/leads      — quote-form intake (shared-secret header)
+//   GET  /api/public/designs    — Quote App "Find design" lookup (shared key)
 //   GET  /api/public/reviews    — published testimonials feed
 //   GET  /api/public/portfolio  — published "recent work" gallery feed
-// The website's server calls these; nothing here is meant for browsers on
-// other origins except the two read-only feeds (CORS-opened to the site).
+// The website's server calls the intake; the owner's Quote App (Electron)
+// calls the design lookup; the two read-only feeds are CORS-open.
+
+// ─── Website designs (configurator submissions) ──────────────────────────────
+// One row per design code (CJM-XXXX) that came through the quote form —
+// the structured record behind the Quote App's "Find design" screen, which
+// previously read the Google Sheet via Apps Script. Speaks that endpoint's
+// exact protocol so the app only needed its lookup URL changed.
+
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS web_designs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ref TEXT NOT NULL UNIQUE,
+    lead_id INTEGER, -- soft ref to crm_leads (kept if the lead is deleted)
+    name TEXT,
+    phone TEXT,
+    email TEXT,
+    contact TEXT,
+    best_time TEXT,
+    service TEXT,
+    location TEXT,
+    consent TEXT,
+    source_tool TEXT, -- e.g. 'configurator-fence'
+    design_spec TEXT,
+    lang TEXT NOT NULL DEFAULT 'en',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_web_designs_created ON web_designs(created_at);
+`);
 
 // ─── Lead intake ─────────────────────────────────────────────────────────────
 
@@ -36,6 +64,14 @@ const intakeSchema = z.object({
       term: z.string().trim().max(200).optional(),
     })
     .optional(),
+  // Configurator design handoff + contact preferences — structured so the
+  // Quote App's design lookup can serve them field-for-field.
+  designRef: z.string().trim().max(40).optional(),
+  designSource: z.string().trim().max(100).optional(),
+  designSpec: z.string().trim().max(8000).optional(),
+  contact: z.string().trim().max(60).optional(),
+  bestTime: z.string().trim().max(120).optional(),
+  consent: z.string().trim().max(10).optional(),
 });
 
 // Map a UTM source onto the CRM's lead-source enum. Anything we can't place
@@ -121,6 +157,41 @@ export function registerPublicRoutes(app: Express): void {
       stage: "new",
     }).returning().get();
 
+    // Configurator designs get their own structured row so the Quote App's
+    // "Find design" lookup can serve them. Resubmitting the same code (e.g.
+    // the customer edits the design and sends again) updates in place.
+    if (body.designRef) {
+      sqlite.prepare(`
+        INSERT INTO web_designs
+          (ref, lead_id, name, phone, email, contact, best_time, service,
+           location, consent, source_tool, design_spec, lang)
+        VALUES
+          (@ref, @leadId, @name, @phone, @email, @contact, @bestTime, @service,
+           @location, @consent, @sourceTool, @designSpec, @lang)
+        ON CONFLICT(ref) DO UPDATE SET
+          lead_id = excluded.lead_id, name = excluded.name,
+          phone = excluded.phone, email = excluded.email,
+          contact = excluded.contact, best_time = excluded.best_time,
+          service = excluded.service, location = excluded.location,
+          consent = excluded.consent, source_tool = excluded.source_tool,
+          design_spec = excluded.design_spec, lang = excluded.lang
+      `).run({
+        ref: body.designRef.toUpperCase(),
+        leadId: row.id,
+        name: body.name,
+        phone: body.phone ?? null,
+        email: body.email ?? null,
+        contact: body.contact ?? null,
+        bestTime: body.bestTime ?? null,
+        service: body.service ?? null,
+        location: body.area ?? null,
+        consent: body.consent ?? null,
+        sourceTool: body.designSource ?? null,
+        designSpec: body.designSpec ?? null,
+        lang: body.lang ?? "en",
+      });
+    }
+
     setImmediate(() => {
       try {
         storage.appendAudit({
@@ -140,6 +211,56 @@ export function registerPublicRoutes(app: Express): void {
     });
 
     res.status(201).json({ ok: true, id: row.id });
+  });
+
+  // ─── Quote App design lookup ──────────────────────────────────────────────
+  // Drop-in replacement for the Apps Script doGet the Electron Quote App was
+  // built against — same query params (?key=…&ref=… / &recent=N), same
+  // response envelope ({ ok, leads: [...] } / { ok: false, error: 'bad key' }),
+  // so migrating the app is just changing its lookup URL in Settings.
+
+  const designLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 120, // the owner clicking around the Find design screen, not a feed
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { ok: false, error: "rate limited" },
+  });
+
+  app.get("/api/public/designs", designLimiter, (req, res) => {
+    const configured = process.env.LEAD_INTAKE_KEY;
+    // Key rides a query param because that's the protocol the app (and the
+    // Apps Script before it) already speaks — HTTPS keeps it out of sight.
+    if (!configured || req.query.key !== configured) {
+      return res.json({ ok: false, error: "bad key" });
+    }
+
+    const rowToLead = (d: any) => ({
+      time: new Date(d.created_at).toISOString(),
+      type: "lead",
+      ref: d.ref,
+      name: d.name ?? "",
+      phone: d.phone ?? "",
+      email: d.email ?? "",
+      contact: d.contact ?? "",
+      bestTime: d.best_time ?? "",
+      service: d.service ?? "",
+      location: d.location ?? "",
+      consent: d.consent ?? "",
+      source: d.source_tool ?? "",
+      designSpec: d.design_spec ?? "",
+      notes: "",
+      lang: d.lang ?? "en",
+    });
+
+    const ref = typeof req.query.ref === "string" ? req.query.ref.trim().toUpperCase() : "";
+    if (ref) {
+      const rows = sqlite.prepare("SELECT * FROM web_designs WHERE upper(ref) = ?").all(ref);
+      return res.json({ ok: true, leads: rows.map(rowToLead) });
+    }
+    const recent = Math.min(Math.max(parseInt(String(req.query.recent ?? "25"), 10) || 25, 1), 100);
+    const rows = sqlite.prepare("SELECT * FROM web_designs ORDER BY created_at DESC, id DESC LIMIT ?").all(recent);
+    res.json({ ok: true, leads: rows.map(rowToLead) });
   });
 
   // ─── Read-only public feeds ───────────────────────────────────────────────
