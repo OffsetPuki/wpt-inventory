@@ -1,0 +1,651 @@
+import { sqlite } from "./storage";
+import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
+
+// ─── Business automations ────────────────────────────────────────────────────
+// Hourly cross-module sweep (plus one on boot), same shape as
+// startMarketingAutomations in marketing.ts: chases money, nudges customers,
+// expires stale paperwork, and sends the daily owner digest. Raw sqlite on
+// purpose — this module reads a dozen other modules' tables and shouldn't
+// import any of them. Every step runs in its own try/catch so one broken
+// table never kills the rest of the sweep.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com";
+
+// ─── Additive migrations (import time) ───────────────────────────────────────
+// Columns this sweep stamps on tables owned by other modules — added here with
+// the same try/catch ALTER pattern as quotes.ts so their files stay untouched.
+// index.ts imports ./routes (→ every module's DDL) before this module, so the
+// tables already exist when these run.
+for (const ddl of [
+  "ALTER TABLE fin_invoices ADD COLUMN reminded_at INTEGER", // last chase email, unix ms
+  "ALTER TABLE quotes ADD COLUMN nudge_sent_at INTEGER", // one-shot customer nudge, unix ms
+  "ALTER TABLE hr_attendance ADD COLUMN overdue_notified_at INTEGER", // clock-out nag, unix ms
+  "ALTER TABLE mk_settings ADD COLUMN lead_time_updated_at INTEGER", // stamped on settings save
+  "ALTER TABLE mk_settings ADD COLUMN last_digest_date TEXT", // 'YYYY-MM-DD' of last owner digest
+]) {
+  try {
+    sqlite.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
+}
+
+// ─── Small helpers ───────────────────────────────────────────────────────────
+
+// Local calendar date — same reasoning as finance.ts: "overdue" flips at the
+// shop's midnight, not UTC's.
+function localDate(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Whole dollars when clean, cents otherwise (same as marketing.ts).
+function fmtUsd(cents: number): string {
+  const dollars = cents / 100;
+  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+}
+
+// hasOpenTask-style dedupe, mirroring marketing.ts. Its sweep keys open tasks
+// by lead_id; these subjects span invoices/POs/items/contracts, so the stable
+// key rides in notes instead. Returns true when a task was actually created.
+// ponytail: open-only check like marketing's — a done/dismissed task whose
+// condition persists gets re-created next sweep; check all statuses if it nags.
+function ensureTask(key: string, title: string, kind = "other", leadId: number | null = null): boolean {
+  const open = sqlite.prepare(
+    "SELECT id FROM mk_tasks WHERE status = 'open' AND notes = ?",
+  ).get(key);
+  if (open) return false;
+  sqlite.prepare(`
+    INSERT INTO mk_tasks (title, kind, lead_id, status, auto_created, due_at, notes)
+    VALUES (?, ?, ?, 'open', 1, ?, ?)
+  `).run(title, kind, leadId, Date.now(), key);
+  return true;
+}
+
+// One failing step must never kill the rest of the sweep.
+function step(name: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (e) {
+    console.error(`[automations] ${name} failed`, e);
+  }
+}
+
+interface SweepSettings {
+  quote_follow_up_days: number;
+  lead_time_weeks: number | null;
+  lead_time_updated_at: number | null;
+  last_digest_date: string | null;
+}
+
+function getSettings(): SweepSettings {
+  try {
+    const row = sqlite.prepare(`
+      SELECT quote_follow_up_days, lead_time_weeks, lead_time_updated_at, last_digest_date
+      FROM mk_settings WHERE id = 1
+    `).get() as SweepSettings | undefined;
+    if (row) return row;
+  } catch {
+    /* mk_settings not migrated yet — fall through to defaults */
+  }
+  return { quote_follow_up_days: 3, lead_time_weeks: null, lead_time_updated_at: null, last_digest_date: null };
+}
+
+// ─── The sweep ───────────────────────────────────────────────────────────────
+
+function runBusinessSweep(): void {
+  const now = Date.now();
+  const today = localDate(now);
+  const cfg = getSettings();
+
+  // 1. Overdue invoice chase — email the client (re-remind every 7 days), or
+  // queue a task when there's no address on file.
+  step("invoice chase", () => {
+    const rows = sqlite.prepare(`
+      SELECT i.id, i.number, i.due_date, i.reminded_at,
+             i.total_cents - i.paid_cents AS balance,
+             c.name AS client_name, c.email
+      FROM fin_invoices i LEFT JOIN crm_clients c ON c.id = i.client_id
+      WHERE i.deleted_at IS NULL AND i.status IN ('sent','partial','overdue')
+        AND i.due_date IS NOT NULL AND i.due_date < ?
+        AND i.total_cents - i.paid_cents > 0
+    `).all(today) as any[];
+    for (const inv of rows) {
+      if (inv.email && mailEnabled()) {
+        if (inv.reminded_at != null && inv.reminded_at > now - 7 * DAY_MS) continue;
+        setImmediate(async () => {
+          const first = String(inv.client_name ?? "").trim().split(/\s+/)[0] || "there";
+          const ok = await sendMail({
+            to: inv.email,
+            subject: `Friendly reminder — invoice ${inv.number} — CJM Metals`,
+            text:
+              `Hi ${first},\n\n` +
+              `Just a friendly reminder that invoice ${inv.number} has an outstanding ` +
+              `balance of ${fmtUsd(inv.balance)} (it was due ${inv.due_date}). If you've ` +
+              `already sent payment, please disregard this note.\n\n` +
+              `Questions? Just reply to this email or give us a call.\n\n` +
+              `— CJM Metals · Arlington, TX`,
+          });
+          if (ok) {
+            sqlite.prepare("UPDATE fin_invoices SET reminded_at = ? WHERE id = ?")
+              .run(Date.now(), inv.id);
+          }
+        });
+      } else {
+        // No address on file, or mailer unconfigured — either way, a task.
+        ensureTask(`auto:invoice-chase:${inv.number}`,
+          `Chase ${inv.number} — ${fmtUsd(inv.balance)} overdue`);
+      }
+    }
+  });
+
+  // 2. Quote Builder follow-up — sent, then silence past the configured window.
+  step("quote follow-up", () => {
+    const cutoff = now - cfg.quote_follow_up_days * DAY_MS;
+    const rows = sqlite.prepare(`
+      SELECT number, customer_name FROM quotes
+      WHERE deleted_at IS NULL AND status = 'sent' AND sent_at IS NOT NULL AND sent_at < ?
+    `).all(cutoff) as any[];
+    for (const q of rows) {
+      ensureTask(`auto:quote-follow-up:${q.number}`,
+        `Follow up on ${q.number} with ${q.customer_name || "the customer"}`, "quote_reminder");
+    }
+  });
+
+  // 3. Customer quote nudge — once ever per quote, email them their share link.
+  step("quote nudge", () => {
+    if (!mailEnabled()) return;
+    const cutoff = now - cfg.quote_follow_up_days * DAY_MS;
+    const rows = sqlite.prepare(`
+      SELECT id, number, customer_name, payload, design_ref, share_token FROM quotes
+      WHERE deleted_at IS NULL AND status = 'sent' AND sent_at IS NOT NULL AND sent_at < ?
+        AND nudge_sent_at IS NULL AND share_token IS NOT NULL
+    `).all(cutoff) as any[];
+    for (const q of rows) {
+      // Email: the builder's customer card (in the payload), else the website
+      // design the quote was started from.
+      let email: string | undefined;
+      try {
+        email = JSON.parse(q.payload)?.customer?.email || undefined;
+      } catch {
+        /* malformed payload — fall through to the design */
+      }
+      if (!email && q.design_ref) {
+        const d = sqlite.prepare("SELECT email FROM web_designs WHERE upper(ref) = ?")
+          .get(String(q.design_ref).toUpperCase()) as any;
+        email = d?.email || undefined;
+      }
+      if (!email) continue;
+      const url = `${PUBLIC_SITE_URL}/quote/${q.share_token}`;
+      setImmediate(async () => {
+        const ok = await sendMail({
+          to: email!,
+          subject: `Your quote from CJM Metals — ${q.number}`,
+          text:
+            `Hi ${q.customer_name || "there"},\n\n` +
+            `Your quote ${q.number} from CJM Metals is ready when you are. ` +
+            `View it (and accept it online) here:\n\n` +
+            `${url}\n\n` +
+            `Questions? Just reply to this email or give us a call.\n\n` +
+            `— CJM Metals · Arlington, TX`,
+        });
+        if (ok) {
+          sqlite.prepare("UPDATE quotes SET nudge_sent_at = ? WHERE id = ?").run(Date.now(), q.id);
+        }
+      });
+    }
+  });
+
+  // 4. Stale draft invoices.
+  step("stale draft invoices", () => {
+    const rows = sqlite.prepare(`
+      SELECT number FROM fin_invoices
+      WHERE deleted_at IS NULL AND status = 'draft' AND created_at < ?
+    `).all(now - 7 * DAY_MS) as any[];
+    for (const inv of rows) {
+      ensureTask(`auto:draft-invoice:${inv.number}`,
+        `${inv.number} has sat in draft — send or void it`);
+    }
+  });
+
+  // 5. Late vendor POs.
+  step("late vendor POs", () => {
+    const rows = sqlite.prepare(`
+      SELECT number, vendor FROM fin_purchase_orders
+      WHERE deleted_at IS NULL AND status = 'sent'
+        AND expected_date IS NOT NULL AND expected_date < ?
+    `).all(today) as any[];
+    for (const po of rows) {
+      ensureTask(`auto:late-po:${po.number}`, `Check on ${po.number} from ${po.vendor}`);
+    }
+  });
+
+  // 6. Missing receipts — one batched task, not one per expense.
+  step("missing receipts", () => {
+    const r = sqlite.prepare(`
+      SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents), 0) AS total FROM fin_expenses
+      WHERE deleted_at IS NULL AND (receipt_url IS NULL OR receipt_url = '')
+        AND amount_cents >= 7500 AND created_at < ?
+    `).get(now - 3 * DAY_MS) as any;
+    if (r.n > 0) {
+      ensureTask("auto:missing-receipts",
+        `${r.n} expense${r.n === 1 ? "" : "s"} missing receipts — ${fmtUsd(r.total)} total`);
+    }
+  });
+
+  // 7. Estimate auto-expire — the status flip is the natural dedupe.
+  step("estimate auto-expire", () => {
+    const rows = sqlite.prepare(`
+      SELECT id, number FROM crm_estimates
+      WHERE deleted_at IS NULL AND status = 'sent'
+        AND valid_until IS NOT NULL AND valid_until < ?
+    `).all(today) as any[];
+    const flip = sqlite.prepare("UPDATE crm_estimates SET status = 'expired' WHERE id = ?");
+    for (const e of rows) {
+      flip.run(e.id);
+      ensureTask(`auto:estimate-expired:${e.number}`,
+        `${e.number} expired — re-quote or chase?`, "quote_reminder");
+    }
+  });
+
+  // 8. Lead follow-up dates — NULLing the column makes each date fire once.
+  step("lead follow-up dates", () => {
+    const rows = sqlite.prepare(`
+      SELECT id, name FROM crm_leads
+      WHERE deleted_at IS NULL AND stage NOT IN ('won','lost')
+        AND next_follow_up_at IS NOT NULL AND next_follow_up_at <= ?
+    `).all(now) as any[];
+    const clear = sqlite.prepare("UPDATE crm_leads SET next_follow_up_at = NULL WHERE id = ?");
+    for (const l of rows) {
+      ensureTask(`auto:lead-follow-up:${l.id}`, `Follow up with ${l.name}`, "follow_up", l.id);
+      clear.run(l.id);
+    }
+  });
+
+  // 9. Campaign auto-end.
+  step("campaign auto-end", () => {
+    sqlite.prepare(`
+      UPDATE mk_campaigns SET status = 'ended'
+      WHERE deleted_at IS NULL AND status = 'active'
+        AND end_date IS NOT NULL AND end_date < ?
+    `).run(today);
+  });
+
+  // 10. Unquoted website designs — same design↔quote join as the public
+  // status tracker (public-portal.ts), minus its sent/accepted narrowing.
+  step("unquoted designs", () => {
+    const rows = sqlite.prepare(`
+      SELECT d.ref, d.name FROM web_designs d
+      WHERE d.created_at < ?
+        AND NOT EXISTS (
+          SELECT 1 FROM quotes q
+          WHERE q.deleted_at IS NULL AND q.status != 'draft'
+            AND upper(q.design_ref) = upper(d.ref)
+        )
+    `).all(now - 48 * HOUR_MS) as any[];
+    for (const d of rows) {
+      ensureTask(`auto:unquoted-design:${d.ref}`,
+        `Quote design ${d.ref} for ${d.name || "the customer"}`, "quote_reminder");
+    }
+  });
+
+  // 11. Review-ask retry — queueReviewRequest (finance.ts) only stamps
+  // review_requests.sent_at when its send succeeded, so a NULL there with an
+  // email on file means the ask never went out. Same wording, same stamp.
+  step("review-ask retry", () => {
+    if (!mailEnabled()) return;
+    const rows = sqlite.prepare(`
+      SELECT id, token, name, email FROM review_requests
+      WHERE email IS NOT NULL AND email != ''
+        AND sent_at IS NULL AND submitted_at IS NULL AND created_at >= ?
+        AND created_at < ?
+    `).all(now - 30 * DAY_MS, now - 15 * 60 * 1000) as any[];
+    // 15-min age floor: finance.ts stamps sent_at only after its send resolves,
+    // so a brand-new row may still be in flight — don't race it into a double send.
+    for (const rr of rows) {
+      setImmediate(async () => {
+        const first = String(rr.name ?? "").trim().split(/\s+/)[0] || "there";
+        const ok = await sendMail({
+          to: rr.email,
+          subject: "How did we do? — CJM Metals",
+          text:
+            `Hi ${first},\n\n` +
+            `Thanks for choosing CJM Metals for your project. If you have a ` +
+            `minute, we'd really appreciate a quick review — it takes about ` +
+            `30 seconds:\n\n` +
+            `${PUBLIC_SITE_URL}/review/${rr.token}\n\n` +
+            `Thank you!\n\n` +
+            `— CJM Metals · Arlington, TX`,
+        });
+        if (ok) {
+          sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
+            .run(Date.now(), rr.id);
+        }
+      });
+    }
+  });
+
+  // 12. Lead-time banner staleness — the settings save stamps
+  // lead_time_updated_at; 30+ days without a touch earns a nudge.
+  step("lead-time staleness", () => {
+    if (cfg.lead_time_weeks == null) return;
+    if (cfg.lead_time_updated_at != null && cfg.lead_time_updated_at > now - 30 * DAY_MS) return;
+    ensureTask("auto:lead-time-stale",
+      `Still quoting ${cfg.lead_time_weeks} weeks out? Update or clear it in Marketing settings`);
+  });
+
+  // 13. Dead-pipe heartbeat — the ≥5 floor keeps brand-new installs quiet;
+  // the open task doubles as the once-per-quiet-period dedupe for the email.
+  step("dead-pipe heartbeat", () => {
+    const r = sqlite.prepare(`
+      SELECT COUNT(*) AS n, MAX(created_at) AS newest FROM crm_leads
+      WHERE deleted_at IS NULL AND source IN ('website','facebook','instagram')
+    `).get() as any;
+    if (r.n < 5 || r.newest == null || r.newest > now - 10 * DAY_MS) return;
+    if (ensureTask("auto:dead-pipe", "No website leads in 10+ days — check the site")) {
+      setImmediate(() => {
+        void sendOwnerMail({
+          subject: "[CJM Suite] No website leads in 10+ days",
+          text:
+            `The newest website/social lead is ${Math.floor((now - r.newest) / DAY_MS)} days old.\n\n` +
+            `Worth checking that cjmmetals.com, its quote form, and the ad campaigns are still working.`,
+        });
+      });
+    }
+  });
+
+  // 14. Low stock — one task per item under its threshold.
+  step("low stock", () => {
+    const rows = sqlite.prepare(`
+      SELECT id, name, quantity FROM items
+      WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold
+    `).all() as any[];
+    for (const i of rows) {
+      ensureTask(`auto:low-stock:${i.id}`, `Reorder ${i.name} — ${i.quantity} left`);
+    }
+  });
+
+  // 15. Tool checkout chase — per user+item, FIFO-match check-ins against
+  // checkouts; the oldest uncovered checkout is what they still owe.
+  // ponytail: naive full-scan + JS walk — fine at shop scale.
+  step("tool checkout chase", () => {
+    const rows = sqlite.prepare(`
+      SELECT t.user_id, t.item_id, t.type, t.quantity, t.created_at,
+             u.name AS user_name, i.name AS item_name
+      FROM transactions t
+      JOIN items i ON i.id = t.item_id
+      JOIN users u ON u.id = t.user_id
+      WHERE i.item_type = 'tool' AND i.deleted_at IS NULL
+      ORDER BY t.created_at, t.id
+    `).all() as any[];
+    const groups = new Map<string, any[]>();
+    for (const r of rows) {
+      const k = `${r.user_id}:${r.item_id}`;
+      let g = groups.get(k);
+      if (!g) groups.set(k, (g = []));
+      g.push(r);
+    }
+    for (const [key, g] of groups) {
+      const out: { at: number; qty: number }[] = [];
+      for (const r of g) {
+        if (r.type === "check_out") {
+          out.push({ at: r.created_at, qty: r.quantity });
+        } else {
+          let back = r.quantity;
+          while (back > 0 && out.length > 0) {
+            const take = Math.min(back, out[0].qty);
+            out[0].qty -= take;
+            back -= take;
+            if (out[0].qty === 0) out.shift();
+          }
+        }
+      }
+      if (out.length === 0 || out[0].at > now - 14 * DAY_MS) continue;
+      const days = Math.floor((now - out[0].at) / DAY_MS);
+      ensureTask(`auto:tool-chase:${key}`,
+        `Chase ${g[0].user_name} for ${g[0].item_name} — out ${days} days`);
+    }
+  });
+
+  // 16. Clock-out nag — one owner mail per batch, each shift nagged once.
+  step("clock-out nag", () => {
+    if (!mailEnabled()) return;
+    const rows = sqlite.prepare(`
+      SELECT a.id, a.clock_in, e.first_name || ' ' || e.last_name AS who
+      FROM hr_attendance a JOIN hr_employees e ON e.id = a.employee_id
+      WHERE a.clock_out IS NULL AND a.overdue_notified_at IS NULL AND a.clock_in < ?
+    `).all(now - 14 * HOUR_MS) as any[];
+    if (rows.length === 0) return;
+    const text =
+      `These shifts were never clocked out:\n\n` +
+      rows.map((r) => `  - ${r.who} — clocked in ${new Date(r.clock_in).toLocaleString()}`).join("\n") +
+      `\n\nFix them in HR → Attendance.`;
+    setImmediate(async () => {
+      const ok = await sendOwnerMail({
+        subject: `[CJM Suite] ${rows.length} shift${rows.length === 1 ? "" : "s"} never clocked out`,
+        text,
+      });
+      if (ok) {
+        const stamp = sqlite.prepare("UPDATE hr_attendance SET overdue_notified_at = ? WHERE id = ?");
+        for (const r of rows) stamp.run(Date.now(), r.id);
+      }
+    });
+  });
+
+  // 17. Runaway timer auto-stop — same math as POST /api/pm/time/stop, then
+  // one owner mail listing everything stopped this tick.
+  step("runaway timers", () => {
+    const rows = sqlite.prepare(`
+      SELECT te.id, te.started_at, u.name AS user_name
+      FROM pm_time_entries te JOIN users u ON u.id = te.user_id
+      WHERE te.ended_at IS NULL AND te.started_at < ?
+    `).all(now - 12 * HOUR_MS) as any[];
+    if (rows.length === 0) return;
+    const stop = sqlite.prepare("UPDATE pm_time_entries SET ended_at = ?, duration_min = ? WHERE id = ?");
+    for (const r of rows) {
+      stop.run(now, Math.max(0, Math.round((now - r.started_at) / 60000)), r.id);
+    }
+    const text =
+      `These timers ran past 12 hours and were stopped automatically:\n\n` +
+      rows.map((r) => `  - ${r.user_name} — started ${new Date(r.started_at).toLocaleString()}`).join("\n") +
+      `\n\nAdjust the entries in Projects → Time if the hours are wrong.`;
+    setImmediate(() => {
+      void sendOwnerMail({
+        subject: `[CJM Suite] Auto-stopped ${rows.length} runaway timer${rows.length === 1 ? "" : "s"}`,
+        text,
+      });
+    });
+  });
+
+  // 18. Contract expiry — flip the lapsed ones, warn about the next 30 days.
+  step("contract expiry", () => {
+    sqlite.prepare(`
+      UPDATE pm_contracts SET status = 'expired'
+      WHERE deleted_at IS NULL AND status IN ('signed','active')
+        AND end_date IS NOT NULL AND end_date < ?
+    `).run(today);
+    const ending = sqlite.prepare(`
+      SELECT id, title, end_date FROM pm_contracts
+      WHERE deleted_at IS NULL AND status IN ('signed','active')
+        AND end_date IS NOT NULL AND end_date >= ? AND end_date <= ?
+    `).all(today, localDate(now + 30 * DAY_MS)) as any[];
+    for (const c of ending) {
+      ensureTask(`auto:contract-ending:${c.id}`, `Contract ${c.title} ends ${c.end_date}`);
+    }
+  });
+
+  // 19. Payroll reminder — anything payable within 2 days and not yet paid.
+  step("payroll reminder", () => {
+    const runs = sqlite.prepare(`
+      SELECT id, period_start, period_end, pay_date, status FROM hr_payroll_runs
+      WHERE status != 'paid' AND pay_date IS NOT NULL AND pay_date <= ?
+    `).all(localDate(now + 2 * DAY_MS)) as any[];
+    for (const r of runs) {
+      ensureTask(`auto:payroll-due:${r.id}`,
+        `Payroll run for ${r.period_start} – ${r.period_end} is due ${r.pay_date} and still ${r.status}`);
+    }
+  });
+
+  // 20. Daily owner digest — once per day, first sweep at/after 7am local.
+  step("owner digest", () => {
+    if (!mailEnabled()) return; // don't burn the day's send on a no-op
+    if (new Date(now).getHours() < 7) return;
+    if (cfg.last_digest_date === today) return;
+    // ponytail: stamp before sending — a failed send waits for tomorrow, but a
+    // slow one can never double-fire.
+    sqlite.prepare("UPDATE mk_settings SET last_digest_date = ? WHERE id = 1").run(today);
+    const text = buildDigest(now, today) || "Nothing needs your attention today.";
+    setImmediate(() => {
+      void sendOwnerMail({ subject: `[CJM Suite] Daily digest — ${today}`, text });
+    });
+  });
+}
+
+// ─── Owner digest body ───────────────────────────────────────────────────────
+// Plain text, sections skipped when empty. Monday adds the weekly funnel;
+// the 1st adds last month's books (same rollup rules as finance.ts /reports).
+
+function buildDigest(now: number, today: string): string {
+  const d = new Date(now);
+  const startOfToday = new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
+  const todayMs = Date.parse(today);
+  const parts: string[] = [];
+
+  const dueToday = sqlite.prepare(
+    "SELECT title FROM mk_tasks WHERE status = 'open' AND due_at >= ? AND due_at < ? ORDER BY due_at",
+  ).all(startOfToday, startOfToday + DAY_MS) as any[];
+  const overdueTasks = (sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM mk_tasks WHERE status = 'open' AND due_at IS NOT NULL AND due_at < ?",
+  ).get(startOfToday) as any).n;
+  if (dueToday.length > 0 || overdueTasks > 0) {
+    parts.push([
+      `TASKS TODAY (${dueToday.length} due, ${overdueTasks} overdue)`,
+      ...dueToday.map((t) => `  - ${t.title}`),
+    ].join("\n"));
+  }
+
+  const yLeads = sqlite.prepare(
+    "SELECT name, source FROM crm_leads WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?",
+  ).all(startOfToday - DAY_MS, startOfToday) as any[];
+  if (yLeads.length > 0) {
+    parts.push([
+      `NEW LEADS YESTERDAY (${yLeads.length})`,
+      ...yLeads.map((l) => `  - ${l.name} (${l.source})`),
+    ].join("\n"));
+  }
+
+  const overdueInv = sqlite.prepare(`
+    SELECT i.number, COALESCE(c.name, i.client_name, '(no client)') AS who,
+           i.total_cents - i.paid_cents AS balance, i.due_date
+    FROM fin_invoices i LEFT JOIN crm_clients c ON c.id = i.client_id
+    WHERE i.deleted_at IS NULL AND i.status IN ('sent','partial','overdue')
+      AND i.due_date IS NOT NULL AND i.due_date < ? AND i.total_cents - i.paid_cents > 0
+    ORDER BY i.due_date
+  `).all(today) as any[];
+  if (overdueInv.length > 0) {
+    parts.push([
+      `OVERDUE INVOICES (${overdueInv.length})`,
+      ...overdueInv.map((i) => {
+        const days = Math.max(1, Math.floor((todayMs - Date.parse(i.due_date)) / DAY_MS));
+        return `  - ${i.number} · ${i.who} · ${fmtUsd(i.balance)} · ${days}d overdue`;
+      }),
+    ].join("\n"));
+  }
+
+  const waiting = sqlite.prepare(
+    "SELECT number, customer_name, total_cents FROM quotes WHERE deleted_at IS NULL AND status = 'sent' ORDER BY sent_at",
+  ).all() as any[];
+  if (waiting.length > 0) {
+    parts.push([
+      `QUOTES WAITING ON CUSTOMERS (${waiting.length})`,
+      ...waiting.map((q) => `  - ${q.number} · ${q.customer_name || "(no name)"} · ${fmtUsd(q.total_cents)}`),
+    ].join("\n"));
+  }
+
+  const low = sqlite.prepare(`
+    SELECT name, quantity FROM items
+    WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold
+    ORDER BY name
+  `).all() as any[];
+  if (low.length > 0) {
+    parts.push([
+      `LOW STOCK (${low.length})`,
+      ...low.map((i) => `  - ${i.name} — ${i.quantity} left`),
+    ].join("\n"));
+  }
+
+  if (d.getDay() === 1) {
+    const weekAgo = now - 7 * DAY_MS;
+    const n = (q: string, ...args: unknown[]): number => (sqlite.prepare(q).get(...args) as any).n;
+    const lines = [
+      "WEEKLY FUNNEL (last 7 days)",
+      `  Leads in: ${n("SELECT COUNT(*) AS n FROM crm_leads WHERE deleted_at IS NULL AND created_at >= ?", weekAgo)}`,
+      `  Designs submitted: ${n("SELECT COUNT(*) AS n FROM web_designs WHERE created_at >= ?", weekAgo)}`,
+      `  Quotes sent: ${n("SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL AND sent_at >= ?", weekAgo)}`,
+      `  Quotes accepted: ${n("SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL AND accepted_at >= ?", weekAgo)}`,
+      `  Reviews received: ${n("SELECT COUNT(*) AS n FROM mk_reviews WHERE created_at >= ?", weekAgo)}`,
+    ];
+    const unpub = n("SELECT COUNT(*) AS n FROM mk_reviews WHERE source = 'website' AND published = 0");
+    if (unpub > 0) lines.push(`  Unpublished website reviews: ${unpub}`);
+    // Today IS Monday here, so startOfToday is this week's start. Walk back a
+    // calendar week from noon so a DST shift can't land us on Sunday 23:00.
+    const lm = new Date(startOfToday + 12 * 60 * 60 * 1000);
+    lm.setDate(lm.getDate() - 7);
+    lm.setHours(0, 0, 0, 0);
+    const lastMonday = lm.getTime();
+    const laggards = sqlite.prepare(`
+      SELECT DISTINCT u.name FROM pm_time_entries te JOIN users u ON u.id = te.user_id
+      WHERE te.started_at >= ? AND te.started_at < ?
+        AND NOT EXISTS (
+          SELECT 1 FROM pm_timesheets ts
+          WHERE ts.user_id = te.user_id AND ts.week_start = ? AND ts.status IN ('submitted','approved')
+        )
+    `).all(lastMonday, startOfToday, localDate(lastMonday)) as any[];
+    if (laggards.length > 0) {
+      lines.push(`  Timesheets missing for last week: ${laggards.map((l) => l.name).join(", ")}`);
+    }
+    parts.push(lines.join("\n"));
+  }
+
+  if (d.getDate() === 1) {
+    const mStart = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    const mEnd = new Date(d.getFullYear(), d.getMonth(), 1);
+    const prefix = `${mStart.getFullYear()}-${String(mStart.getMonth() + 1).padStart(2, "0")}`;
+    const income = (sqlite.prepare(`
+      SELECT COALESCE(SUM(amount_cents), 0) AS n FROM fin_invoice_payments
+      WHERE (paid_at LIKE ?) OR (paid_at IS NULL AND created_at >= ? AND created_at < ?)
+    `).get(`${prefix}%`, mStart.getTime(), mEnd.getTime()) as any).n;
+    const spent = (sqlite.prepare(
+      "SELECT COALESCE(SUM(amount_cents), 0) AS n FROM fin_expenses WHERE deleted_at IS NULL AND date LIKE ?",
+    ).get(`${prefix}%`) as any).n;
+    const ar = (sqlite.prepare(`
+      SELECT COALESCE(SUM(total_cents - paid_cents), 0) AS n FROM fin_invoices
+      WHERE deleted_at IS NULL AND status IN ('sent','partial','overdue')
+    `).get() as any).n;
+    parts.push([
+      `LAST MONTH (${prefix})`,
+      `  Income: ${fmtUsd(income)}`,
+      `  Expenses: ${fmtUsd(spent)}`,
+      `  Net: ${fmtUsd(income - spent)}`,
+      `  AR outstanding today: ${fmtUsd(ar)}`,
+    ].join("\n"));
+  }
+
+  return parts.join("\n\n");
+}
+
+// Same shape as startMarketingAutomations: run once on boot, then hourly;
+// unref() so the timer never keeps a shutting-down process alive.
+export function startBusinessAutomations(): void {
+  const tick = () => {
+    try {
+      runBusinessSweep();
+    } catch (e) {
+      console.error("[automations] sweep failed", e);
+    }
+  };
+  tick();
+  setInterval(tick, 60 * 60 * 1000).unref();
+}

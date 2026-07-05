@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { type Settings } from "@shared/schema";
 import Header from "@/components/Header";
-import { formatDateTime } from "@/lib/format";
-import { Loader2, Save, Upload, Plug, Unplug, RefreshCw, ExternalLink } from "lucide-react";
+import { Loader2, Save, Upload } from "lucide-react";
 
 const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
@@ -167,189 +165,12 @@ function BrandingTab() {
   );
 }
 
-interface QbStatus {
-  connected: boolean;
-  configured: boolean;
-  realmId?: string;
-  environment?: string;
-  lastSyncAt?: number | null;
-  reconnectNeeded?: boolean;
-  queue?: { pending: number; error: number; manual: number };
-  unmapped?: { items: number; projects: number };
-}
-
-function QuickBooksCard() {
-  const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
-
-  const { data: status } = useQuery<QbStatus>({
-    queryKey: ["qb-status"],
-    queryFn: async () => (await apiRequest("GET", "/api/qb/status")).json(),
-  });
-
-  // Intuit redirects back to "/?qb=connected#/settings" — surface the result
-  // once and clean the URL so refreshes don't re-toast.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const qb = params.get("qb");
-    if (!qb) return;
-    if (qb === "connected") {
-      toast({ variant: "success", title: "QuickBooks connected", description: "Run a sync to pull items and purchase orders." });
-      qc.invalidateQueries({ queryKey: ["qb-status"] });
-    } else {
-      toast({ variant: "destructive", title: "QuickBooks connection failed", description: params.get("qbmsg") ?? undefined });
-    }
-    window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-  }, [qc]);
-
-  function connect() {
-    setBusy(true);
-    // Full-page hop to the public connect endpoint, which 302s to Intuit's
-    // consent screen. Same URL we give Intuit as the Connect/Reconnect URL.
-    window.location.href = "/api/qb/connect";
-  }
-
-  async function syncNow() {
-    setBusy(true);
-    try {
-      const res = await apiRequest("POST", "/api/qb/sync");
-      const s = await res.json();
-      toast({
-        variant: "success",
-        title: "Synced",
-        description: `${s.purchaseOrders} POs, ${s.items} items, ${s.customers} customers pulled.`,
-      });
-      qc.invalidateQueries({ queryKey: ["qb-status"] });
-      qc.invalidateQueries({ queryKey: ["pos"] });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Sync failed", description: e?.message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function disconnect() {
-    setBusy(true);
-    try {
-      await apiRequest("POST", "/api/qb/disconnect");
-      toast({ variant: "success", title: "QuickBooks disconnected" });
-      qc.invalidateQueries({ queryKey: ["qb-status"] });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Disconnect failed", description: e?.message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const needsAttention =
-    (status?.queue?.error ?? 0) + (status?.queue?.manual ?? 0) +
-    (status?.unmapped?.items ?? 0) + (status?.unmapped?.projects ?? 0);
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <h2 className="text-base font-semibold text-foreground">QuickBooks Online</h2>
-        <span
-          className={
-            "rounded-full px-2.5 py-0.5 text-xs font-medium " +
-            (status?.connected
-              ? status.reconnectNeeded
-                ? "bg-orange-500/15 text-orange-700 dark:text-orange-400"
-                : "bg-green-500/15 text-green-700 dark:text-green-400"
-              : "bg-secondary text-secondary-foreground")
-          }
-        >
-          {status?.connected ? (status.reconnectNeeded ? "Reconnect needed" : "Connected") : "Not connected"}
-        </span>
-        {status?.environment === "sandbox" && status?.connected && (
-          <span className="rounded-full bg-blue-500/15 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">Sandbox</span>
-        )}
-      </div>
-      <p className="mb-4 text-sm text-muted-foreground">
-        POs are pulled from QuickBooks; project part-issues are pushed back as
-        zero-dollar job costs. The bookkeeper keeps owning POs and Bills.
-        {status?.connected && status.lastSyncAt ? ` Last sync ${formatDateTime(status.lastSyncAt)}.` : ""}
-      </p>
-
-      {status?.connected && needsAttention > 0 && (
-        <p className="mb-3 text-sm text-orange-600 dark:text-orange-400">
-          {status.unmapped?.items ? `${status.unmapped.items} unmapped items. ` : ""}
-          {status.unmapped?.projects ? `${status.unmapped.projects} unmapped projects. ` : ""}
-          {status.queue?.error ? `${status.queue.error} failed pushes. ` : ""}
-          {status.queue?.manual ? `${status.queue.manual} adjustments to enter in QBO by hand.` : ""}
-        </p>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        {!status?.connected || status.reconnectNeeded ? (
-          <button
-            onClick={connect}
-            disabled={busy || status?.configured === false}
-            className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
-          >
-            {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plug className="h-5 w-5" />}
-            Connect to QuickBooks
-          </button>
-        ) : null}
-        {status?.connected && (
-          <>
-            <button
-              onClick={syncNow}
-              disabled={busy}
-              className="flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-foreground hover:border-primary disabled:opacity-60"
-            >
-              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCw className="h-5 w-5" />}
-              Sync now
-            </button>
-            <Link
-              href="/qb"
-              className="flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-foreground hover:border-primary"
-            >
-              <ExternalLink className="h-5 w-5" />
-              Mapping & queue
-            </Link>
-            <button
-              onClick={disconnect}
-              disabled={busy}
-              className="flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-destructive hover:border-destructive disabled:opacity-60"
-            >
-              <Unplug className="h-5 w-5" />
-              Disconnect
-            </button>
-          </>
-        )}
-        {status?.configured === false && (
-          <p className="self-center text-sm text-muted-foreground">
-            Set QB_CLIENT_ID / QB_CLIENT_SECRET in .env first.
-          </p>
-        )}
-      </div>
-
-      {/* Intuit requires public Privacy Policy and EULA URLs when applying for
-          production keys — these are the links to hand them. */}
-      <p className="mt-4 text-sm text-muted-foreground">
-        Public legal pages (give these URLs to Intuit):{" "}
-        <a href="/privacy" target="_blank" rel="noopener" className="text-primary hover:underline">Privacy Policy</a>
-        <span className="mx-1.5">·</span>
-        <a href="/eula" target="_blank" rel="noopener" className="text-primary hover:underline">EULA</a>
-      </p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Need help?{" "}
-        <a href="mailto:support@cjmmetals.com?subject=CJM%20Metals%20suite%20support" className="text-primary hover:underline">
-          Contact support
-        </a>
-      </p>
-    </div>
-  );
-}
-
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl">
-      <Header title="Settings" description="Branding & integrations" />
+      <Header title="Settings" description="Branding" />
       <div className="flex flex-col gap-5">
         <BrandingTab />
-        <QuickBooksCard />
       </div>
     </div>
   );

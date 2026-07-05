@@ -45,7 +45,6 @@ import {
   Star,
   Clock4,
   Users2,
-  Link2,
   PencilRuler,
 } from "lucide-react";
 
@@ -82,7 +81,7 @@ interface NavGroup {
 // The suite is organized by business function. Entry-level visibility mirrors
 // the API: workers get the floor tools (sales, projects, inventory, their own
 // HR self-service); managers add oversight (dashboard, marketing, finance);
-// technicians add the operational knobs (settings, templates, QuickBooks).
+// technicians add the operational knobs (settings, templates).
 const NAV_GROUPS: NavGroup[] = [
   {
     key: "crm",
@@ -124,7 +123,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/add", label: "Add Item", icon: Plus, needs: "technician" },
       { to: "/activity", label: "Activity", icon: Activity },
       { to: "/map", label: "Shop Map", icon: Map },
-      { to: "/pos", label: "QuickBooks POs", icon: ClipboardList },
     ],
   },
   {
@@ -161,7 +159,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/audit", label: "Audit Log", icon: ShieldCheck, needs: "elevated" },
       { to: "/trash", label: "Trash", icon: Trash2, needs: "elevated" },
       { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "technician" },
-      { to: "/qb", label: "QuickBooks", icon: Link2, needs: "technician" },
       { to: "/settings", label: "Settings", icon: Settings, needs: "technician" },
     ],
   },

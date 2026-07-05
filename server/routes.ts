@@ -8,10 +8,9 @@ import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
 import { storage } from "./storage";
 import { requireAuth, requireTechnician, requireElevated, createSession, destroySession } from "./auth";
-import { registerQbRoutes, qbEnqueueIssue, qbEnqueueAdjust } from "./qb";
 // Business-suite modules. Import order matters for DDL: marketing owns the
 // mk_* tables that CRM's automation hooks insert into, so it loads first.
-import { registerMarketingRoutes } from "./marketing";
+import { registerMarketingRoutes, queueTaskOnce } from "./marketing";
 import { registerCrmRoutes } from "./crm";
 import { registerPmRoutes } from "./pm";
 import { registerHrRoutes } from "./hr";
@@ -317,7 +316,6 @@ export function registerRoutes(app: Express): void {
       item,
       transactions: storage.getTransactions({ itemId: id, limit: 10 }),
       adjustments: storage.getAdjustments(id),
-      onOrder: storage.getItemOnOrder(id),
     });
   });
 
@@ -387,9 +385,6 @@ export function registerRoutes(app: Express): void {
         targetType: "item", targetId: id, targetName: target?.name ?? null,
         details: { delta: data.delta, reason: data.reason },
       });
-      // Pushed to QBO as an InventoryAdjustment (or flagged for manual entry
-      // when the QBO plan doesn't allow API adjustments).
-      qbEnqueueAdjust({ id: adj.id, itemId: id, itemName: target?.name, delta: data.delta, reason: data.reason });
       res.status(201).json(adj);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -407,8 +402,6 @@ export function registerRoutes(app: Express): void {
       const data = insertTransactionSchema.parse(req.body);
       const itemId = pid(req.params.id);
       const txn = storage.createTransaction(itemId, req.user!.userId, "check_out", data);
-      // Project-linked issues flow to QuickBooks as $0 job-cost documents.
-      qbEnqueueIssue({ id: txn.id, itemId, projectId: txn.projectId, quantity: txn.quantity, type: "check_out" });
       res.status(201).json(txn);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -420,7 +413,6 @@ export function registerRoutes(app: Express): void {
       const data = insertTransactionSchema.parse(req.body);
       const itemId = pid(req.params.id);
       const txn = storage.createTransaction(itemId, req.user!.userId, "check_in", data);
-      qbEnqueueIssue({ id: txn.id, itemId, projectId: txn.projectId, quantity: txn.quantity, type: "check_in" });
       res.status(201).json(txn);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -499,6 +491,15 @@ export function registerRoutes(app: Express): void {
         targetType: "project", targetId: id, targetName: project.name,
         details: { from: before.status, to: project.status },
       });
+      // Closing a job with unresolved checklist items → surface a follow-up
+      // task (queueTaskOnce defers the insert and dedupes by open title).
+      if (project.status === "done") {
+        const unresolved = storage.getChecklist(id)
+          .filter((r) => r.status === "pending" || r.status === "ordered").length;
+        if (unresolved > 0) {
+          queueTaskOnce(`Project ${project.name} closed with ${unresolved} unresolved checklist items`);
+        }
+      }
     }
     res.json(project);
   });
@@ -824,10 +825,6 @@ export function registerRoutes(app: Express): void {
 
     res.json({ category: "tools" });
   });
-
-  // ─── QuickBooks Online ─────────────────────────────────────────────────
-
-  registerQbRoutes(app);
 
   // ─── Business suite modules ────────────────────────────────────────────
 

@@ -8,6 +8,7 @@ import { registerRoutes } from "./routes";
 import { registerLegalRoutes } from "./legal";
 import { startSessionReaper } from "./auth";
 import { startMarketingAutomations } from "./marketing";
+import { startBusinessAutomations } from "./automations";
 import { serveStatic } from "./static";
 import { setupVite } from "./vite";
 
@@ -128,13 +129,13 @@ startSessionReaper();
 // Hourly marketing sweep: stale-lead flagging, auto follow-up / quote-reminder
 // tasks. Safe to start here: every module's DDL already ran at import time.
 startMarketingAutomations();
+startBusinessAutomations();
 
 // ── Register routes ──
 registerRoutes(app);
 
 // Public legal pages (/privacy, /eula). Registered before the SPA catch-all
-// so they return real HTML — Intuit's reviewer needs a public Privacy Policy
-// URL, and these must resolve without auth or the React shell.
+// so they return real HTML and resolve without auth or the React shell.
 registerLegalRoutes(app);
 
 // ── Serve frontend ──

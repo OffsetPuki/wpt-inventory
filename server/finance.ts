@@ -313,6 +313,41 @@ function queueReviewRequest(inv: Invoice): void {
   });
 }
 
+// ─── Payment receipt email ───────────────────────────────────────────────────
+// Confirms the money landed the moment it's recorded. Same contract as the
+// review hook: everything deferred + try/catch'd, so recording a payment can
+// never fail or slow down because mail hiccuped. Skips silently with no
+// mailer or no client email on file.
+
+const usd = (cents: number): string => `$${(cents / 100).toFixed(2)}`;
+
+function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
+  setImmediate(async () => {
+    try {
+      if (!mailEnabled() || inv.clientId == null) return;
+      const client = db.select({ name: clients.name, email: clients.email })
+        .from(clients).where(eq(clients.id, inv.clientId)).get();
+      if (!client?.email) return;
+
+      const first = (client.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
+      const balanceCents = inv.totalCents - inv.paidCents;
+      await sendMail({
+        to: client.email,
+        subject: `Received ${usd(amountCents)} on ${inv.number} — CJM Metals`,
+        text:
+          `Hi ${first},\n\n` +
+          `We received your payment of ${usd(amountCents)} on invoice ${inv.number}. ` +
+          (balanceCents > 0
+            ? `Remaining balance: ${usd(balanceCents)}.\n\n`
+            : `Your invoice is paid in full — thank you!\n\n`) +
+          `— CJM Metals · Arlington, TX`,
+      });
+    } catch (e) {
+      console.error("[finance] payment-receipt hook failed", e);
+    }
+  });
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerFinanceRoutes(app: Express): void {
@@ -705,6 +740,8 @@ export function registerFinanceRoutes(app: Express): void {
 
     // Newly settled → queue the review ask (deferred; can never break this path).
     if (status === "paid" && inv.status !== "paid") queueReviewRequest(updated);
+    // Every recorded payment → receipt email to the customer (same contract).
+    queuePaymentReceipt(updated, body.amountCents);
 
     audit(req, "finance.payment_record", {
       targetType: "invoice", targetId: inv.id, targetName: inv.number,

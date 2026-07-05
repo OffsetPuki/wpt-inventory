@@ -5,6 +5,8 @@ import {
 } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
 import { requireAuth, requireElevated } from "./auth";
+import { sendMail, sendOwnerMail } from "./mailer";
+import { queueTaskOnce } from "./marketing";
 import {
   employees, payrollRuns, payslips, attendance, leaveRequests,
   jobOpenings, candidates, performanceReviews,
@@ -591,7 +593,8 @@ export function registerHrRoutes(app: Express): void {
   app.post("/api/hr/leave", requireAuth, (req, res) => {
     try {
       const data = insertLeaveRequestSchema.parse(req.body);
-      if (!getEmployee(data.employeeId)) {
+      const emp = getEmployee(data.employeeId);
+      if (!emp) {
         return res.status(400).json({ message: "Employee not found" });
       }
       // Workers may only file for themselves; managers can file for anyone.
@@ -602,6 +605,15 @@ export function registerHrRoutes(app: Express): void {
         }
       }
       const row = db.insert(leaveRequests).values(data).returning().get();
+      // Notify the owner off the response path — sendOwnerMail never throws
+      // and no-ops when mail isn't configured.
+      const who = fullName(emp);
+      setImmediate(() => {
+        void sendOwnerMail({
+          subject: `[CJM Suite] Leave request — ${who}`,
+          text: `${who} requested ${row.type} leave ${row.startDate}–${row.endDate}.`,
+        });
+      });
       res.status(201).json(row);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -623,6 +635,18 @@ export function registerHrRoutes(app: Express): void {
         targetType: "leave_request", targetId: id,
         details: { status, employeeId: existing.employeeId, type: existing.type },
       });
+      // Tell the employee — skipped silently when they have no email on file.
+      const emp = getEmployee(existing.employeeId);
+      if (emp?.email) {
+        const { email, firstName } = emp;
+        setImmediate(() => {
+          void sendMail({
+            to: email,
+            subject: `Your leave request was ${status} — CJM Metals`,
+            text: `Hi ${firstName},\n\nYour ${existing.type} leave request for ${existing.startDate}–${existing.endDate} was ${status}.`,
+          });
+        });
+      }
       res.json(row);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -952,6 +976,10 @@ export function registerHrRoutes(app: Express): void {
           targetType: "candidate", targetId: id, targetName: row.name,
           details: { from: before.stage, to: data.stage },
         });
+        // Hired → queue the onboarding follow-up (deduped by open task title).
+        if (data.stage === "hired") {
+          queueTaskOnce(`Onboard ${row.name}: create employee record, link login`);
+        }
       }
       res.json(row);
     } catch (e: any) {

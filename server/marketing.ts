@@ -2,6 +2,7 @@ import type { Express, Request } from "express";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
 import { requireAuth, requireElevated } from "./auth";
+import { sendOwnerMail } from "./mailer";
 import {
   campaigns, reviews, mkTasks, marketingSettings, portfolioItems,
   insertCampaignSchema, insertReviewSchema, insertMkTaskSchema,
@@ -137,6 +138,15 @@ try {
   /* column already exists */
 }
 
+// Additive migration: mk_settings.lead_time_updated_at (unix ms) — stamped
+// whenever lead_time_weeks changes, so the website can show how fresh the
+// posted lead time is.
+try {
+  sqlite.exec("ALTER TABLE mk_settings ADD COLUMN lead_time_updated_at INTEGER");
+} catch {
+  /* column already exists */
+}
+
 // Singleton settings row — the automation sweep and the alert thresholds read
 // it unconditionally, so guarantee it exists at boot rather than lazily.
 sqlite.prepare("INSERT OR IGNORE INTO mk_settings (id) VALUES (1)").run();
@@ -194,6 +204,24 @@ function audit(req: Request, action: string, extras: {
       storage.appendAudit(entry);
     } catch (e) {
       console.error("[audit] failed to write entry", e);
+    }
+  });
+}
+
+// Fire-and-forget task creation for on-event hooks (used here, by hr.ts and
+// routes.ts): defers the insert via setImmediate like audit(), and dedupes on
+// an open task with the same title so repeated events don't pile up copies.
+export function queueTaskOnce(title: string, kind: (typeof MK_TASK_KINDS)[number] = "other"): void {
+  setImmediate(() => {
+    try {
+      const dupe = db.select({ id: mkTasks.id }).from(mkTasks)
+        .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
+        .get();
+      if (!dupe) {
+        db.insert(mkTasks).values({ title, kind, status: "open", autoCreated: true }).run();
+      }
+    } catch (e) {
+      console.error("[marketing] queueTaskOnce failed", e);
     }
   });
 }
@@ -566,11 +594,25 @@ export function registerMarketingRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
     const updates = stripUndefined(body);
-    getSettingsRow(); // guarantees the row exists before UPDATE
+    const before = getSettingsRow(); // guarantees the row exists before UPDATE
     db.update(marketingSettings)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(marketingSettings.id, 1))
       .run();
+    // Freshness stamp for the website's lead-time banner (null counts as a
+    // change — clearing the banner is also news).
+    // ponytail: raw SQL — the column isn't in the drizzle table (shared/ is
+    // out of scope here); move it into marketing-schema.ts if the client ever
+    // needs to read it.
+    if (updates.leadTimeWeeks !== undefined && updates.leadTimeWeeks !== before.leadTimeWeeks) {
+      setImmediate(() => {
+        try {
+          sqlite.prepare("UPDATE mk_settings SET lead_time_updated_at = ? WHERE id = 1").run(Date.now());
+        } catch (e) {
+          console.error("[marketing] lead_time_updated_at stamp failed", e);
+        }
+      });
+    }
     const row = getSettingsRow();
     audit(req, "marketing.settings_update", {
       targetType: "marketing_settings", targetId: 1,
@@ -697,6 +739,19 @@ export function registerMarketingRoutes(app: Express): void {
     const row = db.insert(reviews)
       .values({ ...body, respondedAt: body.responded ? Date.now() : null })
       .returning().get();
+    // Negative-review alarm (admin entry path; the public submit path lives in
+    // public-portal.ts): alert the owner and queue a response task.
+    if (row.rating <= 3) {
+      const name = row.author || "Anonymous";
+      const { rating, source, text } = row;
+      setImmediate(() => {
+        void sendOwnerMail({
+          subject: `[CJM Suite] ${rating}-star review from ${name}`,
+          text: `${name} left a ${rating}-star review on ${source}:\n\n${text || "(no text)"}`,
+        });
+      });
+      queueTaskOnce(`Respond to ${name}'s ${rating}-star review`);
+    }
     res.status(201).json(row);
   });
 

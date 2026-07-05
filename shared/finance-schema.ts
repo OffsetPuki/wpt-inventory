@@ -152,7 +152,6 @@ export const paymentGateways = sqliteTable("fin_gateways", {
 });
 
 // App-native purchase orders (vendor orders the business sends out).
-// Distinct from the read-only QuickBooks POs on the inventory side.
 export const purchaseOrders = sqliteTable("fin_purchase_orders", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: text("number").notNull().unique(), // "PO-2026-0001"

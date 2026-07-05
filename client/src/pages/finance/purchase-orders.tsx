@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
@@ -438,15 +437,6 @@ export default function PurchaseOrdersPage() {
           New purchase order
         </button>
       </Header>
-
-      <p className="mb-4 text-sm text-muted-foreground">
-        Vendor POs created here. QuickBooks purchase orders pulled by the bookkeeper live
-        under{" "}
-        <Link href="/pos" className="text-primary underline-offset-2 hover:underline">
-          Inventory → QuickBooks POs
-        </Link>
-        .
-      </p>
 
       <div className="mb-4 flex flex-wrap gap-2">
         {TABS.map((t) => (

@@ -4,9 +4,10 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { hasLeadKey } from "./public-api";
-import { mailEnabled, sendOwnerMail } from "./mailer";
+import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
-import { reviews, marketingSettings } from "../shared/marketing-schema";
+import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
+import { invoices } from "../shared/finance-schema";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
@@ -292,6 +293,53 @@ export function registerPublicPortalRoutes(app: Express): void {
         /* audit is best-effort */
       }
     });
+
+    // Accepted online → a DRAFT invoice for the owner to review (never sent
+    // automatically). Deferred + try/catch'd: accepting must never fail or
+    // slow down over bookkeeping — same stance as finance's review hook.
+    setImmediate(() => {
+      try {
+        // Re-accept / double-click dedupe: skip if any live invoice already
+        // references this quote number in its notes or line items.
+        const dupe = sqlite.prepare(
+          "SELECT id FROM fin_invoices WHERE deleted_at IS NULL AND (notes LIKE ? OR items LIKE ?)",
+        ).get(`%${quote.number}%`, `%${quote.number}%`);
+        if (dupe) return;
+
+        const items = JSON.stringify([{
+          description: `Quote ${quote.number} — ${QUOTE_TYPE_LABELS[quote.type]} (accepted online)`,
+          qty: 1,
+          unitPriceCents: quote.totalCents,
+        }]);
+        // ponytail: finance.ts's insertNumbered isn't exported — same
+        // MAX(id)+1, retry-on-UNIQUE numbering inlined; export the helper if
+        // a third module ever needs INV numbers.
+        const base = (sqlite.prepare(
+          "SELECT COALESCE(MAX(id), 0) AS m FROM fin_invoices",
+        ).get() as { m: number }).m + 1;
+        const year = new Date().getFullYear();
+        for (let i = 0; i < 25; i++) {
+          try {
+            db.insert(invoices).values({
+              number: `INV-${year}-${String(base + i).padStart(4, "0")}`,
+              clientName: quote.customerName,
+              status: "draft",
+              items,
+              subtotalCents: quote.totalCents,
+              totalCents: quote.totalCents,
+              notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
+            }).run();
+            return;
+          } catch (e: any) {
+            if (!String(e?.message ?? "").includes("UNIQUE")) throw e;
+          }
+        }
+        throw new Error("Could not allocate a unique INV number");
+      } catch (e) {
+        console.error("[public-portal] accept→invoice hook failed", e);
+      }
+    });
+
     if (mailEnabled()) {
       const text =
         `Quote ${quote.number} was accepted on cjmmetals.com.\n\n` +
@@ -306,6 +354,30 @@ export function registerPublicPortalRoutes(app: Express): void {
           text,
         });
       });
+
+      // Customer confirmation — the builder's customer-card email first
+      // (same payload read as the share endpoint), else the linked website
+      // design's. No address on file → skip silently.
+      const to =
+        parseJson<{ customer?: { email?: string } }>(quote.payload, {}).customer?.email
+        || (quote.designRef
+          ? (sqlite.prepare("SELECT email FROM web_designs WHERE upper(ref) = ?")
+              .get(quote.designRef.toUpperCase()) as { email: string | null } | undefined)?.email
+          : null)
+        || "";
+      if (to) {
+        setImmediate(() => {
+          void sendMail({
+            to,
+            subject: `Quote ${quote.number} accepted — CJM Metals`,
+            text:
+              `Hi ${quote.customerName || "there"},\n\n` +
+              `Got it — your quote ${quote.number} is locked in. We'll call you ` +
+              `to schedule the work.\n\n` +
+              `— CJM Metals · Arlington, TX`,
+          });
+        });
+      }
     }
 
     res.json({ ok: true, status: "accepted" });
@@ -368,6 +440,31 @@ export function registerPublicPortalRoutes(app: Express): void {
     sqlite.prepare(
       "UPDATE review_requests SET submitted_at = ?, review_id = ? WHERE id = ?",
     ).run(Date.now(), row.id, rr.id);
+
+    // Negative-review fast lane: 1–3 stars lands an open task so the owner
+    // responds quickly. Deferred + try/catch'd — submitting must never 500
+    // over a marketing nicety. Deduped by open task title.
+    if (body.rating <= 3) {
+      const title = `Respond to ${author || "a customer"}'s ${body.rating}-star review`;
+      setImmediate(() => {
+        try {
+          const open = db.select({ id: mkTasks.id }).from(mkTasks)
+            .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
+            .get();
+          if (open) return;
+          db.insert(mkTasks).values({
+            title,
+            kind: "follow_up",
+            status: "open",
+            autoCreated: true,
+            dueAt: Date.now(),
+            notes: `Review #${row.id} via cjmmetals.com.`,
+          }).run();
+        } catch (e) {
+          console.error("[public-portal] review-task hook failed", e);
+        }
+      });
+    }
 
     if (mailEnabled()) {
       const text =

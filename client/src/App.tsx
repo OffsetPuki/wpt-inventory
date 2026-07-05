@@ -23,8 +23,6 @@ const SettingsPage = lazy(() => import("./pages/settings"));
 const AdminTemplatesPage = lazy(() => import("./pages/admin-templates"));
 const AuditLogPage = lazy(() => import("./pages/audit-log"));
 const TrashPage = lazy(() => import("./pages/trash"));
-const PurchaseOrdersPage = lazy(() => import("./pages/pos"));
-const QuickBooksPage = lazy(() => import("./pages/qb"));
 const NotFoundPage = lazy(() => import("./pages/not-found"));
 
 // Business-suite modules
@@ -153,10 +151,6 @@ export default function App() {
 
           <Route path="/map">
             <MapPage />
-          </Route>
-
-          <Route path="/pos">
-            <PurchaseOrdersPage />
           </Route>
 
           {/* Add item — available to workers and technicians; nav hides it
@@ -309,12 +303,6 @@ export default function App() {
           <Route path="/admin/templates">
             <TechnicianRoute>
               <AdminTemplatesPage />
-            </TechnicianRoute>
-          </Route>
-
-          <Route path="/qb">
-            <TechnicianRoute>
-              <QuickBooksPage />
             </TechnicianRoute>
           </Route>
 
