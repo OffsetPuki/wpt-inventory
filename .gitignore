@@ -1,6 +1,8 @@
 node_modules/
 dist/
-data/
+# Root data dir only (SQLite + uploads) — an unanchored "data/" also swallowed
+# client/src/quote/data/, which broke the deploy build.
+/data/
 *.db
 *.db-shm
 *.db-wal
