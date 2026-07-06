@@ -132,7 +132,7 @@ export default function CrmOverviewPage() {
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Monthly revenue (accepted estimates)">
+        <ChartCard title="Monthly revenue (accepted estimates & quotes)">
           {revenueData.every((d) => d.revenue === 0) ? (
             <div className="flex h-[240px] flex-col items-center justify-center gap-2 text-muted-foreground">
               <TrendingUp className="h-8 w-8" />

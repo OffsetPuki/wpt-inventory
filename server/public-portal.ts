@@ -9,6 +9,8 @@ import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
 import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
 import { invoices } from "../shared/finance-schema";
+import { projects } from "../shared/schema";
+import { onQuoteEvent } from "./crm";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
@@ -285,10 +287,37 @@ export function registerPublicPortalRoutes(app: Express): void {
       }
     });
 
-    // Accepted online → a DRAFT invoice for the owner to review (never sent
-    // automatically). Deferred + try/catch'd: accepting must never fail or
-    // slow down over bookkeeping — same stance as finance's review hook.
+    // Accepted online → a job in Projects plus a DRAFT invoice for the owner
+    // to review (never sent automatically). Deferred + try/catch'd: accepting
+    // must never fail or slow down over bookkeeping — same stance as finance's
+    // review hook. quote.number doubles as the dedupe key for both.
     setImmediate(() => {
+      let projectId: number | null = null;
+      try {
+        // job_number is UNIQUE and the quote number is too — an existing row
+        // (even soft-deleted) means this job was already made once. A trashed
+        // one gets restored: the task and owner email say "job is in
+        // Projects", so it must actually be visible there.
+        const existing = sqlite.prepare(
+          "SELECT id, deleted_at FROM projects WHERE job_number = ?",
+        ).get(quote.number) as { id: number; deleted_at: number | null } | undefined;
+        if (existing) {
+          if (existing.deleted_at != null) {
+            sqlite.prepare("UPDATE projects SET deleted_at = NULL WHERE id = ?")
+              .run(existing.id);
+          }
+          projectId = existing.id;
+        } else {
+          projectId = db.insert(projects).values({
+            jobNumber: quote.number,
+            name: `${QUOTE_TYPE_LABELS[quote.type]}${quote.customerName ? ` — ${quote.customerName}` : ""}`,
+            customer: quote.customerName,
+            notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
+          }).returning().get().id;
+        }
+      } catch (e) {
+        console.error("[public-portal] accept→project hook failed", e);
+      }
       try {
         // Re-accept / double-click dedupe: skip if any live invoice already
         // references this quote number in its notes or line items.
@@ -315,6 +344,7 @@ export function registerPublicPortalRoutes(app: Express): void {
               number: `INV-${year}-${String(base + i).padStart(4, "0")}`,
               clientName: quote.customerName,
               status: "draft",
+              projectId,
               items,
               subtotalCents: quote.totalCents,
               totalCents: quote.totalCents,
@@ -331,6 +361,44 @@ export function registerPublicPortalRoutes(app: Express): void {
       }
     });
 
+    // The in-app ping: an open task due right now — shows in Marketing →
+    // Tasks and trips the dashboard's overdue-tasks banner, so the acceptance
+    // is visible in the suite even with email off. Deduped by open title.
+    setImmediate(() => {
+      try {
+        const title = `Schedule the job — quote ${quote.number} accepted`
+          + (quote.customerName ? ` by ${quote.customerName}` : "");
+        const open = db.select({ id: mkTasks.id }).from(mkTasks)
+          .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
+          .get();
+        if (open) return;
+        db.insert(mkTasks).values({
+          title,
+          kind: "follow_up",
+          status: "open",
+          autoCreated: true,
+          dueAt: Date.now(),
+          notes: `$${(quote.totalCents / 100).toFixed(2)} — job ${quote.number} is in Projects, draft invoice in Finance.`,
+        }).run();
+      } catch (e) {
+        console.error("[public-portal] accept→task hook failed", e);
+      }
+    });
+
+    // CRM bridge: a matching lead is won — stage, closed revenue, activity note.
+    {
+      const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
+        quote.payload, {},
+      ).customer ?? {};
+      onQuoteEvent("accepted", {
+        quoteNumber: quote.number,
+        email: cust.email,
+        phone: cust.phone,
+        designRef: quote.designRef,
+        totalCents: quote.totalCents,
+      });
+    }
+
     if (mailEnabled()) {
       const text =
         `Quote ${quote.number} was accepted on cjmmetals.com.\n\n` +
@@ -338,7 +406,8 @@ export function registerPublicPortalRoutes(app: Express): void {
         `Project:   ${QUOTE_TYPE_LABELS[quote.type]}\n` +
         `Total:     $${(quote.totalCents / 100).toFixed(2)}\n` +
         (note ? `\nCustomer note:\n${note}\n` : "") +
-        `\nOpen the suite to schedule the job.`;
+        `\nIn the suite: job ${quote.number} in Projects, a draft invoice in ` +
+        `Finance, and a follow-up task in Marketing → Tasks.`;
       setImmediate(() => {
         void sendOwnerMail({
           subject: `[CJM Suite] Quote accepted — ${quote.number}`,

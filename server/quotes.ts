@@ -6,6 +6,7 @@ import { audit } from "./audit";
 import { requireAuth } from "./auth";
 import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-schema";
 import { webDesignRowToLead } from "./public-api";
+import { onQuoteEvent } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
 
 // ─── Quote builder module ────────────────────────────────────────────────────
@@ -294,9 +295,20 @@ export function registerQuoteRoutes(app: Express): void {
     // Email the customer the link when asked — explicit address wins, else the
     // one they typed into the builder's customer card (stored in the payload).
     let emailed = false;
+    const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
+      quote.payload, {},
+    ).customer ?? {};
     const to = (typeof req.body?.email === "string" && req.body.email.trim())
-      || parseJson<{ customer?: { email?: string } }>(quote.payload, {}).customer?.email
+      || cust.email
       || "";
+
+    // CRM bridge: a shared quote counts as "quote sent" for a matching lead.
+    onQuoteEvent("sent", {
+      quoteNumber: quote.number,
+      email: to,
+      phone: cust.phone,
+      designRef: quote.designRef,
+    });
     if (req.body?.sendEmail && to && mailEnabled()) {
       emailed = await sendMail({
         to,

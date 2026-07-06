@@ -262,6 +262,101 @@ function bumpLeadForQuote(leadId: number, now: number): void {
   }
 }
 
+// ─── Quote builder lifecycle bridge ──────────────────────────────────────────
+// Called by quotes.ts (share → sent) and public-portal.ts (customer accepted).
+// Builder quotes carry no lead/client FK — only free-text contact details — so
+// this matches the most recent live lead by normalized email or digits-only
+// phone (same rule as public-api's findRecentDuplicate), falling back to the
+// linked web design's contact when the builder's customer card is empty.
+// Deferred + try/catch: quote flows must never fail over a CRM nicety.
+export function onQuoteEvent(
+  evt: "sent" | "accepted",
+  info: {
+    quoteNumber: string;
+    email?: string | null;
+    phone?: string | null;
+    designRef?: string | null;
+    totalCents?: number;
+  },
+): void {
+  setImmediate(() => {
+    try {
+      // Last 10 digits so "+1 (817) 555-0123" from browser autofill matches
+      // "817-555-0123" typed in the builder months later.
+      const digits = (s: string | null | undefined): string =>
+        (s ?? "").replace(/\D/g, "").slice(-10);
+      let emailNorm = (info.email ?? "").trim().toLowerCase();
+      let phoneDigits = digits(info.phone);
+      if ((!emailNorm || !phoneDigits) && info.designRef) {
+        try {
+          const d = sqlite.prepare(
+            "SELECT email, phone FROM web_designs WHERE upper(ref) = upper(?)",
+          ).get(info.designRef) as { email?: string | null; phone?: string | null } | undefined;
+          emailNorm ||= (d?.email ?? "").trim().toLowerCase();
+          phoneDigits ||= digits(d?.phone);
+        } catch {
+          // web_designs belongs to the website module — absent is fine.
+        }
+      }
+      if (!emailNorm && !phoneDigits) return;
+
+      // ponytail: JS scan over live leads, newest first — fine at shop scale.
+      const lead = db.select().from(leads)
+        .where(isNull(leads.deletedAt))
+        .orderBy(desc(leads.createdAt), desc(leads.id))
+        .all()
+        .find((l) => {
+          const lEmail = (l.email ?? "").trim().toLowerCase();
+          const lPhone = digits(l.phone);
+          return (!!emailNorm && !!lEmail && lEmail === emailNorm)
+            || (!!phoneDigits && !!lPhone && lPhone === phoneDigits);
+        });
+      if (!lead) return;
+
+      const now = Date.now();
+      if (evt === "sent") {
+        bumpLeadForQuote(lead.id, now);
+        return;
+      }
+      // Accepted → the lead is won. A lost lead flips too — the customer
+      // literally just came back and said yes (any stale loss reason is
+      // overwritten; the manual close path always records a reason, so this
+      // one does too).
+      const addCents = info.totalCents || 0;
+      if (lead.stage !== "won") {
+        db.update(leads).set({
+          stage: "won",
+          winLossReason: "good_fit",
+          lastContactAt: now,
+          stale: false,
+          // Same fallback chain as a manual win: a $0 display total (quote
+          // saved before pricing) must not clobber known value.
+          revenueClosedCents: addCents || lead.revenueClosedCents || lead.estimatedValueCents || 0,
+        }).where(eq(leads.id, lead.id)).run();
+        maybeCreateReviewTask(lead, now);
+      } else {
+        // Repeat business — the lead stays won; ADD the new job's revenue so
+        // the closed-revenue KPI agrees with the monthly chart, and refresh
+        // the contact stamp.
+        db.update(leads).set({
+          lastContactAt: now,
+          stale: false,
+          revenueClosedCents: (lead.revenueClosedCents || 0) + addCents,
+        }).where(eq(leads.id, lead.id)).run();
+      }
+      db.insert(crmActivities).values({
+        entityType: "lead",
+        entityId: lead.id,
+        kind: "note",
+        notes: `Accepted quote ${info.quoteNumber} on cjmmetals.com`
+          + (info.totalCents ? ` — $${(info.totalCents / 100).toFixed(2)}` : ""),
+      }).run();
+    } catch (e) {
+      console.error("[crm] quote lifecycle hook failed", e);
+    }
+  });
+}
+
 // Server-side totals — never trust client-supplied subtotal/tax/total. Throws
 // (zod) on malformed line items so callers surface a 400.
 function computeEstimateTotals(itemsJson: string, taxRateBp: number): {
@@ -331,9 +426,20 @@ export function registerCrmRoutes(app: Express): void {
       .where(and(isNull(deals.deletedAt), notInArray(deals.stage, ["won", "lost"])))
       .get()?.v ?? 0;
 
-    const quotesSentLast30 = db.select({ n: sql<number>`count(*)` }).from(estimates)
+    // Estimates + builder quotes — the funnel shouldn't hide half the sends.
+    // Raw sqlite for the quotes table (quote module owns it; automations.ts
+    // reads it the same way), try/catch'd in case that module isn't loaded.
+    let builderQuotesSent = 0;
+    try {
+      builderQuotesSent = (sqlite.prepare(
+        "SELECT count(*) AS n FROM quotes WHERE deleted_at IS NULL AND sent_at >= ?",
+      ).get(monthAgoMs) as { n: number }).n;
+    } catch {
+      /* quotes table not created */
+    }
+    const quotesSentLast30 = (db.select({ n: sql<number>`count(*)` }).from(estimates)
       .where(and(isNull(estimates.deletedAt), gte(estimates.sentAt, monthAgoMs)))
-      .get()?.n ?? 0;
+      .get()?.n ?? 0) + builderQuotesSent;
 
     const closed = db.select({
       won: sql<number>`coalesce(sum(case when ${leads.stage} = 'won' then 1 else 0 end), 0)`,
@@ -404,6 +510,33 @@ export function registerCrmRoutes(app: Express): void {
       .groupBy(revMonth)
       .orderBy(revMonth)
       .all();
+
+    // Accepted builder quotes join the same buckets — same "honest date" rule
+    // (accepted_at is when the money became real). Raw sqlite + try/catch for
+    // the quote module's table, like the stats endpoint above.
+    // ponytail: assumes a job lives in exactly ONE system — a job tracked as
+    // both an accepted estimate and an accepted builder quote double-counts
+    // here (nothing links the two tables; add a link column if that happens).
+    try {
+      const quoteRows = sqlite.prepare(`
+        SELECT strftime('%Y-%m', accepted_at / 1000, 'unixepoch') AS month,
+               coalesce(sum(total_cents), 0) AS v
+        FROM quotes
+        WHERE deleted_at IS NULL AND status = 'accepted' AND accepted_at >= ?
+        GROUP BY month
+      `).all(cutoffMs) as { month: string; v: number }[];
+      if (quoteRows.length > 0) {
+        const byMonth = new Map(monthlyRevenue.map((r) => [r.month, r]));
+        for (const q of quoteRows) {
+          const hit = byMonth.get(q.month);
+          if (hit) hit.revenueCents += q.v;
+          else monthlyRevenue.push({ month: q.month, revenueCents: q.v });
+        }
+        monthlyRevenue.sort((a, b) => a.month.localeCompare(b.month));
+      }
+    } catch {
+      /* quotes table not created */
+    }
 
     const leadMonth = sql<string>`strftime('%Y-%m', ${leads.createdAt} / 1000, 'unixepoch')`;
     const monthlyLeads = db.select({
