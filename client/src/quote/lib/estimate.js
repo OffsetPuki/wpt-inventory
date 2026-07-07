@@ -69,7 +69,7 @@ export function toMaterials(items) {
 function finishItem(type, state, pb, area) {
   const up = (pb.finishUpchargePerSqFt || {})[state.color] || 0;
   if (!(up > 0) || !(area > 0)) return null;
-  const noun = type === 'carport' ? 'frame finish' : 'finish';
+  const noun = type === 'carport' || type === 'pergola' ? 'frame finish' : 'finish';
   return { key: 'finish', name: `${finishLabel(state.color)} ${noun}`, kind: 'area', qty: round2(area), rate: round2(up) };
 }
 
@@ -269,7 +269,49 @@ function estimateRailing(s, pb) {
   return { items, laborHours: round2(length * (Number(r.laborHoursPerFt) || 0)) };
 }
 
-const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing };
+function estimatePergola(s, pb) {
+  const p = pb.pergola || {};
+  const width = Number(s.width) || 0;
+  const height = Number(s.height) || 0;
+  const hex = s.style === 'hexagonal';
+  const depth = hex ? 0 : Number(s.depth) || 0;
+
+  // Regular hexagon, W = width across flats: area = (√3/2)·W², perimeter = 2√3·W.
+  const planArea = round2(hex ? (Math.sqrt(3) / 2) * width * width : width * depth);
+  const perimeter = round2(hex ? 2 * Math.sqrt(3) * width : 2 * (width + depth));
+  // Rect: 4 corner posts, +1 mid-span pair once a side passes 16 ft. Hex: one per corner.
+  const posts = hex ? 6 : Math.max(width, depth) > 16 ? 6 : 4;
+
+  const items = [
+    {
+      key: 'rafters', name: hex ? 'Radial rafter grid (hexagonal)' : 'Rafter grid',
+      kind: 'area', qty: planArea, rate: round2(Number(p.rafterPerSqFt) || 0),
+    },
+  ];
+  pushPriced(items, {
+    // Whole feet in the display name (hex perimeter is irrational); qty stays precise.
+    key: 'beams', name: `Header beams (${Math.round(perimeter)} ft perimeter)`, kind: 'length',
+    qty: perimeter, rate: round2(Number(p.beamPerFt) || 0),
+  });
+  pushPriced(items, {
+    key: 'posts', name: `Posts (${posts} × ${height} ft)`, kind: 'length',
+    qty: round2(posts * height), rate: round2(Number(p.postPricePerFt) || 0),
+  });
+  if (s.shade === 'panels') {
+    pushPriced(items, {
+      key: 'shade', name: 'Shade panels', kind: 'area',
+      qty: planArea, rate: round2(Number(p.shadePanelPerSqFt) || 0),
+    });
+  }
+  const fin = finishItem('pergola', s, pb, planArea);
+  if (fin) items.push(fin);
+
+  // Hexagonal = 6 mitered corners and radial fit-up — more hours per sq ft.
+  const laborMult = hex ? Number(p.hexLaborMult) || 1 : 1;
+  return { items, laborHours: round2((planArea / 100) * (Number(p.laborHoursPer100SqFt) || 0) * laborMult) };
+}
+
+const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola };
 
 /**
  * Consumables (wire, gas, discs, primer/paint, fasteners) as a % of the material

@@ -38,6 +38,18 @@ const ICONS = {
       <line x1="20" y1="164" x2="300" y2="164" strokeOpacity="0.25" />
     </svg>
   ),
+  pergola: (
+    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <line x1="40" y1="52" x2="280" y2="52" strokeWidth="3" />
+      <line x1="64" y1="34" x2="256" y2="34" strokeOpacity="0.55" strokeWidth="3" />
+      <line x1="40" y1="52" x2="64" y2="34" /><line x1="280" y1="52" x2="256" y2="34" />
+      {[72, 104, 136, 168, 200, 232].map((x) => <line key={x} x1={x} y1="52" x2={x + 24} y2="34" strokeOpacity="0.7" />)}
+      <line x1="48" y1="52" x2="48" y2="164" strokeWidth="3" /><line x1="272" y1="52" x2="272" y2="164" strokeWidth="3" />
+      <line x1="70" y1="34" x2="70" y2="150" strokeOpacity="0.4" strokeWidth="2" /><line x1="250" y1="34" x2="250" y2="150" strokeOpacity="0.4" strokeWidth="2" />
+      <line x1="48" y1="76" x2="66" y2="58" strokeOpacity="0.7" /><line x1="272" y1="76" x2="254" y2="58" strokeOpacity="0.7" />
+      <line x1="30" y1="164" x2="290" y2="164" strokeOpacity="0.25" />
+    </svg>
+  ),
 };
 
 export default function Home({ onPick, onFind }) {

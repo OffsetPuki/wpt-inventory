@@ -28,9 +28,9 @@ export function normalizeRef(input) {
     if (!body) return '';
     // Carport codes can legitimately start with 'CJM' (CJM-CJM2K), so a bare
     // body like 'CJM2K' is ambiguous — prefer the reading that leaves a valid
-    // tool letter (F/G/C/R) up front.
-    if (/^[FGCR][A-Z0-9]+$/.test(body)) return `CJM-${body}`;
-    if (/^[FGCR][A-Z0-9]+$/.test(flat)) return `CJM-${flat}`;
+    // tool letter (F/G/C/R/P) up front.
+    if (/^[FGCRP][A-Z0-9]+$/.test(body)) return `CJM-${body}`;
+    if (/^[FGCRP][A-Z0-9]+$/.test(flat)) return `CJM-${flat}`;
     return `CJM-${body}`;
   }
 
@@ -42,11 +42,11 @@ export function normalizeRef(input) {
   return `CJM-${flat}`;
 }
 
-/** The configurator tool a design code came from (F/G/C/R), or null. */
+/** The configurator tool a design code came from (F/G/C/R/P), or null. */
 export function refTool(ref) {
-  const m = /^CJM-([FGCR])/i.exec(String(ref || '').trim());
+  const m = /^CJM-([FGCRP])/i.exec(String(ref || '').trim());
   if (!m) return null;
-  return { F: 'fence', G: 'gate', C: 'carport', R: 'railing' }[m[1].toUpperCase()] || null;
+  return { F: 'fence', G: 'gate', C: 'carport', R: 'railing', P: 'pergola' }[m[1].toUpperCase()] || null;
 }
 
 function normalizeLead(row) {

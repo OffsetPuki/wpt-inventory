@@ -89,6 +89,21 @@ export const DEFAULT_PRICE_BOOK = {
     laborHoursPer100SqFt: 6,
   },
 
+  pergola: {
+    // Open rafter/lattice top, per sq ft of plan footprint. Nonzero by default —
+    // the website ballpark needs a real base rate to show a range at all.
+    rafterPerSqFt: 7,
+    // Header beams around the perimeter, per linear foot.
+    beamPerFt: 16,
+    // Posts per linear foot of post (post count × head clearance).
+    postPricePerFt: 14,
+    // Shade-panel upcharge over the open rafters, per sq ft of plan.
+    shadePanelPerSqFt: 6,
+    // Hexagonal = 6 mitered corners + radial rafter fit-up; multiplies labor hours.
+    hexLaborMult: 1.35,
+    laborHoursPer100SqFt: 8,
+  },
+
   railing: {
     // Base railing, per linear foot of run, by infill style. These carry the
     // posts/rails/infill for a standard-height run; height nudges are per-quote.
@@ -181,6 +196,18 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'carport.roofFinishUpchargePerSqFt.#1C1C1A', label: 'Roof finish — Matte Black', prefix: '$', suffix: '/ sq ft', step: 0.25 },
       { path: 'carport.roofFinishUpchargePerSqFt.#E9E7E1', label: 'Roof finish — White', prefix: '$', suffix: '/ sq ft', step: 0.25 },
       { path: 'carport.laborHoursPer100SqFt', label: 'Labor', suffix: 'hrs / 100 sq ft', step: 0.5 },
+    ],
+  },
+  {
+    title: 'Pergola',
+    note: 'Plan-footprint rates. Hexagonal jobs multiply labor by the hex factor.',
+    fields: [
+      { path: 'pergola.rafterPerSqFt', label: 'Rafter grid', prefix: '$', suffix: '/ sq ft of plan', step: 0.5 },
+      { path: 'pergola.beamPerFt', label: 'Header beams', prefix: '$', suffix: '/ ft', step: 1 },
+      { path: 'pergola.postPricePerFt', label: 'Posts', prefix: '$', suffix: '/ ft of post', step: 1 },
+      { path: 'pergola.shadePanelPerSqFt', label: 'Shade panels', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'pergola.hexLaborMult', label: 'Hexagonal labor multiplier', suffix: '×', step: 0.05 },
+      { path: 'pergola.laborHoursPer100SqFt', label: 'Labor', suffix: 'hrs / 100 sq ft', step: 0.5 },
     ],
   },
   {

@@ -3,10 +3,11 @@ import { renderFence } from '../lib/preview/fence.js';
 import { renderGate } from '../lib/preview/gate.js';
 import { renderCarport } from '../lib/preview/carport.js';
 import { renderRailing } from '../lib/preview/railing.js';
+import { renderPergola } from '../lib/preview/pergola.js';
 import { summaryLine } from '../data/configurators.js';
 
-const RENDERERS = { fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing };
-const ARIA = { fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview' };
+const RENDERERS = { fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing, pergola: renderPergola };
+const ARIA = { fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview' };
 
 /** Live SVG preview driven by the same config state as the price estimate. */
 export default function Preview({ type, state }) {

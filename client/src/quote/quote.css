@@ -132,6 +132,8 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   background: var(--line);
   border: 1px solid var(--line);
 }
+/* Odd card count: span the straggler so the hairline-gap trick shows no empty cell. */
+.qa .type-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .qa .type-card {
   display: flex;
   flex-direction: column;

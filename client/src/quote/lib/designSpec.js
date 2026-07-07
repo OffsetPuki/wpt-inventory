@@ -65,6 +65,7 @@ const TOOLS = {
   fence: {
     head: (headline) => ({ type: FENCE_TYPE(headline) }),
     fields: [
+      { key: 'totalLengthFt', labels: ['total run length', 'largo total'], parse: firstNumber },
       { key: 'style', labels: ['style', 'estilo'], parse: oneOf({ flat: ['flat', 'plano'], arched: ['arched', 'arqueado'] }) },
       { key: 'height', labels: ['height', 'altura'], parse: firstNumber },
       { key: 'panelWidth', labels: ['panel width', 'ancho de panel'], parse: firstNumber },
@@ -139,6 +140,28 @@ const TOOLS = {
     ],
   },
 
+  pergola: {
+    // Headline: "<prefix> — <Rectangular|Hexagonal> Pergola" (localized, either
+    // word order). The Style line below is authoritative; this is a fallback.
+    head: (headline) => {
+      const n = norm(headline);
+      return { style: n.includes('hexagon') ? 'hexagonal' : n.includes('rectangul') ? 'rectangular' : undefined };
+    },
+    fields: [
+      { key: 'style', labels: ['style', 'estilo'], parse: oneOf({ hexagonal: ['hexagonal'], rectangular: ['rectangular'] }) },
+      {
+        key: 'width', labels: ['size', 'tamano'], parse: firstNumber,
+        also: (raw, state) => {
+          const nums = String(raw).match(/\d+(?:\.\d+)?/g) || [];
+          if (nums[1] != null) state.depth = Number(nums[1]); // "12 ft × 10 ft" (hex specs carry one number)
+        },
+      },
+      { key: 'height', labels: ['head clearance', 'clearance', 'altura libre'], parse: firstNumber },
+      { key: 'shade', labels: ['roof', 'techo'], parse: oneOf({ open: ['open', 'rejilla'], panels: ['shade', 'panel'] }) },
+      { key: 'color', labels: ['frame finish', 'acabado estructura'], parse: COLOR },
+    ],
+  },
+
   railing: {
     // Railing specs are always English ("Custom design — Custom Railing").
     head: () => ({}),
@@ -154,8 +177,10 @@ const TOOLS = {
       { key: 'spacing', labels: ['baluster spacing'], parse: oneOf({ wide: ['wide'], standard: ['standard'] }) },
       { key: 'toprail', labels: ['top rail'], parse: oneOf({ flat: ['flat bar'], round: ['round'], wood: ['wood cap'] }) },
       { key: 'height', labels: ['height'], parse: firstNumber },
-      // "Length: To be determined on site walkthrough" — deliberately ignored;
-      // the owner measures on site and types the real run length.
+      // Newer website specs carry a real "Length: 24 ft"; older leads say
+      // "Length: To be determined on site walkthrough" — no number → the line
+      // surfaces as a warning, which is exactly the "measure on site" reminder.
+      { key: 'lengthFt', labels: ['length'], parse: firstNumber },
       { key: 'mounting', labels: ['mounting'], parse: oneOf({ surface: ['surface'], fascia: ['side / fascia', 'fascia'] }) },
       { key: 'color', labels: ['finish'], parse: COLOR },
     ],
@@ -167,6 +192,7 @@ const SERVICE_TO_TOOL = oneOf({
   gate: ['gate', 'porton', 'portón'],
   carport: ['carport', 'cochera'],
   railing: ['railing', 'barandal'],
+  pergola: ['pergola'], // norm() strips the accent, so 'Pérgola' matches too
 });
 
 /** Which configurator a lead belongs to — from source, then ref, then service. */

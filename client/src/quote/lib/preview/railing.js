@@ -10,9 +10,9 @@
 //              (ignored when app === 'handrail')      (default 'pickets')
 //   toprail  : 'flat' | 'round' | 'wood'              (default 'flat')
 //   height   : number (int, inches)                   (default 36)
-//   lengthFt : number (feet). The website always previews a representative 12 ft
-//              ("measured on site"); here the owner's run length drives the
-//              drawing, so 12 ft reproduces exactly what the customer saw.
+//   lengthFt : number (feet). The website has a 4–100 ft slider (default 12)
+//              but clamps its own drawing to a representative 12 ft section;
+//              here the owner's run length drives the drawing directly.
 //   spacing  : 'standard' | 'wide'  (pickets only)    (default 'standard')
 //   mounting : 'surface' | 'fascia'                   (default 'surface')
 //   color    : string (hex, e.g. '#0A0A0A')           (default '#0A0A0A')

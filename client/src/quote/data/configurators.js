@@ -57,6 +57,7 @@ export const TYPES = [
   { key: 'gate',    label: 'Gate',    tagline: 'Swing or sliding entry gate' },
   { key: 'carport', label: 'Carport', tagline: 'Free-standing or attached cover' },
   { key: 'railing', label: 'Railing', tagline: 'Stairs, balconies & handrails' },
+  { key: 'pergola', label: 'Pergola', tagline: 'Shade structure, square or hexagonal' },
 ];
 
 const ftDisplay = (v) => `${v} ft`;
@@ -248,10 +249,10 @@ export const CONFIG = {
   },
 
   // ---- Railing ----------------------------------------------------------------
-  // The website's railing tool has no length input ("measured on site walkthrough")
-  // and previews a representative 12 ft. Here the run length is a pricing input;
-  // it defaults to 12 so a looked-up design first renders exactly what the
-  // customer saw.
+  // The website's railing tool has a 4–100 ft length slider (default 12) and
+  // sends "Length: N ft" in the spec; older leads say "measured on site
+  // walkthrough". The default of 12 matches the website's, so a looked-up
+  // design without a readable length renders what the customer saw.
   railing: {
     defaults: {
       lengthFt: 12,
@@ -312,6 +313,43 @@ export const CONFIG = {
       { kind: 'swatch', name: 'color', label: 'Finish', options: RAILING_FINISHES },
     ],
   },
+
+  // ---- Pergola ----------------------------------------------------------------
+  // Width doubles as "across flats" when the style is hexagonal; depth applies
+  // to rectangular only (visibleWhen hides it for hex).
+  pergola: {
+    defaults: {
+      style: 'rectangular',
+      width: 12,
+      depth: 12,
+      height: 8,
+      shade: 'open',
+      color: '#0A0A0A',
+    },
+    controls: [
+      {
+        kind: 'segment', name: 'style', label: 'Style', cols: 2,
+        options: [
+          { value: 'rectangular', label: 'Rectangular' },
+          { value: 'hexagonal', label: 'Hexagonal' },
+        ],
+      },
+      { kind: 'range', name: 'width', label: 'Width', min: 8, max: 24, step: 1, display: ftDisplay },
+      {
+        kind: 'range', name: 'depth', label: 'Depth', min: 8, max: 24, step: 1, display: ftDisplay,
+        visibleWhen: (s) => s.style !== 'hexagonal',
+      },
+      { kind: 'range', name: 'height', label: 'Head clearance', min: 7, max: 12, step: 1, display: ftDisplay },
+      {
+        kind: 'segment', name: 'shade', label: 'Roof', cols: 2,
+        options: [
+          { value: 'open', label: 'Open rafters' },
+          { value: 'panels', label: 'Shade panels' },
+        ],
+      },
+      { kind: 'swatch', name: 'color', label: 'Frame finish', options: FINISHES },
+    ],
+  },
 };
 
 export function typeLabel(type) {
@@ -355,6 +393,12 @@ export function summaryLine(type, s) {
     const app = optionLabel('railing', 'app', s.app);
     const inf = s.app === 'handrail' ? '' : ` · ${optionLabel('railing', 'infill', s.infill)}`;
     return `${app}${inf} · ${s.lengthFt} ft · ${s.height} in · ${fin}`;
+  }
+  if (type === 'pergola') {
+    const style = optionLabel('pergola', 'style', s.style);
+    const size = s.style === 'hexagonal' ? `${s.width} ft across` : `${s.width}×${s.depth} ft`;
+    const shade = s.shade === 'panels' ? ' · shade panels' : '';
+    return `${style} · ${size} · ${s.height} ft${shade} · ${fin}`;
   }
   // carport
   const roof = optionLabel('carport', 'roof', s.roof);
@@ -409,6 +453,16 @@ export function specRows(type, s) {
     }
     rows.push(['Top rail', optionLabel('railing', 'toprail', s.toprail)]);
     rows.push(['Finish', fin]);
+    return rows.map(([label, value]) => ({ label, value }));
+  }
+  if (type === 'pergola') {
+    const rows = [
+      ['Style', optionLabel('pergola', 'style', s.style)],
+      ['Size', s.style === 'hexagonal' ? `${s.width} ft across flats` : `${s.width} ft × ${s.depth} ft`],
+      ['Head clearance', `${s.height} ft`],
+      ['Roof', optionLabel('pergola', 'shade', s.shade)],
+      ['Frame finish', fin],
+    ];
     return rows.map(([label, value]) => ({ label, value }));
   }
   // carport
