@@ -297,6 +297,15 @@ function estimatePergola(s, pb) {
     key: 'posts', name: `Posts (${posts} × ${height} ft)`, kind: 'length',
     qty: round2(posts * height), rate: round2(Number(p.postPricePerFt) || 0),
   });
+  // Designer (slatted) legs from the CJM design — per-post upcharge over the
+  // standard square post. Rectangular only: the control is hidden for hex, so
+  // ignore a stale 'designer' left behind by a style switch.
+  if (!hex && s.legs === 'designer') {
+    pushPriced(items, {
+      key: 'legs', name: `Designer legs (${posts} posts)`, kind: 'unit',
+      qty: posts, rate: round2(Number(p.legsDesignerPerPost) || 0),
+    });
+  }
   if (s.shade === 'panels') {
     pushPriced(items, {
       key: 'shade', name: 'Shade panels', kind: 'area',

@@ -320,6 +320,7 @@ export const CONFIG = {
   pergola: {
     defaults: {
       style: 'rectangular',
+      legs: 'standard',
       width: 12,
       depth: 12,
       height: 8,
@@ -333,6 +334,15 @@ export const CONFIG = {
           { value: 'rectangular', label: 'Rectangular' },
           { value: 'hexagonal', label: 'Hexagonal' },
         ],
+      },
+      // Post styles from the CJM Fusion 360 design — rectangular builds only
+      {
+        kind: 'segment', name: 'legs', label: 'Legs', cols: 2,
+        options: [
+          { value: 'standard', label: 'Standard' },
+          { value: 'designer', label: 'Designer' },
+        ],
+        visibleWhen: (s) => s.style !== 'hexagonal',
       },
       { kind: 'range', name: 'width', label: 'Width', min: 8, max: 24, step: 1, display: ftDisplay },
       {
