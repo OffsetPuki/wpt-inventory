@@ -348,10 +348,11 @@ export const CONFIG = {
       },
       // Post styles from the CJM Fusion 360 design — rectangular builds only
       {
-        kind: 'segment', name: 'legs', label: 'Legs', cols: 2,
+        kind: 'segment', name: 'legs', label: 'Legs', cols: 3,
         options: [
           { value: 'standard', label: 'Standard' },
           { value: 'designer', label: 'Designer' },
+          { value: 'sides', label: 'Side Screens' },
         ],
         visibleWhen: (s) => s.style !== 'hexagonal',
       },

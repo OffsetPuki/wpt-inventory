@@ -106,6 +106,9 @@ export const DEFAULT_PRICE_BOOK = {
     // Designer (slatted multi-bar) legs from the CJM Fusion design — extra
     // cutting + welding per post over the standard square post. Per post.
     legsDesignerPerPost: 60,
+    // Side-screen variant — louvered privacy screens wrapping each post.
+    // Considerably more steel + welding than designer legs. Per post.
+    legsSidesPerPost: 90,
     // Hexagonal = 6 mitered corners + radial rafter fit-up; multiplies labor hours.
     hexLaborMult: 1.35,
     laborHoursPer100SqFt: 8,
@@ -215,6 +218,7 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'pergola.beamPerFt', label: 'Header beams', prefix: '$', suffix: '/ ft', step: 1 },
       { path: 'pergola.postPricePerFt', label: 'Posts', prefix: '$', suffix: '/ ft of post', step: 1 },
       { path: 'pergola.legsDesignerPerPost', label: 'Designer legs upcharge', prefix: '$', suffix: '/ post', step: 5 },
+      { path: 'pergola.legsSidesPerPost', label: 'Side screens upcharge', prefix: '$', suffix: '/ post', step: 5 },
       { path: 'pergola.shadePanelPerSqFt', label: 'Shade panels', prefix: '$', suffix: '/ sq ft', step: 0.5 },
       { path: 'pergola.hexLaborMult', label: 'Hexagonal labor multiplier', suffix: '×', step: 0.05 },
       { path: 'pergola.laborHoursPer100SqFt', label: 'Labor', suffix: 'hrs / 100 sq ft', step: 0.5 },

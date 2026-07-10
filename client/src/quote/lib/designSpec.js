@@ -152,8 +152,9 @@ const TOOLS = {
     },
     fields: [
       { key: 'style', labels: ['style', 'estilo'], parse: oneOf({ hexagonal: ['hexagonal'], rectangular: ['rectangular'] }) },
-      // Website labels: 'Standard'/'Designer' (EN), 'Estándar'/'De diseño' (ES)
-      { key: 'legs', labels: ['legs', 'patas'], parse: oneOf({ designer: ['designer', 'de diseno', 'diseno'], standard: ['standard', 'estandar'] }) },
+      // Website labels: 'Standard'/'Designer'/'Side Screens' (EN),
+      // 'Estándar'/'De diseño'/'Con laterales' (ES)
+      { key: 'legs', labels: ['legs', 'patas'], parse: oneOf({ sides: ['side screens', 'con laterales', 'sides'], designer: ['designer', 'de diseno', 'diseno'], standard: ['standard', 'estandar'] }) },
       {
         key: 'width', labels: ['size', 'tamano'], parse: firstNumber,
         also: (raw, state) => {
