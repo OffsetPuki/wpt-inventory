@@ -98,6 +98,9 @@ const TOOLS = {
       },
       { key: 'color', labels: ['finish'], parse: COLOR },
       { key: 'topEdge', labels: ['top edge'], parse: oneOf({ flat: ['flat top', 'flat'], capped: ['capped top', 'capped'] }) },
+      // Website upsell: 'Initials "JMR"' / 'Custom image (...)' — the letters
+      // themselves stay visible in the lead's raw spec text.
+      { key: 'personalization', labels: ['personalization'], parse: oneOf({ initials: ['initials'], image: ['custom image', 'image'], none: ['none'] }) },
     ],
   },
 

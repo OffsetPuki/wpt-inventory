@@ -125,6 +125,7 @@ export const CONFIG = {
       meshRatio: 25,
       color: '#0A0A0A',
       topEdge: 'flat',
+      personalization: 'none',
     },
     controls: [
       {
@@ -167,6 +168,16 @@ export const CONFIG = {
       {
         kind: 'segment', name: 'topEdge', label: 'Top edge', cols: 2,
         options: [{ value: 'flat', label: 'Flat' }, { value: 'capped', label: 'Capped' }],
+      },
+      // Website upsell — plasma-cut initials medallion or customer artwork.
+      // The initials/art itself lives in the lead's spec text; this drives price.
+      {
+        kind: 'segment', name: 'personalization', label: 'Personalization', cols: 3,
+        options: [
+          { value: 'none', label: 'None' },
+          { value: 'initials', label: 'Initials' },
+          { value: 'image', label: 'Custom image' },
+        ],
       },
     ],
   },
