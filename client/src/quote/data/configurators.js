@@ -91,7 +91,7 @@ export const CONFIG = {
         options: [4, 6, 8].map((w) => ({ value: w, label: `${w} ft` })),
       },
       {
-        kind: 'number', name: 'slatSpacing', label: 'Slat spacing', unit: '"', min: 0.5, max: 12, step: 0.25,
+        kind: 'number', name: 'slatSpacing', label: 'Slat spacing', unit: '"', min: 0.5, max: 20, step: 0.25,
         visibleWhen: (s) => s.type === 'horizontal-slat',
       },
       {
