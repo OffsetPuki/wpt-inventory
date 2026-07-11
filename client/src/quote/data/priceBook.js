@@ -58,7 +58,7 @@ export const DEFAULT_PRICE_BOOK = {
     // Flat upcharge when the gate's top edge is "capped" (mirrors fence cap).
     // Default 0 → set this so the gate's top-edge picker moves the price.
     cappedUpcharge: 0,
-    // Personalization upsell from the website designer — plasma-cut initials
+    // Personalization upsell from the website designer — laser-cut initials
     // medallion, or the customer's own artwork (logo / ranch brand / silhouette).
     monogramFlat: 150,
     customArtFlat: 250,
@@ -185,8 +185,8 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'gate.meshUpchargePerSqFt', label: 'Mesh upgrade', prefix: '$', suffix: '/ sq ft', step: 0.5 },
       { path: 'gate.archedUpcharge', label: 'Arched top', prefix: '$', step: 5 },
       { path: 'gate.cappedUpcharge', label: 'Capped top edge', prefix: '$', step: 5 },
-      { path: 'gate.monogramFlat', label: 'Monogram initials (plasma-cut)', prefix: '$', step: 5 },
-      { path: 'gate.customArtFlat', label: 'Custom plasma-cut artwork', prefix: '$', step: 5 },
+      { path: 'gate.monogramFlat', label: 'Monogram initials (laser-cut)', prefix: '$', step: 5 },
+      { path: 'gate.customArtFlat', label: 'Custom laser-cut artwork', prefix: '$', step: 5 },
       { path: 'gate.postPricePerFt', label: 'Posts', prefix: '$', suffix: '/ ft of post', step: 1 },
       { path: 'gate.lateralFramePerFt', label: 'Lateral frame', prefix: '$', suffix: '/ ft', step: 1 },
       { path: 'gate.topBottomFramePerFt', label: 'Top & bottom frame', prefix: '$', suffix: '/ ft', step: 1 },

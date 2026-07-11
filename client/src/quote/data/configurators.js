@@ -169,7 +169,7 @@ export const CONFIG = {
         kind: 'segment', name: 'topEdge', label: 'Top edge', cols: 2,
         options: [{ value: 'flat', label: 'Flat' }, { value: 'capped', label: 'Capped' }],
       },
-      // Website upsell — plasma-cut initials medallion or customer artwork.
+      // Website upsell — laser-cut initials medallion or customer artwork.
       // The initials/art itself lives in the lead's spec text; this drives price.
       {
         kind: 'segment', name: 'personalization', label: 'Personalization', cols: 3,

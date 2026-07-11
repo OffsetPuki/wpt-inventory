@@ -157,16 +157,16 @@ function estimateGate(s, pb) {
       qty: 1, rate: round2(g.cappedUpcharge || 0),
     });
   }
-  // Personalization upsell from the website designer — plasma-cut initials
+  // Personalization upsell from the website designer — laser-cut initials
   // medallion or the customer's own artwork. Flat per gate.
   if (s.personalization === 'initials') {
     pushPriced(items, {
-      key: 'monogram', name: 'Monogram initials (plasma-cut)', kind: 'flat',
+      key: 'monogram', name: 'Monogram initials (laser-cut)', kind: 'flat',
       qty: 1, rate: round2(g.monogramFlat || 0),
     });
   } else if (s.personalization === 'image') {
     pushPriced(items, {
-      key: 'customArt', name: 'Custom plasma-cut artwork', kind: 'flat',
+      key: 'customArt', name: 'Custom laser-cut artwork', kind: 'flat',
       qty: 1, rate: round2(g.customArtFlat || 0),
     });
   }
