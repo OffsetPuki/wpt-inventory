@@ -52,6 +52,8 @@ sqlite.exec(`
     ended_at INTEGER,
     duration_min INTEGER NOT NULL DEFAULT 0,
     billable INTEGER NOT NULL DEFAULT 1,
+    -- "Billed on" stamp (wiring plan, Fix 4) — soft ref to fin_invoices.id.
+    invoice_id INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
   -- (user_id, started_at) covers both "my entries in range" and the
@@ -117,6 +119,16 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_pm_kb_category ON pm_kb_articles(category);
   CREATE INDEX IF NOT EXISTS idx_pm_kb_created ON pm_kb_articles(created_at);
 `);
+
+// Additive migration (wiring plan, Fix 4): pm_time_entries.invoice_id arrived
+// after installs existed. SQLite has no IF NOT EXISTS for columns — the throw
+// on re-run is expected.
+try {
+  sqlite.exec("ALTER TABLE pm_time_entries ADD COLUMN invoice_id INTEGER");
+} catch {
+  /* column already exists */
+}
+sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pm_time_invoice ON pm_time_entries(invoice_id)");
 
 // ─── Local date helpers ──────────────────────────────────────────────────────
 // Calendar dates are TEXT "YYYY-MM-DD" in the shop's local timezone; instants

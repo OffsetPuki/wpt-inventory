@@ -14,7 +14,7 @@ import {
   type PayrollStatus,
   type PayslipDeduction,
 } from "@shared/hr-schema";
-import { Loader2, Plus, Wallet, Pencil, Trash2, X, CheckCircle2, Receipt } from "lucide-react";
+import { Loader2, Plus, Wallet, Pencil, Trash2, X, CheckCircle2, Receipt, AlertTriangle } from "lucide-react";
 
 const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
@@ -32,7 +32,18 @@ type RunRow = PayrollRun & {
   deductionsTotalCents: number;
   netTotalCents: number;
 };
-type SlipRow = Payslip & { employeeName: string };
+// pmMinutes (Fix 5, wiring plan): job-log minutes from PM time entries for the
+// same period, joined via the employee's login. null = PM module absent or no
+// linked login — the comparison column shows "—" and never flags.
+type SlipRow = Payslip & { employeeName: string; pmMinutes?: number | null };
+
+// The shop clock (attendance) and job clock (PM time) disagree by >15% —
+// either hours never got logged to jobs, or someone forgot to clock in/out.
+function timeDiverges(p: SlipRow): boolean {
+  if (p.pmMinutes == null || p.hoursWorked <= 0) return false;
+  const pmHours = p.pmMinutes / 60;
+  return Math.abs(pmHours - p.hoursWorked) / p.hoursWorked > 0.15;
+}
 type MySlip = Payslip & {
   periodStart: string;
   periodEnd: string;
@@ -432,6 +443,12 @@ function RunDetailModal({ runId, onClose }: { runId: number; onClose: () => void
                   <tr className="text-left text-xs uppercase text-muted-foreground">
                     <th className="px-4 py-3 font-medium">Employee</th>
                     <th className="px-4 py-3 text-right font-medium">Hours</th>
+                    <th
+                      className="px-4 py-3 text-right font-medium"
+                      title="Hours logged to jobs in PM → Time for the same period"
+                    >
+                      Job log
+                    </th>
                     <th className="px-4 py-3 text-right font-medium">Gross</th>
                     <th className="px-4 py-3 text-right font-medium">Deductions</th>
                     <th className="px-4 py-3 text-right font-medium">Net</th>
@@ -444,6 +461,24 @@ function RunDetailModal({ runId, onClose }: { runId: number; onClose: () => void
                       <td className="px-4 py-3 font-medium text-foreground">{p.employeeName}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-foreground">
                         {hoursLabel(p.hoursWorked)}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-4 py-3 text-right tabular-nums",
+                          timeDiverges(p)
+                            ? "font-medium text-amber-700 dark:text-amber-400"
+                            : "text-muted-foreground",
+                        )}
+                        title={
+                          timeDiverges(p)
+                            ? "Shop clock and job log disagree by more than 15% — hours may be missing from PM → Time or Attendance"
+                            : undefined
+                        }
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {timeDiverges(p) && <AlertTriangle className="h-3.5 w-3.5" />}
+                          {p.pmMinutes == null ? "—" : formatHours(p.pmMinutes)}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-foreground">
                         {formatMoney(p.grossCents)}

@@ -5,7 +5,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import { PROJECT_STATUSES, type Project, type ProjectStatus } from "@shared/schema";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatMoney } from "@/lib/format";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import ProjectChecklist from "@/components/ProjectChecklist";
@@ -146,6 +146,33 @@ function PublishPortfolioDialog({ project, onClose }: { project: Project; onClos
   );
 }
 
+// Fix 4 (wiring plan): money waiting to be invoiced on this job — billable
+// expenses + per-worker labor not yet pulled onto an invoice. Renders nothing
+// when there's nothing unbilled. Finance API is elevated-only, so the caller
+// gates on isManager; retry off so a 403 doesn't hammer.
+function UnbilledCard({ projectId }: { projectId: number }) {
+  const { data } = useQuery<{
+    totals: { laborCents: number; expenseCents: number; totalCents: number };
+  }>({
+    queryKey: ["project-unbilled", projectId],
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/finance/projects/${projectId}/unbilled`)).json(),
+    retry: false,
+  });
+  if (!data || data.totals.totalCents <= 0) return null;
+  return (
+    <div className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/5 p-5">
+      <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+        {formatMoney(data.totals.totalCents)} unbilled on this job
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {formatMoney(data.totals.laborCents)} labor · {formatMoney(data.totals.expenseCents)} expenses
+        {" — "}open the job’s draft invoice in Finance and use “Pull unbilled from job”.
+      </p>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage({ id }: { id: string }) {
   const projectId = Number(id);
   // Manager + technician both manage project status / checklist / deletion.
@@ -246,6 +273,8 @@ export default function ProjectDetailPage({ id }: { id: string }) {
           <p className="whitespace-pre-wrap text-sm text-muted-foreground">{project.notes}</p>
         </div>
       )}
+
+      {isManager && <UnbilledCard projectId={projectId} />}
 
       <ProjectChecklist projectId={projectId} />
 

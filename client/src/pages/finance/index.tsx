@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { toast } from "@/components/ui/toaster";
 import { formatMoney } from "@/lib/format";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
-import { Loader2, Receipt, Users } from "lucide-react";
+import { Loader2, Receipt, Users, Percent } from "lucide-react";
 import {
   EXPENSE_CATEGORY_LABELS,
   type ExpenseCategory,
@@ -49,6 +51,88 @@ interface FinanceReports {
   expenseByCategory: { category: string; amountCents: number }[];
   arAging: ArAging;
   topClients: { clientName: string; revenueCents: number }[];
+}
+
+// ─── Billing markups (wiring plan, Fix 4) ─────────────────────────────────────
+// "Pull unbilled from job" bills labor at each worker's HR pay rate × (1 +
+// labor markup) and billable expenses at cost × (1 + expense markup). The
+// two knobs live here; both are editable per pull on the server API too.
+
+interface FinSettingsShape {
+  laborMarkupBp: number;
+  expenseMarkupBp: number;
+}
+
+function MarkupSettingsCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery<FinSettingsShape>({
+    queryKey: ["finance-settings"],
+    queryFn: async () => (await apiRequest("GET", "/api/finance/settings")).json(),
+  });
+  const [labor, setLabor] = useState("");
+  const [expense, setExpense] = useState("");
+  useEffect(() => {
+    if (data) {
+      setLabor(String(data.laborMarkupBp / 100));
+      setExpense(String(data.expenseMarkupBp / 100));
+    }
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: async () =>
+      (
+        await apiRequest("PATCH", "/api/finance/settings", {
+          laborMarkupBp: Math.round((parseFloat(labor) || 0) * 100),
+          expenseMarkupBp: Math.round((parseFloat(expense) || 0) * 100),
+        })
+      ).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["finance-settings"] });
+      toast({ variant: "success", title: "Markups saved" });
+    },
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+  });
+
+  const numCls =
+    "h-10 w-24 rounded-lg border border-input bg-background px-3 text-right text-base tabular-nums text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-1 flex items-center gap-2 font-semibold text-foreground">
+        <Percent className="h-4 w-4" /> Billing markups
+      </h2>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Used by “Pull unbilled from job” on draft invoices: labor bills at each
+        worker’s pay rate plus the labor markup; billable expenses at cost plus
+        the expense markup.
+      </p>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Labor markup %</span>
+          <input
+            type="number" min={0} step={0.5} className={numCls}
+            value={labor} onChange={(e) => setLabor(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Expense markup %</span>
+          <input
+            type="number" min={0} step={0.5} className={numCls}
+            value={expense} onChange={(e) => setExpense(e.target.value)}
+          />
+        </label>
+        <button
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+          className="flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+        >
+          {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+          Save
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ─── Small pieces ─────────────────────────────────────────────────────────────
@@ -318,6 +402,10 @@ export default function FinanceOverviewPage() {
             </ol>
           )}
         </div>
+      </div>
+
+      <div className="mt-6">
+        <MarkupSettingsCard />
       </div>
     </div>
   );

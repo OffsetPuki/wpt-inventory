@@ -18,6 +18,9 @@ import {
 // module's DDL, not ours — so every read/write against them below is wrapped
 // in try/catch and degrades to a no-op / defaults if that module isn't loaded.
 import { mkTasks, marketingSettings } from "../shared/marketing-schema";
+// Wiring plan, Fix 2 — projects carry a soft clientId ref; the client detail
+// view lists the jobs behind it. Core table, always present.
+import { projects } from "../shared/schema";
 import {
   parseLineItems, lineItemsSchema, lineItemsTotalCents,
 } from "../shared/biz-common";
@@ -269,35 +272,76 @@ function bumpLeadForQuote(leadId: number, now: number): void {
 // phone (same rule as public-api's findRecentDuplicate), falling back to the
 // linked web design's contact when the builder's customer card is empty.
 // Deferred + try/catch: quote flows must never fail over a CRM nicety.
+// Last 10 digits so "+1 (817) 555-0123" from browser autofill matches
+// "817-555-0123" typed in the builder months later.
+const contactDigits = (s: string | null | undefined): string =>
+  (s ?? "").replace(/\D/g, "").slice(-10);
+
+export interface QuoteContactInfo {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  designRef?: string | null;
+}
+
+// Normalized contact channels for matching, falling back to the linked web
+// design's contact when the builder's customer card is empty.
+function resolveQuoteContact(info: QuoteContactInfo): { emailNorm: string; phoneDigits: string } {
+  let emailNorm = (info.email ?? "").trim().toLowerCase();
+  let phoneDigits = contactDigits(info.phone);
+  if ((!emailNorm || !phoneDigits) && info.designRef) {
+    try {
+      const d = sqlite.prepare(
+        "SELECT email, phone FROM web_designs WHERE upper(ref) = upper(?)",
+      ).get(info.designRef) as { email?: string | null; phone?: string | null } | undefined;
+      emailNorm ||= (d?.email ?? "").trim().toLowerCase();
+      phoneDigits ||= contactDigits(d?.phone);
+    } catch {
+      // web_designs belongs to the website module — absent is fine.
+    }
+  }
+  return { emailNorm, phoneDigits };
+}
+
+// Fix 3 (wiring plan): resolve a contact to a CRM client id, creating the
+// client when nobody matches. Requires at least one contact channel — a bare
+// name is too spoofable/collidable to auto-create from a public flow.
+// Synchronous by design so accept hooks can use the id for invoice/project
+// linkage; callers are already inside setImmediate + try/catch.
+export function findOrCreateClientByContact(info: QuoteContactInfo): number | null {
+  const { emailNorm, phoneDigits } = resolveQuoteContact(info);
+  if (!emailNorm && !phoneDigits) return null;
+  // ponytail: JS scan over live clients, newest first — fine at shop scale.
+  const existing = db.select().from(clients)
+    .where(isNull(clients.deletedAt))
+    .orderBy(desc(clients.createdAt), desc(clients.id))
+    .all()
+    .find((c) => {
+      const cEmail = (c.email ?? "").trim().toLowerCase();
+      const cPhone = contactDigits(c.phone);
+      return (!!emailNorm && !!cEmail && cEmail === emailNorm)
+        || (!!phoneDigits && !!cPhone && cPhone === phoneDigits);
+    });
+  if (existing) return existing.id;
+  const row = db.insert(clients).values({
+    name: (info.name ?? "").trim() || emailNorm || `Customer …${phoneDigits}`,
+    email: (info.email ?? "").trim() || (emailNorm || null),
+    phone: (info.phone ?? "").trim() || null,
+    notes: "Auto-created from a quote (wiring plan, Fix 3)",
+  }).returning().get();
+  return row.id;
+}
+
 export function onQuoteEvent(
   evt: "sent" | "accepted",
-  info: {
+  info: QuoteContactInfo & {
     quoteNumber: string;
-    email?: string | null;
-    phone?: string | null;
-    designRef?: string | null;
     totalCents?: number;
   },
 ): void {
   setImmediate(() => {
     try {
-      // Last 10 digits so "+1 (817) 555-0123" from browser autofill matches
-      // "817-555-0123" typed in the builder months later.
-      const digits = (s: string | null | undefined): string =>
-        (s ?? "").replace(/\D/g, "").slice(-10);
-      let emailNorm = (info.email ?? "").trim().toLowerCase();
-      let phoneDigits = digits(info.phone);
-      if ((!emailNorm || !phoneDigits) && info.designRef) {
-        try {
-          const d = sqlite.prepare(
-            "SELECT email, phone FROM web_designs WHERE upper(ref) = upper(?)",
-          ).get(info.designRef) as { email?: string | null; phone?: string | null } | undefined;
-          emailNorm ||= (d?.email ?? "").trim().toLowerCase();
-          phoneDigits ||= digits(d?.phone);
-        } catch {
-          // web_designs belongs to the website module — absent is fine.
-        }
-      }
+      const { emailNorm, phoneDigits } = resolveQuoteContact(info);
       if (!emailNorm && !phoneDigits) return;
 
       // ponytail: JS scan over live leads, newest first — fine at shop scale.
@@ -307,16 +351,57 @@ export function onQuoteEvent(
         .all()
         .find((l) => {
           const lEmail = (l.email ?? "").trim().toLowerCase();
-          const lPhone = digits(l.phone);
+          const lPhone = contactDigits(l.phone);
           return (!!emailNorm && !!lEmail && lEmail === emailNorm)
             || (!!phoneDigits && !!lPhone && lPhone === phoneDigits);
         });
-      if (!lead) return;
 
       const now = Date.now();
+
+      // Fix 3: unknown contact — CREATE the CRM records instead of dropping
+      // the event. Before this, a stranger accepting a quote left no client,
+      // no lead, nothing.
+      if (!lead) {
+        const clientId = evt === "accepted" ? findOrCreateClientByContact(info) : null;
+        const created = db.insert(leads).values({
+          name: (info.name ?? "").trim() || emailNorm || `Customer …${phoneDigits}`,
+          email: (info.email ?? "").trim() || (emailNorm || null),
+          phone: (info.phone ?? "").trim() || null,
+          source: info.designRef ? "website" : "other",
+          stage: evt === "accepted" ? "won" : "quote_sent",
+          clientId,
+          lastContactAt: now,
+          estimatedValueCents: info.totalCents || 0,
+          ...(evt === "accepted"
+            ? { winLossReason: "good_fit" as const, revenueClosedCents: info.totalCents || 0 }
+            : {}),
+          notes: `Created from quote ${info.quoteNumber}`,
+        }).returning().get();
+        db.insert(crmActivities).values({
+          entityType: "lead",
+          entityId: created.id,
+          kind: "note",
+          notes: evt === "accepted"
+            ? `Accepted quote ${info.quoteNumber} on cjmmetals.com`
+              + (info.totalCents ? ` — $${(info.totalCents / 100).toFixed(2)}` : "")
+            : `Quote ${info.quoteNumber} shared with this contact`,
+        }).run();
+        if (evt === "sent") ensureQuoteReminder(created, now);
+        else maybeCreateReviewTask(created, now);
+        return;
+      }
+
       if (evt === "sent") {
         bumpLeadForQuote(lead.id, now);
         return;
+      }
+
+      // Fix 3: a winning lead should be tied to a real client record.
+      if (lead.clientId == null) {
+        const cid = findOrCreateClientByContact(info);
+        if (cid != null) {
+          db.update(leads).set({ clientId: cid }).where(eq(leads.id, lead.id)).run();
+        }
       }
       // Accepted → the lead is won. A lost lead flips too — the customer
       // literally just came back and said yes (any stale loss reason is
@@ -796,6 +881,12 @@ export function registerCrmRoutes(app: Express): void {
       activities: db.select().from(crmActivities)
         .where(and(eq(crmActivities.entityType, "client"), eq(crmActivities.entityId, id)))
         .orderBy(desc(crmActivities.createdAt))
+        .all(),
+      // Fix 2: the client's jobs — projects.clientId is a soft ref set by the
+      // project form, the accept-quote hook, or the backfill script.
+      projects: db.select().from(projects)
+        .where(and(eq(projects.clientId, id), isNull(projects.deletedAt)))
+        .orderBy(desc(projects.createdAt))
         .all(),
     });
   });

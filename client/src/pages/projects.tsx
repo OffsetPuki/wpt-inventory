@@ -5,6 +5,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import type { Project, ProjectStatus } from "@shared/schema";
+import type { Client } from "@shared/crm-schema";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import FromTemplateDialog from "@/components/FromTemplateDialog";
@@ -31,7 +32,16 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
   const [jobNumber, setJobNumber] = useState("");
   const [name, setName] = useState("");
   const [customer, setCustomer] = useState("");
+  const [clientId, setClientId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+
+  // Fix 2 (wiring plan): jobs link to a CRM client by id. The picker is
+  // optional — free-text customer still works for non-CRM names.
+  const { data: clients = [] } = useQuery<Client[]>({
+    queryKey: ["crm-clients-picker"],
+    queryFn: async () => (await apiRequest("GET", "/api/crm/clients?status=active")).json(),
+    enabled: open,
+  });
 
   const create = useMutation({
     mutationFn: async () =>
@@ -40,6 +50,7 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
           jobNumber: jobNumber.trim(),
           name: name.trim(),
           customer: customer.trim() || undefined,
+          clientId: clientId ?? undefined,
           notes: notes.trim() || undefined,
         })
       ).json(),
@@ -75,7 +86,28 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Customer (optional)</span>
+          <span className="text-sm font-medium text-foreground">CRM client (optional)</span>
+          <select
+            className={inputCls}
+            value={clientId ?? ""}
+            onChange={(e) => {
+              const id = e.target.value ? parseInt(e.target.value, 10) : null;
+              setClientId(id);
+              // Prefill the display name; still editable below.
+              const c = clients.find((cl) => cl.id === id);
+              if (c) setCustomer(c.name);
+            }}
+          >
+            <option value="">— not linked —</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}{c.company ? ` (${c.company})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Customer name (optional)</span>
           <input className={inputCls} value={customer} onChange={(e) => setCustomer(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">

@@ -147,6 +147,11 @@ export const projects = sqliteTable("projects", {
   jobNumber: text("job_number").notNull().unique(),
   name: text("name").notNull(),
   customer: text("customer"),
+  // Soft ref to crm_clients.id (wiring plan, Fix 2). No FK: crm-schema.ts
+  // imports FROM this file, so a real reference would be a cycle — same
+  // trick as mk_tasks.leadId. `customer` above stays as the denormalized
+  // display fallback (pattern: fin_invoices.clientName).
+  clientId: integer("client_id"),
   status: text("status", { enum: PROJECT_STATUSES })
     .notNull()
     .default("active"),

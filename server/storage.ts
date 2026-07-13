@@ -252,8 +252,11 @@ function addColumnIfMissing(table: string, column: string, ddl: string): void {
 
 addColumnIfMissing("items", "deleted_at", "deleted_at INTEGER");
 addColumnIfMissing("projects", "deleted_at", "deleted_at INTEGER");
+// Wiring plan, Fix 2 — jobs link to a CRM client by id (soft ref, see schema.ts).
+addColumnIfMissing("projects", "client_id", "client_id INTEGER");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
+sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id)");
 
 // ─── Helper: strip pin from user ─────────────────────────────────────────────
 
@@ -688,11 +691,29 @@ export const storage = {
       .orderBy(desc(projects.deletedAt)).all();
   },
 
-  createProject(data: { jobNumber: string; name: string; customer?: string; status?: string; notes?: string }): Project {
+  // Wiring plan, Fix 2 — resolve a CRM client's display name for the
+  // denormalized `customer` column. Raw SQL: crm_clients belongs to crm.ts,
+  // which bootstraps after this module loads; the query only runs at request
+  // time, and try/catch covers a missing table just in case.
+  crmClientName(clientId: number): string | null {
+    try {
+      const row = sqlite.prepare(
+        "SELECT name FROM crm_clients WHERE id = ? AND deleted_at IS NULL",
+      ).get(clientId) as { name?: string } | undefined;
+      return row?.name ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  createProject(data: { jobNumber: string; name: string; customer?: string; clientId?: number | null; status?: string; notes?: string }): Project {
+    const clientId = data.clientId ?? null;
     return db.insert(projects).values({
       jobNumber: data.jobNumber,
       name: data.name,
-      customer: data.customer || null,
+      // clientId set but no customer text → denormalize the client's name.
+      customer: data.customer || (clientId != null ? this.crmClientName(clientId) : null),
+      clientId,
       status: (data.status as any) || "active",
       notes: data.notes || null,
     }).returning().get();
@@ -702,6 +723,12 @@ export const storage = {
     const vals: any = {};
     if (data.name !== undefined) vals.name = data.name;
     if (data.customer !== undefined) vals.customer = data.customer;
+    if (data.clientId !== undefined) {
+      vals.clientId = data.clientId; // null unlinks; customer text stays as the snapshot
+      if (data.clientId != null && data.customer === undefined) {
+        vals.customer = this.crmClientName(data.clientId) ?? undefined;
+      }
+    }
     if (data.status !== undefined) vals.status = data.status;
     if (data.notes !== undefined) vals.notes = data.notes;
     if (data.jobNumber !== undefined) vals.jobNumber = data.jobNumber;

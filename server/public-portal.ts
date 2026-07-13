@@ -10,7 +10,7 @@ import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/qu
 import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
 import { invoices } from "../shared/finance-schema";
 import { projects } from "../shared/schema";
-import { onQuoteEvent } from "./crm";
+import { onQuoteEvent, findOrCreateClientByContact } from "./crm";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
@@ -291,8 +291,24 @@ export function registerPublicPortalRoutes(app: Express): void {
     // to review (never sent automatically). Deferred + try/catch'd: accepting
     // must never fail or slow down over bookkeeping — same stance as finance's
     // review hook. quote.number doubles as the dedupe key for both.
+    // Fix 3 (wiring plan): the customer card resolves to a real CRM client so
+    // the job + invoice carry clientId, not just a text name.
+    const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
+      quote.payload, {},
+    ).customer ?? {};
     setImmediate(() => {
       let projectId: number | null = null;
+      let clientId: number | null = null;
+      try {
+        clientId = findOrCreateClientByContact({
+          name: quote.customerName,
+          email: cust.email,
+          phone: cust.phone,
+          designRef: quote.designRef,
+        });
+      } catch (e) {
+        console.error("[public-portal] accept→client hook failed", e);
+      }
       try {
         // job_number is UNIQUE and the quote number is too — an existing row
         // (even soft-deleted) means this job was already made once. A trashed
@@ -306,12 +322,18 @@ export function registerPublicPortalRoutes(app: Express): void {
             sqlite.prepare("UPDATE projects SET deleted_at = NULL WHERE id = ?")
               .run(existing.id);
           }
+          // Fix 3: a re-accept may know the client when the first pass didn't.
+          if (clientId != null) {
+            sqlite.prepare("UPDATE projects SET client_id = COALESCE(client_id, ?) WHERE id = ?")
+              .run(clientId, existing.id);
+          }
           projectId = existing.id;
         } else {
           projectId = db.insert(projects).values({
             jobNumber: quote.number,
             name: `${QUOTE_TYPE_LABELS[quote.type]}${quote.customerName ? ` — ${quote.customerName}` : ""}`,
             customer: quote.customerName,
+            clientId,
             notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
           }).returning().get().id;
         }
@@ -342,6 +364,7 @@ export function registerPublicPortalRoutes(app: Express): void {
           try {
             db.insert(invoices).values({
               number: `INV-${year}-${String(base + i).padStart(4, "0")}`,
+              clientId,
               clientName: quote.customerName,
               status: "draft",
               projectId,
@@ -385,19 +408,16 @@ export function registerPublicPortalRoutes(app: Express): void {
       }
     });
 
-    // CRM bridge: a matching lead is won — stage, closed revenue, activity note.
-    {
-      const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
-        quote.payload, {},
-      ).customer ?? {};
-      onQuoteEvent("accepted", {
-        quoteNumber: quote.number,
-        email: cust.email,
-        phone: cust.phone,
-        designRef: quote.designRef,
-        totalCents: quote.totalCents,
-      });
-    }
+    // CRM bridge: a matching lead is won — stage, closed revenue, activity
+    // note; an unknown contact gets a client + won lead created (Fix 3).
+    onQuoteEvent("accepted", {
+      quoteNumber: quote.number,
+      name: quote.customerName,
+      email: cust.email,
+      phone: cust.phone,
+      designRef: quote.designRef,
+      totalCents: quote.totalCents,
+    });
 
     if (mailEnabled()) {
       const text =

@@ -29,6 +29,7 @@ export const EXPENSE_CATEGORIES = [
   "meals",
   "taxes_fees",
   "subcontractors",
+  "payroll",
   "other",
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
@@ -126,11 +127,25 @@ export const expenses = sqliteTable("fin_expenses", {
     onDelete: "set null",
   }),
   billable: integer("billable", { mode: "boolean" }).notNull().default(false),
+  // "Billed on" stamp (wiring plan, Fix 4) — set when a billable expense is
+  // pulled onto a draft invoice, cleared when that invoice is voided/deleted.
+  // NULL + billable=1 ⇒ shows up as unbilled. Soft ref (ALTER'd column).
+  invoiceId: integer("invoice_id"),
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
   deletedAt: integer("deleted_at"),
+});
+
+// Singleton row (id=1) — finance knobs (wiring plan, Fix 4). Markups are
+// basis points (1500 = 15%): labor bills at the worker's HR pay rate ×
+// (1 + laborMarkupBp), billable expenses at cost × (1 + expenseMarkupBp).
+export const finSettings = sqliteTable("fin_settings", {
+  id: integer("id").primaryKey(),
+  laborMarkupBp: integer("labor_markup_bp").notNull().default(0),
+  expenseMarkupBp: integer("expense_markup_bp").notNull().default(0),
+  updatedAt: integer("updated_at"),
 });
 
 // Registry of payment gateways the business can accept. Seeded from
@@ -199,12 +214,26 @@ export const insertExpenseSchema = createInsertSchema(expenses).omit({
   id: true,
   createdAt: true,
   deletedAt: true,
+  // Server-managed by the pull-unbilled flow (Fix 4) — a client write could
+  // fake "already billed" or double-bill by clearing it.
+  invoiceId: true,
 });
 
 export const updateGatewaySchema = z.object({
   enabled: z.boolean().optional(),
   config: z.string().optional(),
   feesNote: z.string().optional(),
+});
+
+export const updateFinSettingsSchema = z.object({
+  laborMarkupBp: z.number().int().min(0).max(50000).optional(),
+  expenseMarkupBp: z.number().int().min(0).max(50000).optional(),
+});
+
+export const pullUnbilledSchema = z.object({
+  projectId: z.number().int(),
+  laborMarkupBp: z.number().int().min(0).max(50000).optional(),
+  expenseMarkupBp: z.number().int().min(0).max(50000).optional(),
 });
 
 export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders).omit({
@@ -222,6 +251,7 @@ export type InvoicePayment = typeof invoicePayments.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type PaymentGateway = typeof paymentGateways.$inferSelect;
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type FinSettings = typeof finSettings.$inferSelect;
 
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
@@ -251,6 +281,7 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   meals: "Meals",
   taxes_fees: "Taxes & Fees",
   subcontractors: "Subcontractors",
+  payroll: "Payroll",
   other: "Other",
 };
 

@@ -30,6 +30,7 @@ import {
   Ban,
   Pencil,
   CreditCard,
+  FolderInput,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
@@ -652,6 +653,23 @@ function InvoiceDetailModal({
       toast({ variant: "destructive", title: "Could not reverse", description: e?.message }),
   });
 
+  // Fix 4 (wiring plan): pull the job's billable-but-unbilled expenses and
+  // per-worker labor onto this draft invoice as line items.
+  const pullUnbilled = useMutation({
+    mutationFn: async () =>
+      (
+        await apiRequest("POST", `/api/finance/invoices/${id}/pull-unbilled`, {
+          projectId: data?.invoice?.projectId,
+        })
+      ).json(),
+    onSuccess: () => {
+      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
+      toast({ variant: "success", title: "Unbilled work pulled onto invoice" });
+    },
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Could not pull unbilled work", description: e?.message }),
+  });
+
   const inv = data?.invoice;
   const payments = data?.payments ?? [];
   const items = inv ? parseLineItems(inv.items) : [];
@@ -805,6 +823,19 @@ function InvoiceDetailModal({
                     <Pencil className="h-4 w-4" />
                     Edit
                   </button>
+                  {inv.projectId != null && (
+                    <button
+                      onClick={() => pullUnbilled.mutate()}
+                      disabled={pullUnbilled.isPending}
+                      className={secondaryBtn}
+                      title="Add the job's unbilled billable expenses and labor as line items"
+                    >
+                      {pullUnbilled.isPending
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <FolderInput className="h-4 w-4" />}
+                      Pull unbilled from job
+                    </button>
+                  )}
                   <button
                     onClick={() => setStatus.mutate("sent")}
                     disabled={setStatus.isPending}

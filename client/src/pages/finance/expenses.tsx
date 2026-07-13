@@ -47,7 +47,7 @@ function todayStr(): string {
 
 const EXPENSE_KEYS = [["finance-expenses"], ["finance-stats"], ["finance-reports"]];
 
-// Understated, theme-safe accents — a few hues cycled over the 13 categories.
+// Understated, theme-safe accents — a few hues cycled over the 14 categories.
 const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
   materials: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   fuel: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
@@ -61,6 +61,7 @@ const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
   meals: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
   taxes_fees: "bg-red-500/10 text-red-700 dark:text-red-400",
   subcontractors: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  payroll: "bg-lime-500/10 text-lime-700 dark:text-lime-400",
   other: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
 };
 

@@ -7,10 +7,12 @@ import { requireElevated } from "./auth";
 import { mailEnabled, sendMail } from "./mailer";
 import {
   invoices, invoicePayments, expenses, paymentGateways, purchaseOrders,
+  finSettings,
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
   updateGatewaySchema, insertPurchaseOrderSchema,
-  PAYMENT_GATEWAY_CATALOG,
-  type Invoice, type InvoiceStatus,
+  updateFinSettingsSchema, pullUnbilledSchema,
+  PAYMENT_GATEWAY_CATALOG, EXPENSE_CATEGORY_LABELS,
+  type Invoice, type InvoiceStatus, type Expense,
 } from "../shared/finance-schema";
 import { clients, estimates, type Estimate } from "../shared/crm-schema";
 // Cross-module automation hook: a freshly paid invoice queues a review request.
@@ -77,6 +79,8 @@ sqlite.exec(`
     receipt_url TEXT,
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     billable INTEGER NOT NULL DEFAULT 0,
+    -- "Billed on" stamp (wiring plan, Fix 4) — soft ref to fin_invoices.id.
+    invoice_id INTEGER,
     notes TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     deleted_at INTEGER
@@ -116,6 +120,27 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_fin_po_project ON fin_purchase_orders(project_id);
   CREATE INDEX IF NOT EXISTS idx_fin_po_created ON fin_purchase_orders(created_at);
 `);
+
+// Additive migration (wiring plan, Fix 4): fin_expenses.invoice_id arrived
+// after installs existed. The throw on re-run is expected.
+try {
+  sqlite.exec("ALTER TABLE fin_expenses ADD COLUMN invoice_id INTEGER");
+} catch {
+  /* column already exists */
+}
+sqlite.exec(`
+  CREATE INDEX IF NOT EXISTS idx_fin_expenses_invoice ON fin_expenses(invoice_id);
+
+  -- Finance knobs singleton (wiring plan, Fix 4): markup basis points for
+  -- pulling unbilled labor / expenses onto an invoice.
+  CREATE TABLE IF NOT EXISTS fin_settings (
+    id INTEGER PRIMARY KEY,
+    labor_markup_bp INTEGER NOT NULL DEFAULT 0,
+    expense_markup_bp INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER
+  );
+`);
+sqlite.exec("INSERT OR IGNORE INTO fin_settings (id) VALUES (1)");
 
 // Seed the gateway registry from the catalog on first boot only — an empty
 // table means "never seeded", so the owner's later edits (toggles, config,
@@ -350,6 +375,82 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
+
+// ─── Unbilled work → invoice (wiring plan, Fix 4) ────────────────────────────
+
+function getFinSettings(): { laborMarkupBp: number; expenseMarkupBp: number } {
+  const row = db.select().from(finSettings).where(eq(finSettings.id, 1)).get();
+  return { laborMarkupBp: row?.laborMarkupBp ?? 0, expenseMarkupBp: row?.expenseMarkupBp ?? 0 };
+}
+
+const withMarkup = (cents: number, markupBp: number): number =>
+  Math.round(cents * (1 + markupBp / 10000));
+
+interface UnbilledTimeGroup {
+  userId: number;
+  userName: string;
+  minutes: number;
+  entryIds: number[];
+  payRateCents: number; // effective HOURLY rate (salary pro-rated at 2080 h/yr)
+  payType: string | null;
+}
+
+// Billable + unstamped work on a project. Time is grouped per worker — the
+// owner's decision: bill at each worker's HR pay rate × (1 + labor markup).
+// hr_employees / pm_time_entries belong to other modules → raw SQL + try/catch;
+// absent tables degrade to no time (or a 0 rate the owner edits on the invoice).
+function collectUnbilled(projectId: number): { expenses: Expense[]; time: UnbilledTimeGroup[] } {
+  const exps = db.select().from(expenses).where(and(
+    isNull(expenses.deletedAt),
+    eq(expenses.billable, true),
+    isNull(expenses.invoiceId),
+    eq(expenses.projectId, projectId),
+  )).all();
+
+  let time: UnbilledTimeGroup[] = [];
+  try {
+    const rows = sqlite.prepare(`
+      SELECT te.id, te.user_id AS userId, te.duration_min AS minutes, u.name AS userName
+      FROM pm_time_entries te JOIN users u ON u.id = te.user_id
+      WHERE te.project_id = ? AND te.billable = 1 AND te.invoice_id IS NULL
+        AND te.ended_at IS NOT NULL AND te.duration_min > 0
+    `).all(projectId) as { id: number; userId: number; minutes: number; userName: string }[];
+    const byUser = new Map<number, UnbilledTimeGroup>();
+    for (const r of rows) {
+      let g = byUser.get(r.userId);
+      if (!g) {
+        g = { userId: r.userId, userName: r.userName, minutes: 0, entryIds: [], payRateCents: 0, payType: null };
+        byUser.set(r.userId, g);
+      }
+      g.minutes += r.minutes;
+      g.entryIds.push(r.id);
+    }
+    for (const g of byUser.values()) {
+      try {
+        const emp = sqlite.prepare(
+          "SELECT pay_type AS payType, pay_rate_cents AS rate FROM hr_employees WHERE user_id = ? AND deleted_at IS NULL",
+        ).get(g.userId) as { payType?: string; rate?: number } | undefined;
+        if (emp) {
+          g.payType = emp.payType ?? null;
+          // Salary is cents/year — 2080 work-hours/yr gives the hourly equivalent.
+          g.payRateCents = emp.payType === "salary"
+            ? Math.round((emp.rate ?? 0) / 2080)
+            : (emp.rate ?? 0);
+        }
+      } catch { /* hr module absent — rate stays 0 */ }
+    }
+    time = [...byUser.values()];
+  } catch { /* pm module absent — no time to bill */ }
+  return { expenses: exps, time };
+}
+
+// Void/delete releases the stamps so the work becomes billable again.
+function releaseBilledItems(invoiceId: number): void {
+  sqlite.prepare("UPDATE fin_expenses SET invoice_id = NULL WHERE invoice_id = ?").run(invoiceId);
+  try {
+    sqlite.prepare("UPDATE pm_time_entries SET invoice_id = NULL WHERE invoice_id = ?").run(invoiceId);
+  } catch { /* pm module absent */ }
+}
 
 export function registerFinanceRoutes(app: Express): void {
   // Express types `req.params.*` as `string | string[]`; narrow to string.
@@ -668,6 +769,9 @@ export function registerFinanceRoutes(app: Express): void {
         targetType: "invoice", targetId: inv.id, targetName: inv.number,
         details: { from: inv.status, to: body.status },
       });
+      // Fix 4: voiding releases the billed-on stamps so pulled expenses/time
+      // become billable again on the reissued invoice.
+      if (body.status === "void") releaseBilledItems(inv.id);
     }
     res.json(presentInvoice(row, todayLocal()));
   });
@@ -681,6 +785,8 @@ export function registerFinanceRoutes(app: Express): void {
       });
     }
     db.update(invoices).set({ deletedAt: Date.now() }).where(eq(invoices.id, inv.id)).run();
+    // Fix 4: deleting releases the billed-on stamps (same as voiding).
+    releaseBilledItems(inv.id);
     audit(req, "finance.invoice_delete", {
       targetType: "invoice", targetId: inv.id, targetName: inv.number,
     });
@@ -767,6 +873,113 @@ export function registerFinanceRoutes(app: Express): void {
   });
 
   // ─── Expenses ────────────────────────────────────────────────────────────
+
+  // ─── Unbilled work → invoice (wiring plan, Fix 4) ─────────────────────────
+
+  app.get("/api/finance/settings", requireElevated, (_req, res) => {
+    res.json(getFinSettings());
+  });
+
+  app.patch("/api/finance/settings", requireElevated, (req, res) => {
+    try {
+      const body = updateFinSettingsSchema.parse(req.body);
+      db.update(finSettings).set({ ...body, updatedAt: Date.now() })
+        .where(eq(finSettings.id, 1)).run();
+      audit(req, "finance.settings_update", {
+        targetType: "settings", targetId: 1, details: body,
+      });
+      res.json(getFinSettings());
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+
+  // Preview of what's waiting to be billed on a job — per-worker labor at the
+  // HR pay rate + markup, billable expenses at cost + markup.
+  app.get("/api/finance/projects/:id/unbilled", requireElevated, (req, res) => {
+    const projectId = pid(req.params.id);
+    const { expenses: exps, time } = collectUnbilled(projectId);
+    const settings = getFinSettings();
+    const laborCents = time.reduce(
+      (s, g) => s + withMarkup(Math.round((g.minutes / 60) * g.payRateCents), settings.laborMarkupBp), 0);
+    const expenseCents = exps.reduce(
+      (s, e) => s + withMarkup(e.amountCents, settings.expenseMarkupBp), 0);
+    res.json({
+      expenses: exps,
+      time,
+      settings,
+      totals: { laborCents, expenseCents, totalCents: laborCents + expenseCents },
+    });
+  });
+
+  // Pull everything unbilled on a project onto a DRAFT invoice as line items,
+  // stamping the sources in the same transaction so a second pull (or a
+  // double-click) can't double-bill.
+  app.post("/api/finance/invoices/:id/pull-unbilled", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    if (inv.status !== "draft") {
+      return res.status(400).json({ message: "Unbilled work can only be pulled onto a draft invoice" });
+    }
+    let body;
+    try {
+      body = pullUnbilledSchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+    const defaults = getFinSettings();
+    const laborMarkupBp = body.laborMarkupBp ?? defaults.laborMarkupBp;
+    const expenseMarkupBp = body.expenseMarkupBp ?? defaults.expenseMarkupBp;
+    const { expenses: exps, time } = collectUnbilled(body.projectId);
+    if (exps.length === 0 && time.length === 0) {
+      return res.status(400).json({ message: "Nothing unbilled on that job" });
+    }
+
+    const newItems = [
+      ...time.map((g) => {
+        const hours = Math.round((g.minutes / 60) * 100) / 100;
+        const rateCents = withMarkup(g.payRateCents, laborMarkupBp);
+        return {
+          description: `Labor — ${g.userName} (${hours} hr @ $${(rateCents / 100).toFixed(2)}/hr)`,
+          qty: hours,
+          unit: "hour",
+          unitPriceCents: rateCents,
+        };
+      }),
+      ...exps.map((e) => ({
+        description: `${e.vendor || EXPENSE_CATEGORY_LABELS[e.category]} — ${e.date}${e.notes ? ` (${e.notes})` : ""}`,
+        qty: 1,
+        unitPriceCents: withMarkup(e.amountCents, expenseMarkupBp),
+      })),
+    ];
+
+    const itemsJson = JSON.stringify([...parseLineItems(inv.items), ...newItems]);
+    let totals;
+    try {
+      totals = computeTotals(itemsJson, inv.taxRateBp);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message });
+    }
+
+    const row = db.transaction((tx) => {
+      const stampExp = sqlite.prepare("UPDATE fin_expenses SET invoice_id = ? WHERE id = ?");
+      for (const e of exps) stampExp.run(inv.id, e.id);
+      const stampTime = sqlite.prepare("UPDATE pm_time_entries SET invoice_id = ? WHERE id = ?");
+      for (const g of time) for (const entryId of g.entryIds) stampTime.run(inv.id, entryId);
+      return tx.update(invoices).set({ items: itemsJson, ...totals })
+        .where(eq(invoices.id, inv.id)).returning().get();
+    });
+    audit(req, "finance.invoice_pull_unbilled", {
+      targetType: "invoice", targetId: inv.id, targetName: inv.number,
+      details: {
+        projectId: body.projectId,
+        laborGroups: time.length,
+        expenses: exps.length,
+        addedCents: totals.totalCents - inv.totalCents,
+      },
+    });
+    res.json(presentInvoice(row, todayLocal()));
+  });
 
   app.get("/api/finance/expenses", requireElevated, (req, res) => {
     const category = qstr(req.query.category);

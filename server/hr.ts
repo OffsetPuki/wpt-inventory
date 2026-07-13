@@ -8,13 +8,14 @@ import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { sendMail, sendOwnerMail } from "./mailer";
 import { queueTaskOnce } from "./marketing";
+import { expenses } from "../shared/finance-schema";
 import {
   employees, payrollRuns, payslips, attendance, leaveRequests,
   jobOpenings, candidates, performanceReviews,
   insertEmployeeSchema, insertLeaveRequestSchema, insertJobOpeningSchema,
   insertCandidateSchema, insertPerformanceReviewSchema, clockSchema,
   PAYROLL_STATUSES,
-  type Employee, type PayslipDeduction,
+  type Employee, type PayrollRun, type PayslipDeduction,
 } from "../shared/hr-schema";
 
 // ─── HR & Payroll module ─────────────────────────────────────────────────────
@@ -234,6 +235,41 @@ function openShiftFor(employeeId: number) {
 
 const elevatedRole = (req: Request): boolean =>
   req.user?.role === "manager" || req.user?.role === "technician";
+
+// Finance bridge (wiring plan, Fix 1): marking a payroll run PAID posts one
+// labor expense to the books — GROSS total, since withheld deductions are
+// still labor cost. Deferred + try/catch'd: paying payroll must never fail
+// or slow down over bookkeeping (same stance as the portal's accept hooks).
+// `auto:payroll-run:<id>` in notes is the idempotency key.
+function postPayrollExpense(req: Request, run: PayrollRun): void {
+  setImmediate(() => {
+    try {
+      const dupe = sqlite.prepare(
+        "SELECT id FROM fin_expenses WHERE deleted_at IS NULL AND notes LIKE ?",
+      ).get(`%auto:payroll-run:${run.id}%`);
+      if (dupe) return;
+      const gross = db.select({ s: sql<number>`coalesce(sum(${payslips.grossCents}), 0)` })
+        .from(payslips).where(eq(payslips.runId, run.id)).get()?.s ?? 0;
+      if (gross <= 0) return; // an empty run books nothing
+      const row = db.insert(expenses).values({
+        date: run.payDate ?? todayLocal(),
+        vendor: "Payroll",
+        category: "payroll",
+        amountCents: gross,
+        paymentMethod: "other",
+        billable: false,
+        notes: `auto:payroll-run:${run.id} — payroll ${run.periodStart} → ${run.periodEnd}`,
+      }).returning().get();
+      audit(req, "hr.payroll_expense_post", {
+        targetType: "expense", targetId: row.id,
+        targetName: `Payroll ${run.periodStart} → ${run.periodEnd}`,
+        details: { runId: run.id, amountCents: gross },
+      });
+    } catch (e) {
+      console.error("[hr] payroll→finance expense hook failed", e);
+    }
+  });
+}
 
 // ─── Request-body schemas (module-local; entity schemas live in hr-schema) ───
 
@@ -735,13 +771,42 @@ export function registerHrRoutes(app: Express): void {
     const id = pid(req.params.id);
     const run = db.select().from(payrollRuns).where(eq(payrollRuns.id, id)).get();
     if (!run) return res.status(404).json({ message: "Payroll run not found" });
+    const slips = db.select({
+      ...getTableColumns(payslips),
+      employeeName: employeeNameSql,
+      userId: employees.userId,
+    })
+      .from(payslips)
+      .innerJoin(employees, eq(payslips.employeeId, employees.id))
+      .where(eq(payslips.runId, id))
+      .orderBy(employees.lastName, employees.firstName).all();
+
+    // Fix 5 (wiring plan): PM-logged minutes for the same period, joined via
+    // the employee's login account — lets the run view flag when the shop
+    // clock (attendance) and the job clock (PM time) tell different stories.
+    // pm_time_entries belongs to the PM module → raw SQL + try/catch; absent
+    // module degrades to pmMinutes: null (UI hides the comparison).
+    const startMs = dayStartMs(run.periodStart);
+    const endMs = dayEndMs(run.periodEnd);
+    // `any`: sqlite.prepare's overload resolution pins a 1-tuple bind type here.
+    let pmStmt: any = null;
+    try {
+      pmStmt = sqlite.prepare(
+        `SELECT COALESCE(SUM(duration_min), 0) AS m FROM pm_time_entries
+         WHERE user_id = ? AND ended_at IS NOT NULL AND started_at >= ? AND started_at <= ?`,
+      );
+    } catch { /* pm module absent */ }
     res.json({
       run,
-      payslips: db.select({ ...getTableColumns(payslips), employeeName: employeeNameSql })
-        .from(payslips)
-        .innerJoin(employees, eq(payslips.employeeId, employees.id))
-        .where(eq(payslips.runId, id))
-        .orderBy(employees.lastName, employees.firstName).all(),
+      payslips: slips.map((s) => {
+        let pmMinutes: number | null = null;
+        if (pmStmt && s.userId != null) {
+          try {
+            pmMinutes = (pmStmt.get(s.userId, startMs, endMs) as { m: number }).m;
+          } catch { /* best-effort */ }
+        }
+        return { ...s, pmMinutes };
+      }),
     });
   });
 
@@ -768,6 +833,7 @@ export function registerHrRoutes(app: Express): void {
           targetName: `${run.periodStart} → ${run.periodEnd}`,
           details: { from: run.status, to: body.status },
         });
+        if (body.status === "paid") postPayrollExpense(req, row);
       }
       res.json(row);
     } catch (e: any) {
@@ -820,6 +886,16 @@ export function registerHrRoutes(app: Express): void {
       const id = pid(req.params.id);
       const slip = db.select().from(payslips).where(eq(payslips.id, id)).get();
       if (!slip) return res.status(404).json({ message: "Payslip not found" });
+
+      // Paid runs are locked — the Finance expense posted at pay time reflects
+      // these slips exactly; editing after the fact would desync the books.
+      // Corrections go through a new correcting run (same rule as un-paying).
+      const run = db.select().from(payrollRuns).where(eq(payrollRuns.id, slip.runId)).get();
+      if (run?.status === "paid") {
+        return res.status(400).json({
+          message: "This run is already paid — payslips are locked. Create a correcting run instead.",
+        });
+      }
 
       // Server recomputes the derived money columns — the client never sends
       // deductionsCents/netCents, so they can't drift from the JSON.

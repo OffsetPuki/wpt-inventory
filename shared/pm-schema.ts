@@ -73,6 +73,10 @@ export const timeEntries = sqliteTable("pm_time_entries", {
   endedAt: integer("ended_at"), // unix ms, null = timer running
   durationMin: integer("duration_min").notNull().default(0), // set on stop / manual entry
   billable: integer("billable", { mode: "boolean" }).notNull().default(true),
+  // "Billed on" stamp (wiring plan, Fix 4) — soft ref to fin_invoices.id, set
+  // when the entry is pulled onto a draft invoice, cleared on void/delete.
+  // Server-managed only; insertTimeEntrySchema deliberately excludes it.
+  invoiceId: integer("invoice_id"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),

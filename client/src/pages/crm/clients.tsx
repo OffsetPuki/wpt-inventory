@@ -17,6 +17,7 @@ import {
   type EstimateStatus,
   type CrmActivity,
 } from "@shared/crm-schema";
+import { type Project, type ProjectStatus } from "@shared/schema";
 import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote } from "lucide-react";
 
 const inputCls =
@@ -39,6 +40,18 @@ const ESTIMATE_STATUS_STYLE: Record<EstimateStatus, string> = {
   accepted: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   declined: "bg-red-500/10 text-red-700 dark:text-red-400",
   expired: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+};
+
+const PROJECT_STATUS_STYLE: Record<ProjectStatus, string> = {
+  active: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  on_hold: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+};
+
+const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  active: "Active",
+  done: "Done",
+  on_hold: "On Hold",
 };
 
 function parseTags(json: string | null): string[] {
@@ -170,6 +183,7 @@ interface ClientDetail {
   leads: Lead[];
   estimates: Estimate[];
   activities: CrmActivity[];
+  projects: Project[];
 }
 
 function ClientDetailModal({
@@ -305,6 +319,27 @@ function ClientDetailModal({
                         {formatMoney(est.totalCents)}
                       </span>
                     </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Jobs</h3>
+            {data.projects.length === 0 ? (
+              <p className="py-2 text-sm text-muted-foreground">No jobs linked to this client</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {data.projects.map((p) => (
+                  <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="min-w-0 truncate text-sm text-foreground">
+                      <span className="font-mono text-xs text-muted-foreground">{p.jobNumber}</span>{" "}
+                      {p.name}
+                    </span>
+                    <span className={cn(chipCls, "shrink-0", PROJECT_STATUS_STYLE[p.status])}>
+                      {PROJECT_STATUS_LABEL[p.status]}
+                    </span>
                   </li>
                 ))}
               </ul>

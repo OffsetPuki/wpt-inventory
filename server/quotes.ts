@@ -302,9 +302,11 @@ export function registerQuoteRoutes(app: Express): void {
       || cust.email
       || "";
 
-    // CRM bridge: a shared quote counts as "quote sent" for a matching lead.
+    // CRM bridge: a shared quote counts as "quote sent" for a matching lead —
+    // and creates the lead when the contact is new to CRM (Fix 3).
     onQuoteEvent("sent", {
       quoteNumber: quote.number,
+      name: quote.customerName,
       email: to,
       phone: cust.phone,
       designRef: quote.designRef,
