@@ -18,7 +18,7 @@ import {
   type ContractKind,
   type ContractStatus,
 } from "@shared/pm-schema";
-import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer } from "lucide-react";
+import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download } from "lucide-react";
 
 type ContractRow = Contract & { projectName: string | null };
 
@@ -56,11 +56,90 @@ function dateSpan(c: ContractRow): string {
   return "—";
 }
 
-// ─── Printable document ──────────────────────────────────────────────────────
-// "Download" = a fully-styled standalone page in a new window that immediately
-// opens the print dialog — Save as PDF gives the customer-ready file. Same
-// pattern as the Quote Builder's Print / Save as PDF. Client-side because auth
-// rides an x-auth header, so a plain new-tab server URL couldn't authenticate.
+// ─── Per-kind contract fields ────────────────────────────────────────────────
+// Each contract kind edits the fields that kind actually needs; the PDF
+// renders them as numbered sections in this order. Values live in the
+// contracts.fields JSON column, keyed by `key`. `body` stays as a free-form
+// "Additional terms" section appended after these.
+
+interface KindField {
+  key: string;
+  label: string;
+  input: "text" | "textarea" | "number" | "select";
+  required?: boolean;
+  placeholder?: string;
+  options?: { value: string; label: string }[];
+  section: string; // heading of the numbered section in the PDF
+  pdfFormat?: (v: string) => string; // raw value → sentence for the PDF
+}
+
+const KIND_FIELDS: Record<ContractKind, KindField[]> = {
+  contract: [
+    { key: "scopeOfWork", label: "Scope of work", input: "textarea", required: true, section: "Scope of Work",
+      placeholder: "What will be built, fabricated, and installed — dimensions, location, site details…" },
+    { key: "materials", label: "Materials & finish", input: "textarea", section: "Materials & Finish",
+      placeholder: "Steel type, finish/coating, hardware…" },
+    { key: "paymentTerms", label: "Payment terms", input: "textarea", required: true, section: "Payment Terms",
+      placeholder: "e.g. 50% deposit to schedule; balance due on completion" },
+    { key: "warranty", label: "Warranty", input: "text", section: "Warranty",
+      placeholder: "e.g. 1-year warranty on workmanship and welds" },
+  ],
+  sow: [
+    { key: "deliverables", label: "Scope & deliverables", input: "textarea", required: true, section: "Scope & Deliverables",
+      placeholder: "Work items this scope covers, one per line…" },
+    { key: "timeline", label: "Timeline & milestones", input: "textarea", section: "Timeline & Milestones",
+      placeholder: "e.g. Fabrication weeks 1–2; installation week 3" },
+    { key: "paymentTerms", label: "Payment terms", input: "textarea", section: "Payment Terms",
+      placeholder: "e.g. Billed per milestone; Net 15" },
+    { key: "exclusions", label: "Exclusions", input: "textarea", section: "Exclusions",
+      placeholder: "What this scope does NOT include" },
+  ],
+  nda: [
+    { key: "purpose", label: "Purpose of disclosure", input: "textarea", required: true, section: "Purpose",
+      placeholder: "Why confidential information is being shared…" },
+    { key: "direction", label: "Type", input: "select", section: "Type of Agreement",
+      options: [
+        { value: "mutual", label: "Mutual — both sides share" },
+        { value: "provider", label: "One-way — we disclose" },
+        { value: "client", label: "One-way — client discloses" },
+      ],
+      pdfFormat: (v) =>
+        ({
+          mutual: "Mutual — both parties may disclose confidential information under this Agreement.",
+          provider: "One-way — the Provider discloses confidential information to the Client.",
+          client: "One-way — the Client discloses confidential information to the Provider.",
+        })[v] ?? v },
+    { key: "termYears", label: "Confidentiality term (years)", input: "number", section: "Term",
+      placeholder: "2",
+      pdfFormat: (v) =>
+        `The confidentiality obligations remain in effect for ${v} year${v === "1" ? "" : "s"} from the effective date.` },
+  ],
+  msa: [
+    { key: "services", label: "Description of services", input: "textarea", required: true, section: "Services",
+      placeholder: "The ongoing services this master agreement covers…" },
+    { key: "paymentTerms", label: "Payment terms", input: "text", section: "Payment Terms",
+      placeholder: "e.g. Net 15 from invoice date" },
+    { key: "term", label: "Initial term & renewal", input: "text", section: "Term & Renewal",
+      placeholder: "e.g. 12 months; renews annually unless cancelled in writing" },
+  ],
+  other: [],
+};
+
+function parseFields(json: string | null | undefined): Record<string, string> {
+  if (!json) return {};
+  try {
+    const p = JSON.parse(json);
+    return p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  } catch {
+    return {};
+  }
+}
+
+// ─── PDF document ────────────────────────────────────────────────────────────
+// A real .pdf file (pdfmake), generated client-side because auth rides the
+// x-auth header — a plain new-tab server URL couldn't authenticate. pdfmake
+// (+ its embedded font) is heavy, so it's dynamically imported: only the
+// first download pays the load, and it never rides in the page bundle.
 
 interface ShopInfo {
   name: string;
@@ -69,94 +148,144 @@ interface ShopInfo {
   email: string;
 }
 
-const esc = (s: string | null | undefined): string =>
-  String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+async function contractPdf(c: ContractRow, shop: ShopInfo, action: "download" | "print") {
+  const pdfMakeMod: any = await import("pdfmake/build/pdfmake");
+  const pdfFontsMod: any = await import("pdfmake/build/vfs_fonts");
+  const pdfMake = pdfMakeMod.default ?? pdfMakeMod;
+  // vfs export shape moved between pdfmake versions — take the first that exists.
+  pdfMake.vfs =
+    pdfFontsMod.default?.pdfMake?.vfs ??
+    pdfFontsMod.pdfMake?.vfs ??
+    pdfFontsMod.default?.vfs ??
+    pdfFontsMod.vfs ??
+    pdfFontsMod.default;
 
-function openContractDocument(c: ContractRow, shop: ShopInfo) {
+  const kindLabel = CONTRACT_KIND_LABELS[c.kind];
   const today = formatDate(new Date());
+  const effective = c.startDate ? formatDate(ymdToDate(c.startDate)) : today;
+  const fields = parseFields(c.fields);
+
+  // Numbered sections: the kind's structured fields first, free-form last.
+  const sections: { heading: string; text: string }[] = [];
+  for (const f of KIND_FIELDS[c.kind] ?? []) {
+    const v = (fields[f.key] ?? "").toString().trim();
+    if (!v) continue;
+    sections.push({ heading: f.section, text: f.pdfFormat ? f.pdfFormat(v) : v });
+  }
+  if (c.body?.trim()) sections.push({ heading: "Additional Terms", text: c.body.trim() });
+
+  const contact = [shop.location, shop.phone, shop.email].filter(Boolean).join("    ·    ");
   const metaRows: [string, string][] = [
     ["Client", c.clientName || "—"],
-    ["Project", c.projectName || "—"],
+    ...(c.projectName ? [["Project", c.projectName] as [string, string]] : []),
     ...(c.valueCents > 0 ? [["Contract value", formatMoney(c.valueCents)] as [string, string]] : []),
-    ["Start date", c.startDate ? formatDate(ymdToDate(c.startDate)) : "—"],
-    ["End date", c.endDate ? formatDate(ymdToDate(c.endDate)) : "—"],
+    ["Effective date", effective],
+    ...(c.endDate ? [["End date", formatDate(ymdToDate(c.endDate))] as [string, string]] : []),
   ];
 
-  const html = `<!doctype html>
-<html><head><meta charset="utf-8">
-<title>${esc(c.title)} — ${esc(CONTRACT_KIND_LABELS[c.kind])}</title>
-<style>
-  @page { margin: 1in; }
-  body { font: 11pt/1.55 Georgia, "Times New Roman", serif; color: #111; margin: 0; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start;
-          border-bottom: 2px solid #111; padding-bottom: 14px; }
-  .co { font-size: 15pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-  .co-sub { font-size: 9pt; color: #444; margin-top: 4px; }
-  .doc-kind { text-align: right; font-size: 9pt; color: #444; text-transform: uppercase; letter-spacing: .12em; }
-  h1 { font-size: 16pt; margin: 26px 0 0; }
-  table.meta { width: 100%; border-collapse: collapse; margin: 18px 0 6px; font-size: 10pt; }
-  table.meta td { border: 1px solid #bbb; padding: 7px 10px; vertical-align: top; }
-  table.meta td.k { width: 22%; background: #f3f1ec; text-transform: uppercase;
-                    font-size: 8pt; letter-spacing: .08em; color: #555; }
-  .section-lbl { font-size: 8pt; text-transform: uppercase; letter-spacing: .12em;
-                 color: #555; margin: 26px 0 6px; }
-  .body-text { white-space: pre-wrap; }
-  .sig { display: flex; gap: 48px; margin-top: 60px; page-break-inside: avoid; }
-  .sig > div { flex: 1; }
-  .line { border-bottom: 1px solid #111; height: 36px; }
-  .lbl { font-size: 8pt; text-transform: uppercase; letter-spacing: .08em; color: #555; margin-top: 5px; }
-  .date-line { border-bottom: 1px solid #111; height: 26px; margin-top: 22px; width: 60%; }
-  .foot { margin-top: 44px; font-size: 8pt; color: #888; }
-</style></head><body>
-  <div class="head">
-    <div>
-      <div class="co">${esc(shop.name)}</div>
-      <div class="co-sub">${esc(shop.location)}${shop.location ? " · " : ""}${esc(shop.phone)}${shop.phone ? " · " : ""}${esc(shop.email)}</div>
-    </div>
-    <div class="doc-kind">${esc(CONTRACT_KIND_LABELS[c.kind])}<br>${esc(today)}</div>
-  </div>
+  const sigCol = (who: string) => ({
+    width: "*",
+    stack: [
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 210, y2: 0, lineWidth: 0.8 }], margin: [0, 34, 0, 3] },
+      { text: who.toUpperCase(), style: "sigLbl" },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 130, y2: 0, lineWidth: 0.8 }], margin: [0, 22, 0, 3] },
+      { text: "DATE", style: "sigLbl" },
+    ],
+  });
 
-  <h1>${esc(c.title)}</h1>
+  const dd = {
+    pageSize: "LETTER",
+    pageMargins: [54, 54, 54, 66],
+    info: { title: `${kindLabel} — ${c.title}`, author: shop.name, subject: kindLabel },
+    footer: (page: number, total: number) => ({
+      columns: [
+        { text: `${shop.name} — ${kindLabel}`, style: "foot" },
+        { text: `Page ${page} of ${total}`, style: "foot", alignment: "right" },
+      ],
+      margin: [54, 24, 54, 0],
+    }),
+    content: [
+      {
+        columns: [
+          {
+            stack: [
+              { text: shop.name.toUpperCase(), style: "co" },
+              ...(contact ? [{ text: contact, style: "coSub" }] : []),
+            ],
+          },
+          {
+            width: "auto",
+            stack: [
+              { text: kindLabel.toUpperCase(), style: "kind", alignment: "right" },
+              { text: today, style: "coSub", alignment: "right" },
+            ],
+          },
+        ],
+        columnGap: 16,
+      },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 504, y2: 0, lineWidth: 1.4 }], margin: [0, 12, 0, 20] },
+      { text: c.title, style: "h1" },
+      {
+        text:
+          `This ${kindLabel} (the “Agreement”) is made as of ${effective} by and between ` +
+          `${shop.name} (the “Provider”) and ${c.clientName || "the Client"} (the “Client”).`,
+        margin: [0, 10, 0, 2],
+        lineHeight: 1.35,
+      },
+      {
+        table: {
+          widths: [132, "*"],
+          body: metaRows.map(([k, v]) => [
+            { text: k.toUpperCase(), style: "metaK" },
+            { text: v, style: "metaV" },
+          ]),
+        },
+        layout: {
+          hLineColor: () => "#BBBBBB",
+          vLineColor: () => "#BBBBBB",
+          hLineWidth: () => 0.7,
+          vLineWidth: () => 0.7,
+          paddingTop: () => 5,
+          paddingBottom: () => 5,
+          paddingLeft: () => 8,
+          paddingRight: () => 8,
+          fillColor: (_row: number, _node: unknown, col: number) => (col === 0 ? "#F3F1EC" : null),
+        },
+        margin: [0, 14, 0, 4],
+      },
+      ...sections.flatMap((s, i) => [
+        { text: `${i + 1}.  ${s.heading.toUpperCase()}`, style: "secH" },
+        { text: s.text, style: "secBody" },
+      ]),
+      {
+        text: "Agreed and accepted by the parties as of the dates written below.",
+        margin: [0, 28, 0, 0],
+      },
+      {
+        columns: [sigCol(`${shop.name} — Authorized signature`), sigCol(`${c.clientName || "Client"} — Signature`)],
+        columnGap: 44,
+        unbreakable: true,
+      },
+    ],
+    styles: {
+      co: { fontSize: 15, bold: true, characterSpacing: 0.6 },
+      coSub: { fontSize: 8.5, color: "#555555", margin: [0, 3, 0, 0] },
+      kind: { fontSize: 9, color: "#555555", characterSpacing: 1.4 },
+      h1: { fontSize: 16, bold: true },
+      metaK: { fontSize: 7.5, color: "#555555", characterSpacing: 0.6, margin: [0, 1.5, 0, 0] },
+      metaV: { fontSize: 10 },
+      secH: { fontSize: 10, bold: true, characterSpacing: 0.7, margin: [0, 16, 0, 4] },
+      secBody: { fontSize: 10.5, lineHeight: 1.35, preserveLeadingSpaces: true },
+      sigLbl: { fontSize: 7.5, color: "#555555", characterSpacing: 0.6 },
+      foot: { fontSize: 7.5, color: "#888888" },
+    },
+    defaultStyle: { fontSize: 10.5, lineHeight: 1.3 },
+  };
 
-  <table class="meta"><tbody>
-    ${metaRows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join("\n    ")}
-  </tbody></table>
-
-  ${c.body ? `<div class="section-lbl">Terms &amp; scope</div>
-  <div class="body-text">${esc(c.body)}</div>` : ""}
-
-  <div class="sig">
-    <div>
-      <div class="line"></div>
-      <div class="lbl">${esc(shop.name)} — authorized signature</div>
-      <div class="date-line"></div>
-      <div class="lbl">Date</div>
-    </div>
-    <div>
-      <div class="line"></div>
-      <div class="lbl">${esc(c.clientName || "Client")} — signature</div>
-      <div class="date-line"></div>
-      <div class="lbl">Date</div>
-    </div>
-  </div>
-
-  <div class="foot">Generated ${esc(today)} · ${esc(shop.name)}</div>
-  <script>window.onload = function () { setTimeout(function () { window.print(); }, 150); };</script>
-</body></html>`;
-
-  const win = window.open("", "_blank");
-  if (!win) {
-    toast({
-      variant: "destructive",
-      title: "Popup blocked",
-      description: "Allow popups for this site to download the contract.",
-    });
-    return;
-  }
-  win.document.write(html);
-  win.document.close();
-  win.focus();
+  const file = `${kindLabel} - ${c.title}`.replace(/[\\/:*?"<>|]+/g, "").slice(0, 80).trim() + ".pdf";
+  const pdf = pdfMake.createPdf(dd);
+  if (action === "print") pdf.print();
+  else pdf.download(file);
 }
 
 // ─── Create / edit dialog ────────────────────────────────────────────────────
@@ -188,6 +317,10 @@ function ContractDialog({
   const [endDate, setEndDate] = useState("");
   const [body, setBody] = useState("");
   const [notes, setNotes] = useState("");
+  // Per-kind structured values, keyed by KindField.key. Kept as one object
+  // across kind switches (shared keys like paymentTerms carry over); only the
+  // current kind's keys are saved.
+  const [fieldVals, setFieldVals] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!open) return;
@@ -204,10 +337,18 @@ function ContractDialog({
     setEndDate(contract?.endDate ?? "");
     setBody(contract?.body ?? "");
     setNotes(contract?.notes ?? "");
+    setFieldVals(parseFields(contract?.fields));
   }, [open, contract]);
 
   const save = useMutation({
     mutationFn: async () => {
+      // Persist only the current kind's keys — selects fall back to their
+      // first option so the PDF never renders an empty select section.
+      const picked: Record<string, string> = {};
+      for (const f of KIND_FIELDS[kind]) {
+        const v = (fieldVals[f.key] ?? (f.input === "select" ? f.options?.[0]?.value ?? "" : "")).trim();
+        if (v) picked[f.key] = v;
+      }
       const payload = {
         title: title.trim(),
         kind,
@@ -218,6 +359,7 @@ function ContractDialog({
         valueCents: parseMoney(valueStr),
         startDate: startDate || null,
         endDate: endDate || null,
+        fields: JSON.stringify(picked),
         body: body.trim() || null,
         notes: notes.trim() || null,
       };
@@ -260,6 +402,18 @@ function ContractDialog({
           e.preventDefault();
           if (!title.trim()) {
             toast({ variant: "destructive", title: "Title is required" });
+            return;
+          }
+          // Per-kind required fields — a job contract without a scope or
+          // payment terms isn't a document worth sending.
+          const missing = KIND_FIELDS[kind].filter(
+            (f) => f.required && !(fieldVals[f.key] ?? "").trim(),
+          );
+          if (missing.length > 0) {
+            toast({
+              variant: "destructive",
+              title: `${CONTRACT_KIND_LABELS[kind]} needs: ${missing.map((f) => f.label).join(", ")}`,
+            });
             return;
           }
           save.mutate();
@@ -370,14 +524,59 @@ function ContractDialog({
             />
           </label>
         </div>
+        {KIND_FIELDS[kind].length > 0 && (
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-muted/20 p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {CONTRACT_KIND_LABELS[kind]} details — these become the document’s numbered sections
+            </p>
+            {KIND_FIELDS[kind].map((f) => (
+              <label key={f.key} className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-foreground">
+                  {f.label}
+                  {f.required && <span className="text-red-600 dark:text-red-400"> *</span>}
+                </span>
+                {f.input === "textarea" ? (
+                  <textarea
+                    className={cn(inputCls, "h-auto min-h-[100px] py-2 leading-relaxed")}
+                    rows={4}
+                    value={fieldVals[f.key] ?? ""}
+                    placeholder={f.placeholder}
+                    onChange={(e) => setFieldVals((v) => ({ ...v, [f.key]: e.target.value }))}
+                  />
+                ) : f.input === "select" ? (
+                  <select
+                    className={inputCls}
+                    value={fieldVals[f.key] ?? f.options?.[0]?.value ?? ""}
+                    onChange={(e) => setFieldVals((v) => ({ ...v, [f.key]: e.target.value }))}
+                  >
+                    {(f.options ?? []).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={f.input === "number" ? "number" : "text"}
+                    min={f.input === "number" ? 0 : undefined}
+                    className={inputCls}
+                    value={fieldVals[f.key] ?? ""}
+                    placeholder={f.placeholder}
+                    onChange={(e) => setFieldVals((v) => ({ ...v, [f.key]: e.target.value }))}
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+        )}
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Body / scope of work</span>
+          <span className="text-sm font-medium text-foreground">Additional terms (optional)</span>
           <textarea
-            className={cn(inputCls, "h-auto min-h-[140px] py-2")}
-            rows={6}
+            className={cn(inputCls, "h-auto min-h-[100px] py-2")}
+            rows={4}
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Scope, deliverables, terms…"
+            placeholder="Any extra clauses — appended as the last section of the document"
           />
         </label>
         <label className="flex flex-col gap-1.5">
@@ -428,6 +627,23 @@ function ContractViewModal({
   canEdit: boolean;
   shop: ShopInfo;
 }) {
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const runPdf = async (action: "download" | "print") => {
+    if (!contract) return;
+    setPdfBusy(true);
+    try {
+      await contractPdf(contract, shop, action);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not build the PDF", description: e?.message });
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+  const fieldSections = contract
+    ? KIND_FIELDS[contract.kind]
+        .map((f) => ({ f, v: (parseFields(contract.fields)[f.key] ?? "").trim() }))
+        .filter(({ v }) => v)
+    : [];
   return (
     <Modal
       open={!!contract}
@@ -479,9 +695,19 @@ function ContractViewModal({
               <p className="mt-0.5 font-medium text-foreground">{dateSpan(contract)}</p>
             </div>
           </div>
+          {fieldSections.map(({ f, v }) => (
+            <div key={f.key}>
+              <p className="mb-1.5 text-xs uppercase text-muted-foreground">{f.section}</p>
+              <div className="whitespace-pre-wrap rounded-lg bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
+                {f.input === "select"
+                  ? f.options?.find((o) => o.value === v)?.label ?? v
+                  : v}
+              </div>
+            </div>
+          ))}
           {contract.body && (
             <div>
-              <p className="mb-1.5 text-xs uppercase text-muted-foreground">Body / scope</p>
+              <p className="mb-1.5 text-xs uppercase text-muted-foreground">Additional terms</p>
               <div className="whitespace-pre-wrap rounded-lg bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
                 {contract.body}
               </div>
@@ -504,12 +730,21 @@ function ContractViewModal({
               </button>
             )}
             <button
-              onClick={() => openContractDocument(contract, shop)}
-              className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
-              title="Opens a print-ready document — choose “Save as PDF” to download"
+              onClick={() => runPdf("print")}
+              disabled={pdfBusy}
+              className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60"
             >
               <Printer className="h-4 w-4" />
-              Download / Print
+              Print
+            </button>
+            <button
+              onClick={() => runPdf("download")}
+              disabled={pdfBusy}
+              className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+              title="Downloads the customer-ready PDF"
+            >
+              {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download PDF
             </button>
           </div>
         </div>

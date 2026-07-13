@@ -117,7 +117,12 @@ export const contracts = sqliteTable("pm_contracts", {
   valueCents: integer("value_cents").notNull().default(0),
   startDate: text("start_date"), // "YYYY-MM-DD"
   endDate: text("end_date"), // "YYYY-MM-DD"
-  body: text("body"), // SOW / scope text composed in-app
+  // Per-kind structured fields (JSON Record<string,string>) — a job contract
+  // stores scope/payment/warranty, an NDA stores purpose/term, etc. The field
+  // definitions live in the contracts page (KIND_FIELDS); the PDF renders
+  // them as numbered sections. `body` below stays as free-form extra terms.
+  fields: text("fields").notNull().default("{}"),
+  body: text("body"), // additional free-form terms appended after the sections
   fileUrl: text("file_url"), // uploaded signed copy
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })

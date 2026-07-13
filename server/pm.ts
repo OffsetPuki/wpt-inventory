@@ -91,6 +91,8 @@ sqlite.exec(`
     value_cents INTEGER NOT NULL DEFAULT 0,
     start_date TEXT,
     end_date TEXT,
+    -- Per-kind structured fields (JSON) — see shared/pm-schema.ts.
+    fields TEXT NOT NULL DEFAULT '{}',
     body TEXT,
     file_url TEXT,
     notes TEXT,
@@ -129,6 +131,14 @@ try {
   /* column already exists */
 }
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pm_time_invoice ON pm_time_entries(invoice_id)");
+
+// Additive migration: pm_contracts.fields (per-kind structured contract
+// fields, JSON) arrived after installs existed — same deal.
+try {
+  sqlite.exec("ALTER TABLE pm_contracts ADD COLUMN fields TEXT NOT NULL DEFAULT '{}'");
+} catch {
+  /* column already exists */
+}
 
 // ─── Local date helpers ──────────────────────────────────────────────────────
 // Calendar dates are TEXT "YYYY-MM-DD" in the shop's local timezone; instants
