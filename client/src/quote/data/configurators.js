@@ -57,7 +57,7 @@ export const TYPES = [
   { key: 'gate',    label: 'Gate',    tagline: 'Swing or sliding entry gate' },
   { key: 'carport', label: 'Carport', tagline: 'Free-standing or attached cover' },
   { key: 'railing', label: 'Railing', tagline: 'Stairs, balconies & handrails' },
-  { key: 'pergola', label: 'Pergola', tagline: 'Shade structure, square or hexagonal' },
+  { key: 'pergola', label: 'Pergola', tagline: 'Rectangular shade structure' },
 ];
 
 const ftDisplay = (v) => `${v} ft`;
@@ -326,27 +326,35 @@ export const CONFIG = {
   },
 
   // ---- Pergola ----------------------------------------------------------------
-  // Width doubles as "across flats" when the style is hexagonal; depth applies
-  // to rectangular only (visibleWhen hides it for hex).
+  // Mirrors the website's pergola designer (CJM/src/pages/customize/pergola.astro)
+  // exactly: rectangular only — style is fixed, not a control (the CJM Fusion 360
+  // design + 3D model are rectangular). Hexagonal remains understood downstream
+  // (estimate.js, designSpec.js, summaryLine) so old saved quotes still render,
+  // but new quotes can't pick it. The visibleWhen guards stay for those old
+  // hexagonal sessions (legs/depth hide when one is opened).
   pergola: {
     defaults: {
-      style: 'rectangular',
+      style: 'rectangular', // fixed — suite↔website contract
       legs: 'standard',
       width: 12,
-      depth: 12,
+      depth: 16, // matches the website designer's default
       height: 8,
       shade: 'open',
       color: '#0A0A0A',
     },
     controls: [
+      // Never rendered (visibleWhen false) — kept so optionLabel() still
+      // resolves 'Style' display labels for old hexagonal quotes and the
+      // spec table. New quotes are always rectangular via defaults.
       {
         kind: 'segment', name: 'style', label: 'Style', cols: 2,
         options: [
           { value: 'rectangular', label: 'Rectangular' },
           { value: 'hexagonal', label: 'Hexagonal' },
         ],
+        visibleWhen: () => false,
       },
-      // Post styles from the CJM Fusion 360 design — rectangular builds only
+      // Post styles from the CJM Fusion 360 design
       {
         kind: 'segment', name: 'legs', label: 'Legs', cols: 3,
         options: [
