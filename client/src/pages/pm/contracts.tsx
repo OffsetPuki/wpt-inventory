@@ -18,7 +18,7 @@ import {
   type ContractKind,
   type ContractStatus,
 } from "@shared/pm-schema";
-import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download } from "lucide-react";
+import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download, Eye } from "lucide-react";
 
 type ContractRow = Contract & { projectName: string | null };
 
@@ -148,7 +148,8 @@ interface ShopInfo {
   email: string;
 }
 
-async function contractPdf(c: ContractRow, shop: ShopInfo, action: "download" | "print") {
+// Builds the pdfmake document once; download / print / preview all share it.
+async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: any; file: string }> {
   const pdfMakeMod: any = await import("pdfmake/build/pdfmake");
   const pdfFontsMod: any = await import("pdfmake/build/vfs_fonts");
   const pdfMake = pdfMakeMod.default ?? pdfMakeMod;
@@ -283,9 +284,26 @@ async function contractPdf(c: ContractRow, shop: ShopInfo, action: "download" | 
   };
 
   const file = `${kindLabel} - ${c.title}`.replace(/[\\/:*?"<>|]+/g, "").slice(0, 80).trim() + ".pdf";
-  const pdf = pdfMake.createPdf(dd);
-  if (action === "print") pdf.print();
-  else pdf.download(file);
+  return { pdf: pdfMake.createPdf(dd), file };
+}
+
+// Preview returns a blob object-URL for an inline <iframe> viewer; the caller
+// owns the URL and must revoke it when done.
+async function contractPdf(
+  c: ContractRow,
+  shop: ShopInfo,
+  action: "download" | "print" | "preview",
+): Promise<string | void> {
+  const { pdf, file } = await makeContractPdf(c, shop);
+  if (action === "print") {
+    pdf.print();
+    return;
+  }
+  if (action === "preview") {
+    const blob: Blob = await new Promise((resolve) => pdf.getBlob(resolve));
+    return URL.createObjectURL(blob);
+  }
+  pdf.download(file);
 }
 
 // ─── Create / edit dialog ────────────────────────────────────────────────────
@@ -628,11 +646,19 @@ function ContractViewModal({
   shop: ShopInfo;
 }) {
   const [pdfBusy, setPdfBusy] = useState(false);
-  const runPdf = async (action: "download" | "print") => {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Revoke the previous blob URL whenever it's replaced or the modal unmounts.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+  const runPdf = async (action: "download" | "print" | "preview") => {
     if (!contract) return;
     setPdfBusy(true);
     try {
-      await contractPdf(contract, shop, action);
+      const url = await contractPdf(contract, shop, action);
+      if (action === "preview" && url) setPreviewUrl(url);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Could not build the PDF", description: e?.message });
     } finally {
@@ -645,6 +671,7 @@ function ContractViewModal({
         .filter(({ v }) => v)
     : [];
   return (
+    <>
     <Modal
       open={!!contract}
       onClose={onClose}
@@ -730,6 +757,15 @@ function ContractViewModal({
               </button>
             )}
             <button
+              onClick={() => runPdf("preview")}
+              disabled={pdfBusy}
+              className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60"
+              title="See the finished document without downloading"
+            >
+              {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+              Preview
+            </button>
+            <button
               onClick={() => runPdf("print")}
               disabled={pdfBusy}
               className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60"
@@ -750,6 +786,46 @@ function ContractViewModal({
         </div>
       )}
     </Modal>
+    {previewUrl && contract && (
+      <Modal
+        open
+        onClose={() => setPreviewUrl(null)}
+        title={`Preview — ${contract.title}`}
+        maxWidth="max-w-4xl"
+      >
+        <div className="flex flex-col gap-3">
+          {/* Desktop browsers render the PDF inline; some phones won't — the
+              fallback links below cover those. bg-white so the Letter page
+              reads correctly in dark mode too. */}
+          <iframe
+            src={previewUrl}
+            title="Contract preview"
+            className="h-[72vh] w-full rounded-lg border border-border bg-white"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Preview not showing on this device?{" "}
+              <button
+                type="button"
+                className="underline hover:text-foreground"
+                onClick={() => window.open(previewUrl, "_blank")}
+              >
+                Open in a new tab
+              </button>
+            </p>
+            <button
+              onClick={() => runPdf("download")}
+              disabled={pdfBusy}
+              className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+            >
+              <Download className="h-4 w-4" />
+              Download PDF
+            </button>
+          </div>
+        </div>
+      </Modal>
+    )}
+    </>
   );
 }
 
