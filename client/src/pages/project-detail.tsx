@@ -5,7 +5,9 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import { PROJECT_STATUSES, type Project, type ProjectStatus } from "@shared/schema";
-import { formatDateTime, formatMoney } from "@/lib/format";
+import type { Client } from "@shared/crm-schema";
+import { formatDateTime, formatMoney, formatHours, formatDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import ProjectChecklist from "@/components/ProjectChecklist";
@@ -146,6 +148,188 @@ function PublishPortfolioDialog({ project, onClose }: { project: Project; onClos
   );
 }
 
+// ─── Job hub cards ───────────────────────────────────────────────────────────
+// The project page is the job's home base: who it's for (client card), what's
+// left to do (open tasks), and whether it's making money (finances card).
+
+function ClientCard({ clientId }: { clientId: number | null }) {
+  const { data: client } = useQuery<Client>({
+    queryKey: ["crm-client", clientId],
+    queryFn: async () => (await apiRequest("GET", `/api/crm/clients/${clientId}`)).json(),
+    enabled: clientId != null,
+    retry: false,
+  });
+  if (clientId == null || !client) return null;
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-3 text-base font-semibold text-foreground">Client</h2>
+      <p className="font-medium text-foreground">
+        {client.name}
+        {client.company && <span className="text-muted-foreground"> — {client.company}</span>}
+      </p>
+      <div className="mt-2 flex flex-col gap-1 text-sm">
+        {client.phone && (
+          <a href={`tel:${client.phone}`} className="text-muted-foreground hover:text-foreground hover:underline">
+            {client.phone}
+          </a>
+        )}
+        {client.email && (
+          <a href={`mailto:${client.email}`} className="text-muted-foreground hover:text-foreground hover:underline">
+            {client.email}
+          </a>
+        )}
+        {(client.address || client.city) && (
+          <span className="text-muted-foreground">
+            {[client.address, client.city, client.zip].filter(Boolean).join(", ")}
+          </span>
+        )}
+      </div>
+      <Link href="/crm/clients" className="mt-3 inline-block text-sm text-muted-foreground underline hover:text-foreground">
+        Open in CRM
+      </Link>
+    </div>
+  );
+}
+
+interface ProjectTaskRow {
+  id: number;
+  title: string;
+  status: string;
+  priority: string;
+  dueDate: string | null;
+}
+
+function OpenTasksCard({ projectId }: { projectId: number }) {
+  const { data: tasks = [] } = useQuery<ProjectTaskRow[]>({
+    queryKey: ["project-tasks", projectId],
+    queryFn: async () => (await apiRequest("GET", `/api/pm/tasks?projectId=${projectId}`)).json(),
+    retry: false,
+  });
+  const open = tasks.filter((t) => t.status !== "done");
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-3 text-base font-semibold text-foreground">
+        Open tasks{" "}
+        <span className="font-normal text-muted-foreground">— {open.length}</span>
+      </h2>
+      {open.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Nothing open. Plan the job in{" "}
+          <Link href="/pm/board" className="underline hover:text-foreground">Projects → Board</Link>.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {open.slice(0, 5).map((t) => (
+            <li key={t.id} className="flex items-center justify-between gap-3 py-2">
+              <span className="min-w-0 truncate text-sm text-foreground">{t.title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {t.priority === "urgent" || t.priority === "high" ? "⚠ " : ""}
+                {t.dueDate ? formatDate(t.dueDate) : t.status.replace("_", " ")}
+              </span>
+            </li>
+          ))}
+          {open.length > 5 && (
+            <li className="py-2 text-xs text-muted-foreground">
+              +{open.length - 5} more on the{" "}
+              <Link href="/pm/board" className="underline hover:text-foreground">board</Link>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+interface ProjectFinSummary {
+  invoices: {
+    id: number;
+    number: string;
+    status: string;
+    totalCents: number;
+    balanceCents: number;
+  }[];
+  totals: {
+    invoicedCents: number;
+    paidCents: number;
+    outstandingCents: number;
+    expenseCents: number;
+    laborMinutes: number;
+    laborCostCents: number;
+    marginCents: number;
+  };
+}
+
+const INV_CHIP: Record<string, string> = {
+  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
+  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  partial: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  paid: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  overdue: "bg-red-500/10 text-red-700 dark:text-red-400",
+};
+
+// Elevated-only (caller gates on isManager): billed vs collected vs cost.
+function JobFinancesCard({ projectId }: { projectId: number }) {
+  const { data } = useQuery<ProjectFinSummary>({
+    queryKey: ["project-fin-summary", projectId],
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/finance/projects/${projectId}/summary`)).json(),
+    retry: false,
+  });
+  if (!data) return null;
+  const t = data.totals;
+  if (t.invoicedCents === 0 && t.expenseCents === 0 && t.laborMinutes === 0) return null;
+  const stat = (label: string, value: string, tone?: string) => (
+    <div>
+      <p className="text-xs uppercase text-muted-foreground">{label}</p>
+      <p className={cn("mt-0.5 font-semibold tabular-nums", tone ?? "text-foreground")}>{value}</p>
+    </div>
+  );
+  return (
+    <div className="mb-6 rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-4 text-base font-semibold text-foreground">Job finances</h2>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {stat("Billed", formatMoney(t.invoicedCents))}
+        {stat("Collected", formatMoney(t.paidCents))}
+        {stat(
+          "Outstanding",
+          formatMoney(t.outstandingCents),
+          t.outstandingCents > 0 ? "text-amber-700 dark:text-amber-400" : undefined,
+        )}
+        {stat("Expenses", formatMoney(t.expenseCents))}
+        {stat("Labor", `${formatHours(t.laborMinutes)} · ${formatMoney(t.laborCostCents)}`)}
+        {stat(
+          "Margin",
+          formatMoney(t.marginCents),
+          t.marginCents >= 0
+            ? "text-emerald-700 dark:text-emerald-400"
+            : "text-red-600 dark:text-red-400",
+        )}
+      </div>
+      {data.invoices.length > 0 && (
+        <ul className="mt-4 divide-y divide-border border-t border-border">
+          {data.invoices.map((inv) => (
+            <li key={inv.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className="font-mono text-xs text-muted-foreground">{inv.number}</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-xs font-medium",
+                  INV_CHIP[inv.status] ?? "bg-muted text-muted-foreground",
+                )}
+              >
+                {inv.status}
+              </span>
+              <span className="ml-auto tabular-nums text-foreground">{formatMoney(inv.totalCents)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        Labor priced at each worker’s HR pay rate. Manage invoices in Finance → Invoices.
+      </p>
+    </div>
+  );
+}
+
 // Fix 4 (wiring plan): money waiting to be invoiced on this job — billable
 // expenses + per-worker labor not yet pulled onto an invoice. Renders nothing
 // when there's nothing unbilled. Finance API is elevated-only, so the caller
@@ -275,6 +459,12 @@ export default function ProjectDetailPage({ id }: { id: string }) {
       )}
 
       {isManager && <UnbilledCard projectId={projectId} />}
+      {isManager && <JobFinancesCard projectId={projectId} />}
+
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <ClientCard clientId={project.clientId} />
+        <OpenTasksCard projectId={projectId} />
+      </div>
 
       <ProjectChecklist projectId={projectId} />
 

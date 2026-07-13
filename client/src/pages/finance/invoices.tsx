@@ -31,6 +31,7 @@ import {
   Pencil,
   CreditCard,
   FolderInput,
+  Trash2,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
@@ -653,6 +654,18 @@ function InvoiceDetailModal({
       toast({ variant: "destructive", title: "Could not reverse", description: e?.message }),
   });
 
+  const del = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("DELETE", `/api/finance/invoices/${id}`)).json(),
+    onSuccess: () => {
+      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
+      toast({ variant: "success", title: "Invoice deleted" });
+      onClose();
+    },
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  });
+
   // Fix 4 (wiring plan): pull the job's billable-but-unbilled expenses and
   // per-worker labor onto this draft invoice as line items.
   const pullUnbilled = useMutation({
@@ -870,6 +883,22 @@ function InvoiceDetailModal({
                 <p className="text-sm text-muted-foreground">
                   {inv.status === "paid" ? "Paid in full — view only." : "Voided — view only."}
                 </p>
+              )}
+              {/* Deletable only while no money is recorded against it — the
+                  server enforces the same rule; paid history voids instead. */}
+              {payments.length === 0 && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete invoice ${inv.number}? It moves out of the books entirely; any pulled billable work becomes billable again.`)) {
+                      del.mutate();
+                    }
+                  }}
+                  disabled={del.isPending}
+                  className={cn(secondaryBtn, "ml-auto text-red-600 dark:text-red-400")}
+                >
+                  {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  Delete
+                </button>
               )}
             </div>
           )}

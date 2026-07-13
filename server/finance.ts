@@ -981,6 +981,62 @@ export function registerFinanceRoutes(app: Express): void {
     res.json(presentInvoice(row, todayLocal()));
   });
 
+  // Job hub money summary — everything needed to answer "is this job making
+  // money?" in one call: invoices (billed/collected), expenses, and labor cost
+  // (all closed PM time × each worker's HR pay rate, salary pro-rated).
+  app.get("/api/finance/projects/:id/summary", requireElevated, (req, res) => {
+    const projectId = pid(req.params.id);
+    const invRows = db.select().from(invoices)
+      .where(and(isNull(invoices.deletedAt), eq(invoices.projectId, projectId)))
+      .orderBy(desc(invoices.id))
+      .all();
+    const live = invRows.filter((i) => i.status !== "void");
+    const invoicedCents = live.reduce((s, i) => s + i.totalCents, 0);
+    const paidCents = live.reduce((s, i) => s + i.paidCents, 0);
+    const expenseCents = db.select({ s: sql<number>`coalesce(sum(${expenses.amountCents}), 0)` })
+      .from(expenses)
+      .where(and(isNull(expenses.deletedAt), eq(expenses.projectId, projectId)))
+      .get()?.s ?? 0;
+
+    let laborMinutes = 0;
+    let laborCostCents = 0;
+    try {
+      const rows = sqlite.prepare(`
+        SELECT te.user_id AS userId, SUM(te.duration_min) AS minutes
+        FROM pm_time_entries te
+        WHERE te.project_id = ? AND te.ended_at IS NOT NULL
+        GROUP BY te.user_id
+      `).all(projectId) as { userId: number; minutes: number }[];
+      for (const r of rows) {
+        laborMinutes += r.minutes;
+        try {
+          const emp = sqlite.prepare(
+            "SELECT pay_type AS payType, pay_rate_cents AS rate FROM hr_employees WHERE user_id = ? AND deleted_at IS NULL",
+          ).get(r.userId) as { payType?: string; rate?: number } | undefined;
+          const hourly = emp
+            ? (emp.payType === "salary" ? Math.round((emp.rate ?? 0) / 2080) : (emp.rate ?? 0))
+            : 0;
+          laborCostCents += Math.round((r.minutes / 60) * hourly);
+        } catch { /* hr module absent — labor priced at 0 */ }
+      }
+    } catch { /* pm module absent — no time on the job */ }
+
+    const today = todayLocal();
+    res.json({
+      invoices: live.map((i) => presentInvoice(i, today)),
+      totals: {
+        invoicedCents,
+        paidCents,
+        outstandingCents: invoicedCents - paidCents,
+        expenseCents,
+        laborMinutes,
+        laborCostCents,
+        // What's left after materials + labor if everything billed gets paid.
+        marginCents: invoicedCents - expenseCents - laborCostCents,
+      },
+    });
+  });
+
   app.get("/api/finance/expenses", requireElevated, (req, res) => {
     const category = qstr(req.query.category);
     const projectId = qstr(req.query.projectId);

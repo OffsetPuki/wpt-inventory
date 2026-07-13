@@ -11,6 +11,9 @@ import {
   type JobTemplate, type ProjectChecklistRow, type PublicUser,
   type ChecklistRowWithItem,
 } from "../shared/schema";
+import {
+  TEMPLATE_CATALOG, TEMPLATE_CATALOG_VERSION, LEGACY_TEMPLATE_KEYS,
+} from "./template-catalog";
 
 // ─── Database initialization ─────────────────────────────────────────────────
 
@@ -257,6 +260,43 @@ addColumnIfMissing("projects", "client_id", "client_id INTEGER");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id)");
+
+// ─── CJM job-template catalog sync ───────────────────────────────────────────
+// Upserts the code-owned service templates (server/template-catalog.ts) once
+// per catalog version, so the owner's edits in Admin → Templates survive
+// restarts. Owner-created templates (other keys) are never touched.
+addColumnIfMissing("settings", "template_catalog_version", "template_catalog_version INTEGER NOT NULL DEFAULT 0");
+{
+  sqlite.exec("INSERT OR IGNORE INTO settings (id) VALUES (1)");
+  const row = sqlite.prepare(
+    "SELECT template_catalog_version AS v FROM settings WHERE id = 1",
+  ).get() as { v: number } | undefined;
+  if ((row?.v ?? 0) < TEMPLATE_CATALOG_VERSION) {
+    const now = Date.now();
+    const up = sqlite.prepare(
+      "UPDATE job_templates SET label = ?, blurb = ?, icon = ?, params = ?, parts = ?, order_index = ?, enabled = 1, updated_at = ? WHERE key = ?",
+    );
+    const ins = sqlite.prepare(
+      "INSERT INTO job_templates (key, label, blurb, icon, params, parts, order_index, enabled, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+    );
+    TEMPLATE_CATALOG.forEach((t, i) => {
+      const params = JSON.stringify(t.params);
+      const parts = JSON.stringify(t.parts);
+      const r = up.run(t.label, t.blurb, t.icon, params, parts, i, now, t.key);
+      if (r.changes === 0) ins.run(t.key, t.label, t.blurb, t.icon, params, parts, i, now);
+    });
+    // Pre-CJM industrial templates: hidden from the picker, not deleted —
+    // restorable from Admin → Templates if ever wanted.
+    const ph = LEGACY_TEMPLATE_KEYS.map(() => "?").join(",");
+    sqlite.prepare(`UPDATE job_templates SET enabled = 0, updated_at = ? WHERE key IN (${ph})`)
+      .run(now, ...LEGACY_TEMPLATE_KEYS);
+    sqlite.prepare("UPDATE settings SET template_catalog_version = ? WHERE id = 1")
+      .run(TEMPLATE_CATALOG_VERSION);
+    console.log(
+      `[templates] CJM catalog v${TEMPLATE_CATALOG_VERSION} synced — ${TEMPLATE_CATALOG.length} service templates, ${LEGACY_TEMPLATE_KEYS.length} legacy disabled`,
+    );
+  }
+}
 
 // ─── Helper: strip pin from user ─────────────────────────────────────────────
 
