@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
@@ -18,7 +19,7 @@ import {
   type CrmActivity,
 } from "@shared/crm-schema";
 import { type Project, type ProjectStatus } from "@shared/schema";
-import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote } from "lucide-react";
+import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote, Trash2 } from "lucide-react";
 
 const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
@@ -196,11 +197,24 @@ function ClientDetailModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const { isElevated } = useAuth();
   const [note, setNote] = useState("");
 
   const { data, isLoading } = useQuery<ClientDetail>({
     queryKey: ["crm-client-detail", clientId],
     queryFn: async () => (await apiRequest("GET", `/api/crm/clients/${clientId}/detail`)).json(),
+  });
+
+  const del = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("DELETE", `/api/crm/clients/${clientId}`)).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["crm-clients"] });
+      toast({ variant: "success", title: "Client deleted" });
+      onClose();
+    },
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
   });
 
   const logNote = useMutation({
@@ -260,12 +274,28 @@ function ClientDetailModal({
                   </p>
                 )}
               </div>
-              <button
-                onClick={() => onEdit(client)}
-                className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary"
-              >
-                <Pencil className="h-4 w-4" /> Edit
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  onClick={() => onEdit(client)}
+                  className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary"
+                >
+                  <Pencil className="h-4 w-4" /> Edit
+                </button>
+                {isElevated && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete client "${client.name}"? This can't be undone from the app. Their jobs and invoices are kept (the name still shows on them).`)) {
+                        del.mutate();
+                      }
+                    }}
+                    disabled={del.isPending}
+                    className="flex h-9 items-center gap-1.5 rounded-lg border border-destructive/40 px-3 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+                  >
+                    {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
             {parseTags(client.tags).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">

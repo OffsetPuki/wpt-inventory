@@ -35,6 +35,7 @@ import {
   Mail,
   StickyNote,
   UserPlus,
+  Trash2,
 } from "lucide-react";
 
 const inputCls =
@@ -365,6 +366,18 @@ function LeadDetailModal({
       toast({ variant: "destructive", title: "Could not convert", description: e?.message }),
   });
 
+  const del = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("DELETE", `/api/crm/leads/${lead.id}`)).json(),
+    onSuccess: () => {
+      invalidateLeads(qc);
+      toast({ variant: "success", title: "Lead deleted" });
+      onClose();
+    },
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  });
+
   const quickBtn =
     "flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary disabled:opacity-60";
 
@@ -484,6 +497,21 @@ function LeadDetailModal({
               >
                 {convert.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
                 Convert to client
+              </button>
+            )}
+            {isElevated && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Delete lead "${lead.name}"? This can't be undone from the app.`)) {
+                    del.mutate();
+                  }
+                }}
+                disabled={del.isPending}
+                className="ml-auto flex h-11 items-center gap-2 rounded-xl border border-destructive/40 px-5 font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+              >
+                {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete
               </button>
             )}
           </div>
