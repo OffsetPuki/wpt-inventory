@@ -18,7 +18,7 @@ import {
   type ContractKind,
   type ContractStatus,
 } from "@shared/pm-schema";
-import { FileSignature, Loader2, Plus, Pencil, Trash2 } from "lucide-react";
+import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer } from "lucide-react";
 
 type ContractRow = Contract & { projectName: string | null };
 
@@ -56,6 +56,109 @@ function dateSpan(c: ContractRow): string {
   return "—";
 }
 
+// ─── Printable document ──────────────────────────────────────────────────────
+// "Download" = a fully-styled standalone page in a new window that immediately
+// opens the print dialog — Save as PDF gives the customer-ready file. Same
+// pattern as the Quote Builder's Print / Save as PDF. Client-side because auth
+// rides an x-auth header, so a plain new-tab server URL couldn't authenticate.
+
+interface ShopInfo {
+  name: string;
+  location: string;
+  phone: string;
+  email: string;
+}
+
+const esc = (s: string | null | undefined): string =>
+  String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+
+function openContractDocument(c: ContractRow, shop: ShopInfo) {
+  const today = formatDate(new Date());
+  const metaRows: [string, string][] = [
+    ["Client", c.clientName || "—"],
+    ["Project", c.projectName || "—"],
+    ...(c.valueCents > 0 ? [["Contract value", formatMoney(c.valueCents)] as [string, string]] : []),
+    ["Start date", c.startDate ? formatDate(ymdToDate(c.startDate)) : "—"],
+    ["End date", c.endDate ? formatDate(ymdToDate(c.endDate)) : "—"],
+  ];
+
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8">
+<title>${esc(c.title)} — ${esc(CONTRACT_KIND_LABELS[c.kind])}</title>
+<style>
+  @page { margin: 1in; }
+  body { font: 11pt/1.55 Georgia, "Times New Roman", serif; color: #111; margin: 0; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start;
+          border-bottom: 2px solid #111; padding-bottom: 14px; }
+  .co { font-size: 15pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .co-sub { font-size: 9pt; color: #444; margin-top: 4px; }
+  .doc-kind { text-align: right; font-size: 9pt; color: #444; text-transform: uppercase; letter-spacing: .12em; }
+  h1 { font-size: 16pt; margin: 26px 0 0; }
+  table.meta { width: 100%; border-collapse: collapse; margin: 18px 0 6px; font-size: 10pt; }
+  table.meta td { border: 1px solid #bbb; padding: 7px 10px; vertical-align: top; }
+  table.meta td.k { width: 22%; background: #f3f1ec; text-transform: uppercase;
+                    font-size: 8pt; letter-spacing: .08em; color: #555; }
+  .section-lbl { font-size: 8pt; text-transform: uppercase; letter-spacing: .12em;
+                 color: #555; margin: 26px 0 6px; }
+  .body-text { white-space: pre-wrap; }
+  .sig { display: flex; gap: 48px; margin-top: 60px; page-break-inside: avoid; }
+  .sig > div { flex: 1; }
+  .line { border-bottom: 1px solid #111; height: 36px; }
+  .lbl { font-size: 8pt; text-transform: uppercase; letter-spacing: .08em; color: #555; margin-top: 5px; }
+  .date-line { border-bottom: 1px solid #111; height: 26px; margin-top: 22px; width: 60%; }
+  .foot { margin-top: 44px; font-size: 8pt; color: #888; }
+</style></head><body>
+  <div class="head">
+    <div>
+      <div class="co">${esc(shop.name)}</div>
+      <div class="co-sub">${esc(shop.location)}${shop.location ? " · " : ""}${esc(shop.phone)}${shop.phone ? " · " : ""}${esc(shop.email)}</div>
+    </div>
+    <div class="doc-kind">${esc(CONTRACT_KIND_LABELS[c.kind])}<br>${esc(today)}</div>
+  </div>
+
+  <h1>${esc(c.title)}</h1>
+
+  <table class="meta"><tbody>
+    ${metaRows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join("\n    ")}
+  </tbody></table>
+
+  ${c.body ? `<div class="section-lbl">Terms &amp; scope</div>
+  <div class="body-text">${esc(c.body)}</div>` : ""}
+
+  <div class="sig">
+    <div>
+      <div class="line"></div>
+      <div class="lbl">${esc(shop.name)} — authorized signature</div>
+      <div class="date-line"></div>
+      <div class="lbl">Date</div>
+    </div>
+    <div>
+      <div class="line"></div>
+      <div class="lbl">${esc(c.clientName || "Client")} — signature</div>
+      <div class="date-line"></div>
+      <div class="lbl">Date</div>
+    </div>
+  </div>
+
+  <div class="foot">Generated ${esc(today)} · ${esc(shop.name)}</div>
+  <script>window.onload = function () { setTimeout(function () { window.print(); }, 150); };</script>
+</body></html>`;
+
+  const win = window.open("", "_blank");
+  if (!win) {
+    toast({
+      variant: "destructive",
+      title: "Popup blocked",
+      description: "Allow popups for this site to download the contract.",
+    });
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+}
+
 // ─── Create / edit dialog ────────────────────────────────────────────────────
 
 function ContractDialog({
@@ -64,12 +167,14 @@ function ContractDialog({
   contract,
   projects,
   clients,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   contract: ContractRow | null;
   projects: Project[];
   clients: Client[];
+  onCreated?: (row: Contract) => void;
 }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
@@ -120,10 +225,12 @@ function ContractDialog({
         ? (await apiRequest("PATCH", `/api/pm/contracts/${contract.id}`, payload)).json()
         : (await apiRequest("POST", "/api/pm/contracts", payload)).json();
     },
-    onSuccess: () => {
+    onSuccess: (row: Contract) => {
       qc.invalidateQueries({ queryKey: ["pm-contracts"] });
       toast({ variant: "success", title: contract ? "Contract updated" : "Contract created" });
       onClose();
+      // New contract → open it right away so Download / Print is one click.
+      if (!contract) onCreated?.(row);
     },
     onError: (e: any) =>
       toast({ variant: "destructive", title: "Could not save", description: e?.message }),
@@ -313,11 +420,13 @@ function ContractViewModal({
   onClose,
   onEdit,
   canEdit,
+  shop,
 }: {
   contract: ContractRow | null;
   onClose: () => void;
   onEdit: () => void;
   canEdit: boolean;
+  shop: ShopInfo;
 }) {
   return (
     <Modal
@@ -384,8 +493,8 @@ function ContractViewModal({
               <p className="text-sm text-foreground">{contract.notes}</p>
             </div>
           )}
-          {canEdit && (
-            <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            {canEdit && (
               <button
                 onClick={onEdit}
                 className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary"
@@ -393,8 +502,16 @@ function ContractViewModal({
                 <Pencil className="h-4 w-4" />
                 Edit
               </button>
-            </div>
-          )}
+            )}
+            <button
+              onClick={() => openContractDocument(contract, shop)}
+              className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
+              title="Opens a print-ready document — choose “Save as PDF” to download"
+            >
+              <Printer className="h-4 w-4" />
+              Download / Print
+            </button>
+          </div>
         </div>
       )}
     </Modal>
@@ -431,6 +548,19 @@ export default function PmContractsPage() {
     queryFn: async () =>
       (await apiRequest("GET", `/api/pm/contracts${qs ? `?${qs}` : ""}`)).json(),
   });
+
+  // Shop identity for the printable document's letterhead — same source as
+  // the Quote Builder's printed quote (Settings → shop block).
+  const { data: shopSettings } = useQuery<{ shop: Partial<ShopInfo> }>({
+    queryKey: ["quote-settings"],
+    queryFn: async () => (await apiRequest("GET", "/api/quotes/settings")).json(),
+  });
+  const shop: ShopInfo = {
+    name: shopSettings?.shop?.name || "CJM Metals",
+    location: shopSettings?.shop?.location || "",
+    phone: shopSettings?.shop?.phone || "",
+    email: shopSettings?.shop?.email || "",
+  };
 
   const tabs: { value: "" | ContractKind; label: string }[] = [
     { value: "", label: "All" },
@@ -567,6 +697,7 @@ export default function PmContractsPage() {
         contract={viewing}
         onClose={() => setViewing(null)}
         canEdit={isElevated}
+        shop={shop}
         onEdit={() => {
           setEditing(viewing);
           setViewing(null);
@@ -580,6 +711,22 @@ export default function PmContractsPage() {
           contract={editing}
           projects={projects}
           clients={clients}
+          onCreated={(row) =>
+            setViewing({
+              ...row,
+              // POST returns the raw row — the list GET coalesces these via
+              // joins, so resolve them here for the immediately-opened view.
+              clientName:
+                row.clientName ??
+                (row.clientId != null
+                  ? clients.find((cl) => cl.id === row.clientId)?.name ?? null
+                  : null),
+              projectName:
+                row.projectId != null
+                  ? projects.find((p) => p.id === row.projectId)?.name ?? null
+                  : null,
+            })
+          }
         />
       )}
     </div>
