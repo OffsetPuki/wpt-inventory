@@ -26,10 +26,29 @@ function Field({ field, value, onChange }) {
   );
 }
 
+const STALE_MS = 90 * 24 * 60 * 60 * 1000;
+
+/** "seed price" / "updated N days ago" freshness tag for a material. */
+function Freshness({ updatedAt }) {
+  const at = Number(updatedAt) || null;
+  if (at == null) {
+    return <p className="note" style={{ margin: '0 0 6px', color: '#d24d3e' }}>⚠ seed price — set yours</p>;
+  }
+  const days = Math.floor((Date.now() - at) / (24 * 60 * 60 * 1000));
+  const stale = Date.now() - at > STALE_MS;
+  return (
+    <p className="note" style={{ margin: '0 0 6px', ...(stale ? { color: '#d24d3e' } : { opacity: 0.6 }) }}>
+      {stale ? '⚠ ' : ''}updated {days === 0 ? 'today' : `${days}d ago`}
+    </p>
+  );
+}
+
 /**
  * The shared material library editor. One row per material: cost per unit +
  * waste %. Editing a price here reprices EVERY product that uses the material
  * (fence posts, gate frames, pergola legs...) and the website ballpark.
+ * Editing a cost stamps `updatedAt` (via QuoteBuilder.updatePriceBook) — that
+ * drives the freshness tags and the server's stale-price reminder task.
  */
 function MaterialsGroup({ priceBook, onChange }) {
   const ids = Object.keys(DEFAULT_PRICE_BOOK.materials);
@@ -50,6 +69,7 @@ function MaterialsGroup({ priceBook, onChange }) {
               value={getPath(priceBook, `materials.${id}.cost`)}
               onChange={onChange}
             />
+            <Freshness updatedAt={getPath(priceBook, `materials.${id}.updatedAt`)} />
             <Field
               field={{ path: `materials.${id}.wastePct`, label: '↳ waste', suffix: '%', step: 1 }}
               value={getPath(priceBook, `materials.${id}.wastePct`)}

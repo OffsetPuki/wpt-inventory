@@ -3,11 +3,18 @@ import crypto from "crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
-import { requireAuth } from "./auth";
+import { requireAuth, requireElevated } from "./auth";
 import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-schema";
 import { webDesignRowToLead } from "./public-api";
 import { onQuoteEvent } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
+// The quote builder's own pricing engine — plain JS, pure functions + data
+// (no React, no DOM), imported straight from client/src/quote so the costing
+// report and buy list price with EXACTLY the math the builder uses. Same
+// pattern as public-portal.ts.
+import { buildLineState, lineCost, materialTotals } from "../client/src/quote/lib/estimate.js";
+import { deepMerge } from "../client/src/quote/lib/store.js";
+import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 
 // ─── Quote builder module ────────────────────────────────────────────────────
 // Backs the ported CJM Quote app (client/src/quote). Three responsibilities:
@@ -102,6 +109,19 @@ function assertSafeKeys(obj: unknown, path = ""): void {
   }
 }
 
+// The price book a stored session should be priced with: its own snapshot
+// (rate versioning — quotes hold their prices) when present, else the current
+// shared book. Both deep-merged over the defaults, identically to the builder.
+function effectiveBook(sess: { priceBookSnapshot?: unknown } | null): Record<string, any> {
+  if (sess?.priceBookSnapshot && typeof sess.priceBookSnapshot === "object") {
+    return deepMerge(DEFAULT_PRICE_BOOK, sess.priceBookSnapshot as Record<string, unknown>);
+  }
+  const row = sqlite.prepare(
+    "SELECT price_book FROM quote_settings WHERE id = 1",
+  ).get() as { price_book?: string } | undefined;
+  return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
+}
+
 // "Q-<year>-<0000>" — same allocation scheme as estimate numbers: seq seeded
 // from max(id)+1, bounded retry on UNIQUE collision.
 function insertQuoteWithNumber(
@@ -183,6 +203,136 @@ export function registerQuoteRoutes(app: Express): void {
       "SELECT * FROM web_designs ORDER BY created_at DESC, id DESC LIMIT ?",
     ).all(recent);
     res.json({ ok: true, leads: rows.map(webDesignRowToLead) });
+  });
+
+  // ─── Costing report (literal path — registered before /:id) ───────────────
+  // Quoted vs actual, per accepted quote. The quoted side re-derives from the
+  // stored session (against its price-book snapshot). The actual side reads
+  // the linked project (projects.job_number = quotes.number): expenses from
+  // Finance, labor from PM time entries × the worker's HR pay rate (salary
+  // pro-rated at 2080 h/yr) — the same math as the project finances card.
+  // requireElevated: this exposes real pay-rate-derived costs, like finance.ts.
+
+  app.get("/api/quotes/costing", requireElevated, (_req, res) => {
+    const accepted = db.select().from(quotes)
+      .where(and(eq(quotes.status, "accepted"), isNull(quotes.deletedAt)))
+      .orderBy(desc(quotes.acceptedAt), desc(quotes.id))
+      .all();
+
+    const rows: any[] = [];
+    for (const q of accepted) {
+      try {
+        const sess = parseJson<any>(q.payload, null);
+        if (!sess || typeof sess !== "object" || !sess.state) continue;
+        const book = effectiveBook(sess);
+        const ls = buildLineState(q.type, sess.state, book, sess.overrides) as any;
+        const materialCents = Math.round(
+          (ls.items as any[]).reduce((s: number, it: any) => s + lineCost(it), 0) * 100,
+        );
+        const shopHours = Number(ls.labor?.hours) || 0;
+        const installHours = Number(ls.install?.hours) || 0;
+        const laborCents = Math.round((
+          shopHours * (Number(ls.labor?.rate) || 0)
+          + installHours * (Number(ls.install?.rate) || 0)
+        ) * 100);
+
+        const project = sqlite.prepare(
+          "SELECT id, status FROM projects WHERE job_number = ? AND deleted_at IS NULL",
+        ).get(q.number) as { id: number; status: string } | undefined;
+
+        let actual: any = null;
+        if (project) {
+          const exp = sqlite.prepare(`
+            SELECT
+              COALESCE(SUM(CASE WHEN category = 'materials' THEN amount_cents ELSE 0 END), 0) AS materials,
+              COALESCE(SUM(CASE WHEN category != 'materials' THEN amount_cents ELSE 0 END), 0) AS other
+            FROM fin_expenses WHERE project_id = ? AND deleted_at IS NULL
+          `).get(project.id) as { materials: number; other: number };
+          const times = sqlite.prepare(`
+            SELECT user_id AS userId, COALESCE(SUM(duration_min), 0) AS minutes
+            FROM pm_time_entries
+            WHERE project_id = ? AND ended_at IS NOT NULL
+            GROUP BY user_id
+          `).all(project.id) as { userId: number; minutes: number }[];
+          let laborMinutes = 0;
+          let laborCostCents = 0;
+          for (const t of times) {
+            laborMinutes += t.minutes;
+            const emp = sqlite.prepare(
+              "SELECT pay_type, pay_rate_cents FROM hr_employees WHERE user_id = ?",
+            ).get(t.userId) as { pay_type?: string; pay_rate_cents?: number } | undefined;
+            const hourly = !emp?.pay_rate_cents ? 0
+              : emp.pay_type === "salary" ? emp.pay_rate_cents / 2080 : emp.pay_rate_cents;
+            laborCostCents += Math.round((t.minutes / 60) * hourly);
+          }
+          actual = {
+            materialCents: exp.materials,
+            otherExpenseCents: exp.other,
+            laborMinutes,
+            laborCostCents,
+          };
+        }
+
+        rows.push({
+          quoteId: q.id,
+          number: q.number,
+          type: q.type,
+          customerName: q.customerName,
+          acceptedAt: q.acceptedAt,
+          totalCents: q.totalCents,
+          projectId: project?.id ?? null,
+          projectStatus: project?.status ?? null,
+          quoted: { materialCents, shopHours, installHours, laborCents },
+          actual,
+        });
+      } catch {
+        /* one unreadable payload must not kill the report */
+      }
+    }
+    res.json({ rows });
+  });
+
+  // ─── Buy list (literal path — registered before /:id) ─────────────────────
+  // Aggregate the material cut lists of several quotes into one supplier
+  // order: total ft of each tubing, bags, sets — waste included. Each quote is
+  // priced against its own snapshot book, same as everywhere else.
+
+  app.get("/api/quotes/buy-list", requireAuth, (req, res) => {
+    const ids = String(req.query.ids ?? "")
+      .split(",")
+      .map((s) => parseInt(s, 10))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .slice(0, 50);
+    if (ids.length === 0) return res.status(400).json({ message: "ids required" });
+
+    const agg = new Map<string, { id: string; name: string; unit: string; qty: number }>();
+    const perQuote: any[] = [];
+    for (const id of ids) {
+      const q = db.select().from(quotes)
+        .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
+        .get();
+      if (!q) continue;
+      try {
+        const sess = parseJson<any>(q.payload, null);
+        if (!sess || typeof sess !== "object" || !sess.state) continue;
+        const book = effectiveBook(sess);
+        const ls = buildLineState(q.type, sess.state, book, sess.overrides) as any;
+        const mats = materialTotals(ls.items, book) as
+          { id: string; name: string; unit: string; qty: number }[];
+        perQuote.push({
+          quoteId: q.id, number: q.number, type: q.type,
+          customerName: q.customerName, materials: mats,
+        });
+        for (const m of mats) {
+          const cur = agg.get(m.id) || { ...m, qty: 0 };
+          cur.qty = Math.round((cur.qty + m.qty) * 100) / 100;
+          agg.set(m.id, cur);
+        }
+      } catch {
+        /* skip an unreadable payload */
+      }
+    }
+    res.json({ combined: [...agg.values()], quotes: perQuote });
   });
 
   // ─── Quotes CRUD ──────────────────────────────────────────────────────────

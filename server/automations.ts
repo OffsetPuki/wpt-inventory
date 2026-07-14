@@ -336,6 +336,37 @@ function runBusinessSweep(): void {
       `Still quoting ${cfg.lead_time_weeks} weeks out? Update or clear it in Marketing settings`);
   });
 
+  // 12b. Material-price staleness — the quote engine prices everything off the
+  // shared material library (quote_settings.price_book → materials.*). The
+  // builder stamps materials.<id>.updatedAt when a cost is edited; a material
+  // with no stamp is still on the SEED placeholder price. 90+ days (or never
+  // touched) earns a nudge — steel moves, stale prices eat margin silently.
+  step("material-price staleness", () => {
+    const row = sqlite.prepare(
+      "SELECT price_book FROM quote_settings WHERE id = 1",
+    ).get() as { price_book?: string } | undefined;
+    let book: any = null;
+    try { book = row?.price_book ? JSON.parse(row.price_book) : null; } catch { return; }
+    const mats = book?.materials;
+    if (!mats || typeof mats !== "object") {
+      // Price book never customized since the material library shipped —
+      // every product (and the website ballpark) is quoting off seed prices.
+      ensureTask("auto:material-prices-stale",
+        "Set your real material prices — the quote engine is still on placeholder seed prices (Quotes → Price book → Materials)");
+      return;
+    }
+    const stale: string[] = [];
+    for (const [id, m] of Object.entries(mats as Record<string, any>)) {
+      if (!m || typeof m !== "object") continue;
+      const at = Number(m.updatedAt) || null;
+      if (at == null || at < now - 90 * DAY_MS) stale.push(String(m.name || id));
+    }
+    if (stale.length === 0) return;
+    const head = stale.slice(0, 4).join(", ");
+    ensureTask("auto:material-prices-stale",
+      `Review material prices — ${stale.length} seed or 90+ days old (${head}${stale.length > 4 ? ", …" : ""})`);
+  });
+
   // 13. Dead-pipe heartbeat — the ≥5 floor keeps brand-new installs quiet;
   // the open task doubles as the once-per-quiet-period dedupe for the email.
   step("dead-pipe heartbeat", () => {

@@ -32,6 +32,7 @@ import PrintQuote from './components/PrintQuote.jsx';
 import PriceBookPanel from './components/PriceBookPanel.jsx';
 import FindDesign from './components/FindDesign.jsx';
 import SavedQuotes from './components/SavedQuotes.jsx';
+import Costing from './components/Costing.jsx';
 
 // Client-side session identity — correlates async save responses with the
 // session that started them, so a slow POST can't stamp its quoteId/number
@@ -338,7 +339,18 @@ export default function QuoteBuilder({ initialSettings }) {
   };
 
   // ── Price book ──────────────────────────────────────────────────────────────
-  const updatePriceBook = (path, value) => { settingsDirty.current = true; setPriceBook((pb) => setPath(pb, path, value)); };
+  // Editing a material's COST also stamps materials.<id>.updatedAt — that
+  // feeds the staleness badges here and the hourly "review material prices"
+  // sweep on the server (automations.ts).
+  const updatePriceBook = (path, value) => {
+    settingsDirty.current = true;
+    setPriceBook((pb) => {
+      let next = setPath(pb, path, value);
+      const m = /^materials\.([^.]+)\.cost$/.exec(path);
+      if (m) next = setPath(next, `materials.${m[1]}.updatedAt`, Date.now());
+      return next;
+    });
+  };
   const updateShop = (field, value) => { settingsDirty.current = true; setShop((sh) => ({ ...sh, [field]: value })); };
   const resetPriceBook = () => {
     if (window.confirm('Reset all rates to the defaults?')) {
@@ -360,6 +372,7 @@ export default function QuoteBuilder({ initialSettings }) {
             <button className={inQuoteFlow ? 'active' : ''} onClick={goHome}>New quote</button>
             <button className={view === 'find' ? 'active' : ''} onClick={() => setView('find')}>Find design</button>
             <button className={view === 'saved' ? 'active' : ''} onClick={() => setView('saved')}>Saved</button>
+            <button className={view === 'costing' ? 'active' : ''} onClick={() => setView('costing')}>Costing</button>
             <button className={view === 'pricebook' ? 'active' : ''} onClick={() => setView('pricebook')}>Price book</button>
           </nav>
         </header>
@@ -372,6 +385,10 @@ export default function QuoteBuilder({ initialSettings }) {
 
         {activeView === 'saved' && (
           <SavedQuotes onOpen={openSaved} />
+        )}
+
+        {activeView === 'costing' && (
+          <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
 
         {activeView === 'configure' && session && (
