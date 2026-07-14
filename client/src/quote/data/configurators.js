@@ -417,14 +417,9 @@ export const CONFIG = {
 
   // ---- Pergola ----------------------------------------------------------------
   // Mirrors the website's pergola designer (CJM/src/pages/customize/pergola.astro)
-  // exactly: rectangular only — style is fixed, not a control (the CJM Fusion 360
-  // design + 3D model are rectangular). Hexagonal remains understood downstream
-  // (estimate.js, designSpec.js, summaryLine) so old saved quotes still render,
-  // but new quotes can't pick it. The visibleWhen guards stay for those old
-  // hexagonal sessions (legs/depth hide when one is opened).
+  // exactly: rectangular only (the CJM Fusion 360 design + 3D model are rectangular).
   pergola: {
     defaults: {
-      style: 'rectangular', // fixed — suite↔website contract
       legs: 'standard',
       width: 12,
       depth: 16, // matches the website designer's default
@@ -437,17 +432,6 @@ export const CONFIG = {
       color: '#0A0A0A',
     },
     controls: [
-      // Never rendered (visibleWhen false) — kept so optionLabel() still
-      // resolves 'Style' display labels for old hexagonal quotes and the
-      // spec table. New quotes are always rectangular via defaults.
-      {
-        kind: 'segment', name: 'style', label: 'Style', cols: 2,
-        options: [
-          { value: 'rectangular', label: 'Rectangular' },
-          { value: 'hexagonal', label: 'Hexagonal' },
-        ],
-        visibleWhen: () => false,
-      },
       // Post styles from the CJM Fusion 360 design
       {
         kind: 'segment', name: 'legs', label: 'Legs', cols: 3,
@@ -456,13 +440,9 @@ export const CONFIG = {
           { value: 'designer', label: 'Designer' },
           { value: 'sides', label: 'Side Screens' },
         ],
-        visibleWhen: (s) => s.style !== 'hexagonal',
       },
       { kind: 'range', name: 'width', label: 'Width', min: 8, max: 24, step: 1, display: ftDisplay },
-      {
-        kind: 'range', name: 'depth', label: 'Depth', min: 8, max: 24, step: 1, display: ftDisplay,
-        visibleWhen: (s) => s.style !== 'hexagonal',
-      },
+      { kind: 'range', name: 'depth', label: 'Depth', min: 8, max: 24, step: 1, display: ftDisplay },
       { kind: 'range', name: 'height', label: 'Head clearance', min: 7, max: 12, step: 1, display: ftDisplay },
       {
         kind: 'segment', name: 'shade', label: 'Roof', cols: 2,
@@ -529,10 +509,9 @@ export function summaryLine(type, s) {
     return `${app}${inf} · ${s.lengthFt} ft · ${s.height} in · ${fin}`;
   }
   if (type === 'pergola') {
-    const style = optionLabel('pergola', 'style', s.style);
-    const size = s.style === 'hexagonal' ? `${s.width} ft across` : `${s.width}×${s.depth} ft`;
+    const legs = optionLabel('pergola', 'legs', s.legs);
     const shade = s.shade === 'panels' ? ' · shade panels' : '';
-    return `${style} · ${size} · ${s.height} ft${shade} · ${fin}`;
+    return `${legs} · ${s.width}×${s.depth} ft · ${s.height} ft${shade} · ${fin}`;
   }
   // carport
   const roof = optionLabel('carport', 'roof', s.roof);
@@ -606,8 +585,7 @@ export function specRows(type, s) {
   }
   if (type === 'pergola') {
     const rows = [
-      ['Style', optionLabel('pergola', 'style', s.style)],
-      ['Size', s.style === 'hexagonal' ? `${s.width} ft across flats` : `${s.width} ft × ${s.depth} ft`],
+      ['Size', `${s.width} ft × ${s.depth} ft`],
       ['Head clearance', `${s.height} ft`],
       ['Legs', optionLabel('pergola', 'legs', s.legs || 'standard')],
       ['Roof', optionLabel('pergola', 'shade', s.shade)],

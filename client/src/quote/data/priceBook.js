@@ -142,8 +142,6 @@ export const DEFAULT_PRICE_BOOK = {
     // leg designer, 12 per leg side screens).
     legsDesignerPerPost: 60,
     legsSidesPerPost: 90,
-    // Hexagonal = 6 mitered corners + radial rafter fit-up; multiplies labor hours.
-    hexLaborMult: 1.35,
     laborHoursPer100SqFt: 5,       // shop fabrication
     installHoursPer100SqFt: 3,     // on-site install
   },
@@ -255,7 +253,6 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'pergola.legsDesignerPerPost', label: 'Designer legs fabrication', prefix: '$', suffix: '/ post', step: 5 },
       { path: 'pergola.legsSidesPerPost', label: 'Side screens fabrication', prefix: '$', suffix: '/ post', step: 5 },
       { path: 'pergola.shadePanelPerSqFt', label: 'Shade panels', prefix: '$', suffix: '/ sq ft', step: 0.5 },
-      { path: 'pergola.hexLaborMult', label: 'Hexagonal labor multiplier', suffix: '×', step: 0.05 },
       { path: 'pergola.laborHoursPer100SqFt', label: 'Shop labor', suffix: 'hrs / 100 sq ft', step: 0.5 },
       { path: 'pergola.installHoursPer100SqFt', label: 'Install labor', suffix: 'hrs / 100 sq ft', step: 0.5 },
     ],

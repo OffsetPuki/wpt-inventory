@@ -144,14 +144,8 @@ const TOOLS = {
   },
 
   pergola: {
-    // Headline: "<prefix> — <Rectangular|Hexagonal> Pergola" (localized, either
-    // word order). The Style line below is authoritative; this is a fallback.
-    head: (headline) => {
-      const n = norm(headline);
-      return { style: n.includes('hexagon') ? 'hexagonal' : n.includes('rectangul') ? 'rectangular' : undefined };
-    },
+    head: () => ({}), // rectangular only — nothing to read from the headline
     fields: [
-      { key: 'style', labels: ['style', 'estilo'], parse: oneOf({ hexagonal: ['hexagonal'], rectangular: ['rectangular'] }) },
       // Website labels: 'Standard'/'Designer'/'Side Screens' (EN),
       // 'Estándar'/'De diseño'/'Con laterales' (ES)
       { key: 'legs', labels: ['legs', 'patas'], parse: oneOf({ sides: ['side screens', 'con laterales', 'sides'], designer: ['designer', 'de diseno', 'diseno'], standard: ['standard', 'estandar'] }) },
@@ -159,7 +153,7 @@ const TOOLS = {
         key: 'width', labels: ['size', 'tamano'], parse: firstNumber,
         also: (raw, state) => {
           const nums = String(raw).match(/\d+(?:\.\d+)?/g) || [];
-          if (nums[1] != null) state.depth = Number(nums[1]); // "12 ft × 10 ft" (hex specs carry one number)
+          if (nums[1] != null) state.depth = Number(nums[1]); // "12 ft × 10 ft"
         },
       },
       { key: 'height', labels: ['head clearance', 'clearance', 'altura libre'], parse: firstNumber },

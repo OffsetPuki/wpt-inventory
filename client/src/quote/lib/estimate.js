@@ -529,14 +529,12 @@ function estimatePergola(s, pb) {
   const p = pb.pergola || {};
   const width = num(s.width, 0);
   const height = num(s.height, 0); // head clearance
-  const hex = s.style === 'hexagonal';
-  const depth = hex ? 0 : num(s.depth, 0);
+  const depth = num(s.depth, 0);
 
-  // Regular hexagon, W = width across flats: area = (√3/2)·W², perimeter = 2√3·W.
-  const planArea = round2(hex ? (Math.sqrt(3) / 2) * width * width : width * depth);
-  const perimeter = round2(hex ? 2 * Math.sqrt(3) * width : 2 * (width + depth));
-  // Rect: 4 corner posts, +1 mid-span pair once a side passes 16 ft. Hex: one per corner.
-  const posts = hex ? 6 : Math.max(width, depth) > 16 ? 6 : 4;
+  const planArea = round2(width * depth);
+  const perimeter = round2(2 * (width + depth));
+  // 4 corner posts, +1 mid-span pair once a side passes 16 ft.
+  const posts = Math.max(width, depth) > 16 ? 6 : 4;
 
   const items = [];
 
@@ -553,11 +551,10 @@ function estimatePergola(s, pb) {
 
   // Frame charged by plan square footage + header beams by perimeter.
   items.unshift({
-    key: 'rafters', name: hex ? 'Radial rafter grid (hexagonal)' : 'Rafter grid / frame',
+    key: 'rafters', name: 'Rafter grid / frame',
     kind: 'area', qty: planArea, rate: round2(num(p.rafterPerSqFt, 0)),
   });
   pushPriced(items, {
-    // Whole feet in the display name (hex perimeter is irrational); qty stays precise.
     key: 'beams', name: `Header beams (${Math.round(perimeter)} ft perimeter)`, kind: 'length',
     qty: perimeter, rate: round2(num(p.beamPerFt, 0)),
   });
@@ -565,8 +562,7 @@ function estimatePergola(s, pb) {
   // Post-style variants from the CJM design. Decorative pieces are 1×1 square
   // tubing from the material library — 5 per leg (designer), 12 per leg (side
   // screens), each ≈ head-clearance long. Fabrication upcharge rides per post.
-  // Rectangular only: the control is hidden for hex, so ignore a stale value.
-  if (!hex && s.legs === 'designer') {
+  if (s.legs === 'designer') {
     const pieces = 5 * posts;
     pushPriced(items, matItem(pb, {
       key: 'legDeco', materialId: 'tube_1x1', qty: pieces * height,
@@ -576,7 +572,7 @@ function estimatePergola(s, pb) {
       key: 'legs', name: `Designer legs fabrication (${posts} posts)`, kind: 'unit',
       qty: posts, rate: round2(num(p.legsDesignerPerPost, 0)),
     });
-  } else if (!hex && s.legs === 'sides') {
+  } else if (s.legs === 'sides') {
     const pieces = 12 * posts;
     pushPriced(items, matItem(pb, {
       key: 'legDeco', materialId: 'tube_1x1', qty: pieces * height,
@@ -599,12 +595,10 @@ function estimatePergola(s, pb) {
   const fin = finishItem('pergola', s, pb, planArea);
   if (fin) items.push(fin);
 
-  // Hexagonal = 6 mitered corners and radial fit-up — more hours per sq ft.
-  const laborMult = hex ? num(p.hexLaborMult, 1) : 1;
   return {
     items,
-    laborHours: round2((planArea / 100) * num(p.laborHoursPer100SqFt, 0) * laborMult),
-    installHours: round2((planArea / 100) * num(p.installHoursPer100SqFt, 0) * laborMult),
+    laborHours: round2((planArea / 100) * num(p.laborHoursPer100SqFt, 0)),
+    installHours: round2((planArea / 100) * num(p.installHoursPer100SqFt, 0)),
   };
 }
 
