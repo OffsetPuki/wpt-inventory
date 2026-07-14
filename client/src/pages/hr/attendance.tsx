@@ -1,19 +1,18 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateTime, formatHours } from "@/lib/format";
 import type { AttendanceRow, Employee } from "@shared/hr-schema";
 import { Loader2, Clock, LogIn, LogOut, MapPin, Pencil, Trash2, Info } from "lucide-react";
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
-const openChip = cn(chipCls, "bg-amber-500/10 text-amber-700 dark:text-amber-400");
 
 type MineResponse = { open: AttendanceRow | null; rows: AttendanceRow[] };
 type TeamRow = AttendanceRow & { employeeName: string };
@@ -221,7 +220,7 @@ function ClockCard() {
                   {formatHours(shiftMinutes(r))}
                 </span>
               ) : (
-                <span className={openChip}>Open</span>
+                <Chip tone="amber">Open</Chip>
               )}
             </li>
           ))}
@@ -234,46 +233,32 @@ function ClockCard() {
 // ─── Team view (elevated) ─────────────────────────────────────────────────────
 
 function EditShiftDialog({ row, onClose }: { row: TeamRow; onClose: () => void }) {
-  const qc = useQueryClient();
   const [clockIn, setClockIn] = useState(toLocalInput(row.clockIn));
   const [clockOut, setClockOut] = useState(toLocalInput(row.clockOut));
   const [notes, setNotes] = useState(row.notes ?? "");
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["hr-attendance"] });
-    qc.invalidateQueries({ queryKey: ["hr-attendance-mine"] });
-  };
-
-  const save = useMutation({
-    mutationFn: async () => {
-      const inMs = new Date(clockIn).getTime();
-      const outMs = clockOut ? new Date(clockOut).getTime() : null;
-      return (
-        await apiRequest("PATCH", `/api/hr/attendance/${row.id}`, {
-          clockIn: inMs,
-          clockOut: outMs,
-          notes: notes.trim() || null,
-        })
-      ).json();
-    },
-    onSuccess: () => {
-      invalidate();
-      toast({ variant: "success", title: "Shift updated" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update shift", description: e?.message }),
+  const save = useApiMutation({
+    request: () => ({
+      method: "PATCH",
+      url: `/api/hr/attendance/${row.id}`,
+      body: {
+        clockIn: new Date(clockIn).getTime(),
+        clockOut: clockOut ? new Date(clockOut).getTime() : null,
+        notes: notes.trim() || null,
+      },
+    }),
+    invalidate: [["hr-attendance"], ["hr-attendance-mine"]],
+    successTitle: "Shift updated",
+    errorTitle: "Could not update shift",
+    onSuccess: onClose,
   });
 
-  const del = useMutation({
-    mutationFn: async () => (await apiRequest("DELETE", `/api/hr/attendance/${row.id}`)).json(),
-    onSuccess: () => {
-      invalidate();
-      toast({ variant: "success", title: "Shift deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete shift", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/hr/attendance/${row.id}` }),
+    invalidate: [["hr-attendance"], ["hr-attendance-mine"]],
+    successTitle: "Shift deleted",
+    errorTitle: "Could not delete shift",
+    onSuccess: onClose,
   });
 
   return (
@@ -405,14 +390,9 @@ function TeamSection() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Clock className="h-12 w-12" />
-          <p className="text-lg">No shifts recorded for this filter</p>
-        </div>
+        <EmptyState icon={Clock} message="No shifts recorded for this filter" />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -436,7 +416,7 @@ function TeamSection() {
                     {r.clockOut ? (
                       <span className="text-foreground">{formatDateTime(r.clockOut)}</span>
                     ) : (
-                      <span className={openChip}>Open</span>
+                      <Chip tone="amber">Open</Chip>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-foreground">

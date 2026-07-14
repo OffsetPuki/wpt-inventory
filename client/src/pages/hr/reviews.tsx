@@ -1,10 +1,14 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
 import type { PublicUser } from "@shared/schema";
@@ -16,11 +20,8 @@ import {
 } from "@shared/hr-schema";
 import { Loader2, Plus, Star, ClipboardList, Trash2 } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 const textareaCls =
   "min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
 
 const STATUS_CHIP: Record<PerfReviewStatus, string> = {
   draft: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400",
@@ -82,7 +83,6 @@ function ReviewDialog({
   review: ReviewRow | null;
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const { user } = useAuth();
   const [employeeId, setEmployeeId] = useState(review ? String(review.employeeId) : "");
   const [periodLabel, setPeriodLabel] = useState(review?.periodLabel ?? "");
@@ -98,8 +98,8 @@ function ReviewDialog({
     queryFn: async () => (await apiRequest("GET", "/api/hr/employees")).json(),
   });
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         employeeId: Number(employeeId),
         periodLabel: periodLabel.trim(),
@@ -111,29 +111,22 @@ function ReviewDialog({
         reviewDate: reviewDate || null,
         ...(review ? {} : { reviewerId: user?.id ?? null }),
       };
-      const res = review
-        ? await apiRequest("PATCH", `/api/hr/reviews/${review.id}`, body)
-        : await apiRequest("POST", "/api/hr/reviews", body);
-      return res.json();
+      return review
+        ? { method: "PATCH", url: `/api/hr/reviews/${review.id}`, body }
+        : { method: "POST", url: "/api/hr/reviews", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-reviews"] });
-      toast({ variant: "success", title: review ? "Review updated" : "Review created" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save review", description: e?.message }),
+    invalidate: [["hr-reviews"]],
+    successTitle: review ? "Review updated" : "Review created",
+    errorTitle: "Could not save review",
+    onSuccess: onClose,
   });
 
-  const del = useMutation({
-    mutationFn: async () => (await apiRequest("DELETE", `/api/hr/reviews/${review!.id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-reviews"] });
-      toast({ variant: "success", title: "Review deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete review", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/hr/reviews/${review!.id}` }),
+    invalidate: [["hr-reviews"]],
+    successTitle: "Review deleted",
+    errorTitle: "Could not delete review",
+    onSuccess: onClose,
   });
 
   return (
@@ -333,13 +326,9 @@ export default function HrReviewsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : reviews.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <ClipboardList className="h-12 w-12" />
-          <p className="text-lg">No reviews found</p>
+        <EmptyState icon={ClipboardList} message="No reviews found">
           <button
             onClick={() => setDialog({ open: true, review: null })}
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
@@ -347,7 +336,7 @@ export default function HrReviewsPage() {
             <Plus className="h-5 w-5" />
             Write the first review
           </button>
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -375,9 +364,9 @@ export default function HrReviewsPage() {
                     <Stars rating={r.overallRating} />
                   </td>
                   <td className="px-4 py-3">
-                    <span className={cn(chipCls, STATUS_CHIP[r.status])}>
+                    <Chip className={STATUS_CHIP[r.status]}>
                       {STATUS_LABEL[r.status]}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {r.reviewDate ? formatDate(r.reviewDate) : "—"}

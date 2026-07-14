@@ -2,15 +2,18 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
+import { todayYmd, ymdToDate } from "@/lib/format";
 import type { Project, PublicUser } from "@shared/schema";
 import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   type TaskStatus,
 } from "@shared/pm-schema";
-import { ChartGantt, Loader2, CalendarDays } from "lucide-react";
+import { ChartGantt, CalendarDays } from "lucide-react";
 import { TaskDialog, type TaskRow } from "./task-dialog";
 
 const DAY_W = 26;
@@ -23,24 +26,13 @@ const BAR_STYLE: Record<TaskStatus, string> = {
   done: "bg-emerald-500/60",
 };
 
-const STATUS_CHIP: Record<TaskStatus, string> = {
-  todo: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  in_progress: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  review: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+// Status pill hues — each an exact match to a shared Chip tone.
+const STATUS_TONE: Record<TaskStatus, ChipTone> = {
+  todo: "zinc",
+  in_progress: "blue",
+  review: "amber",
+  done: "emerald",
 };
-
-function todayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-}
-
-function ymdToDate(ymd: string): Date {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
 
 function addDaysYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split("-").map(Number);
@@ -142,17 +134,13 @@ export default function PmGanttPage() {
       <Header title="Gantt" description="Scheduled tasks across projects on a shared timeline" />
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : scheduled.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <ChartGantt className="h-12 w-12" />
-          <p className="text-lg">Nothing scheduled yet</p>
+        <EmptyState icon={ChartGantt} message="Nothing scheduled yet">
           <p className="text-sm">
             Give tasks a start and due date on the board and they will appear here.
           </p>
-        </div>
+        </EmptyState>
       ) : (
         range && (
           <>
@@ -300,14 +288,7 @@ export default function PmGanttPage() {
                     {t.projectName}
                   </span>
                 )}
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                    STATUS_CHIP[t.status]
-                  )}
-                >
-                  {TASK_STATUS_LABELS[t.status]}
-                </span>
+                <Chip tone={STATUS_TONE[t.status]}>{TASK_STATUS_LABELS[t.status]}</Chip>
               </button>
             ))}
           </div>

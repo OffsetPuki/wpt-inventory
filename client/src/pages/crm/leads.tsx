@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { formatDateTime, formatMoney, parseMoney } from "@/lib/format";
 import {
   LEAD_STAGES,
@@ -38,19 +42,24 @@ import {
   Trash2,
 } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
-
-const STAGE_STYLE: Record<LeadStage, string> = {
-  new: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  contacted: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  quote_sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  follow_up: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  won: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  lost: "bg-red-500/10 text-red-700 dark:text-red-400",
+const STAGE_TONE: Record<LeadStage, ChipTone> = {
+  new: "zinc",
+  contacted: "blue",
+  quote_sent: "blue",
+  follow_up: "amber",
+  won: "emerald",
+  lost: "red",
 };
+
+// Every lead mutation refreshes the same set of dependent queries. Winning/
+// converting a lead feeds the marketing overview/attribution, so the prefix
+// "marketing" match keeps those tabs fresh instead of showing stale numbers.
+const LEAD_KEYS: QueryKey[] = [
+  ["crm-leads"],
+  ["crm-stats"],
+  ["crm-reports"],
+  ["marketing"],
+];
 
 function daysSince(v: string | number | Date | null | undefined): number | null {
   if (!v) return null;
@@ -59,19 +68,9 @@ function daysSince(v: string | number | Date | null | undefined): number | null 
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 }
 
-function invalidateLeads(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["crm-leads"] });
-  qc.invalidateQueries({ queryKey: ["crm-stats"] });
-  qc.invalidateQueries({ queryKey: ["crm-reports"] });
-  // Winning/converting a lead feeds the marketing overview/attribution — prefix
-  // match keeps those tabs fresh instead of showing stale numbers.
-  qc.invalidateQueries({ queryKey: ["marketing"] });
-}
-
 // ─── New lead dialog ──────────────────────────────────────────────────────────
 
 function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const qc = useQueryClient();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -96,30 +95,30 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
     enabled: open,
   });
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/crm/leads", {
-          name: name.trim(),
-          phone: phone.trim() || undefined,
-          email: email.trim() || undefined,
-          source,
-          campaignId: campaignId ? parseInt(campaignId, 10) : undefined,
-          serviceRequested: serviceRequested.trim() || undefined,
-          serviceArea: serviceArea.trim() || undefined,
-          estimatedValueCents: estimatedValue ? parseMoney(estimatedValue) : undefined,
-          notes: notes.trim() || undefined,
-        })
-      ).json(),
+  const create = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/crm/leads",
+      body: {
+        name: name.trim(),
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        source,
+        campaignId: campaignId ? parseInt(campaignId, 10) : undefined,
+        serviceRequested: serviceRequested.trim() || undefined,
+        serviceArea: serviceArea.trim() || undefined,
+        estimatedValueCents: estimatedValue ? parseMoney(estimatedValue) : undefined,
+        notes: notes.trim() || undefined,
+      },
+    }),
+    invalidate: LEAD_KEYS,
+    successTitle: "Lead created",
+    errorTitle: "Could not create lead",
     onSuccess: () => {
-      invalidateLeads(qc);
-      toast({ variant: "success", title: "Lead created" });
       setName(""); setPhone(""); setEmail(""); setSource("website"); setCampaignId("");
       setServiceRequested(""); setServiceArea(""); setEstimatedValue(""); setNotes("");
       onClose();
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not create lead", description: e?.message }),
   });
 
   return (
@@ -212,28 +211,25 @@ function CloseLeadModal({
   to: "won" | "lost";
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const [reason, setReason] = useState<WinLossReason | "">(lead.winLossReason ?? "");
   const [revenue, setRevenue] = useState(
     lead.estimatedValueCents ? String(lead.estimatedValueCents / 100) : ""
   );
 
-  const close = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("PATCH", `/api/crm/leads/${lead.id}`, {
-          stage: to,
-          winLossReason: reason || undefined,
-          ...(to === "won" ? { revenueClosedCents: parseMoney(revenue) } : {}),
-        })
-      ).json(),
-    onSuccess: () => {
-      invalidateLeads(qc);
-      toast({ variant: "success", title: to === "won" ? "Lead won" : "Lead marked lost" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update lead", description: e?.message }),
+  const close = useApiMutation({
+    request: () => ({
+      method: "PATCH",
+      url: `/api/crm/leads/${lead.id}`,
+      body: {
+        stage: to,
+        winLossReason: reason || undefined,
+        ...(to === "won" ? { revenueClosedCents: parseMoney(revenue) } : {}),
+      },
+    }),
+    invalidate: LEAD_KEYS,
+    successTitle: to === "won" ? "Lead won" : "Lead marked lost",
+    errorTitle: "Could not update lead",
+    onSuccess: () => onClose(),
   });
 
   return (
@@ -290,7 +286,6 @@ function LeadDetailModal({
   isElevated: boolean;
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const [name, setName] = useState(lead.name);
   const [phone, setPhone] = useState(lead.phone ?? "");
   const [email, setEmail] = useState(lead.email ?? "");
@@ -312,13 +307,15 @@ function LeadDetailModal({
       (await apiRequest("GET", `/api/crm/activities?entityType=lead&entityId=${lead.id}`)).json(),
   });
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       // Moving out of won/lost — clear the now-stale close fields so reports
       // don't keep counting an old reason/revenue.
       const clearsClose = stage !== "won" && stage !== "lost";
-      return (
-        await apiRequest("PATCH", `/api/crm/leads/${lead.id}`, {
+      return {
+        method: "PATCH",
+        url: `/api/crm/leads/${lead.id}`,
+        body: {
           name: name.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,
@@ -331,59 +328,44 @@ function LeadDetailModal({
           ...(clearsClose && lead.stage === "won" ? { revenueClosedCents: 0 } : {}),
           ...(isElevated ? { assignedTo: assignedTo ? parseInt(assignedTo, 10) : null } : {}),
           notes: notes.trim() || null,
-        })
-      ).json();
+        },
+      };
     },
-    onSuccess: () => {
-      invalidateLeads(qc);
-      toast({ variant: "success", title: "Lead updated" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+    invalidate: LEAD_KEYS,
+    successTitle: "Lead updated",
+    errorTitle: "Could not save",
   });
 
-  const logActivity = useMutation({
-    mutationFn: async (kind: "call" | "email" | "note") =>
-      (
-        await apiRequest("POST", "/api/crm/activities", {
-          entityType: "lead",
-          entityId: lead.id,
-          kind,
-          notes: activityNote.trim() || undefined,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-activities", "lead", lead.id] });
-      invalidateLeads(qc);
-      setActivityNote("");
-      toast({ variant: "success", title: "Activity logged" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not log activity", description: e?.message }),
+  const logActivity = useApiMutation<any, "call" | "email" | "note">({
+    request: (kind) => ({
+      method: "POST",
+      url: "/api/crm/activities",
+      body: {
+        entityType: "lead",
+        entityId: lead.id,
+        kind,
+        notes: activityNote.trim() || undefined,
+      },
+    }),
+    invalidate: [["crm-activities", "lead", lead.id], ...LEAD_KEYS],
+    successTitle: "Activity logged",
+    errorTitle: "Could not log activity",
+    onSuccess: () => setActivityNote(""),
   });
 
-  const convert = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("POST", `/api/crm/leads/${lead.id}/convert`)).json(),
-    onSuccess: () => {
-      invalidateLeads(qc);
-      qc.invalidateQueries({ queryKey: ["crm-clients"] });
-      toast({ variant: "success", title: "Converted to client" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not convert", description: e?.message }),
+  const convert = useApiMutation({
+    request: () => ({ method: "POST", url: `/api/crm/leads/${lead.id}/convert` }),
+    invalidate: [...LEAD_KEYS, ["crm-clients"]],
+    successTitle: "Converted to client",
+    errorTitle: "Could not convert",
   });
 
-  const del = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/crm/leads/${lead.id}`)).json(),
-    onSuccess: () => {
-      invalidateLeads(qc);
-      toast({ variant: "success", title: "Lead deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/crm/leads/${lead.id}` }),
+    invalidate: LEAD_KEYS,
+    successTitle: "Lead deleted",
+    errorTitle: "Could not delete",
+    onSuccess: () => onClose(),
   });
 
   const quickBtn =
@@ -559,9 +541,9 @@ function LeadDetailModal({
               {activities.map((a) => (
                 <li key={a.id} className="flex items-start justify-between gap-3 py-2.5">
                   <div className="min-w-0">
-                    <span className={cn(chipCls, "bg-muted text-muted-foreground")}>
+                    <Chip className="bg-muted text-muted-foreground">
                       {ACTIVITY_KIND_LABELS[a.kind]}
-                    </span>
+                    </Chip>
                     {a.notes && <p className="mt-1 break-words text-sm text-foreground">{a.notes}</p>}
                   </div>
                   <span className="shrink-0 text-xs text-muted-foreground">
@@ -581,7 +563,6 @@ function LeadDetailModal({
 
 export default function LeadsPage() {
   const { isElevated } = useAuth();
-  const qc = useQueryClient();
 
   const [view, setView] = useState<"board" | "list">("board");
   const [q, setQ] = useState("");
@@ -617,23 +598,24 @@ export default function LeadsPage() {
   const userName = (id: number | null) =>
     id == null ? "—" : users.find((u) => u.id === id)?.name ?? `#${id}`;
 
-  const patchStage = useMutation({
-    mutationFn: async ({ id, stage: next }: { id: number; stage: LeadStage }) => {
+  const patchStage = useApiMutation<any, { id: number; stage: LeadStage }>({
+    request: ({ id, stage: next }) => {
       const prev = leads.find((l) => l.id === id)?.stage;
       // Dragging out of won/lost must clear the stale reason (and closed
       // revenue when it was won) so those columns don't keep old values.
       const clearsClose = next !== "won" && next !== "lost";
-      return (
-        await apiRequest("PATCH", `/api/crm/leads/${id}`, {
+      return {
+        method: "PATCH",
+        url: `/api/crm/leads/${id}`,
+        body: {
           stage: next,
           ...(clearsClose ? { winLossReason: null } : {}),
           ...(clearsClose && prev === "won" ? { revenueClosedCents: 0 } : {}),
-        })
-      ).json();
+        },
+      };
     },
-    onSuccess: () => invalidateLeads(qc),
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not move lead", description: e?.message }),
+    invalidate: LEAD_KEYS,
+    errorTitle: "Could not move lead",
   });
 
   const handleDrop = (leadId: number, target: LeadStage) => {
@@ -720,13 +702,9 @@ export default function LeadsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : leads.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Users className="h-12 w-12" />
-          <p className="text-lg">No leads yet</p>
+        <EmptyState icon={Users} message="No leads yet">
           <button
             onClick={() => setNewOpen(true)}
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
@@ -734,7 +712,7 @@ export default function LeadsPage() {
             <Plus className="h-5 w-5" />
             Add your first lead
           </button>
-        </div>
+        </EmptyState>
       ) : view === "board" ? (
         <div className="overflow-x-auto pb-4">
           <div className="flex items-start gap-3">
@@ -761,7 +739,7 @@ export default function LeadsPage() {
                 >
                   <div className="flex items-center justify-between px-2 py-2">
                     <span className="text-sm font-medium text-foreground">{LEAD_STAGE_LABELS[s]}</span>
-                    <span className={cn(chipCls, "bg-muted text-muted-foreground")}>{column.length}</span>
+                    <Chip className="bg-muted text-muted-foreground">{column.length}</Chip>
                   </div>
                   <div className="flex flex-col gap-2">
                     {column.map((lead) => {
@@ -776,14 +754,8 @@ export default function LeadsPage() {
                         >
                           <p className="font-medium text-foreground">{lead.name}</p>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                            <span className={cn(chipCls, "bg-blue-500/10 text-blue-700 dark:text-blue-400")}>
-                              {LEAD_SOURCE_LABELS[lead.source]}
-                            </span>
-                            {lead.stale && (
-                              <span className={cn(chipCls, "bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
-                                Stale
-                              </span>
-                            )}
+                            <Chip tone="blue">{LEAD_SOURCE_LABELS[lead.source]}</Chip>
+                            {lead.stale && <Chip tone="amber">Stale</Chip>}
                           </div>
                           <div className="mt-2 flex items-center justify-between text-sm">
                             <span className="tabular-nums text-foreground">
@@ -838,15 +810,13 @@ export default function LeadsPage() {
                       <td className="px-4 py-3 font-medium text-foreground">
                         {lead.name}
                         {lead.stale && (
-                          <span className={cn(chipCls, "ml-2 bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
-                            Stale
-                          </span>
+                          <Chip tone="amber" className="ml-2">Stale</Chip>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={cn(chipCls, STAGE_STYLE[lead.stage])}>
+                        <Chip tone={STAGE_TONE[lead.stage]}>
                           {LEAD_STAGE_LABELS[lead.stage]}
-                        </span>
+                        </Chip>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{LEAD_SOURCE_LABELS[lead.source]}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-foreground">

@@ -2,11 +2,22 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip } from "@/components/ui/Chip";
+import { inputCls, primaryBtn, secondaryBtn, thCls, tdCls, chipCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
-import { formatDate, formatMoney, formatPercent, parseMoney } from "@/lib/format";
+import {
+  formatDate,
+  formatMoney,
+  formatPercent,
+  parseMoney,
+  relDays,
+  centsToInput,
+} from "@/lib/format";
 import {
   CAMPAIGN_CHANNELS,
   REVIEW_SOURCES,
@@ -62,19 +73,12 @@ import {
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
+// Local-only Tailwind strings (no shared equivalent yet); inputCls / primaryBtn /
+// secondaryBtn / chipCls now come from @/lib/ui-styles.
 const textareaCls =
   "min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const primaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60";
-const secondaryBtn =
-  "flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary";
 const smallBtn =
   "flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-foreground hover:border-primary disabled:opacity-60";
-const chipCls = "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium";
 
 const STAGE_CHIP: Record<LeadStage, string> = {
   new: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
@@ -104,18 +108,6 @@ const neutralChip = "bg-muted text-muted-foreground";
 
 function sourceLabel(source: string): string {
   return (LEAD_SOURCE_LABELS as Record<string, string>)[source] ?? source;
-}
-
-function centsToInput(cents: number): string {
-  return cents === 0 ? "" : (cents / 100).toFixed(2).replace(/\.00$/, "");
-}
-
-function relDays(ms: number | null | undefined): string {
-  if (!ms) return "never";
-  const days = Math.floor((Date.now() - ms) / DAY_MS);
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  return `${days} days ago`;
 }
 
 // ─── API payload shapes (server/marketing.ts, server/crm.ts) ─────────────────
@@ -165,32 +157,8 @@ interface CrmReports {
 }
 
 // ─── Small presentational helpers ─────────────────────────────────────────────
-
-function LoadingBlock() {
-  return (
-    <div className="flex justify-center py-16 text-muted-foreground">
-      <Loader2 className="h-8 w-8 animate-spin" />
-    </div>
-  );
-}
-
-function EmptyState({
-  icon: Icon,
-  message,
-  children,
-}: {
-  icon: typeof Megaphone;
-  message: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-      <Icon className="h-12 w-12" />
-      <p className="text-lg">{message}</p>
-      {children}
-    </div>
-  );
-}
+// LoadingBlock / EmptyState now come from @/components/ui/Feedback (markup is
+// byte-identical to the local copies they replaced).
 
 function KpiCard({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
@@ -264,9 +232,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-3 font-semibold text-foreground">{children}</h2>;
 }
 
-const thCls = "px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground";
+// thCls / tdCls now come from @/lib/ui-styles; the right-aligned variants stay local.
 const thRight = "px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground";
-const tdCls = "px-3 py-2.5";
 const tdRight = "px-3 py-2.5 text-right tabular-nums";
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
@@ -495,11 +462,7 @@ function LeadsTab() {
                     <td className={cn(tdCls, "font-medium text-foreground")}>
                       <span className="flex items-center gap-2">
                         {l.name}
-                        {l.stale && (
-                          <span className={cn(chipCls, "bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
-                            Stale
-                          </span>
-                        )}
+                        {l.stale && <Chip tone="amber">Stale</Chip>}
                       </span>
                     </td>
                     <td className={tdCls}>
@@ -538,7 +501,6 @@ function CampaignDialog({
   onClose: () => void;
   campaign: Campaign | null;
 }) {
-  const qc = useQueryClient();
   const [name, setName] = useState(campaign?.name ?? "");
   const [channel, setChannel] = useState<CampaignChannel>(campaign?.channel ?? "facebook");
   const [startDate, setStartDate] = useState(campaign?.startDate ?? "");
@@ -549,8 +511,8 @@ function CampaignDialog({
   const [clicks, setClicks] = useState(campaign ? String(campaign.clicks) : "");
   const [notes, setNotes] = useState(campaign?.notes ?? "");
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         name: name.trim(),
         channel,
@@ -562,18 +524,14 @@ function CampaignDialog({
         clicks: parseInt(clicks, 10) || 0,
         notes: notes.trim() || null,
       };
-      const res = campaign
-        ? await apiRequest("PATCH", `/api/marketing/campaigns/${campaign.id}`, body)
-        : await apiRequest("POST", "/api/marketing/campaigns", body);
-      return res.json();
+      return campaign
+        ? { method: "PATCH", url: `/api/marketing/campaigns/${campaign.id}`, body }
+        : { method: "POST", url: "/api/marketing/campaigns", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({ variant: "success", title: campaign ? "Campaign updated" : "Campaign created" });
-      onClose();
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not save campaign", description: e.message }),
+    invalidate: [["marketing"]],
+    successTitle: campaign ? "Campaign updated" : "Campaign created",
+    errorTitle: "Could not save campaign",
+    onSuccess: onClose,
   });
 
   return (
@@ -665,7 +623,6 @@ function CampaignDialog({
 }
 
 function CampaignsTab() {
-  const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Campaign | null>(null);
 
@@ -685,15 +642,15 @@ function CampaignsTab() {
     [overview]
   );
 
-  const setStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: CampaignStatus }) =>
-      (await apiRequest("PATCH", `/api/marketing/campaigns/${id}`, { status })).json(),
-    onSuccess: (_row, vars) => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({ variant: "success", title: `Campaign ${CAMPAIGN_STATUS_LABELS[vars.status].toLowerCase()}` });
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not update campaign", description: e.message }),
+  const setStatus = useApiMutation<Campaign, { id: number; status: CampaignStatus }>({
+    request: ({ id, status }) => ({
+      method: "PATCH",
+      url: `/api/marketing/campaigns/${id}`,
+      body: { status },
+    }),
+    invalidate: [["marketing"]],
+    successTitle: (_row, vars) => `Campaign ${CAMPAIGN_STATUS_LABELS[vars.status].toLowerCase()}`,
+    errorTitle: "Could not update campaign",
   });
 
   return (
@@ -1073,31 +1030,28 @@ function Stars({ rating }: { rating: number }) {
 }
 
 function ReviewDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const qc = useQueryClient();
   const [source, setSource] = useState<ReviewSource>("google");
   const [author, setAuthor] = useState("");
   const [rating, setRating] = useState("5");
   const [date, setDate] = useState("");
   const [text, setText] = useState("");
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/marketing/reviews", {
-          source,
-          author: author.trim() || null,
-          rating: parseInt(rating, 10),
-          reviewDate: date || null,
-          text: text.trim() || null,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({ variant: "success", title: "Review logged" });
-      onClose();
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not log review", description: e.message }),
+  const create = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/marketing/reviews",
+      body: {
+        source,
+        author: author.trim() || null,
+        rating: parseInt(rating, 10),
+        reviewDate: date || null,
+        text: text.trim() || null,
+      },
+    }),
+    invalidate: [["marketing"]],
+    successTitle: "Review logged",
+    errorTitle: "Could not log review",
+    onSuccess: onClose,
   });
 
   return (
@@ -1167,20 +1121,19 @@ function ReviewsTab() {
     queryFn: async () => (await apiRequest("GET", "/api/marketing/stats")).json(),
   });
 
-  const toggleResponded = useMutation({
-    mutationFn: async (r: Review) =>
-      (await apiRequest("PATCH", `/api/marketing/reviews/${r.id}`, { responded: !r.responded })).json(),
-    onSuccess: (row: Review) => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({
-        variant: "success",
-        title: row.responded ? "Marked as responded" : "Marked as needing a response",
-      });
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not update review", description: e.message }),
+  const toggleResponded = useApiMutation<Review, Review>({
+    request: (r) => ({
+      method: "PATCH",
+      url: `/api/marketing/reviews/${r.id}`,
+      body: { responded: !r.responded },
+    }),
+    invalidate: [["marketing"]],
+    successTitle: (row) => (row.responded ? "Marked as responded" : "Marked as needing a response"),
+    errorTitle: "Could not update review",
   });
 
+  // Kept as a raw mutation: its success toast carries a conditional `description`
+  // ("The site picks it up within ~5 minutes.") that useApiMutation can't express.
   const togglePublished = useMutation({
     mutationFn: async (r: Review) =>
       (await apiRequest("PATCH", `/api/marketing/reviews/${r.id}`, { published: !r.published })).json(),
@@ -1277,29 +1230,26 @@ function ReviewsTab() {
 // "Recent work" photos published to the cjmmetals.com gallery feed.
 
 function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/marketing/portfolio", {
-          title: title.trim(),
-          category: category.trim() || null,
-          photoUrl,
-          published: true,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
-      toast({ variant: "success", title: "Added to the portfolio" });
-      onClose();
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not add photo", description: e.message }),
+  const create = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/marketing/portfolio",
+      body: {
+        title: title.trim(),
+        category: category.trim() || null,
+        photoUrl,
+        published: true,
+      },
+    }),
+    invalidate: [["marketing", "portfolio"]],
+    successTitle: "Added to the portfolio",
+    errorTitle: "Could not add photo",
+    onSuccess: onClose,
   });
 
   const pickPhoto = async (file: File) => {
@@ -1373,7 +1323,6 @@ function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void
 }
 
 function PortfolioTab() {
-  const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
 
   const { data: items = [], isLoading } = useQuery<PortfolioItem[]>({
@@ -1381,29 +1330,22 @@ function PortfolioTab() {
     queryFn: async () => (await apiRequest("GET", "/api/marketing/portfolio")).json(),
   });
 
-  const togglePublished = useMutation({
-    mutationFn: async (it: PortfolioItem) =>
-      (await apiRequest("PATCH", `/api/marketing/portfolio/${it.id}`, { published: !it.published })).json(),
-    onSuccess: (row: PortfolioItem) => {
-      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
-      toast({
-        variant: "success",
-        title: row.published ? "Shown on cjmmetals.com" : "Hidden from the website",
-      });
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not update", description: e.message }),
+  const togglePublished = useApiMutation<PortfolioItem, PortfolioItem>({
+    request: (it) => ({
+      method: "PATCH",
+      url: `/api/marketing/portfolio/${it.id}`,
+      body: { published: !it.published },
+    }),
+    invalidate: [["marketing", "portfolio"]],
+    successTitle: (row) => (row.published ? "Shown on cjmmetals.com" : "Hidden from the website"),
+    errorTitle: "Could not update",
   });
 
-  const remove = useMutation({
-    mutationFn: async (it: PortfolioItem) =>
-      (await apiRequest("DELETE", `/api/marketing/portfolio/${it.id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
-      toast({ variant: "success", title: "Removed from the portfolio" });
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not remove", description: e.message }),
+  const remove = useApiMutation<unknown, PortfolioItem>({
+    request: (it) => ({ method: "DELETE", url: `/api/marketing/portfolio/${it.id}` }),
+    invalidate: [["marketing", "portfolio"]],
+    successTitle: "Removed from the portfolio",
+    errorTitle: "Could not remove",
   });
 
   return (
@@ -1481,7 +1423,6 @@ const DUE_FILTERS = [
 ] as const;
 
 function TaskDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<MkTaskKind>("follow_up");
   const [due, setDue] = useState("");
@@ -1498,27 +1439,25 @@ function TaskDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     queryFn: async () => (await apiRequest("GET", "/api/marketing/campaigns")).json(),
   });
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/marketing/tasks", {
-          title: title.trim(),
-          kind,
-          // Due dates are day-granular in the UI; anchor to end of business
-          // so a task isn't "overdue" the morning it's due.
-          dueAt: due ? new Date(`${due}T17:00:00`).getTime() : null,
-          assignedTo: assignedTo ? parseInt(assignedTo, 10) : null,
-          campaignId: campaignId ? parseInt(campaignId, 10) : null,
-          notes: notes.trim() || null,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({ variant: "success", title: "Task created" });
-      onClose();
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not create task", description: e.message }),
+  const create = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/marketing/tasks",
+      body: {
+        title: title.trim(),
+        kind,
+        // Due dates are day-granular in the UI; anchor to end of business
+        // so a task isn't "overdue" the morning it's due.
+        dueAt: due ? new Date(`${due}T17:00:00`).getTime() : null,
+        assignedTo: assignedTo ? parseInt(assignedTo, 10) : null,
+        campaignId: campaignId ? parseInt(campaignId, 10) : null,
+        notes: notes.trim() || null,
+      },
+    }),
+    invalidate: [["marketing"]],
+    successTitle: "Task created",
+    errorTitle: "Could not create task",
+    onSuccess: onClose,
   });
 
   return (
@@ -1592,7 +1531,6 @@ function TaskDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 function TasksTab() {
-  const qc = useQueryClient();
   const [due, setDue] = useState<string>("");
   const [status, setStatus] = useState<string>("open");
   const [newOpen, setNewOpen] = useState(false);
@@ -1619,19 +1557,16 @@ function TasksTab() {
   const userName = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
   const campaignName = useMemo(() => new Map(campaigns.map((c) => [c.id, c.name])), [campaigns]);
 
-  const setTaskStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: "open" | "done" | "dismissed" }) =>
-      (await apiRequest("PATCH", `/api/marketing/tasks/${id}`, { status })).json(),
-    onSuccess: (_row, vars) => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({
-        variant: "success",
-        title:
-          vars.status === "done" ? "Task completed" : vars.status === "dismissed" ? "Task dismissed" : "Task reopened",
-      });
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not update task", description: e.message }),
+  const setTaskStatus = useApiMutation<MkTask, { id: number; status: "open" | "done" | "dismissed" }>({
+    request: ({ id, status }) => ({
+      method: "PATCH",
+      url: `/api/marketing/tasks/${id}`,
+      body: { status },
+    }),
+    invalidate: [["marketing"]],
+    successTitle: (_row, vars) =>
+      vars.status === "done" ? "Task completed" : vars.status === "dismissed" ? "Task dismissed" : "Task reopened",
+    errorTitle: "Could not update task",
   });
 
   const now = Date.now();
@@ -1776,7 +1711,6 @@ function TasksTab() {
 // ─── Settings dialog ──────────────────────────────────────────────────────────
 
 function SettingsForm({ settings, onClose }: { settings: MarketingSettings; onClose: () => void }) {
-  const qc = useQueryClient();
   const [staleDays, setStaleDays] = useState(String(settings.staleLeadDays));
   const [followUpDays, setFollowUpDays] = useState(String(settings.quoteFollowUpDays));
   const [cplAlert, setCplAlert] = useState((settings.cplAlertCents / 100).toFixed(2).replace(/\.00$/, ""));
@@ -1784,24 +1718,22 @@ function SettingsForm({ settings, onClose }: { settings: MarketingSettings; onCl
   // Nullable: empty string ⇔ NULL ⇔ the website hides its lead-time banner.
   const [leadTime, setLeadTime] = useState(settings.leadTimeWeeks == null ? "" : String(settings.leadTimeWeeks));
 
-  const save = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("PUT", "/api/marketing/settings", {
-          staleLeadDays: parseInt(staleDays, 10) || settings.staleLeadDays,
-          quoteFollowUpDays: parseInt(followUpDays, 10) || settings.quoteFollowUpDays,
-          cplAlertCents: parseMoney(cplAlert),
-          autoReviewRequest: autoReview,
-          leadTimeWeeks: leadTime.trim() === "" ? null : parseInt(leadTime, 10) || 0,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing"] });
-      toast({ variant: "success", title: "Settings saved" });
-      onClose();
-    },
-    onError: (e: Error) =>
-      toast({ variant: "destructive", title: "Could not save settings", description: e.message }),
+  const save = useApiMutation({
+    request: () => ({
+      method: "PUT",
+      url: "/api/marketing/settings",
+      body: {
+        staleLeadDays: parseInt(staleDays, 10) || settings.staleLeadDays,
+        quoteFollowUpDays: parseInt(followUpDays, 10) || settings.quoteFollowUpDays,
+        cplAlertCents: parseMoney(cplAlert),
+        autoReviewRequest: autoReview,
+        leadTimeWeeks: leadTime.trim() === "" ? null : parseInt(leadTime, 10) || 0,
+      },
+    }),
+    invalidate: [["marketing"]],
+    successTitle: "Settings saved",
+    errorTitle: "Could not save settings",
+    onSuccess: onClose,
   });
 
   return (

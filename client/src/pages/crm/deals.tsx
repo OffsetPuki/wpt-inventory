@@ -1,11 +1,15 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { formatDate, formatMoney, parseMoney } from "@/lib/format";
 import {
   DEAL_STAGES,
@@ -20,17 +24,12 @@ import {
 import type { PublicUser } from "@shared/schema";
 import { Loader2, Plus, Handshake, LayoutGrid, List } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
-
-const STAGE_STYLE: Record<DealStage, string> = {
-  qualified: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  proposal: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  negotiation: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  won: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  lost: "bg-red-500/10 text-red-700 dark:text-red-400",
+const STAGE_TONE: Record<DealStage, ChipTone> = {
+  qualified: "zinc",
+  proposal: "blue",
+  negotiation: "amber",
+  won: "emerald",
+  lost: "red",
 };
 
 // ─── Create / edit dialog ─────────────────────────────────────────────────────
@@ -48,7 +47,6 @@ function DealModal({
   isElevated: boolean;
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState(deal?.title ?? "");
   const [clientId, setClientId] = useState(deal?.clientId != null ? String(deal.clientId) : "");
   const [value, setValue] = useState(deal?.valueCents ? String(deal.valueCents / 100) : "");
@@ -58,8 +56,8 @@ function DealModal({
   const [ownerId, setOwnerId] = useState(deal?.ownerId != null ? String(deal.ownerId) : "");
   const [notes, setNotes] = useState(deal?.notes ?? "");
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         title: title.trim(),
         clientId: clientId ? parseInt(clientId, 10) : null,
@@ -70,19 +68,14 @@ function DealModal({
         ...(isElevated ? { ownerId: ownerId ? parseInt(ownerId, 10) : null } : {}),
         notes: notes.trim() || null,
       };
-      const res = deal
-        ? await apiRequest("PATCH", `/api/crm/deals/${deal.id}`, body)
-        : await apiRequest("POST", "/api/crm/deals", body);
-      return res.json();
+      return deal
+        ? { method: "PATCH", url: `/api/crm/deals/${deal.id}`, body }
+        : { method: "POST", url: "/api/crm/deals", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-deals"] });
-      qc.invalidateQueries({ queryKey: ["crm-stats"] });
-      toast({ variant: "success", title: deal ? "Deal updated" : "Deal created" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save deal", description: e?.message }),
+    invalidate: [["crm-deals"], ["crm-stats"]],
+    successTitle: deal ? "Deal updated" : "Deal created",
+    errorTitle: "Could not save deal",
+    onSuccess: () => onClose(),
   });
 
   return (
@@ -183,25 +176,21 @@ function CloseDealModal({
   to: "won" | "lost";
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const [reason, setReason] = useState<WinLossReason | "">(deal.winLossReason ?? "");
 
-  const close = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("PATCH", `/api/crm/deals/${deal.id}`, {
-          stage: to,
-          winLossReason: reason || undefined,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-deals"] });
-      qc.invalidateQueries({ queryKey: ["crm-stats"] });
-      toast({ variant: "success", title: to === "won" ? "Deal won" : "Deal marked lost" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update deal", description: e?.message }),
+  const close = useApiMutation({
+    request: () => ({
+      method: "PATCH",
+      url: `/api/crm/deals/${deal.id}`,
+      body: {
+        stage: to,
+        winLossReason: reason || undefined,
+      },
+    }),
+    invalidate: [["crm-deals"], ["crm-stats"]],
+    successTitle: to === "won" ? "Deal won" : "Deal marked lost",
+    errorTitle: "Could not update deal",
+    onSuccess: () => onClose(),
   });
 
   return (
@@ -243,7 +232,6 @@ function CloseDealModal({
 
 export default function DealsPage() {
   const { isElevated } = useAuth();
-  const qc = useQueryClient();
 
   const [view, setView] = useState<"board" | "table">("board");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -271,15 +259,10 @@ export default function DealsPage() {
   const ownerName = (id: number | null) =>
     id == null ? "—" : users.find((u) => u.id === id)?.name ?? `#${id}`;
 
-  const patchStage = useMutation({
-    mutationFn: async ({ id, stage }: { id: number; stage: DealStage }) =>
-      (await apiRequest("PATCH", `/api/crm/deals/${id}`, { stage })).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-deals"] });
-      qc.invalidateQueries({ queryKey: ["crm-stats"] });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not move deal", description: e?.message }),
+  const patchStage = useApiMutation<any, { id: number; stage: DealStage }>({
+    request: ({ id, stage }) => ({ method: "PATCH", url: `/api/crm/deals/${id}`, body: { stage } }),
+    invalidate: [["crm-deals"], ["crm-stats"]],
+    errorTitle: "Could not move deal",
   });
 
   const handleDrop = (dealId: number, target: DealStage) => {
@@ -324,13 +307,9 @@ export default function DealsPage() {
       </Header>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : deals.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Handshake className="h-12 w-12" />
-          <p className="text-lg">No deals yet</p>
+        <EmptyState icon={Handshake} message="No deals yet">
           <button
             onClick={() => openEditor(null)}
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
@@ -338,7 +317,7 @@ export default function DealsPage() {
             <Plus className="h-5 w-5" />
             Add your first deal
           </button>
-        </div>
+        </EmptyState>
       ) : view === "board" ? (
         <div className="overflow-x-auto pb-4">
           <div className="flex items-start gap-3">
@@ -366,7 +345,7 @@ export default function DealsPage() {
                 >
                   <div className="flex items-center justify-between px-2 py-2">
                     <span className="text-sm font-medium text-foreground">{DEAL_STAGE_LABELS[s]}</span>
-                    <span className={cn(chipCls, "bg-muted text-muted-foreground")}>{column.length}</span>
+                    <Chip className="bg-muted text-muted-foreground">{column.length}</Chip>
                   </div>
                   <p className="px-2 pb-2 text-xs tabular-nums text-muted-foreground">
                     {formatMoney(columnValue)}
@@ -424,9 +403,9 @@ export default function DealsPage() {
                   <td className="px-4 py-3 font-medium text-foreground">{deal.title}</td>
                   <td className="px-4 py-3 text-muted-foreground">{clientName(deal.clientId)}</td>
                   <td className="px-4 py-3">
-                    <span className={cn(chipCls, STAGE_STYLE[deal.stage])}>
+                    <Chip tone={STAGE_TONE[deal.stage]}>
                       {DEAL_STAGE_LABELS[deal.stage]}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-foreground">
                     {formatMoney(deal.valueCents)}

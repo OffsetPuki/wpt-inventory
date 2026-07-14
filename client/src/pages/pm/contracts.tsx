@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { inputCls } from "@/lib/ui-styles";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
-import { formatMoney, parseMoney, formatDate } from "@/lib/format";
+import { formatMoney, parseMoney, formatDate, ymdToDate, parseJsonObject } from "@/lib/format";
 import type { Project } from "@shared/schema";
 import type { Client } from "@shared/crm-schema";
 import {
@@ -22,30 +26,23 @@ import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download, Eye } 
 
 type ContractRow = Contract & { projectName: string | null };
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-const KIND_CHIP: Record<ContractKind, string> = {
-  contract: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  sow: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  nda: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  msa: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  other: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
+// Per-kind / per-status pill hues — each is an exact match to a shared Chip tone.
+const KIND_TONE: Record<ContractKind, ChipTone> = {
+  contract: "blue",
+  sow: "emerald",
+  nda: "amber",
+  msa: "zinc",
+  other: "zinc",
 };
 
-const STATUS_CHIP: Record<ContractStatus, string> = {
-  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  signed: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  expired: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  terminated: "bg-red-500/10 text-red-700 dark:text-red-400",
+const STATUS_TONE: Record<ContractStatus, ChipTone> = {
+  draft: "zinc",
+  sent: "blue",
+  signed: "emerald",
+  active: "emerald",
+  expired: "amber",
+  terminated: "red",
 };
-
-function ymdToDate(ymd: string): Date {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
 
 function dateSpan(c: ContractRow): string {
   const s = c.startDate ? formatDate(ymdToDate(c.startDate)) : "";
@@ -125,16 +122,6 @@ const KIND_FIELDS: Record<ContractKind, KindField[]> = {
   other: [],
 };
 
-function parseFields(json: string | null | undefined): Record<string, string> {
-  if (!json) return {};
-  try {
-    const p = JSON.parse(json);
-    return p && typeof p === "object" && !Array.isArray(p) ? p : {};
-  } catch {
-    return {};
-  }
-}
-
 // ─── PDF document ────────────────────────────────────────────────────────────
 // A real .pdf file (pdfmake), generated client-side because auth rides the
 // x-auth header — a plain new-tab server URL couldn't authenticate. pdfmake
@@ -164,7 +151,7 @@ async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: a
   const kindLabel = CONTRACT_KIND_LABELS[c.kind];
   const today = formatDate(new Date());
   const effective = c.startDate ? formatDate(ymdToDate(c.startDate)) : today;
-  const fields = parseFields(c.fields);
+  const fields = parseJsonObject<Record<string, string>>(c.fields);
 
   // Numbered sections: the kind's structured fields first, free-form last.
   const sections: { heading: string; text: string }[] = [];
@@ -323,7 +310,6 @@ function ContractDialog({
   clients: Client[];
   onCreated?: (row: Contract) => void;
 }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<ContractKind>("contract");
   const [status, setStatus] = useState<ContractStatus>("draft");
@@ -355,11 +341,11 @@ function ContractDialog({
     setEndDate(contract?.endDate ?? "");
     setBody(contract?.body ?? "");
     setNotes(contract?.notes ?? "");
-    setFieldVals(parseFields(contract?.fields));
+    setFieldVals(parseJsonObject<Record<string, string>>(contract?.fields));
   }, [open, contract]);
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation<Contract>({
+    request: () => {
       // Persist only the current kind's keys — selects fall back to their
       // first option so the PDF never renders an empty select section.
       const picked: Record<string, string> = {};
@@ -382,30 +368,25 @@ function ContractDialog({
         notes: notes.trim() || null,
       };
       return contract
-        ? (await apiRequest("PATCH", `/api/pm/contracts/${contract.id}`, payload)).json()
-        : (await apiRequest("POST", "/api/pm/contracts", payload)).json();
+        ? { method: "PATCH", url: `/api/pm/contracts/${contract.id}`, body: payload }
+        : { method: "POST", url: "/api/pm/contracts", body: payload };
     },
-    onSuccess: (row: Contract) => {
-      qc.invalidateQueries({ queryKey: ["pm-contracts"] });
-      toast({ variant: "success", title: contract ? "Contract updated" : "Contract created" });
+    invalidate: [["pm-contracts"]],
+    successTitle: contract ? "Contract updated" : "Contract created",
+    errorTitle: "Could not save",
+    onSuccess: (row) => {
       onClose();
       // New contract → open it right away so Download / Print is one click.
       if (!contract) onCreated?.(row);
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
   });
 
-  const del = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/pm/contracts/${contract!.id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-contracts"] });
-      toast({ variant: "success", title: "Contract deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/pm/contracts/${contract!.id}` }),
+    invalidate: [["pm-contracts"]],
+    successTitle: "Contract deleted",
+    errorTitle: "Could not delete",
+    onSuccess: onClose,
   });
 
   return (
@@ -667,7 +648,7 @@ function ContractViewModal({
   };
   const fieldSections = contract
     ? KIND_FIELDS[contract.kind]
-        .map((f) => ({ f, v: (parseFields(contract.fields)[f.key] ?? "").trim() }))
+        .map((f) => ({ f, v: (parseJsonObject<Record<string, string>>(contract.fields)[f.key] ?? "").trim() }))
         .filter(({ v }) => v)
     : [];
   return (
@@ -681,22 +662,8 @@ function ContractViewModal({
       {contract && (
         <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={cn(
-                "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                KIND_CHIP[contract.kind]
-              )}
-            >
-              {CONTRACT_KIND_LABELS[contract.kind]}
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                STATUS_CHIP[contract.status]
-              )}
-            >
-              {CONTRACT_STATUS_LABELS[contract.status]}
-            </span>
+            <Chip tone={KIND_TONE[contract.kind]}>{CONTRACT_KIND_LABELS[contract.kind]}</Chip>
+            <Chip tone={STATUS_TONE[contract.status]}>{CONTRACT_STATUS_LABELS[contract.status]}</Chip>
           </div>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
             <div>
@@ -927,13 +894,9 @@ export default function PmContractsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : contracts.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <FileSignature className="h-12 w-12" />
-          <p className="text-lg">No contracts yet</p>
+        <EmptyState icon={FileSignature} message="No contracts yet">
           {isElevated && (
             <button
               onClick={() => {
@@ -946,7 +909,7 @@ export default function PmContractsPage() {
               Create the first contract
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -970,14 +933,7 @@ export default function PmContractsPage() {
                 >
                   <td className="px-4 py-3 font-medium text-foreground">{c.title}</td>
                   <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        KIND_CHIP[c.kind]
-                      )}
-                    >
-                      {CONTRACT_KIND_LABELS[c.kind]}
-                    </span>
+                    <Chip tone={KIND_TONE[c.kind]}>{CONTRACT_KIND_LABELS[c.kind]}</Chip>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{c.clientName || "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.projectName || "—"}</td>
@@ -985,14 +941,7 @@ export default function PmContractsPage() {
                     {formatMoney(c.valueCents)}
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        STATUS_CHIP[c.status]
-                      )}
-                    >
-                      {CONTRACT_STATUS_LABELS[c.status]}
-                    </span>
+                    <Chip tone={STATUS_TONE[c.status]}>{CONTRACT_STATUS_LABELS[c.status]}</Chip>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
                     {dateSpan(c)}

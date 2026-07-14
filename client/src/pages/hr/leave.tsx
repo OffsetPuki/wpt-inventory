@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
-import { cn } from "@/lib/utils";
+import { LoadingBlock } from "@/components/ui/Feedback";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { formatDate } from "@/lib/format";
 import {
   LEAVE_TYPES,
@@ -18,16 +21,13 @@ import {
 } from "@shared/hr-schema";
 import { Loader2, Plus, CalendarDays, Check, X, Trash2, Info } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 const textareaCls =
   "min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
 
-const STATUS_CHIP: Record<LeaveStatus, string> = {
-  pending: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  approved: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  denied: "bg-red-500/10 text-red-700 dark:text-red-400",
+const STATUS_CHIP: Record<LeaveStatus, ChipTone> = {
+  pending: "amber",
+  approved: "emerald",
+  denied: "red",
 };
 
 type LeaveRow = LeaveRequest & { employeeName?: string };
@@ -39,7 +39,6 @@ function daysLabel(days: number): string {
 // ─── Request dialog ───────────────────────────────────────────────────────────
 
 function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => void }) {
-  const qc = useQueryClient();
   const { isElevated } = useAuth();
   const [employeeId, setEmployeeId] = useState(me ? String(me.id) : "");
   const [type, setType] = useState<LeaveType>("vacation");
@@ -54,25 +53,23 @@ function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => vo
     enabled: isElevated,
   });
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/hr/leave", {
-          employeeId: Number(employeeId),
-          type,
-          startDate,
-          endDate,
-          days: parseFloat(days) || 1,
-          reason: reason.trim() || null,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-leave"] });
-      toast({ variant: "success", title: "Leave requested" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not file request", description: e?.message }),
+  const create = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/hr/leave",
+      body: {
+        employeeId: Number(employeeId),
+        type,
+        startDate,
+        endDate,
+        days: parseFloat(days) || 1,
+        reason: reason.trim() || null,
+      },
+    }),
+    invalidate: [["hr-leave"]],
+    successTitle: "Leave requested",
+    errorTitle: "Could not file request",
+    onSuccess: onClose,
   });
 
   return (
@@ -186,7 +183,6 @@ function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => vo
 
 export default function HrLeavePage() {
   const { isElevated } = useAuth();
-  const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const { data: me = null, isLoading: meLoading } = useQuery<Employee | null>({
@@ -199,28 +195,22 @@ export default function HrLeavePage() {
     queryFn: async () => (await apiRequest("GET", "/api/hr/leave")).json(),
   });
 
-  const decide = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: "approved" | "denied" }) =>
-      (await apiRequest("PATCH", `/api/hr/leave/${id}/decide`, { status })).json(),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["hr-leave"] });
-      toast({
-        variant: "success",
-        title: vars.status === "approved" ? "Leave approved" : "Leave denied",
-      });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not decide request", description: e?.message }),
+  const decide = useApiMutation<any, { id: number; status: "approved" | "denied" }>({
+    request: ({ id, status }) => ({
+      method: "PATCH",
+      url: `/api/hr/leave/${id}/decide`,
+      body: { status },
+    }),
+    invalidate: [["hr-leave"]],
+    successTitle: (_d, vars) => (vars.status === "approved" ? "Leave approved" : "Leave denied"),
+    errorTitle: "Could not decide request",
   });
 
-  const withdraw = useMutation({
-    mutationFn: async (id: number) => (await apiRequest("DELETE", `/api/hr/leave/${id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-leave"] });
-      toast({ variant: "success", title: "Request withdrawn" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not withdraw", description: e?.message }),
+  const withdraw = useApiMutation<any, number>({
+    request: (id) => ({ method: "DELETE", url: `/api/hr/leave/${id}` }),
+    invalidate: [["hr-leave"]],
+    successTitle: "Request withdrawn",
+    errorTitle: "Could not withdraw",
   });
 
   const myRequests = isElevated ? rows.filter((r) => me && r.employeeId === me.id) : rows;
@@ -247,9 +237,7 @@ export default function HrLeavePage() {
       </Header>
 
       {isLoading || meLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : (
         <>
           {!me && !isElevated && (
@@ -285,9 +273,9 @@ export default function HrLeavePage() {
                         {r.reason}
                       </span>
                     )}
-                    <span className={cn(chipCls, "ml-auto", STATUS_CHIP[r.status])}>
+                    <Chip tone={STATUS_CHIP[r.status]} className="ml-auto">
                       {LEAVE_STATUS_LABELS[r.status]}
-                    </span>
+                    </Chip>
                     {r.status === "pending" && me && r.employeeId === me.id && (
                       <button
                         onClick={() => {
@@ -312,12 +300,12 @@ export default function HrLeavePage() {
                 <h2 className="text-lg font-semibold text-foreground">Team queue</h2>
                 <div className="ml-auto flex flex-wrap gap-2">
                   {typeSummary.map((s) => (
-                    <span
+                    <Chip
                       key={s.type}
-                      className={cn(chipCls, "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400")}
+                      className="bg-zinc-500/10 text-zinc-700 dark:text-zinc-400"
                     >
                       {LEAVE_TYPE_LABELS[s.type]} · {s.days}d
-                    </span>
+                    </Chip>
                   ))}
                 </div>
               </div>
@@ -412,9 +400,9 @@ export default function HrLeavePage() {
                             {r.days}
                           </td>
                           <td className="px-4 py-3">
-                            <span className={cn(chipCls, STATUS_CHIP[r.status])}>
+                            <Chip tone={STATUS_CHIP[r.status]}>
                               {LEAVE_STATUS_LABELS[r.status]}
-                            </span>
+                            </Chip>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {r.decidedAt ? formatDate(r.decidedAt) : "—"}

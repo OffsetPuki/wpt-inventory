@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { inputCls } from "@/lib/ui-styles";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
@@ -22,9 +25,6 @@ import {
 
 type TimeRow = TimeEntry & { projectName: string | null; taskTitle: string | null };
 type TaskRow = PmTask & { projectName: string | null; assigneeName: string | null };
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 
 function ymdOfMs(ms: number): string {
   const d = new Date(ms);
@@ -74,7 +74,6 @@ function EntryDialog({
   entry: TimeRow | null;
   projects: Project[];
 }) {
-  const qc = useQueryClient();
   const [date, setDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -119,19 +118,15 @@ function EntryDialog({
     enabled: open && !!projectSel,
   });
 
-  const save = useMutation({
-    mutationFn: async (payload: Record<string, unknown>) =>
+  const save = useApiMutation<any, Record<string, unknown>>({
+    request: (payload) =>
       entry
-        ? (await apiRequest("PATCH", `/api/pm/time/${entry.id}`, payload)).json()
-        : (await apiRequest("POST", "/api/pm/time", payload)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-time"] });
-      qc.invalidateQueries({ queryKey: ["pm-timesheets"] });
-      toast({ variant: "success", title: entry ? "Entry updated" : "Entry added" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save entry", description: e?.message }),
+        ? { method: "PATCH", url: `/api/pm/time/${entry.id}`, body: payload }
+        : { method: "POST", url: "/api/pm/time", body: payload },
+    invalidate: [["pm-time"], ["pm-timesheets"]],
+    successTitle: entry ? "Entry updated" : "Entry added",
+    errorTitle: "Could not save entry",
+    onSuccess: onClose,
   });
 
   const submit = (e: React.FormEvent) => {
@@ -302,7 +297,6 @@ function EntryDialog({
 
 export default function PmTimePage() {
   const { user, isElevated } = useAuth();
-  const qc = useQueryClient();
 
   // Timer / quick-start state
   const [desc, setDesc] = useState("");
@@ -360,49 +354,39 @@ export default function PmTimePage() {
     return () => clearInterval(t);
   }, [running?.id]);
 
-  const start = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/pm/time/start", {
-          description: desc.trim() || undefined,
-          projectId: projectSel ? Number(projectSel) : undefined,
-          taskId: taskSel ? Number(taskSel) : undefined,
-        })
-      ).json(),
+  const start = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/pm/time/start",
+      body: {
+        description: desc.trim() || undefined,
+        projectId: projectSel ? Number(projectSel) : undefined,
+        taskId: taskSel ? Number(taskSel) : undefined,
+      },
+    }),
+    invalidate: [["pm-time-running"], ["pm-time"]],
+    successTitle: "Timer started",
+    errorTitle: "Could not start timer",
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-time-running"] });
-      qc.invalidateQueries({ queryKey: ["pm-time"] });
       setDesc("");
       setProjectSel("");
       setTaskSel("");
       setNow(Date.now());
-      toast({ variant: "success", title: "Timer started" });
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not start timer", description: e?.message }),
   });
 
-  const stop = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/pm/time/stop")).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-time-running"] });
-      qc.invalidateQueries({ queryKey: ["pm-time"] });
-      qc.invalidateQueries({ queryKey: ["pm-timesheets"] });
-      toast({ variant: "success", title: "Timer stopped" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not stop timer", description: e?.message }),
+  const stop = useApiMutation({
+    request: () => ({ method: "POST", url: "/api/pm/time/stop" }),
+    invalidate: [["pm-time-running"], ["pm-time"], ["pm-timesheets"]],
+    successTitle: "Timer stopped",
+    errorTitle: "Could not stop timer",
   });
 
-  const del = useMutation({
-    mutationFn: async (id: number) => (await apiRequest("DELETE", `/api/pm/time/${id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-time"] });
-      qc.invalidateQueries({ queryKey: ["pm-timesheets"] });
-      toast({ variant: "success", title: "Entry deleted" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation<any, number>({
+    request: (id) => ({ method: "DELETE", url: `/api/pm/time/${id}` }),
+    invalidate: [["pm-time"], ["pm-timesheets"]],
+    successTitle: "Entry deleted",
+    errorTitle: "Could not delete",
   });
 
   const runningProject = running?.projectId
@@ -591,15 +575,11 @@ export default function PmTimePage() {
 
       {/* Entries grouped by day */}
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : entries.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Clock className="h-12 w-12" />
-          <p className="text-lg">No time entries</p>
+        <EmptyState icon={Clock} message="No time entries">
           <p className="text-sm">Start the timer above or add a manual entry.</p>
-        </div>
+        </EmptyState>
       ) : (
         <div className="flex flex-col gap-6">
           {groups.map(([day, dayEntries]) => (

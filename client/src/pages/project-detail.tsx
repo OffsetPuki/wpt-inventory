@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { PROJECT_STATUSES, type Project, type ProjectStatus } from "@shared/schema";
 import type { Client } from "@shared/crm-schema";
 import { formatDateTime, formatMoney, formatHours, formatDate } from "@/lib/format";
@@ -51,28 +52,25 @@ interface Usage {
 // Projects carry no photos of their own, so the dialog asks for one — the
 // server requires photoUrl and defaults the title to the project name.
 function PublishPortfolioDialog({ project, onClose }: { project: Project; onClose: () => void }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState(project.name);
   const [category, setCategory] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const publish = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", `/api/projects/${project.id}/publish-portfolio`, {
-          title: title.trim() || undefined,
-          category: category.trim() || null,
-          photoUrl,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["marketing", "portfolio"] });
-      toast({ variant: "success", title: "Published — live on cjmmetals.com within ~5 minutes." });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not publish", description: e?.message }),
+  const publish = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: `/api/projects/${project.id}/publish-portfolio`,
+      body: {
+        title: title.trim() || undefined,
+        category: category.trim() || null,
+        photoUrl,
+      },
+    }),
+    invalidate: [["marketing", "portfolio"]],
+    successTitle: "Published — live on cjmmetals.com within ~5 minutes.",
+    errorTitle: "Could not publish",
+    onSuccess: onClose,
   });
 
   const pickPhoto = async (file: File) => {
@@ -361,7 +359,6 @@ export default function ProjectDetailPage({ id }: { id: string }) {
   const projectId = Number(id);
   // Manager + technician both manage project status / checklist / deletion.
   const { isElevated: isManager } = useAuth();
-  const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -376,26 +373,22 @@ export default function ProjectDetailPage({ id }: { id: string }) {
     queryFn: async () => (await apiRequest("GET", `/api/projects/${projectId}/usage`)).json(),
   });
 
-  const setStatus = useMutation({
-    mutationFn: async (status: ProjectStatus) =>
-      apiRequest("PATCH", `/api/projects/${projectId}`, { status }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["project", projectId] });
-      qc.invalidateQueries({ queryKey: ["projects"] });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Update failed", description: e?.message }),
+  const setStatus = useApiMutation<any, ProjectStatus>({
+    request: (status) => ({
+      method: "PATCH",
+      url: `/api/projects/${projectId}`,
+      body: { status },
+    }),
+    invalidate: [["project", projectId], ["projects"]],
+    errorTitle: "Update failed",
   });
 
-  const del = useMutation({
-    mutationFn: async () => apiRequest("DELETE", `/api/projects/${projectId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["projects"] });
-      toast({ variant: "success", title: "Project deleted" });
-      setLocation("/projects");
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/projects/${projectId}` }),
+    invalidate: [["projects"]],
+    successTitle: "Project deleted",
+    errorTitle: "Could not delete",
+    onSuccess: () => setLocation("/projects"),
   });
 
   if (isLoading || !project) {

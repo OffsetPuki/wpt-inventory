@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
 import {
@@ -18,11 +22,8 @@ import {
 } from "@shared/hr-schema";
 import { Loader2, Plus, Briefcase, Pencil, Trash2, Star, UserPlus } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 const textareaCls =
   "min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
 
 const OPENING_CHIP: Record<OpeningStatus, string> = {
   open: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
@@ -93,15 +94,14 @@ function OpeningDialog({
   onClose: () => void;
   onDeleted: (id: number) => void;
 }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState(opening?.title ?? "");
   const [department, setDepartment] = useState(opening?.department ?? "");
   const [status, setStatus] = useState<OpeningStatus>(opening?.status ?? "open");
   const [postedAt, setPostedAt] = useState(opening?.postedAt ?? "");
   const [description, setDescription] = useState(opening?.description ?? "");
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         title: title.trim(),
         department: department.trim() || null,
@@ -109,31 +109,25 @@ function OpeningDialog({
         postedAt: postedAt || null,
         description: description.trim() || null,
       };
-      const res = opening
-        ? await apiRequest("PATCH", `/api/hr/openings/${opening.id}`, body)
-        : await apiRequest("POST", "/api/hr/openings", body);
-      return res.json();
+      return opening
+        ? { method: "PATCH", url: `/api/hr/openings/${opening.id}`, body }
+        : { method: "POST", url: "/api/hr/openings", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-openings"] });
-      toast({ variant: "success", title: opening ? "Opening updated" : "Opening created" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save opening", description: e?.message }),
+    invalidate: [["hr-openings"]],
+    successTitle: opening ? "Opening updated" : "Opening created",
+    errorTitle: "Could not save opening",
+    onSuccess: onClose,
   });
 
-  const del = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/hr/openings/${opening!.id}`)).json(),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/hr/openings/${opening!.id}` }),
+    invalidate: [["hr-openings"]],
+    successTitle: "Opening removed",
+    errorTitle: "Could not remove opening",
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-openings"] });
-      toast({ variant: "success", title: "Opening removed" });
       onDeleted(opening!.id);
       onClose();
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not remove opening", description: e?.message }),
   });
 
   return (
@@ -231,7 +225,6 @@ function CandidateDialog({
   openingId: number;
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const [name, setName] = useState(candidate?.name ?? "");
   const [email, setEmail] = useState(candidate?.email ?? "");
   const [phone, setPhone] = useState(candidate?.phone ?? "");
@@ -239,13 +232,8 @@ function CandidateDialog({
   const [rating, setRating] = useState(candidate?.rating ?? 0);
   const [notes, setNotes] = useState(candidate?.notes ?? "");
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["hr-candidates"] });
-    qc.invalidateQueries({ queryKey: ["hr-openings"] });
-  };
-
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         openingId,
         name: name.trim(),
@@ -255,30 +243,22 @@ function CandidateDialog({
         rating: rating || null,
         notes: notes.trim() || null,
       };
-      const res = candidate
-        ? await apiRequest("PATCH", `/api/hr/candidates/${candidate.id}`, body)
-        : await apiRequest("POST", "/api/hr/candidates", body);
-      return res.json();
+      return candidate
+        ? { method: "PATCH", url: `/api/hr/candidates/${candidate.id}`, body }
+        : { method: "POST", url: "/api/hr/candidates", body };
     },
-    onSuccess: () => {
-      invalidate();
-      toast({ variant: "success", title: candidate ? "Candidate updated" : "Candidate added" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save candidate", description: e?.message }),
+    invalidate: [["hr-candidates"], ["hr-openings"]],
+    successTitle: candidate ? "Candidate updated" : "Candidate added",
+    errorTitle: "Could not save candidate",
+    onSuccess: onClose,
   });
 
-  const del = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/hr/candidates/${candidate!.id}`)).json(),
-    onSuccess: () => {
-      invalidate();
-      toast({ variant: "success", title: "Candidate deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/hr/candidates/${candidate!.id}` }),
+    invalidate: [["hr-candidates"], ["hr-openings"]],
+    successTitle: "Candidate deleted",
+    errorTitle: "Could not delete",
+    onSuccess: onClose,
   });
 
   return (
@@ -419,13 +399,9 @@ export default function HrRecruitmentPage() {
       </Header>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : openings.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Briefcase className="h-12 w-12" />
-          <p className="text-lg">No job openings yet</p>
+        <EmptyState icon={Briefcase} message="No job openings yet">
           <button
             onClick={() => setOpeningDialog({ open: true, opening: null })}
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
@@ -433,7 +409,7 @@ export default function HrRecruitmentPage() {
             <Plus className="h-5 w-5" />
             Post your first opening
           </button>
-        </div>
+        </EmptyState>
       ) : (
         <>
           <div className="mb-8 overflow-x-auto rounded-xl border border-border bg-card">
@@ -461,9 +437,9 @@ export default function HrRecruitmentPage() {
                     <td className="px-4 py-3 font-medium text-foreground">{o.title}</td>
                     <td className="px-4 py-3 text-foreground">{o.department ?? "—"}</td>
                     <td className="px-4 py-3">
-                      <span className={cn(chipCls, OPENING_CHIP[o.status])}>
+                      <Chip className={OPENING_CHIP[o.status]}>
                         {OPENING_STATUS_LABELS[o.status]}
-                      </span>
+                      </Chip>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {o.postedAt ? formatDate(o.postedAt) : "—"}
@@ -505,9 +481,7 @@ export default function HrRecruitmentPage() {
               </div>
 
               {candidatesLoading ? (
-                <div className="flex justify-center py-16 text-muted-foreground">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
+                <LoadingBlock />
               ) : (
                 <div className="overflow-x-auto pb-4">
                   <div className="flex gap-3">
@@ -529,9 +503,9 @@ export default function HrRecruitmentPage() {
                             <span className="text-sm font-semibold text-foreground">
                               {CANDIDATE_STAGE_LABELS[stage]}
                             </span>
-                            <span className={cn(chipCls, "bg-muted text-muted-foreground")}>
+                            <Chip className="bg-muted text-muted-foreground">
                               {inStage.length}
-                            </span>
+                            </Chip>
                           </div>
                           {inStage.length === 0 ? (
                             <p className="px-1 py-3 text-center text-xs text-muted-foreground">

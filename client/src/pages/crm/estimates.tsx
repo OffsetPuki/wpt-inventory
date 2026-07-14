@@ -1,10 +1,14 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { formatDate, formatMoney, parseMoney } from "@/lib/format";
 import { parseLineItems } from "@shared/biz-common";
 import {
@@ -17,17 +21,12 @@ import {
 } from "@shared/crm-schema";
 import { Loader2, Plus, FileText, Trash2, Send, Check, X, Pencil } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
-
-const STATUS_STYLE: Record<EstimateStatus, string> = {
-  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  accepted: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  declined: "bg-red-500/10 text-red-700 dark:text-red-400",
-  expired: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+const STATUS_TONE: Record<EstimateStatus, ChipTone> = {
+  draft: "zinc",
+  sent: "blue",
+  accepted: "emerald",
+  declined: "red",
+  expired: "amber",
 };
 
 const TABS: { value: string; label: string }[] = [
@@ -63,7 +62,6 @@ function EstimateBuilderModal({
   products: Product[];
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState(estimate?.title ?? "");
   const [clientId, setClientId] = useState(estimate?.clientId != null ? String(estimate.clientId) : "");
   const [leadId, setLeadId] = useState(estimate?.leadId != null ? String(estimate.leadId) : "");
@@ -124,8 +122,8 @@ function EstimateBuilderModal({
         ...(r.productId != null ? { productId: r.productId } : {}),
       }));
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         title: title.trim(),
         clientId: clientId ? parseInt(clientId, 10) : null,
@@ -135,20 +133,14 @@ function EstimateBuilderModal({
         taxRateBp,
         notes: notes.trim() || null,
       };
-      const res = estimate
-        ? await apiRequest("PATCH", `/api/crm/estimates/${estimate.id}`, body)
-        : await apiRequest("POST", "/api/crm/estimates", body);
-      return res.json();
+      return estimate
+        ? { method: "PATCH", url: `/api/crm/estimates/${estimate.id}`, body }
+        : { method: "POST", url: "/api/crm/estimates", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-estimates"] });
-      qc.invalidateQueries({ queryKey: ["crm-stats"] });
-      qc.invalidateQueries({ queryKey: ["crm-reports"] });
-      toast({ variant: "success", title: estimate ? "Estimate updated" : "Draft saved" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save estimate", description: e?.message }),
+    invalidate: [["crm-estimates"], ["crm-stats"], ["crm-reports"]],
+    successTitle: estimate ? "Estimate updated" : "Draft saved",
+    errorTitle: "Could not save estimate",
+    onSuccess: () => onClose(),
   });
 
   const smallInput =
@@ -299,7 +291,6 @@ function EstimateBuilderModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function EstimatesPage() {
-  const qc = useQueryClient();
   const [statusTab, setStatusTab] = useState("");
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<Estimate | null>(null);
@@ -327,18 +318,11 @@ export default function EstimatesPage() {
     queryFn: async () => (await apiRequest("GET", "/api/crm/products?active=1")).json(),
   });
 
-  const setStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: EstimateStatus }) =>
-      (await apiRequest("PATCH", `/api/crm/estimates/${id}`, { status })).json(),
-    onSuccess: (row: Estimate) => {
-      qc.invalidateQueries({ queryKey: ["crm-estimates"] });
-      qc.invalidateQueries({ queryKey: ["crm-leads"] });
-      qc.invalidateQueries({ queryKey: ["crm-stats"] });
-      qc.invalidateQueries({ queryKey: ["crm-reports"] });
-      toast({ variant: "success", title: `Estimate ${ESTIMATE_STATUS_LABELS[row.status].toLowerCase()}` });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update estimate", description: e?.message }),
+  const setStatus = useApiMutation<Estimate, { id: number; status: EstimateStatus }>({
+    request: ({ id, status }) => ({ method: "PATCH", url: `/api/crm/estimates/${id}`, body: { status } }),
+    invalidate: [["crm-estimates"], ["crm-leads"], ["crm-stats"], ["crm-reports"]],
+    successTitle: (row) => `Estimate ${ESTIMATE_STATUS_LABELS[row.status].toLowerCase()}`,
+    errorTitle: "Could not update estimate",
   });
 
   const actionBtn =
@@ -377,13 +361,9 @@ export default function EstimatesPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : estimates.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <FileText className="h-12 w-12" />
-          <p className="text-lg">{statusTab ? "No estimates with this status" : "No estimates yet"}</p>
+        <EmptyState icon={FileText} message={statusTab ? "No estimates with this status" : "No estimates yet"}>
           {!statusTab && (
             <button
               onClick={() => {
@@ -396,7 +376,7 @@ export default function EstimatesPage() {
               Build your first estimate
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -418,9 +398,9 @@ export default function EstimatesPage() {
                   <td className="px-4 py-3 font-medium text-foreground">{est.title}</td>
                   <td className="px-4 py-3 text-muted-foreground">{clientName(est.clientId)}</td>
                   <td className="px-4 py-3">
-                    <span className={cn(chipCls, STATUS_STYLE[est.status])}>
+                    <Chip tone={STATUS_TONE[est.status]}>
                       {ESTIMATE_STATUS_LABELS[est.status]}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-foreground">
                     {formatMoney(est.totalCents)}

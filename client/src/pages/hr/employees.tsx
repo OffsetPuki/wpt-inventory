@@ -1,9 +1,13 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateTime, formatMoney, parseMoney, formatHours } from "@/lib/format";
 import type { PublicUser } from "@shared/schema";
@@ -30,24 +34,20 @@ import {
 } from "@shared/hr-schema";
 import { Loader2, Plus, Search, Users, Pencil, Trash2, Star } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
-
-const STATUS_CHIP: Record<EmployeeStatus, string> = {
-  active: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  on_leave: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  terminated: "bg-red-500/10 text-red-700 dark:text-red-400",
+const STATUS_CHIP: Record<EmployeeStatus, ChipTone> = {
+  active: "emerald",
+  on_leave: "amber",
+  terminated: "red",
 };
 const TYPE_CHIP: Record<EmploymentType, string> = {
   full_time: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   part_time: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400",
   contractor: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
 };
-const LEAVE_CHIP: Record<LeaveStatus, string> = {
-  pending: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  approved: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  denied: "bg-red-500/10 text-red-700 dark:text-red-400",
+const LEAVE_CHIP: Record<LeaveStatus, ChipTone> = {
+  pending: "amber",
+  approved: "emerald",
+  denied: "red",
 };
 const RUN_CHIP: Record<PayrollStatus, string> = {
   draft: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400",
@@ -66,7 +66,6 @@ function initials(e: Pick<Employee, "firstName" | "lastName">): string {
 // ─── Create / edit dialog ─────────────────────────────────────────────────────
 
 function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onClose: () => void }) {
-  const qc = useQueryClient();
   const [firstName, setFirstName] = useState(employee?.firstName ?? "");
   const [lastName, setLastName] = useState(employee?.lastName ?? "");
   const [email, setEmail] = useState(employee?.email ?? "");
@@ -93,8 +92,8 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
     queryFn: async () => (await apiRequest("GET", "/api/users")).json(),
   });
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -113,19 +112,14 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
         notes: notes.trim() || null,
         userId: userId ? Number(userId) : null,
       };
-      const res = employee
-        ? await apiRequest("PATCH", `/api/hr/employees/${employee.id}`, body)
-        : await apiRequest("POST", "/api/hr/employees", body);
-      return res.json();
+      return employee
+        ? { method: "PATCH", url: `/api/hr/employees/${employee.id}`, body }
+        : { method: "POST", url: "/api/hr/employees", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-employees"] });
-      qc.invalidateQueries({ queryKey: ["hr-employee-detail"] });
-      toast({ variant: "success", title: employee ? "Employee updated" : "Employee added" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save employee", description: e?.message }),
+    invalidate: [["hr-employees"], ["hr-employee-detail"]],
+    successTitle: employee ? "Employee updated" : "Employee added",
+    errorTitle: "Could not save employee",
+    onSuccess: onClose,
   });
 
   return (
@@ -313,21 +307,17 @@ function DetailModal({
   onClose: () => void;
   onEdit: (e: Employee) => void;
 }) {
-  const qc = useQueryClient();
   const { data, isLoading } = useQuery<EmployeeDetail>({
     queryKey: ["hr-employee-detail", id],
     queryFn: async () => (await apiRequest("GET", `/api/hr/employees/${id}/detail`)).json(),
   });
 
-  const del = useMutation({
-    mutationFn: async () => (await apiRequest("DELETE", `/api/hr/employees/${id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-employees"] });
-      toast({ variant: "success", title: "Employee removed" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not remove", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/hr/employees/${id}` }),
+    invalidate: [["hr-employees"]],
+    successTitle: "Employee removed",
+    errorTitle: "Could not remove",
+    onSuccess: onClose,
   });
 
   const emp = data?.employee;
@@ -346,12 +336,12 @@ function DetailModal({
       ) : (
         <div className="max-h-[70vh] overflow-y-auto pr-1">
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            <span className={cn(chipCls, STATUS_CHIP[emp.status])}>
+            <Chip tone={STATUS_CHIP[emp.status]}>
               {EMPLOYEE_STATUS_LABELS[emp.status]}
-            </span>
-            <span className={cn(chipCls, TYPE_CHIP[emp.employmentType])}>
+            </Chip>
+            <Chip className={TYPE_CHIP[emp.employmentType]}>
               {EMPLOYMENT_TYPE_LABELS[emp.employmentType]}
-            </span>
+            </Chip>
             <span className="text-sm text-muted-foreground">
               {PAY_TYPE_LABELS[emp.payType]} · {payLabel(emp)}
             </span>
@@ -416,9 +406,9 @@ function DetailModal({
                   <span className="text-muted-foreground">
                     {formatDate(l.startDate)} – {formatDate(l.endDate)} · {l.days}d
                   </span>
-                  <span className={cn(chipCls, LEAVE_CHIP[l.status])}>
+                  <Chip tone={LEAVE_CHIP[l.status]}>
                     {LEAVE_STATUS_LABELS[l.status]}
-                  </span>
+                  </Chip>
                 </li>
               ))}
             </ul>
@@ -434,9 +424,9 @@ function DetailModal({
                   <span className="text-foreground">
                     {formatDate(p.periodStart)} – {formatDate(p.periodEnd)}
                   </span>
-                  <span className={cn(chipCls, RUN_CHIP[p.runStatus])}>
+                  <Chip className={RUN_CHIP[p.runStatus]}>
                     {PAYROLL_STATUS_LABELS[p.runStatus]}
-                  </span>
+                  </Chip>
                   <span className="tabular-nums font-medium text-foreground">
                     {formatMoney(p.netCents)}
                   </span>
@@ -559,15 +549,12 @@ export default function HrEmployeesPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Users className="h-12 w-12" />
-          <p className="text-lg">
-            {employees.length === 0 ? "No employees yet" : "No employees match your filters"}
-          </p>
+        <EmptyState
+          icon={Users}
+          message={employees.length === 0 ? "No employees yet" : "No employees match your filters"}
+        >
           {employees.length === 0 && (
             <button
               onClick={() => setDialog({ open: true, employee: null })}
@@ -577,7 +564,7 @@ export default function HrEmployeesPage() {
               Add your first employee
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -616,14 +603,14 @@ export default function HrEmployeesPage() {
                   <td className="px-4 py-3 text-foreground">{e.jobTitle ?? "—"}</td>
                   <td className="px-4 py-3 text-foreground">{e.department ?? "—"}</td>
                   <td className="px-4 py-3">
-                    <span className={cn(chipCls, TYPE_CHIP[e.employmentType])}>
+                    <Chip className={TYPE_CHIP[e.employmentType]}>
                       {EMPLOYMENT_TYPE_LABELS[e.employmentType]}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={cn(chipCls, STATUS_CHIP[e.status])}>
+                    <Chip tone={STATUS_CHIP[e.status]}>
                       {EMPLOYEE_STATUS_LABELS[e.status]}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-foreground">
                     {payLabel(e)}

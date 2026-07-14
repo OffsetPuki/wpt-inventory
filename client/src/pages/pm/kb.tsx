@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { inputCls } from "@/lib/ui-styles";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
@@ -10,9 +13,6 @@ import type { KbArticle } from "@shared/pm-schema";
 import { BookOpen, Loader2, Pencil, Pin, Plus, Search, Trash2 } from "lucide-react";
 
 type KbRow = KbArticle & { authorName: string | null };
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 
 function parseTags(json: string | null): string[] {
   if (!json) return [];
@@ -120,7 +120,6 @@ function ArticleDialog({
   article: KbRow | null;
   categories: string[];
 }) {
-  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
@@ -136,8 +135,8 @@ function ArticleDialog({
     setContent(article?.content ?? "");
   }, [open, article]);
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const tagList = tags
         .split(",")
         .map((t) => t.trim())
@@ -150,27 +149,21 @@ function ArticleDialog({
         content,
       };
       return article
-        ? (await apiRequest("PATCH", `/api/pm/kb/${article.id}`, payload)).json()
-        : (await apiRequest("POST", "/api/pm/kb", payload)).json();
+        ? { method: "PATCH", url: `/api/pm/kb/${article.id}`, body: payload }
+        : { method: "POST", url: "/api/pm/kb", body: payload };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-kb"] });
-      toast({ variant: "success", title: article ? "Article updated" : "Article created" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save article", description: e?.message }),
+    invalidate: [["pm-kb"]],
+    successTitle: article ? "Article updated" : "Article created",
+    errorTitle: "Could not save article",
+    onSuccess: onClose,
   });
 
-  const del = useMutation({
-    mutationFn: async () => (await apiRequest("DELETE", `/api/pm/kb/${article!.id}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-kb"] });
-      toast({ variant: "success", title: "Article deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/pm/kb/${article!.id}` }),
+    invalidate: [["pm-kb"]],
+    successTitle: "Article deleted",
+    errorTitle: "Could not delete",
+    onSuccess: onClose,
   });
 
   return (
@@ -357,13 +350,12 @@ export default function PmKbPage() {
       )}
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <BookOpen className="h-12 w-12" />
-          <p className="text-lg">{articles.length === 0 ? "No articles yet" : "No matches"}</p>
+        <EmptyState
+          icon={BookOpen}
+          message={articles.length === 0 ? "No articles yet" : "No matches"}
+        >
           {articles.length === 0 && (
             <button
               onClick={() => {
@@ -376,7 +368,7 @@ export default function PmKbPage() {
               Write the first article
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="divide-y divide-border rounded-xl border border-border bg-card">
           {filtered.map((a) => {

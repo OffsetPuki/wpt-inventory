@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
-import { cn } from "@/lib/utils";
-import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
+import { formatDate, formatDateTime, formatMoney, parseJsonArray } from "@/lib/format";
 import {
   LEAD_STAGE_LABELS,
   ESTIMATE_STATUS_LABELS,
@@ -21,32 +24,27 @@ import {
 import { type Project, type ProjectStatus } from "@shared/schema";
 import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote, Trash2 } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
-
-const LEAD_STAGE_STYLE: Record<LeadStage, string> = {
-  new: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  contacted: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  quote_sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  follow_up: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  won: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  lost: "bg-red-500/10 text-red-700 dark:text-red-400",
+const LEAD_STAGE_TONE: Record<LeadStage, ChipTone> = {
+  new: "zinc",
+  contacted: "blue",
+  quote_sent: "blue",
+  follow_up: "amber",
+  won: "emerald",
+  lost: "red",
 };
 
-const ESTIMATE_STATUS_STYLE: Record<EstimateStatus, string> = {
-  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  accepted: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  declined: "bg-red-500/10 text-red-700 dark:text-red-400",
-  expired: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+const ESTIMATE_STATUS_TONE: Record<EstimateStatus, ChipTone> = {
+  draft: "zinc",
+  sent: "blue",
+  accepted: "emerald",
+  declined: "red",
+  expired: "amber",
 };
 
-const PROJECT_STATUS_STYLE: Record<ProjectStatus, string> = {
-  active: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  on_hold: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+const PROJECT_STATUS_TONE: Record<ProjectStatus, ChipTone> = {
+  active: "blue",
+  done: "emerald",
+  on_hold: "amber",
 };
 
 const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -56,19 +54,12 @@ const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
 };
 
 function parseTags(json: string | null): string[] {
-  if (!json) return [];
-  try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed.filter((t) => typeof t === "string" && t) : [];
-  } catch {
-    return [];
-  }
+  return parseJsonArray(json).filter((t): t is string => typeof t === "string" && !!t);
 }
 
 // ─── Create / edit dialog ─────────────────────────────────────────────────────
 
 function ClientFormModal({ client, onClose }: { client: Client | null; onClose: () => void }) {
-  const qc = useQueryClient();
   const [name, setName] = useState(client?.name ?? "");
   const [company, setCompany] = useState(client?.company ?? "");
   const [email, setEmail] = useState(client?.email ?? "");
@@ -79,8 +70,8 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
   const [tags, setTags] = useState(parseTags(client?.tags ?? null).join(", "));
   const [notes, setNotes] = useState(client?.notes ?? "");
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const tagList = tags
         .split(",")
         .map((t) => t.trim())
@@ -96,19 +87,14 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
         tags: tagList.length > 0 ? JSON.stringify(tagList) : null,
         notes: notes.trim() || null,
       };
-      const res = client
-        ? await apiRequest("PATCH", `/api/crm/clients/${client.id}`, body)
-        : await apiRequest("POST", "/api/crm/clients", body);
-      return res.json();
+      return client
+        ? { method: "PATCH", url: `/api/crm/clients/${client.id}`, body }
+        : { method: "POST", url: "/api/crm/clients", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-clients"] });
-      qc.invalidateQueries({ queryKey: ["crm-client-detail"] });
-      toast({ variant: "success", title: client ? "Client updated" : "Client created" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save client", description: e?.message }),
+    invalidate: [["crm-clients"], ["crm-client-detail"]],
+    successTitle: client ? "Client updated" : "Client created",
+    errorTitle: "Could not save client",
+    onSuccess: () => onClose(),
   });
 
   return (
@@ -196,7 +182,6 @@ function ClientDetailModal({
   onEdit: (client: Client) => void;
   onClose: () => void;
 }) {
-  const qc = useQueryClient();
   const { isElevated } = useAuth();
   const [note, setNote] = useState("");
 
@@ -205,35 +190,29 @@ function ClientDetailModal({
     queryFn: async () => (await apiRequest("GET", `/api/crm/clients/${clientId}/detail`)).json(),
   });
 
-  const del = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/crm/clients/${clientId}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-clients"] });
-      toast({ variant: "success", title: "Client deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/crm/clients/${clientId}` }),
+    invalidate: [["crm-clients"]],
+    successTitle: "Client deleted",
+    errorTitle: "Could not delete",
+    onSuccess: () => onClose(),
   });
 
-  const logNote = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/crm/activities", {
-          entityType: "client",
-          entityId: clientId,
-          kind: "note",
-          notes: note.trim() || undefined,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-client-detail", clientId] });
-      setNote("");
-      toast({ variant: "success", title: "Note logged" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not log note", description: e?.message }),
+  const logNote = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/crm/activities",
+      body: {
+        entityType: "client",
+        entityId: clientId,
+        kind: "note",
+        notes: note.trim() || undefined,
+      },
+    }),
+    invalidate: [["crm-client-detail", clientId]],
+    successTitle: "Note logged",
+    errorTitle: "Could not log note",
+    onSuccess: () => setNote(""),
   });
 
   const client = data?.client;
@@ -300,7 +279,7 @@ function ClientDetailModal({
             {parseTags(client.tags).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {parseTags(client.tags).map((t) => (
-                  <span key={t} className={cn(chipCls, "bg-muted text-muted-foreground")}>{t}</span>
+                  <Chip key={t} className="bg-muted text-muted-foreground">{t}</Chip>
                 ))}
               </div>
             )}
@@ -316,9 +295,9 @@ function ClientDetailModal({
                   <li key={l.id} className="flex items-center justify-between gap-3 py-2.5">
                     <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.name}</span>
                     <div className="flex shrink-0 items-center gap-3">
-                      <span className={cn(chipCls, LEAD_STAGE_STYLE[l.stage])}>
+                      <Chip tone={LEAD_STAGE_TONE[l.stage]}>
                         {LEAD_STAGE_LABELS[l.stage]}
-                      </span>
+                      </Chip>
                       <span className="text-sm tabular-nums text-muted-foreground">
                         {formatMoney(l.stage === "won" ? l.revenueClosedCents : l.estimatedValueCents)}
                       </span>
@@ -342,9 +321,9 @@ function ClientDetailModal({
                       {est.title}
                     </span>
                     <div className="flex shrink-0 items-center gap-3">
-                      <span className={cn(chipCls, ESTIMATE_STATUS_STYLE[est.status])}>
+                      <Chip tone={ESTIMATE_STATUS_TONE[est.status]}>
                         {ESTIMATE_STATUS_LABELS[est.status]}
-                      </span>
+                      </Chip>
                       <span className="text-sm tabular-nums text-foreground">
                         {formatMoney(est.totalCents)}
                       </span>
@@ -367,9 +346,9 @@ function ClientDetailModal({
                       <span className="font-mono text-xs text-muted-foreground">{p.jobNumber}</span>{" "}
                       {p.name}
                     </span>
-                    <span className={cn(chipCls, "shrink-0", PROJECT_STATUS_STYLE[p.status])}>
+                    <Chip tone={PROJECT_STATUS_TONE[p.status]} className="shrink-0">
                       {PROJECT_STATUS_LABEL[p.status]}
-                    </span>
+                    </Chip>
                   </li>
                 ))}
               </ul>
@@ -401,9 +380,9 @@ function ClientDetailModal({
                 {data.activities.map((a) => (
                   <li key={a.id} className="flex items-start justify-between gap-3 py-2.5">
                     <div className="min-w-0">
-                      <span className={cn(chipCls, "bg-muted text-muted-foreground")}>
+                      <Chip className="bg-muted text-muted-foreground">
                         {ACTIVITY_KIND_LABELS[a.kind]}
-                      </span>
+                      </Chip>
                       {a.notes && <p className="mt-1 break-words text-sm text-foreground">{a.notes}</p>}
                     </div>
                     <span className="shrink-0 text-xs text-muted-foreground">
@@ -423,7 +402,6 @@ function ClientDetailModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ClientsPage() {
-  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("active");
   const [formOpen, setFormOpen] = useState(false);
@@ -440,18 +418,16 @@ export default function ClientsPage() {
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
 
-  const setClientStatus = useMutation({
-    mutationFn: async ({ id, next }: { id: number; next: "active" | "archived" }) =>
-      (await apiRequest("PATCH", `/api/crm/clients/${id}`, { status: next })).json(),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["crm-clients"] });
-      toast({
-        variant: "success",
-        title: vars.next === "archived" ? "Client archived" : "Client restored",
-      });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update client", description: e?.message }),
+  const setClientStatus = useApiMutation<any, { id: number; next: "active" | "archived" }>({
+    request: ({ id, next }) => ({
+      method: "PATCH",
+      url: `/api/crm/clients/${id}`,
+      body: { status: next },
+    }),
+    invalidate: [["crm-clients"]],
+    successTitle: (_data, vars) =>
+      vars.next === "archived" ? "Client archived" : "Client restored",
+    errorTitle: "Could not update client",
   });
 
   return (
@@ -491,13 +467,9 @@ export default function ClientsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : clients.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Contact className="h-12 w-12" />
-          <p className="text-lg">No clients yet</p>
+        <EmptyState icon={Contact} message="No clients yet">
           <button
             onClick={() => {
               setEditing(null);
@@ -508,7 +480,7 @@ export default function ClientsPage() {
             <Plus className="h-5 w-5" />
             Add your first client
           </button>
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -545,23 +517,16 @@ export default function ClientsPage() {
                       {parseTags(c.tags).length === 0
                         ? "—"
                         : parseTags(c.tags).map((t) => (
-                            <span key={t} className={cn(chipCls, "bg-muted text-muted-foreground")}>
+                            <Chip key={t} className="bg-muted text-muted-foreground">
                               {t}
-                            </span>
+                            </Chip>
                           ))}
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        chipCls,
-                        c.status === "active"
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                          : "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400"
-                      )}
-                    >
+                    <Chip tone={c.status === "active" ? "emerald" : "zinc"}>
                       {c.status === "active" ? "Active" : "Archived"}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button

@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
-import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import type { Item, Adjustment } from "@shared/schema";
 import {
   itemPhotos,
@@ -47,7 +47,6 @@ export default function ItemDetailPage({ id }: { id: string }) {
   const itemId = Number(id);
   const { isTechnician } = useAuth();
   const [, setLocation] = useLocation();
-  const qc = useQueryClient();
 
   const [checkMode, setCheckMode] = useState<null | "check_out" | "check_in">(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -68,15 +67,12 @@ export default function ItemDetailPage({ id }: { id: string }) {
   const txns = detail?.transactions ?? [];
   const adjustments = detail?.adjustments ?? [];
 
-  const del = useMutation({
-    mutationFn: async () => apiRequest("DELETE", `/api/items/${itemId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["items"] });
-      toast({ variant: "success", title: "Item deleted" });
-      setLocation("/home");
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/items/${itemId}` }),
+    invalidate: [["items"]],
+    successTitle: "Item deleted",
+    errorTitle: "Could not delete",
+    onSuccess: () => setLocation("/home"),
   });
 
   if (isLoading) {

@@ -1,23 +1,24 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { inputCls } from "@/lib/ui-styles";
 import { formatMoney, formatPercent, parseMoney } from "@/lib/format";
 import type { Product } from "@shared/crm-schema";
 import { Loader2, Plus, Package, Search, Pencil } from "lucide-react";
 
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
+// The active/inactive toggle is a clickable <button>, not a Chip span, so it
+// keeps this local pill shape (matching the palette emerald/zinc washes).
 const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
 
 // ─── Create / edit dialog ─────────────────────────────────────────────────────
 
 function ProductFormModal({ product, onClose }: { product: Product | null; onClose: () => void }) {
-  const qc = useQueryClient();
   const [sku, setSku] = useState(product?.sku ?? "");
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
@@ -27,8 +28,8 @@ function ProductFormModal({ product, onClose }: { product: Product | null; onClo
   const [cost, setCost] = useState(product ? String(product.costCents / 100) : "");
   const [active, setActive] = useState(product?.active ?? true);
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         sku: sku.trim() || null,
         name: name.trim(),
@@ -39,18 +40,14 @@ function ProductFormModal({ product, onClose }: { product: Product | null; onClo
         costCents: parseMoney(cost),
         active,
       };
-      const res = product
-        ? await apiRequest("PATCH", `/api/crm/products/${product.id}`, body)
-        : await apiRequest("POST", "/api/crm/products", body);
-      return res.json();
+      return product
+        ? { method: "PATCH", url: `/api/crm/products/${product.id}`, body }
+        : { method: "POST", url: "/api/crm/products", body };
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["crm-products"] });
-      toast({ variant: "success", title: product ? "Product updated" : "Product created" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save product", description: e?.message }),
+    invalidate: [["crm-products"]],
+    successTitle: product ? "Product updated" : "Product created",
+    errorTitle: "Could not save product",
+    onSuccess: () => onClose(),
   });
 
   return (
@@ -121,7 +118,6 @@ function ProductFormModal({ product, onClose }: { product: Product | null; onClo
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ProductsPage() {
-  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [activeFilter, setActiveFilter] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -137,15 +133,11 @@ export default function ProductsPage() {
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
 
-  const toggleActive = useMutation({
-    mutationFn: async (p: Product) =>
-      (await apiRequest("PATCH", `/api/crm/products/${p.id}`, { active: !p.active })).json(),
-    onSuccess: (row: Product) => {
-      qc.invalidateQueries({ queryKey: ["crm-products"] });
-      toast({ variant: "success", title: row.active ? "Product activated" : "Product deactivated" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update product", description: e?.message }),
+  const toggleActive = useApiMutation<Product, Product>({
+    request: (p) => ({ method: "PATCH", url: `/api/crm/products/${p.id}`, body: { active: !p.active } }),
+    invalidate: [["crm-products"]],
+    successTitle: (row) => (row.active ? "Product activated" : "Product deactivated"),
+    errorTitle: "Could not update product",
   });
 
   const margin = (p: Product): number | null =>
@@ -188,13 +180,9 @@ export default function ProductsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : products.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Package className="h-12 w-12" />
-          <p className="text-lg">No products yet</p>
+        <EmptyState icon={Package} message="No products yet">
           <button
             onClick={() => {
               setEditing(null);
@@ -205,7 +193,7 @@ export default function ProductsPage() {
             <Plus className="h-5 w-5" />
             Add your first product
           </button>
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">

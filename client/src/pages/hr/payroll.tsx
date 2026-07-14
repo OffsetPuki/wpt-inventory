@@ -1,12 +1,16 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
+import { Chip } from "@/components/ui/Chip";
+import { inputCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
-import { formatDate, formatMoney, parseMoney, formatHours } from "@/lib/format";
+import { formatDate, formatMoney, parseMoney, formatHours, parseJsonArray } from "@/lib/format";
 import {
   PAYROLL_STATUS_LABELS,
   type PayrollRun,
@@ -15,10 +19,6 @@ import {
   type PayslipDeduction,
 } from "@shared/hr-schema";
 import { Loader2, Plus, Wallet, Pencil, Trash2, X, CheckCircle2, Receipt, AlertTriangle } from "lucide-react";
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const chipCls = "rounded-full px-2.5 py-0.5 text-xs font-medium";
 
 const RUN_CHIP: Record<PayrollStatus, string> = {
   draft: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400",
@@ -51,16 +51,6 @@ type MySlip = Payslip & {
   runStatus: PayrollStatus;
 };
 
-function parseDeductions(json: string | null | undefined): PayslipDeduction[] {
-  if (!json) return [];
-  try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
 function hoursLabel(hours: number): string {
   return hours > 0 ? formatHours(Math.round(hours * 60)) : "—";
 }
@@ -68,24 +58,25 @@ function hoursLabel(hours: number): string {
 // ─── New run dialog ───────────────────────────────────────────────────────────
 
 function NewRunDialog({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient();
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [payDate, setPayDate] = useState("");
   const [notes, setNotes] = useState("");
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/hr/payroll/runs", {
-          periodStart,
-          periodEnd,
-          payDate: payDate || undefined,
-          notes: notes.trim() || undefined,
-        })
-      ).json(),
-    onSuccess: (data: { run: PayrollRun; payslips: Payslip[] }) => {
-      qc.invalidateQueries({ queryKey: ["hr-payroll-runs"] });
+  const create = useApiMutation<{ run: PayrollRun; payslips: Payslip[] }>({
+    request: () => ({
+      method: "POST",
+      url: "/api/hr/payroll/runs",
+      body: {
+        periodStart,
+        periodEnd,
+        payDate: payDate || undefined,
+        notes: notes.trim() || undefined,
+      },
+    }),
+    invalidate: [["hr-payroll-runs"]],
+    errorTitle: "Could not create run",
+    onSuccess: (data) => {
       toast({
         variant: "success",
         title: "Payroll run created",
@@ -93,8 +84,6 @@ function NewRunDialog({ onClose }: { onClose: () => void }) {
       });
       onClose();
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not create run", description: e?.message }),
   });
 
   return (
@@ -167,11 +156,10 @@ function NewRunDialog({ onClose }: { onClose: () => void }) {
 // ─── Payslip edit dialog ──────────────────────────────────────────────────────
 
 function EditSlipDialog({ slip, onClose }: { slip: SlipRow; onClose: () => void }) {
-  const qc = useQueryClient();
   const [hours, setHours] = useState(String(slip.hoursWorked));
   const [gross, setGross] = useState(String(slip.grossCents / 100));
   const [rows, setRows] = useState<{ label: string; amount: string }[]>(
-    parseDeductions(slip.deductions).map((d) => ({
+    parseJsonArray<PayslipDeduction>(slip.deductions).map((d) => ({
       label: d.label,
       amount: String(d.amountCents / 100),
     }))
@@ -181,27 +169,23 @@ function EditSlipDialog({ slip, onClose }: { slip: SlipRow; onClose: () => void 
   const deductionsTotal = rows.reduce((s, r) => s + parseMoney(r.amount), 0);
   const netPreview = parseMoney(gross) - deductionsTotal;
 
-  const save = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("PATCH", `/api/hr/payslips/${slip.id}`, {
-          hoursWorked: parseFloat(hours) || 0,
-          grossCents: parseMoney(gross),
-          deductions: rows
-            .filter((r) => r.label.trim())
-            .map((r) => ({ label: r.label.trim(), amountCents: parseMoney(r.amount) })),
-          notes: notes.trim() || null,
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-payroll-run"] });
-      qc.invalidateQueries({ queryKey: ["hr-payroll-runs"] });
-      qc.invalidateQueries({ queryKey: ["hr-payslips-mine"] });
-      toast({ variant: "success", title: "Payslip updated" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save payslip", description: e?.message }),
+  const save = useApiMutation({
+    request: () => ({
+      method: "PATCH",
+      url: `/api/hr/payslips/${slip.id}`,
+      body: {
+        hoursWorked: parseFloat(hours) || 0,
+        grossCents: parseMoney(gross),
+        deductions: rows
+          .filter((r) => r.label.trim())
+          .map((r) => ({ label: r.label.trim(), amountCents: parseMoney(r.amount) })),
+        notes: notes.trim() || null,
+      },
+    }),
+    invalidate: [["hr-payroll-run"], ["hr-payroll-runs"], ["hr-payslips-mine"]],
+    successTitle: "Payslip updated",
+    errorTitle: "Could not save payslip",
+    onSuccess: onClose,
   });
 
   return (
@@ -309,7 +293,6 @@ function EditSlipDialog({ slip, onClose }: { slip: SlipRow; onClose: () => void 
 // ─── Run detail modal ─────────────────────────────────────────────────────────
 
 function RunDetailModal({ runId, onClose }: { runId: number; onClose: () => void }) {
-  const qc = useQueryClient();
   const [editSlip, setEditSlip] = useState<SlipRow | null>(null);
 
   const { data, isLoading } = useQuery<{ run: PayrollRun; payslips: SlipRow[] }>({
@@ -317,31 +300,23 @@ function RunDetailModal({ runId, onClose }: { runId: number; onClose: () => void
     queryFn: async () => (await apiRequest("GET", `/api/hr/payroll/runs/${runId}`)).json(),
   });
 
-  const setStatus = useMutation({
-    mutationFn: async (status: PayrollStatus) =>
-      (await apiRequest("PATCH", `/api/hr/payroll/runs/${runId}`, { status })).json(),
-    onSuccess: (_d, status) => {
-      qc.invalidateQueries({ queryKey: ["hr-payroll-run", runId] });
-      qc.invalidateQueries({ queryKey: ["hr-payroll-runs"] });
-      qc.invalidateQueries({ queryKey: ["hr-payslips-mine"] });
-      toast({
-        variant: "success",
-        title: status === "approved" ? "Run approved" : "Run marked as paid",
-      });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update run", description: e?.message }),
+  const setStatus = useApiMutation<any, PayrollStatus>({
+    request: (status) => ({
+      method: "PATCH",
+      url: `/api/hr/payroll/runs/${runId}`,
+      body: { status },
+    }),
+    invalidate: [["hr-payroll-run", runId], ["hr-payroll-runs"], ["hr-payslips-mine"]],
+    successTitle: (_d, status) => (status === "approved" ? "Run approved" : "Run marked as paid"),
+    errorTitle: "Could not update run",
   });
 
-  const del = useMutation({
-    mutationFn: async () => (await apiRequest("DELETE", `/api/hr/payroll/runs/${runId}`)).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["hr-payroll-runs"] });
-      toast({ variant: "success", title: "Run deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete run", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/hr/payroll/runs/${runId}` }),
+    invalidate: [["hr-payroll-runs"]],
+    successTitle: "Run deleted",
+    errorTitle: "Could not delete run",
+    onSuccess: onClose,
   });
 
   const run = data?.run;
@@ -364,9 +339,9 @@ function RunDetailModal({ runId, onClose }: { runId: number; onClose: () => void
       ) : (
         <div className="max-h-[70vh] overflow-y-auto pr-1">
           <div className="mb-4 flex flex-wrap items-center gap-3">
-            <span className={cn(chipCls, RUN_CHIP[run.status])}>
+            <Chip className={RUN_CHIP[run.status]}>
               {PAYROLL_STATUS_LABELS[run.status]}
-            </span>
+            </Chip>
             <span className="text-sm text-muted-foreground">
               Pay date: {run.payDate ? formatDate(run.payDate) : "—"}
             </span>
@@ -550,13 +525,9 @@ export default function HrPayrollPage() {
       {isElevated && (
         <section className="mb-10">
           {runsLoading ? (
-            <div className="flex justify-center py-16 text-muted-foreground">
-              <Loader2 className="h-8 w-8 animate-spin" />
-            </div>
+            <LoadingBlock />
           ) : runs.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-              <Wallet className="h-12 w-12" />
-              <p className="text-lg">No payroll runs yet</p>
+            <EmptyState icon={Wallet} message="No payroll runs yet">
               <button
                 onClick={() => setNewRunOpen(true)}
                 className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
@@ -564,7 +535,7 @@ export default function HrPayrollPage() {
                 <Plus className="h-5 w-5" />
                 Create your first run
               </button>
-            </div>
+            </EmptyState>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border bg-card">
               <table className="w-full text-sm">
@@ -592,9 +563,9 @@ export default function HrPayrollPage() {
                         {r.payDate ? formatDate(r.payDate) : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={cn(chipCls, RUN_CHIP[r.status])}>
+                        <Chip className={RUN_CHIP[r.status]}>
                           {PAYROLL_STATUS_LABELS[r.status]}
-                        </span>
+                        </Chip>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-foreground">
                         {r.payslipCount}
@@ -617,9 +588,7 @@ export default function HrPayrollPage() {
       <section>
         <h2 className="mb-3 text-lg font-semibold text-foreground">My payslips</h2>
         {mineLoading ? (
-          <div className="flex justify-center py-16 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
+          <LoadingBlock />
         ) : mySlips.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
             <Receipt className="h-12 w-12" />
@@ -652,9 +621,9 @@ export default function HrPayrollPage() {
                       {p.payDate ? formatDate(p.payDate) : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn(chipCls, RUN_CHIP[p.runStatus])}>
+                      <Chip className={RUN_CHIP[p.runStatus]}>
                         {PAYROLL_STATUS_LABELS[p.runStatus]}
-                      </span>
+                      </Chip>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-foreground">
                       {hoursLabel(p.hoursWorked)}
