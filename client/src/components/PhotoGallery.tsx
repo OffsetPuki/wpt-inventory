@@ -1,20 +1,13 @@
 import { useRef, useState } from "react";
-import { shrinkAndUpload } from "@/lib/uploadPhoto";
-import { toast } from "@/components/ui/toaster";
 import { cn } from "@/lib/utils";
-import { ImagePlus, X, Loader2, ImageOff, ChevronLeft, ChevronRight } from "lucide-react";
+import { ImageOff, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface PhotoGalleryProps {
   photos: string[];
-  onChange?: (photos: string[]) => void;
-  max?: number;
 }
 
-export default function PhotoGallery({ photos, onChange, max = 5 }: PhotoGalleryProps) {
-  const editable = typeof onChange === "function";
-  const fileRef = useRef<HTMLInputElement>(null);
+export default function PhotoGallery({ photos }: PhotoGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [uploading, setUploading] = useState(false);
   const [active, setActive] = useState(0);
 
   function go(i: number) {
@@ -28,74 +21,6 @@ export default function PhotoGallery({ photos, onChange, max = 5 }: PhotoGallery
     if (!el) return;
     const idx = Math.round(el.scrollLeft / el.clientWidth);
     if (idx !== active) setActive(idx);
-  }
-
-  async function handleFiles(files: FileList | null) {
-    if (!files || !onChange) return;
-    const remaining = max - photos.length;
-    const toUpload = Array.from(files).slice(0, remaining);
-    if (toUpload.length === 0) return;
-    setUploading(true);
-    try {
-      // Shrink + upload all picked files in parallel rather than one at a
-      // time — for N photos this is ~Nx faster on a normal connection.
-      const urls = await Promise.all(toUpload.map((f) => shrinkAndUpload(f)));
-      onChange([...photos, ...urls]);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Upload failed", description: e?.message });
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  // ── Editable grid ──
-  if (editable) {
-    return (
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-        {photos.map((url, i) => (
-          <div
-            key={url + i}
-            className="group relative aspect-square overflow-hidden rounded-xl border border-border bg-muted"
-          >
-            <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
-            <button
-              type="button"
-              onClick={() => onChange!(photos.filter((_, idx) => idx !== i))}
-              className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label="Remove photo"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
-        {photos.length < max && (
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-border text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-60"
-          >
-            {uploading ? (
-              <Loader2 className="h-6 w-6 animate-spin" />
-            ) : (
-              <>
-                <ImagePlus className="h-6 w-6" />
-                <span className="text-xs">Add</span>
-              </>
-            )}
-          </button>
-        )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
-        />
-      </div>
-    );
   }
 
   // ── Display mode ──

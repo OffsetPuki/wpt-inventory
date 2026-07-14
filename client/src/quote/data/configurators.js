@@ -34,11 +34,12 @@ export const RAILING_FINISHES = [
   { value: '#E8E6E0', label: 'White' },
 ];
 
+// Every known finish, one flat list. RAILING_FINISHES already spreads FINISHES,
+// so this covers frame, railing (+White) and roof colors with a single search.
+const ALL_FINISHES = [...RAILING_FINISHES, ...ROOF_FINISHES];
+
 export function finishLabel(hex) {
-  return (FINISHES.find((f) => f.value === hex)
-    || ROOF_FINISHES.find((f) => f.value === hex)
-    || RAILING_FINISHES.find((f) => f.value === hex)
-    || { label: hex }).label;
+  return (ALL_FINISHES.find((f) => f.value === hex) || { label: hex }).label;
 }
 
 // Rough car capacity from span (matches the website readout).

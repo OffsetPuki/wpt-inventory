@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { eq, like, and, or, sql, desc, asc } from "drizzle-orm";
+import { eq, and, or, sql, desc, asc } from "drizzle-orm";
 import path from "path";
 import fs from "fs";
 import {
@@ -150,7 +150,10 @@ sqlite.exec(`
 
   CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_number TEXT NOT NULL UNIQUE,
+    -- Uniqueness on job_number is enforced by the partial index
+    -- idx_projects_jobnumber_active (active rows only), NOT a table-level
+    -- UNIQUE — reusing a trashed project's job number must be allowed.
+    job_number TEXT NOT NULL,
     name TEXT NOT NULL,
     customer TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -260,6 +263,15 @@ addColumnIfMissing("projects", "client_id", "client_id INTEGER");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id)");
+// job_number must be unique only among ACTIVE projects, so a job number freed
+// up by soft-deleting a project can be reused. This partial unique index
+// enforces that. NOTE: databases created before the inline `UNIQUE` was removed
+// from the projects table still carry an automatic table-level unique index
+// spanning soft-deleted rows; dropping it requires a manual table-rebuild
+// migration (SQLite can't drop an inline column constraint in place).
+sqlite.exec(
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_jobnumber_active ON projects(job_number) WHERE deleted_at IS NULL",
+);
 
 // ─── CJM job-template catalog sync ───────────────────────────────────────────
 // Upserts the code-owned service templates (server/template-catalog.ts) once
@@ -303,6 +315,13 @@ addColumnIfMissing("settings", "template_catalog_version", "template_catalog_ver
 function toPublicUser(u: User): PublicUser {
   const { pin, ...pub } = u;
   return pub;
+}
+
+// Escape LIKE metacharacters (\, %, _) in a user-supplied search term so they
+// match literally instead of acting as wildcards. Backslash must be escaped
+// first. Pair with `ESCAPE '\'` on every LIKE clause that uses the result.
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 // ─── Storage API ─────────────────────────────────────────────────────────────
@@ -505,12 +524,12 @@ export const storage = {
     const conditions: any[] = [sql`${items.deletedAt} IS NULL`];
 
     if (opts.q) {
-      const pattern = `%${opts.q}%`;
+      const pattern = `%${escapeLike(opts.q)}%`;
       conditions.push(
         or(
-          like(items.name, pattern),
-          like(items.partNumber, pattern),
-          like(items.mfgPartNumber, pattern)
+          sql`${items.name} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${items.partNumber} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${items.mfgPartNumber} LIKE ${pattern} ESCAPE '\\'`
         )
       );
     }
@@ -619,15 +638,23 @@ export const storage = {
 
   // ── Adjustments ──────────────────────────────────────────────────────────
   createAdjustment(itemId: number, userId: number, data: { delta: number; reason: string; notes?: string }): Adjustment {
-    // Update item quantity
-    sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(data.delta, itemId);
-    return db.insert(adjustments).values({
-      itemId,
-      userId,
-      delta: data.delta,
-      reason: data.reason as any,
-      notes: data.notes || null,
-    }).returning().get();
+    // Stock mutation + ledger row must commit together or not at all — a failed
+    // INSERT must never leave the quantity changed with no adjustment record.
+    return db.transaction((tx) => {
+      // Verify the item exists AND is active before touching stock. Done inside
+      // the transaction so a concurrent soft-delete can't race the check.
+      const item = tx.select().from(items)
+        .where(and(eq(items.id, itemId), sql`${items.deletedAt} IS NULL`)).get();
+      if (!item) throw new Error("Item not found");
+      sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(data.delta, itemId);
+      return tx.insert(adjustments).values({
+        itemId,
+        userId,
+        delta: data.delta,
+        reason: data.reason as any,
+        notes: data.notes || null,
+      }).returning().get();
+    });
   },
 
   getAdjustments(itemId: number): Adjustment[] {
@@ -650,8 +677,8 @@ export const storage = {
     if (opts.userId) { query += " AND a.user_id = ?"; params.push(opts.userId); }
     if (opts.itemId) { query += " AND a.item_id = ?"; params.push(opts.itemId); }
     if (opts.q) {
-      query += " AND (i.name LIKE ? OR u.name LIKE ?)";
-      const pat = `%${opts.q}%`;
+      query += " AND (i.name LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\')";
+      const pat = `%${escapeLike(opts.q)}%`;
       params.push(pat, pat);
     }
     query += " ORDER BY a.created_at DESC";
@@ -667,15 +694,25 @@ export const storage = {
     data: { quantity: number; notes?: string; projectId?: number }
   ): Transaction {
     const delta = type === "check_out" ? -data.quantity : data.quantity;
-    sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(delta, itemId);
-    return db.insert(transactions).values({
-      itemId,
-      userId,
-      type,
-      quantity: data.quantity,
-      notes: data.notes || null,
-      projectId: data.projectId ?? null,
-    }).returning().get();
+    // Stock mutation + ledger row must commit together or not at all — a failed
+    // INSERT (e.g. a bad projectId FK with foreign_keys=ON) must never leave the
+    // quantity changed with no transaction record.
+    return db.transaction((tx) => {
+      // Verify the item exists AND is active before touching stock. Done inside
+      // the transaction so a concurrent soft-delete can't race the check.
+      const item = tx.select().from(items)
+        .where(and(eq(items.id, itemId), sql`${items.deletedAt} IS NULL`)).get();
+      if (!item) throw new Error("Item not found");
+      sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(delta, itemId);
+      return tx.insert(transactions).values({
+        itemId,
+        userId,
+        type,
+        quantity: data.quantity,
+        notes: data.notes || null,
+        projectId: data.projectId ?? null,
+      }).returning().get();
+    });
   },
 
   getTransactions(opts: {
@@ -700,8 +737,8 @@ export const storage = {
     if (opts.projectId) { query += " AND t.project_id = ?"; params.push(opts.projectId); }
     if (opts.type) { query += " AND t.type = ?"; params.push(opts.type); }
     if (opts.q) {
-      query += " AND (i.name LIKE ? OR u.name LIKE ?)";
-      const pat = `%${opts.q}%`;
+      query += " AND (i.name LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\')";
+      const pat = `%${escapeLike(opts.q)}%`;
       params.push(pat, pat);
     }
     query += " ORDER BY t.created_at DESC";
@@ -1021,34 +1058,40 @@ export const storage = {
       "SELECT category, COUNT(*) as count FROM items WHERE deleted_at IS NULL GROUP BY category"
     ).all() as any[];
 
-    // Weekly checkouts (last 8 weeks)
+    // Weekly checkouts (last 8 weeks). Join items so checkouts of soft-deleted
+    // items are excluded, matching the scalar stats' deleted_at filter.
     const weeklyCheckouts = sqlite.prepare(`
       SELECT
-        CAST((created_at / (7 * 24 * 3600 * 1000)) AS INTEGER) as week,
-        SUM(quantity) as total
-      FROM transactions
-      WHERE type = 'check_out' AND created_at >= ?
+        CAST((t.created_at / (7 * 24 * 3600 * 1000)) AS INTEGER) as week,
+        SUM(t.quantity) as total
+      FROM transactions t
+      JOIN items i ON t.item_id = i.id
+      WHERE t.type = 'check_out' AND t.created_at >= ? AND i.deleted_at IS NULL
       GROUP BY week
       ORDER BY week
     `).all(eightWeeksAgo) as any[];
 
-    // Top workers by checkouts
+    // Top workers by checkouts. Join items so checkouts of soft-deleted items
+    // don't inflate a worker's total. (users are hard-deleted, so there's no
+    // deleted_at column to filter on the users side.)
     const topWorkers = sqlite.prepare(`
       SELECT u.name, SUM(t.quantity) as total
       FROM transactions t
       JOIN users u ON t.user_id = u.id
-      WHERE t.type = 'check_out' AND t.created_at >= ?
+      JOIN items i ON t.item_id = i.id
+      WHERE t.type = 'check_out' AND t.created_at >= ? AND i.deleted_at IS NULL
       GROUP BY t.user_id
       ORDER BY total DESC
       LIMIT 10
     `).all(sevenDaysAgo) as any[];
 
-    // Top items by usage
+    // Top items by usage. Exclude soft-deleted items so the dashboard matches
+    // what's visible in Find Items.
     const topItems = sqlite.prepare(`
       SELECT i.name, SUM(t.quantity) as total
       FROM transactions t
       JOIN items i ON t.item_id = i.id
-      WHERE t.type = 'check_out' AND t.created_at >= ?
+      WHERE t.type = 'check_out' AND t.created_at >= ? AND i.deleted_at IS NULL
       GROUP BY t.item_id
       ORDER BY total DESC
       LIMIT 10

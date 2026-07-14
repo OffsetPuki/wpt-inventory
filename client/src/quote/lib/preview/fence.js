@@ -39,20 +39,6 @@ export function renderFence(state) {
   const PAD_X = 50;
   const GROUND_Y = 420;
 
-  // Lighten the chosen color by ~35% for the wood panel fill (so it reads as a
-  // different material against the ink frame). Kept inline for fidelity even
-  // though the wood tones below are fixed.
-  function lighten(hex, amount) {
-    const h = hex.replace('#', '');
-    const r = parseInt(h.substring(0, 2), 16);
-    const g = parseInt(h.substring(2, 4), 16);
-    const b = parseInt(h.substring(4, 6), 16);
-    const lr = Math.min(255, Math.round(r + (255 - r) * amount));
-    const lg = Math.min(255, Math.round(g + (255 - g) * amount));
-    const lb = Math.min(255, Math.round(b + (255 - b) * amount));
-    return '#' + [lr, lg, lb].map((n) => n.toString(16).padStart(2, '0')).join('');
-  }
-
   function archPath(x1, x2, topY, archHeightPx, bottomY) {
     // Path enclosing the panel area with an arched top that peaks ABOVE topY.
     // Endpoints meet posts at (x1, topY) and (x2, topY); the curve peaks at (midX, topY - archHeightPx).

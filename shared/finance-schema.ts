@@ -187,7 +187,11 @@ export const purchaseOrders = sqliteTable("fin_purchase_orders", {
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
-export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+export const insertInvoiceSchema = createInsertSchema(invoices, {
+  // Tax basis points can never be negative — a negative rate would credit tax
+  // back against the subtotal. (computeTotals also clamps as a backstop.)
+  taxRateBp: z.number().int().min(0).optional(),
+}).omit({
   id: true,
   number: true, // server-assigned
   paidCents: true,
@@ -210,7 +214,11 @@ export const insertInvoicePaymentSchema = z.object({
   notes: z.string().optional(),
 });
 
-export const insertExpenseSchema = createInsertSchema(expenses).omit({
+export const insertExpenseSchema = createInsertSchema(expenses, {
+  // amount_cents carries a DB default, so drizzle-zod would otherwise accept
+  // negative/zero. Mirror the client's `parseMoney(amount) <= 0` guard.
+  amountCents: z.number().int().positive(),
+}).omit({
   id: true,
   createdAt: true,
   deletedAt: true,

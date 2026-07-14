@@ -31,7 +31,6 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
   const [jobNumber, setJobNumber] = useState("");
   const [name, setName] = useState("");
   const [customer, setCustomer] = useState("");
-  const [notes, setNotes] = useState("");
 
   const { data: templates = [] } = useQuery<JobTemplate[]>({
     queryKey: ["job-templates"],
@@ -48,7 +47,6 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
     setJobNumber("");
     setName("");
     setCustomer("");
-    setNotes("");
   }
 
   function pick(tpl: JobTemplate) {
@@ -68,7 +66,6 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
         jobNumber: jobNumber.trim(),
         name: name.trim(),
         customer: customer.trim() || undefined,
-        notes: notes.trim() || undefined,
       });
       return res.json();
     },

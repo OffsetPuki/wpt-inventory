@@ -137,7 +137,9 @@ function slatCountFor(heightFt, slatCount, gapIn) {
   const manual = num(slatCount, 0);
   if (manual > 0) return Math.round(manual);
   const gap = Math.max(0, num(gapIn, 1));
-  return Math.max(1, Math.round((num(heightFt, 0) * 12) / (4 + gap)));
+  // Match the approved SVG preview exactly (preview/fence.js): 3" slat face,
+  // 2.5" pad top & bottom (−5"), gap between → 6 ft/1" = 17, 4 ft/1" = 11.
+  return Math.max(1, Math.floor((num(heightFt, 0) * 12 - 5 + gap) / (3 + gap)));
 }
 
 /** 4×1 wood coverage: a 4-inch board face → 3 linear ft of board per sq ft. */
@@ -440,7 +442,12 @@ function estimateCarport(s, pb) {
     items.push({ key: 'sides', name: 'Enclosed sides', kind: 'area', qty: round2(sideArea), rate: round2(c.sidePanelPerSqFt) });
   }
   if (s.gutters === 'yes') {
-    items.push({ key: 'gutters', name: 'Gutters & downspouts', kind: 'length', qty: round2(width), rate: round2(c.guttersPerFt) });
+    // A gable sheds to TWO eaves (left & right), each running the full depth, so
+    // it needs 2×depth of gutter; a single-slope roof (lean-to/flat) sheds to
+    // ONE front eave running the width. Default to the gable (the configurator
+    // default) when the roof style isn't a recognized single-slope value.
+    const gutterFt = (s.roof === 'lean-to' || s.roof === 'flat') ? width : 2 * depth;
+    items.push({ key: 'gutters', name: 'Gutters & downspouts', kind: 'length', qty: round2(gutterFt), rate: round2(c.guttersPerFt) });
   }
   const roofFinishRate = (c.roofFinishUpchargePerSqFt || {})[s.roofColor] || 0;
   const isStandardRoof = s.roofColor === '#A7A8A4'; // Galvalume is the standard, $0 base
@@ -604,13 +611,30 @@ function estimatePergola(s, pb) {
 const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola };
 
 /**
- * Consumables (wire, gas, discs, primer/paint, fasteners) as a % of the material
- * subtotal so far — they scale with how much you build. Always present so the
- * owner remembers to set the rate; flagged unpriced (and $0) when the % is 0.
+ * Consumables (wire, gas, discs, primer/paint, fasteners) scale with FABRICATED
+ * material only, so their base excludes BOUGHT-IN hardware/operator sets
+ * (materialId 'hw_*' — the gate hardware sets and the ~$1900 operator kit) and
+ * every FLAT-FEE line (demo, dump, and the gate arched/capped/monogram/artwork
+ * flats). Everything else — cut-and-welded steel/wood/mesh/concrete, roofs,
+ * frames, coatings, finishes — stays in the base. (The consumables line itself
+ * is a flat, so it's excluded here too.)
+ */
+function isConsumablesBase(it) {
+  if (!it) return false;
+  if (it.kind === 'flat') return false;
+  if (typeof it.materialId === 'string' && it.materialId.startsWith('hw_')) return false;
+  return true;
+}
+
+/**
+ * Consumables (wire, gas, discs, primer/paint, fasteners) as a % of the
+ * FABRICATED-material subtotal so far — they scale with how much you build.
+ * Always present so the owner remembers to set the rate; flagged unpriced (and
+ * $0) when the % is 0.
  */
 function consumablesItem(materialItems, priceBook) {
   const pct = Number(priceBook.consumablesPct) || 0;
-  const base = (materialItems || []).reduce((s, it) => s + lineCost(it), 0);
+  const base = (materialItems || []).reduce((s, it) => (isConsumablesBase(it) ? s + lineCost(it) : s), 0);
   const amt = round2(base * pct / 100);
   const item = {
     key: 'consumables',
@@ -674,7 +698,10 @@ export function buildLineState(type, state, priceBook, overrides) {
     const ci = merged.findIndex((m) => m.key === 'consumables');
     if (ci !== -1) {
       const pct = Number(priceBook.consumablesPct) || 0;
-      const base = merged.reduce((sum, it, i) => (i === ci ? sum : sum + lineCost(it)), 0);
+      // Same fabricated-material base as consumablesItem: skip hardware/operator
+      // sets and flat-fee lines (isConsumablesBase also excludes the consumables
+      // line itself, so the explicit index guard is belt-and-suspenders).
+      const base = merged.reduce((sum, it, i) => (i === ci || !isConsumablesBase(it) ? sum : sum + lineCost(it)), 0);
       merged[ci] = { ...merged[ci], rate: round2(base * pct / 100) };
     }
   }

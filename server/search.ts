@@ -1,5 +1,5 @@
 import type { Express, Request } from "express";
-import { and, isNull, like, or, sql } from "drizzle-orm";
+import { and, isNull, or, sql } from "drizzle-orm";
 import { db } from "./storage";
 import { requireAuth } from "./auth";
 import { items, projects } from "../shared/schema";
@@ -24,6 +24,17 @@ export interface SearchHit {
 const PER_SOURCE = 5;
 const TOTAL_CAP = 20;
 
+// Escape LIKE metacharacters (\, %, _) in a user term so they match literally
+// instead of acting as wildcards. Backslash is escaped first.
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// LIKE condition that treats the (already-escaped) pattern's metacharacters as
+// literals via `ESCAPE '\'`. Drop-in for drizzle's `like`, which has no
+// ESCAPE support. `col` may be a column or a raw sql expression.
+const likeEsc = (col: any, pattern: string) => sql`${col} LIKE ${pattern} ESCAPE '\\'`;
+
 function elevated(req: Request): boolean {
   const role = req.user?.role;
   return role === "manager" || role === "technician";
@@ -33,7 +44,7 @@ export function registerSearchRoutes(app: Express): void {
   app.get("/api/search", requireAuth, (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     if (q.length < 2) return res.json({ results: [] });
-    const p = `%${q}%`;
+    const p = `%${escapeLike(q)}%`;
     const hits: SearchHit[] = [];
     const isElev = elevated(req);
 
@@ -50,7 +61,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: items.id, name: items.name, partNumber: items.partNumber })
         .from(items)
-        .where(and(isNull(items.deletedAt), or(like(items.name, p), like(items.partNumber, p))))
+        .where(and(isNull(items.deletedAt), or(likeEsc(items.name, p), likeEsc(items.partNumber, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Items", label: r.name, sublabel: r.partNumber, href: `/item/${r.id}` });
       }
@@ -59,7 +70,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: projects.id, name: projects.name, jobNumber: projects.jobNumber, customer: projects.customer })
         .from(projects)
-        .where(and(isNull(projects.deletedAt), or(like(projects.name, p), like(projects.jobNumber, p), like(projects.customer, p))))
+        .where(and(isNull(projects.deletedAt), or(likeEsc(projects.name, p), likeEsc(projects.jobNumber, p), likeEsc(projects.customer, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Projects", label: r.name, sublabel: r.jobNumber, href: `/project/${r.id}` });
       }
@@ -68,7 +79,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: clients.id, name: clients.name, company: clients.company })
         .from(clients)
-        .where(and(isNull(clients.deletedAt), or(like(clients.name, p), like(clients.company, p))))
+        .where(and(isNull(clients.deletedAt), or(likeEsc(clients.name, p), likeEsc(clients.company, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Clients", label: r.name, sublabel: r.company, href: "/crm/clients" });
       }
@@ -77,7 +88,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: leads.id, name: leads.name, service: leads.serviceRequested })
         .from(leads)
-        .where(and(isNull(leads.deletedAt), or(like(leads.name, p), like(leads.serviceRequested, p))))
+        .where(and(isNull(leads.deletedAt), or(likeEsc(leads.name, p), likeEsc(leads.serviceRequested, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Leads", label: r.name, sublabel: r.service, href: "/crm/leads" });
       }
@@ -86,7 +97,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: deals.id, title: deals.title })
         .from(deals)
-        .where(and(isNull(deals.deletedAt), like(deals.title, p)))
+        .where(and(isNull(deals.deletedAt), likeEsc(deals.title, p)))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Deals", label: r.title, href: "/crm/deals" });
       }
@@ -95,7 +106,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: products.id, name: products.name, sku: products.sku })
         .from(products)
-        .where(and(isNull(products.deletedAt), or(like(products.name, p), like(products.sku, p))))
+        .where(and(isNull(products.deletedAt), or(likeEsc(products.name, p), likeEsc(products.sku, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Products", label: r.name, sublabel: r.sku, href: "/crm/products" });
       }
@@ -104,7 +115,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: estimates.id, number: estimates.number, title: estimates.title })
         .from(estimates)
-        .where(and(isNull(estimates.deletedAt), or(like(estimates.number, p), like(estimates.title, p))))
+        .where(and(isNull(estimates.deletedAt), or(likeEsc(estimates.number, p), likeEsc(estimates.title, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Estimates", label: r.number, sublabel: r.title, href: "/crm/estimates" });
       }
@@ -113,7 +124,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: pmTasks.id, title: pmTasks.title })
         .from(pmTasks)
-        .where(and(isNull(pmTasks.deletedAt), like(pmTasks.title, p)))
+        .where(and(isNull(pmTasks.deletedAt), likeEsc(pmTasks.title, p)))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Tasks", label: r.title, href: "/pm/board" });
       }
@@ -122,7 +133,7 @@ export function registerSearchRoutes(app: Express): void {
     source(() => {
       for (const r of db.select({ id: kbArticles.id, title: kbArticles.title, category: kbArticles.category })
         .from(kbArticles)
-        .where(and(isNull(kbArticles.deletedAt), like(kbArticles.title, p)))
+        .where(and(isNull(kbArticles.deletedAt), likeEsc(kbArticles.title, p)))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Knowledge Base", label: r.title, sublabel: r.category, href: "/pm/kb" });
       }
@@ -132,7 +143,7 @@ export function registerSearchRoutes(app: Express): void {
       source(() => {
         for (const r of db.select({ id: invoices.id, number: invoices.number, clientName: invoices.clientName })
           .from(invoices)
-          .where(and(isNull(invoices.deletedAt), or(like(invoices.number, p), like(invoices.clientName, p))))
+          .where(and(isNull(invoices.deletedAt), or(likeEsc(invoices.number, p), likeEsc(invoices.clientName, p))))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Invoices", label: r.number, sublabel: r.clientName, href: "/finance/invoices" });
         }
@@ -141,7 +152,7 @@ export function registerSearchRoutes(app: Express): void {
       source(() => {
         for (const r of db.select({ id: purchaseOrders.id, number: purchaseOrders.number, vendor: purchaseOrders.vendor })
           .from(purchaseOrders)
-          .where(and(isNull(purchaseOrders.deletedAt), or(like(purchaseOrders.number, p), like(purchaseOrders.vendor, p))))
+          .where(and(isNull(purchaseOrders.deletedAt), or(likeEsc(purchaseOrders.number, p), likeEsc(purchaseOrders.vendor, p))))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Purchase Orders", label: r.number, sublabel: r.vendor, href: "/finance/purchase-orders" });
         }
@@ -156,7 +167,7 @@ export function registerSearchRoutes(app: Express): void {
           .from(employees)
           .where(and(
             isNull(employees.deletedAt),
-            like(sql`${employees.firstName} || ' ' || ${employees.lastName}`, p),
+            likeEsc(sql`${employees.firstName} || ' ' || ${employees.lastName}`, p),
           ))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Employees", label: r.name, sublabel: r.title, href: "/hr/employees" });
@@ -166,7 +177,7 @@ export function registerSearchRoutes(app: Express): void {
       source(() => {
         for (const r of db.select({ id: candidates.id, name: candidates.name })
           .from(candidates)
-          .where(like(candidates.name, p))
+          .where(likeEsc(candidates.name, p))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Candidates", label: r.name, href: "/hr/recruitment" });
         }
@@ -175,7 +186,7 @@ export function registerSearchRoutes(app: Express): void {
       source(() => {
         for (const r of db.select({ id: campaigns.id, name: campaigns.name })
           .from(campaigns)
-          .where(and(isNull(campaigns.deletedAt), like(campaigns.name, p)))
+          .where(and(isNull(campaigns.deletedAt), likeEsc(campaigns.name, p)))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Campaigns", label: r.name, href: "/marketing" });
         }

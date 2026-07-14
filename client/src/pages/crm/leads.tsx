@@ -63,6 +63,9 @@ function invalidateLeads(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["crm-leads"] });
   qc.invalidateQueries({ queryKey: ["crm-stats"] });
   qc.invalidateQueries({ queryKey: ["crm-reports"] });
+  // Winning/converting a lead feeds the marketing overview/attribution — prefix
+  // match keeps those tabs fresh instead of showing stale numbers.
+  qc.invalidateQueries({ queryKey: ["marketing"] });
 }
 
 // ─── New lead dialog ──────────────────────────────────────────────────────────
@@ -111,7 +114,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
     onSuccess: () => {
       invalidateLeads(qc);
       toast({ variant: "success", title: "Lead created" });
-      setName(""); setPhone(""); setEmail(""); setCampaignId("");
+      setName(""); setPhone(""); setEmail(""); setSource("website"); setCampaignId("");
       setServiceRequested(""); setServiceArea(""); setEstimatedValue(""); setNotes("");
       onClose();
     },
@@ -310,22 +313,27 @@ function LeadDetailModal({
   });
 
   const save = useMutation({
-    mutationFn: async () =>
-      (
+    mutationFn: async () => {
+      // Moving out of won/lost — clear the now-stale close fields so reports
+      // don't keep counting an old reason/revenue.
+      const clearsClose = stage !== "won" && stage !== "lost";
+      return (
         await apiRequest("PATCH", `/api/crm/leads/${lead.id}`, {
           name: name.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,
           source,
           stage,
-          winLossReason: winLossReason || undefined,
+          winLossReason: clearsClose ? null : winLossReason || undefined,
           serviceRequested: serviceRequested.trim() || null,
           serviceArea: serviceArea.trim() || null,
           estimatedValueCents: parseMoney(estimatedValue),
+          ...(clearsClose && lead.stage === "won" ? { revenueClosedCents: 0 } : {}),
           ...(isElevated ? { assignedTo: assignedTo ? parseInt(assignedTo, 10) : null } : {}),
           notes: notes.trim() || null,
         })
-      ).json(),
+      ).json();
+    },
     onSuccess: () => {
       invalidateLeads(qc);
       toast({ variant: "success", title: "Lead updated" });
@@ -389,6 +397,10 @@ function LeadDetailModal({
             e.preventDefault();
             if (!name.trim()) {
               toast({ variant: "destructive", title: "Name is required" });
+              return;
+            }
+            if ((stage === "won" || stage === "lost") && !winLossReason) {
+              toast({ variant: "destructive", title: "A reason is required" });
               return;
             }
             save.mutate();
@@ -606,8 +618,19 @@ export default function LeadsPage() {
     id == null ? "—" : users.find((u) => u.id === id)?.name ?? `#${id}`;
 
   const patchStage = useMutation({
-    mutationFn: async ({ id, stage: next }: { id: number; stage: LeadStage }) =>
-      (await apiRequest("PATCH", `/api/crm/leads/${id}`, { stage: next })).json(),
+    mutationFn: async ({ id, stage: next }: { id: number; stage: LeadStage }) => {
+      const prev = leads.find((l) => l.id === id)?.stage;
+      // Dragging out of won/lost must clear the stale reason (and closed
+      // revenue when it was won) so those columns don't keep old values.
+      const clearsClose = next !== "won" && next !== "lost";
+      return (
+        await apiRequest("PATCH", `/api/crm/leads/${id}`, {
+          stage: next,
+          ...(clearsClose ? { winLossReason: null } : {}),
+          ...(clearsClose && prev === "won" ? { revenueClosedCents: 0 } : {}),
+        })
+      ).json();
+    },
     onSuccess: () => invalidateLeads(qc),
     onError: (e: any) =>
       toast({ variant: "destructive", title: "Could not move lead", description: e?.message }),

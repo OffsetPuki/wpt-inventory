@@ -4,7 +4,7 @@ import {
 } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
-import { requireAuth } from "./auth";
+import { requireAuth, requireElevated } from "./auth";
 import {
   clients, leads, deals, products, estimates, crmActivities,
   insertClientSchema, insertLeadSchema, insertDealSchema,
@@ -272,10 +272,16 @@ function bumpLeadForQuote(leadId: number, now: number): void {
 // phone (same rule as public-api's findRecentDuplicate), falling back to the
 // linked web design's contact when the builder's customer card is empty.
 // Deferred + try/catch: quote flows must never fail over a CRM nicety.
-// Last 10 digits so "+1 (817) 555-0123" from browser autofill matches
-// "817-555-0123" typed in the builder months later.
-const contactDigits = (s: string | null | undefined): string =>
-  (s ?? "").replace(/\D/g, "").slice(-10);
+// Normalize North American numbers so "+1 (817) 555-0123" from browser
+// autofill matches "817-555-0123" typed in the builder months later: strip
+// non-digits, then drop a leading country-code "1" from an 11-digit number so
+// both forms collapse to the same 10 digits. Everything else keeps its FULL
+// digits — a blind last-10 slice would let an 11-digit +44 number collide with
+// a 10-digit US number, so we compare full normalized digits instead.
+const contactDigits = (s: string | null | undefined): string => {
+  const d = (s ?? "").replace(/\D/g, "");
+  return d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+};
 
 export interface QuoteContactInfo {
   name?: string | null;
@@ -330,6 +336,58 @@ export function findOrCreateClientByContact(info: QuoteContactInfo): number | nu
     notes: "Auto-created from a quote (wiring plan, Fix 3)",
   }).returning().get();
   return row.id;
+}
+
+// Shared "quote accepted → win the linked lead" side effect. Idempotent per
+// quote number (fix 2): a second accept of the SAME quote for this lead (a
+// portal double-click, or an estimate re-PATCHed to accepted) neither
+// double-counts revenue nor logs a duplicate activity — it detects the prior
+// acceptance activity and returns. Used by onQuoteEvent("accepted") and the
+// estimate PATCH→accepted path (fix 4).
+function winLeadForAcceptedQuote(
+  lead: Lead,
+  quoteNumber: string,
+  addCents: number,
+  now: number,
+): void {
+  // Already recorded this quote's acceptance on this lead → nothing to do.
+  const already = db.select({ id: crmActivities.id }).from(crmActivities)
+    .where(and(
+      eq(crmActivities.entityType, "lead"),
+      eq(crmActivities.entityId, lead.id),
+      like(crmActivities.notes, `Accepted quote ${quoteNumber} on cjmmetals.com%`),
+    ))
+    .get();
+  if (already) return;
+
+  if (lead.stage !== "won") {
+    // First win — a lost lead flips too (the customer just said yes). Same
+    // fallback chain as a manual win: a $0 display total (quote saved before
+    // pricing) must not clobber known value.
+    db.update(leads).set({
+      stage: "won",
+      winLossReason: "good_fit",
+      lastContactAt: now,
+      stale: false,
+      revenueClosedCents: addCents || lead.revenueClosedCents || lead.estimatedValueCents || 0,
+    }).where(eq(leads.id, lead.id)).run();
+    maybeCreateReviewTask(lead, now);
+  } else {
+    // Repeat business — the lead stays won; ADD the new job's revenue so the
+    // closed-revenue KPI agrees with the monthly chart, and refresh the stamp.
+    db.update(leads).set({
+      lastContactAt: now,
+      stale: false,
+      revenueClosedCents: (lead.revenueClosedCents || 0) + addCents,
+    }).where(eq(leads.id, lead.id)).run();
+  }
+  db.insert(crmActivities).values({
+    entityType: "lead",
+    entityId: lead.id,
+    kind: "note",
+    notes: `Accepted quote ${quoteNumber} on cjmmetals.com`
+      + (addCents ? ` — $${(addCents / 100).toFixed(2)}` : ""),
+  }).run();
 }
 
 export function onQuoteEvent(
@@ -403,39 +461,11 @@ export function onQuoteEvent(
           db.update(leads).set({ clientId: cid }).where(eq(leads.id, lead.id)).run();
         }
       }
-      // Accepted → the lead is won. A lost lead flips too — the customer
-      // literally just came back and said yes (any stale loss reason is
-      // overwritten; the manual close path always records a reason, so this
-      // one does too).
-      const addCents = info.totalCents || 0;
-      if (lead.stage !== "won") {
-        db.update(leads).set({
-          stage: "won",
-          winLossReason: "good_fit",
-          lastContactAt: now,
-          stale: false,
-          // Same fallback chain as a manual win: a $0 display total (quote
-          // saved before pricing) must not clobber known value.
-          revenueClosedCents: addCents || lead.revenueClosedCents || lead.estimatedValueCents || 0,
-        }).where(eq(leads.id, lead.id)).run();
-        maybeCreateReviewTask(lead, now);
-      } else {
-        // Repeat business — the lead stays won; ADD the new job's revenue so
-        // the closed-revenue KPI agrees with the monthly chart, and refresh
-        // the contact stamp.
-        db.update(leads).set({
-          lastContactAt: now,
-          stale: false,
-          revenueClosedCents: (lead.revenueClosedCents || 0) + addCents,
-        }).where(eq(leads.id, lead.id)).run();
-      }
-      db.insert(crmActivities).values({
-        entityType: "lead",
-        entityId: lead.id,
-        kind: "note",
-        notes: `Accepted quote ${info.quoteNumber} on cjmmetals.com`
-          + (info.totalCents ? ` — $${(info.totalCents / 100).toFixed(2)}` : ""),
-      }).run();
+      // Accepted → win the lead (a lost lead flips too — the customer just
+      // came back and said yes; any stale loss reason is overwritten).
+      // Idempotent per quote (fix 2): a double accept of the same quote can't
+      // double-count revenue or duplicate the acceptance activity.
+      winLeadForAcceptedQuote(lead, info.quoteNumber, info.totalCents || 0, now);
     } catch (e) {
       console.error("[crm] quote lifecycle hook failed", e);
     }
@@ -534,16 +564,18 @@ export function registerCrmRoutes(app: Express): void {
       ? closed.won / (closed.won + closed.lost)
       : null;
 
-    // APPROXIMATION: the schema has no closedAt on leads, so "won in the last
-    // 30 days" is proxied by lastContactAt — every stage change (including
-    // → won) stamps lastContactAt, so this is right unless a lead is touched
-    // again after winning. Good enough for a dashboard tile.
+    // APPROXIMATION: the schema has no closedAt/wonAt on leads, and
+    // lastContactAt is reset by any later touch — so a lead touched again
+    // months after winning would wrongly re-enter a lastContactAt window.
+    // Proxy "won in the last 30 days" by the lead having an ACCEPTED estimate
+    // whose decidedAt falls in the window — the same honest money-date the
+    // monthly-revenue report groups by. Good enough for a dashboard tile.
     const revenueClosed30dCents = db.select({ v: sql<number>`coalesce(sum(${leads.revenueClosedCents}), 0)` })
       .from(leads)
       .where(and(
         isNull(leads.deletedAt),
         eq(leads.stage, "won"),
-        gte(leads.lastContactAt, monthAgoMs),
+        sql`EXISTS (SELECT 1 FROM crm_estimates e WHERE e.lead_id = ${leads.id} AND e.status = 'accepted' AND e.deleted_at IS NULL AND e.decided_at >= ${monthAgoMs})`,
       ))
       .get()?.v ?? 0;
 
@@ -819,7 +851,7 @@ export function registerCrmRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/crm/leads/:id", requireAuth, (req, res) => {
+  app.delete("/api/crm/leads/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(leads)
       .where(and(eq(leads.id, id), isNull(leads.deletedAt)))
@@ -927,7 +959,7 @@ export function registerCrmRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/crm/clients/:id", requireAuth, (req, res) => {
+  app.delete("/api/crm/clients/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(clients)
       .where(and(eq(clients.id, id), isNull(clients.deletedAt)))
@@ -1014,7 +1046,7 @@ export function registerCrmRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/crm/deals/:id", requireAuth, (req, res) => {
+  app.delete("/api/crm/deals/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(deals)
       .where(and(eq(deals.id, id), isNull(deals.deletedAt)))
@@ -1088,7 +1120,7 @@ export function registerCrmRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/crm/products/:id", requireAuth, (req, res) => {
+  app.delete("/api/crm/products/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(products)
       .where(and(eq(products.id, id), isNull(products.deletedAt)))
@@ -1210,6 +1242,16 @@ export function registerCrmRoutes(app: Express): void {
 
       if (statusChanged) {
         if (row.status === "sent" && row.leadId != null) bumpLeadForQuote(row.leadId, now);
+        // Fix 4: accepting an estimate wins its linked lead and records the
+        // revenue — the same side effect as onQuoteEvent("accepted"), and
+        // idempotent per estimate number so a re-accept can't double-count.
+        // decidedAt is already stamped above.
+        if (row.status === "accepted" && row.leadId != null) {
+          const lead = db.select().from(leads)
+            .where(and(eq(leads.id, row.leadId), isNull(leads.deletedAt)))
+            .get();
+          if (lead) winLeadForAcceptedQuote(lead, row.number, row.totalCents || 0, now);
+        }
         audit(req, "crm.estimate_status", {
           targetType: "estimate", targetId: row.id, targetName: row.number,
           details: { from: existing.status, to: row.status, totalCents: row.totalCents },
@@ -1221,7 +1263,7 @@ export function registerCrmRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/crm/estimates/:id", requireAuth, (req, res) => {
+  app.delete("/api/crm/estimates/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(estimates)
       .where(and(eq(estimates.id, id), isNull(estimates.deletedAt)))

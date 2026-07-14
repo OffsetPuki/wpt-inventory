@@ -82,6 +82,7 @@ function migrateSession(sess, priceBook) {
     ...sess,
     materialMarkupPct: sess.materialMarkupPct ?? legacy ?? priceBook.materialMarkupPct,
     laborMarkupPct: sess.laborMarkupPct ?? legacy ?? priceBook.laborMarkupPct,
+    taxPct: sess.taxPct ?? priceBook.taxPct,
     deliveryMiles: sess.deliveryMiles ?? 0,
     deliveryPerMile: sess.deliveryPerMile ?? priceBook.deliveryPerMile,
     discountPct: sess.discountPct ?? 0,

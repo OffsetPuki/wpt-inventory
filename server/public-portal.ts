@@ -374,10 +374,25 @@ export function registerPublicPortalRoutes(app: Express): void {
         ).get(`%${quote.number}%`, `%${quote.number}%`);
         if (dupe) return;
 
+        // quote.totalCents is TAX-INCLUSIVE (the builder prices sales tax into
+        // the total). Split it back into a pre-tax subtotal + tax so the draft
+        // invoice doesn't record the tax-inclusive figure as its pre-tax
+        // subtotal (which would double-tax downstream). The quote's tax rate
+        // lives in its builder session payload as taxPct (a percent) — the same
+        // field the shared quote page reads; no positive rate ⇒ no tax line.
+        const quoteTaxPct = Number(parseJson<{ taxPct?: unknown }>(quote.payload, {}).taxPct);
+        const taxRate = Number.isFinite(quoteTaxPct) && quoteTaxPct > 0 ? quoteTaxPct / 100 : 0;
+        const subtotalCents = Math.round(quote.totalCents / (1 + taxRate));
+        const taxCents = quote.totalCents - subtotalCents;
+        const taxRateBp = Math.round(taxRate * 10000);
+
+        // Line item priced PRE-TAX so sum(items) == subtotalCents: finance's
+        // computeTotals re-derives subtotal from items and re-applies taxRateBp
+        // on any later edit, so a tax-inclusive line item here would double-tax.
         const items = JSON.stringify([{
           description: `Quote ${quote.number} — ${QUOTE_TYPE_LABELS[quote.type]} (accepted online)`,
           qty: 1,
-          unitPriceCents: quote.totalCents,
+          unitPriceCents: subtotalCents,
         }]);
         // ponytail: finance.ts's insertNumbered isn't exported — same
         // MAX(id)+1, retry-on-UNIQUE numbering inlined; export the helper if
@@ -395,7 +410,9 @@ export function registerPublicPortalRoutes(app: Express): void {
               status: "draft",
               projectId,
               items,
-              subtotalCents: quote.totalCents,
+              subtotalCents,
+              taxRateBp,
+              taxCents,
               totalCents: quote.totalCents,
               notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
             }).run();

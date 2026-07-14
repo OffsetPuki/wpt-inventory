@@ -177,7 +177,10 @@ function monthKey(d: Date): string {
 function computeTotals(itemsJson: string, taxRateBp: number) {
   const items = lineItemsSchema.parse(parseLineItems(itemsJson));
   const subtotalCents = lineItemsTotalCents(items);
-  const taxCents = Math.round((subtotalCents * taxRateBp) / 10000);
+  // Tax rate can't go below zero — a negative rate would refund tax against the
+  // subtotal. Clamp as a backstop even though the schema also rejects it now.
+  const bp = Math.max(0, taxRateBp);
+  const taxCents = Math.round((subtotalCents * bp) / 10000);
   return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents };
 }
 
@@ -486,12 +489,16 @@ export function registerFinanceRoutes(app: Express): void {
     // to when it was recorded (createdAt) for rows entered without a date.
     const paidThisMonthCents = db.select({
       v: sql<number>`COALESCE(SUM(${invoicePayments.amountCents}), 0)`,
-    }).from(invoicePayments).where(or(
-      sql`${invoicePayments.paidAt} LIKE ${monthPrefix + "%"}`,
-      and(
-        isNull(invoicePayments.paidAt),
-        sql`${invoicePayments.createdAt} >= ${monthStartMs}`
-      )
+    }).from(invoicePayments).where(and(
+      or(
+        sql`${invoicePayments.paidAt} LIKE ${monthPrefix + "%"}`,
+        and(
+          isNull(invoicePayments.paidAt),
+          sql`${invoicePayments.createdAt} >= ${monthStartMs}`
+        )
+      ),
+      // Payments against VOIDED invoices are not income — exclude them.
+      sql`${invoicePayments.invoiceId} NOT IN (SELECT ${invoices.id} FROM ${invoices} WHERE ${invoices.status} = 'void')`
     )).get()?.v ?? 0;
 
     const expensesThisMonthCents = db.select({
@@ -538,6 +545,7 @@ export function registerFinanceRoutes(app: Express): void {
 
     const paymentsAll = db.select().from(invoicePayments).all();
     const invoicesAll = db.select().from(invoices).all();
+    const invoiceById = new Map(invoicesAll.map((i) => [i.id, i]));
     const expenseRows = db.select().from(expenses)
       .where(and(isNull(expenses.deletedAt), sql`${expenses.date} >= ${windowStart}`))
       .all();
@@ -549,6 +557,8 @@ export function registerFinanceRoutes(app: Express): void {
     const income = new Map<string, number>(months.map((m) => [m, 0]));
     const expense = new Map<string, number>(months.map((m) => [m, 0]));
     for (const p of paymentsAll) {
+      // Payments against voided invoices aren't income.
+      if (invoiceById.get(p.invoiceId)?.status === "void") continue;
       const m = paymentMonth(p);
       if (monthSet.has(m)) income.set(m, (income.get(m) ?? 0) + p.amountCents);
     }
@@ -592,12 +602,13 @@ export function registerFinanceRoutes(app: Express): void {
 
     // Top clients by payments received via their invoices (same 12-month
     // window as the rest of the report).
-    const invoiceById = new Map(invoicesAll.map((i) => [i.id, i]));
     const clientNames = allClientNames();
     const revenueByClient = new Map<string, number>();
     for (const p of paymentsAll) {
       if (!monthSet.has(paymentMonth(p))) continue;
       const inv = invoiceById.get(p.invoiceId);
+      // Payments against voided invoices aren't revenue.
+      if (inv?.status === "void") continue;
       const label =
         inv?.clientName ??
         (inv?.clientId != null ? clientNames.get(inv.clientId) : undefined) ??
@@ -748,6 +759,12 @@ export function registerFinanceRoutes(app: Express): void {
       } catch (e: any) {
         return res.status(400).json({ message: e.message });
       }
+      // Fix 4 (bug): editing the line items can drop pulled labor/expense lines.
+      // Release this invoice's billed-on stamps so any source entries no longer
+      // represented become collectible again (collectUnbilled keys off
+      // invoice_id IS NULL). Only reachable pre-payment — the lock above already
+      // rejected edits once money has been recorded.
+      if (body.items !== undefined) releaseBilledItems(inv.id);
     }
     // Linking a different CRM client re-snapshots the display name the same
     // way POST does; unlinking (clientId: null) keeps the old snapshot so the
@@ -812,7 +829,10 @@ export function registerFinanceRoutes(app: Express): void {
       .get();
     // Auto-status from the running paid total: covered → paid, anything → partial.
     const paidCents = inv.paidCents + body.amountCents;
-    const status: InvoiceStatus = paidCents >= inv.totalCents ? "paid" : "partial";
+    // A $0-total invoice must not auto-settle to "paid" (mirrors the reversal
+    // path's `&& inv.totalCents > 0` guard below).
+    const status: InvoiceStatus =
+      paidCents >= inv.totalCents && inv.totalCents > 0 ? "paid" : "partial";
     const updated = db.update(invoices)
       .set({ paidCents, status })
       .where(eq(invoices.id, inv.id))
@@ -939,11 +959,16 @@ export function registerFinanceRoutes(app: Express): void {
       ...time.map((g) => {
         const hours = Math.round((g.minutes / 60) * 100) / 100;
         const rateCents = withMarkup(g.payRateCents, laborMarkupBp);
+        // Bill the EXACT amount the /unbilled preview shows: markup applied to
+        // the rounded labor cost. Rounding hours→2dp then ×rate drifts from the
+        // preview, so charge the computed cents as a single line unit and keep
+        // the hours/rate only in the human-readable description.
+        const amountCents = withMarkup(Math.round((g.minutes / 60) * g.payRateCents), laborMarkupBp);
         return {
           description: `Labor — ${g.userName} (${hours} hr @ $${(rateCents / 100).toFixed(2)}/hr)`,
-          qty: hours,
+          qty: 1,
           unit: "hour",
-          unitPriceCents: rateCents,
+          unitPriceCents: amountCents,
         };
       }),
       ...exps.map((e) => ({

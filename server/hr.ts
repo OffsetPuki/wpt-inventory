@@ -246,7 +246,7 @@ function postPayrollExpense(req: Request, run: PayrollRun): void {
     try {
       const dupe = sqlite.prepare(
         "SELECT id FROM fin_expenses WHERE deleted_at IS NULL AND notes LIKE ?",
-      ).get(`%auto:payroll-run:${run.id}%`);
+      ).get(`%auto:payroll-run:${run.id};%`);
       if (dupe) return;
       const gross = db.select({ s: sql<number>`coalesce(sum(${payslips.grossCents}), 0)` })
         .from(payslips).where(eq(payslips.runId, run.id)).get()?.s ?? 0;
@@ -258,7 +258,7 @@ function postPayrollExpense(req: Request, run: PayrollRun): void {
         amountCents: gross,
         paymentMethod: "other",
         billable: false,
-        notes: `auto:payroll-run:${run.id} — payroll ${run.periodStart} → ${run.periodEnd}`,
+        notes: `auto:payroll-run:${run.id}; — payroll ${run.periodStart} → ${run.periodEnd}`,
       }).returning().get();
       audit(req, "hr.payroll_expense_post", {
         targetType: "expense", targetId: row.id,
@@ -706,8 +706,18 @@ export function registerHrRoutes(app: Express): void {
       if (endMs < startMs) {
         return res.status(400).json({ message: "periodEnd must be on or after periodStart" });
       }
-      // Inclusive day count: 1st..15th = 15 days. Round handles DST edges.
-      const periodDays = Math.round((dayStartMs(body.periodEnd) - startMs) / MS_PER_DAY) + 1;
+      // Reject overlapping periods: two runs covering the same dates would
+      // double-count hours and post two labor expenses. Dates are
+      // "YYYY-MM-DD", so a lexicographic compare == chronological compare;
+      // ranges overlap when each start is on/before the other's end.
+      const overlap = db.select({ id: payrollRuns.id }).from(payrollRuns)
+        .where(and(
+          lte(payrollRuns.periodStart, body.periodEnd),
+          gte(payrollRuns.periodEnd, body.periodStart),
+        )).get();
+      if (overlap) {
+        return res.status(409).json({ message: "A payroll run already covers part of this period — periods may not overlap" });
+      }
 
       const result = db.transaction((tx) => {
         const run = tx.insert(payrollRuns).values({
@@ -726,21 +736,38 @@ export function registerHrRoutes(app: Express): void {
           let grossCents = 0;
           if (emp.payType === "hourly") {
             // Only CLOSED shifts count (an open shift has no duration yet);
-            // a shift belongs to the period its clock-in falls into, so a
-            // shift spanning midnight on period-end isn't double-counted by
-            // the next run.
+            // a shift is billed to the period its clock-OUT falls into. That
+            // way a shift left open when an earlier run generated isn't lost:
+            // it's captured by the run covering its clock-out, and counted
+            // exactly once (never by two adjacent periods).
             const shifts = tx.select().from(attendance).where(and(
               eq(attendance.employeeId, emp.id),
               isNotNull(attendance.clockOut),
-              gte(attendance.clockIn, startMs),
-              lte(attendance.clockIn, endMs),
+              gte(attendance.clockOut, startMs),
+              lte(attendance.clockOut, endMs),
             )).all();
             const hours = shifts.reduce((s, r) => s + (r.clockOut! - r.clockIn) / MS_PER_HOUR, 0);
             hoursWorked = Math.round(hours * 100) / 100;
             grossCents = Math.round(hoursWorked * emp.payRateCents);
           } else {
-            // Salary is cents/year — pro-rate by calendar days in the period.
-            grossCents = Math.round((emp.payRateCents * periodDays) / 365);
+            // Salary is cents/year — pro-rate by the calendar days the
+            // employee was actually active in the period, clamping the day
+            // range to their [hireDate .. endDate] window. Missing hireDate
+            // ⇒ active from the period start; missing endDate ⇒ active
+            // through the period end (this reproduces the full-period default).
+            let activeStartMs = startMs;
+            let activeEndMs = dayStartMs(body.periodEnd);
+            if (emp.hireDate && DATE_RE.test(emp.hireDate)) {
+              activeStartMs = Math.max(activeStartMs, dayStartMs(emp.hireDate));
+            }
+            if (emp.endDate && DATE_RE.test(emp.endDate)) {
+              activeEndMs = Math.min(activeEndMs, dayStartMs(emp.endDate));
+            }
+            // Inclusive day count: 1st..15th = 15 days. Round handles DST edges.
+            const activeDays = activeEndMs >= activeStartMs
+              ? Math.round((activeEndMs - activeStartMs) / MS_PER_DAY) + 1
+              : 0;
+            grossCents = Math.round((emp.payRateCents * activeDays) / 365);
           }
           return tx.insert(payslips).values({
             runId: run.id,

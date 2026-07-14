@@ -2,6 +2,7 @@ import type { Express } from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import { timingSafeEqual } from "crypto";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
@@ -214,9 +215,18 @@ export function webDesignRowToLead(d: any) {
 // X-Lead-Key header. Those calls funnel every visitor through one egress IP,
 // so per-IP limits would hand the whole site a single hourly bucket — keyed
 // requests skip the public limiters instead (the site throttles per visitor).
+// Constant-time secret compare so an attacker can't recover LEAD_INTAKE_KEY
+// byte-by-byte from response timing. Length is compared first (timingSafeEqual
+// throws on unequal-length buffers), which leaks only the key's length.
+function safeKeyEqual(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const ba = Buffer.from(a), bb = Buffer.from(b);
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
 export function hasLeadKey(req: import("express").Request): boolean {
   const configured = process.env.LEAD_INTAKE_KEY;
-  return !!configured && req.headers["x-lead-key"] === configured;
+  return safeKeyEqual(req.headers["x-lead-key"] as string | undefined, configured);
 }
 
 // 30 submissions per IP per hour — far above any legitimate visitor, low
@@ -227,6 +237,7 @@ const intakeLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: hasLeadKey,
   message: { message: "Too many submissions — try again later." },
 });
 
@@ -239,7 +250,7 @@ export function registerPublicRoutes(app: Express): void {
     if (!configured) {
       return res.status(503).json({ message: "Lead intake not configured (LEAD_INTAKE_KEY unset)" });
     }
-    if (req.headers["x-lead-key"] !== configured) {
+    if (!safeKeyEqual(req.headers["x-lead-key"] as string | undefined, configured)) {
       return res.status(401).json({ message: "Bad intake key" });
     }
 
@@ -417,6 +428,7 @@ export function registerPublicRoutes(app: Express): void {
     max: 120, // the owner clicking around the Find design screen, not a feed
     standardHeaders: true,
     legacyHeaders: false,
+    skip: hasLeadKey,
     message: { ok: false, error: "rate limited" },
   });
 
@@ -430,10 +442,9 @@ export function registerPublicRoutes(app: Express): void {
     // Apps Script before it) already speaks. Query strings land in proxy and
     // access logs, though, so an X-Lead-Key header is accepted too — callers
     // can move off the query param without a protocol break.
-    // ponytail: query-param key kept for Quote App compat; retire it when the
-    // app ships a header-sending release.
+    // TODO: drop req.query.key fallback once the website sends X-Lead-Key (avoids secret in access logs)
     const provided = req.headers["x-lead-key"] ?? req.query.key;
-    if (!configured || provided !== configured) {
+    if (!safeKeyEqual(provided as string | undefined, configured)) {
       return res.json({ ok: false, error: "bad key" });
     }
 

@@ -42,5 +42,5 @@ export function useToast() {
       listeners.delete(setState);
     };
   }, []);
-  return { toasts: state, toast, dismiss: dismissToast };
+  return { toasts: state };
 }

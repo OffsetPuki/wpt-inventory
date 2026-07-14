@@ -307,8 +307,20 @@ export function registerRoutes(app: Express): void {
   });
 
   app.patch("/api/items/:id", requireAuth, (req, res) => {
-    const item = storage.updateItem(pid(req.params.id), req.body);
+    const body = { ...req.body };
+    // Only technicians may set stock levels, the low-stock threshold and the
+    // reserved quantity — mirror the create handler so a worker can't quietly
+    // overwrite these with no audit trail.
+    if (req.user?.role !== "technician") {
+      delete body.quantity;
+      delete body.lowStockThreshold;
+      delete body.quantityReserved;
+    }
+    const item = storage.updateItem(pid(req.params.id), body);
     if (!item) return res.status(404).json({ message: "Item not found" });
+    audit(req, "item.update", {
+      targetType: "item", targetId: item.id, targetName: item.name,
+    });
     res.json(item);
   });
 
@@ -491,7 +503,7 @@ export function registerRoutes(app: Express): void {
 
   // ─── Equipment Presets ──────────────────────────────────────────────────
 
-  app.get("/api/equipment-presets", (_req, res) => {
+  app.get("/api/equipment-presets", requireAuth, (_req, res) => {
     res.json(storage.getPresets());
   });
 
@@ -517,7 +529,7 @@ export function registerRoutes(app: Express): void {
 
   // ─── Job Templates ─────────────────────────────────────────────────────
 
-  app.get("/api/job-templates", (_req, res) => {
+  app.get("/api/job-templates", requireAuth, (_req, res) => {
     res.json(storage.getTemplates());
   });
 
@@ -654,12 +666,12 @@ export function registerRoutes(app: Express): void {
 
   // ─── Map Layouts ───────────────────────────────────────────────────────
 
-  app.get("/api/map-layouts", (_req, res) => {
+  app.get("/api/map-layouts", requireAuth, (_req, res) => {
     res.json(storage.getMapLayouts());
   });
 
-  app.get("/api/map-layouts/:key", (_req, res) => {
-    const layout = storage.getMapLayoutByKey(_req.params.key);
+  app.get("/api/map-layouts/:key", requireAuth, (_req, res) => {
+    const layout = storage.getMapLayoutByKey(_req.params.key as string);
     if (!layout) return res.status(404).json({ message: "Layout not found" });
     res.json(layout);
   });

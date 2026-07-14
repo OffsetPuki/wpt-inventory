@@ -28,7 +28,7 @@ interface CrmReports {
 }
 
 interface MarketingStats {
-  cplCents30d: number | null;
+  cplCents: number | null;
   overdueTasks: number;
   alerts: string[];
 }
@@ -358,7 +358,7 @@ export default function DashboardPage() {
         />
         <StatCard
           label="Cost per lead (30d)"
-          value={mk.data && (mk.data.cplCents30d == null ? "—" : formatMoney(mk.data.cplCents30d))}
+          value={mk.data && (mk.data.cplCents == null ? "—" : formatMoney(mk.data.cplCents))}
           href="/marketing"
         />
         <StatCard

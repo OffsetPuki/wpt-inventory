@@ -125,10 +125,10 @@ interface OverviewPayload {
     leads: number;
     quotesSent: number;
     closeRate: number | null;
-    spendCents: number;
     revenueCents: number;
     bestSource: { source: string; leads: number } | null;
   };
+  activeCampaignSpendCents: number;
   funnel: { stage: LeadStage; count: number }[];
   bySource: { source: string; leads: number; quoteSent: number; won: number; revenueCents: number }[];
   campaignPerf: {
@@ -150,7 +150,7 @@ interface OverviewPayload {
 
 interface MarketingStats {
   leadsThisWeek: number;
-  cplCents30d: number | null;
+  cplCents: number | null;
   activeCampaigns: number;
   openTasks: number;
   overdueTasks: number;
@@ -289,7 +289,7 @@ function OverviewTab() {
         <KpiCard label="Leads this week" value={w.leads} />
         <KpiCard label="Quotes sent" value={w.quotesSent} sub="last 7 days" />
         <KpiCard label="Close rate" value={formatPercent(w.closeRate, 0)} sub="this month" />
-        <KpiCard label="Spend" value={formatMoney(w.spendCents)} sub="active campaigns" />
+        <KpiCard label="Spend" value={formatMoney(data.activeCampaignSpendCents)} sub="active campaigns" />
         <KpiCard label="Revenue" value={formatMoney(w.revenueCents)} sub="this month" />
         <KpiCard
           label="Best source"

@@ -800,7 +800,7 @@ export function registerPmRoutes(app: Express): void {
     res.status(201).json(row);
   });
 
-  app.patch("/api/pm/kb/:id", requireAuth, (req, res) => {
+  app.patch("/api/pm/kb/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const existing = db.select().from(kbArticles)
       .where(and(eq(kbArticles.id, id), isNull(kbArticles.deletedAt))).get();
@@ -818,7 +818,7 @@ export function registerPmRoutes(app: Express): void {
     res.json(updated);
   });
 
-  app.delete("/api/pm/kb/:id", requireAuth, (req, res) => {
+  app.delete("/api/pm/kb/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const existing = db.select().from(kbArticles)
       .where(and(eq(kbArticles.id, id), isNull(kbArticles.deletedAt))).get();

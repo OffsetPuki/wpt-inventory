@@ -1,7 +1,8 @@
-import type { Express, Request } from "express";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import type { Express } from "express";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
 import { requireAuth, requireElevated } from "./auth";
+import { audit } from "./audit";
 import { sendOwnerMail } from "./mailer";
 import {
   campaigns, reviews, mkTasks, marketingSettings, portfolioItems,
@@ -169,35 +170,6 @@ function fmtUsd(cents: number): string {
   return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
 }
 
-// Same fire-and-forget audit pattern as routes.ts: snapshot request fields
-// synchronously (req may be recycled by the time setImmediate fires), then
-// defer the insert off the response path.
-function audit(req: Request, action: string, extras: {
-  targetType?: string | null;
-  targetId?: number | null;
-  targetName?: string | null;
-  details?: Record<string, unknown> | null;
-} = {}): void {
-  const entry = {
-    userId: req.user?.userId ?? null,
-    userName: req.user?.name ?? null,
-    role: req.user?.role ?? null,
-    action,
-    targetType: extras.targetType ?? null,
-    targetId: extras.targetId ?? null,
-    targetName: extras.targetName ?? null,
-    ip: req.ip ?? null,
-    details: extras.details ?? null,
-  };
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch (e) {
-      console.error("[audit] failed to write entry", e);
-    }
-  });
-}
-
 // Fire-and-forget task creation for on-event hooks (used here, by hr.ts and
 // routes.ts): defers the insert via setImmediate like audit(), and dedupes on
 // an open task with the same title so repeated events don't pile up copies.
@@ -296,27 +268,24 @@ export function registerMarketingRoutes(app: Express): void {
       .where(and(isNull(leads.deletedAt), sql`${leads.createdAt} >= ${weekAgo}`))
       .get()?.n ?? 0;
 
-    // "Active in the last 30 days" ≈ still active now, or has an end date
-    // inside the window. start/end dates are optional free text on campaigns,
-    // so this is the closest cheap approximation.
-    const isoCut = new Date(thirtyAgo).toISOString().slice(0, 10);
-    const spend30 = db.select({ total: sql<number>`coalesce(sum(${campaigns.spendCents}), 0)` })
+    // campaigns.spend_cents is a cumulative lifetime figure — it carries no
+    // time dimension, so there's no honest "30-day spend" to divide by 30-day
+    // leads. Report an all-time cost per lead instead: total campaign spend
+    // over the leads that spend has been attributed, both measured over all
+    // time so the numerator and denominator share the same window.
+    const campaignSpendCents = db.select({ total: sql<number>`coalesce(sum(${campaigns.spendCents}), 0)` })
       .from(campaigns)
-      .where(and(
-        isNull(campaigns.deletedAt),
-        or(
-          eq(campaigns.status, "active"),
-          sql`${campaigns.endDate} IS NOT NULL AND ${campaigns.endDate} >= ${isoCut}`,
-        ),
-      )).get()?.total ?? 0;
-    const attributedLeads30 = db.select({ n: sql<number>`count(*)` }).from(leads)
+      .where(isNull(campaigns.deletedAt))
+      .get()?.total ?? 0;
+    const attributedLeads = db.select({ n: sql<number>`count(*)` }).from(leads)
       .where(and(
         isNull(leads.deletedAt),
         isNotNull(leads.campaignId),
-        sql`${leads.createdAt} >= ${thirtyAgo}`,
       )).get()?.n ?? 0;
-    const cplCents30d = spend30 > 0 && attributedLeads30 > 0
-      ? Math.round(spend30 / attributedLeads30)
+    // All-time cost per attributed lead (lifetime spend ÷ lifetime attributed
+    // leads); null until there's both spend and at least one attributed lead.
+    const cplCents = campaignSpendCents > 0 && attributedLeads > 0
+      ? Math.round(campaignSpendCents / attributedLeads)
       : null;
 
     const activeCampaigns = db.select({ n: sql<number>`count(*)` }).from(campaigns)
@@ -347,7 +316,7 @@ export function registerMarketingRoutes(app: Express): void {
 
     res.json({
       leadsThisWeek,
-      cplCents30d,
+      cplCents,
       activeCampaigns,
       openTasks,
       overdueTasks,
@@ -405,7 +374,10 @@ export function registerMarketingRoutes(app: Express): void {
     const wonThisMonth = decided.filter((l) => l.stage === "won").length;
     const closeRate = decided.length > 0 ? wonThisMonth / decided.length : null;
 
-    const spendCents = allCampaigns
+    // Cumulative lifetime spend across currently-active campaigns. This is NOT
+    // a this-week figure — campaigns.spend_cents has no time dimension — so it
+    // is surfaced as its own clearly-named lifetime field, never inside thisWeek.
+    const activeCampaignSpendCents = allCampaigns
       .filter((c) => c.status === "active")
       .reduce((sum, c) => sum + c.spendCents, 0);
 
@@ -483,10 +455,10 @@ export function registerMarketingRoutes(app: Express): void {
         leads: leadsWk.length,
         quotesSent,
         closeRate,
-        spendCents,
         revenueCents,
         bestSource,
       },
+      activeCampaignSpendCents,
       funnel,
       bySource,
       campaignPerf,
