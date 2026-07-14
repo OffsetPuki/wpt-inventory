@@ -96,6 +96,7 @@ export const CONFIG = {
       slatSpacing: 1,
       slatCount: 0,        // 0 = auto from height + spacing; set it from the design
       slatMaterial: '4x1', // 4×1 or 4×2 rectangular tubing
+      railCount: 0,        // corrugated: 0 = auto (2 rails, 3 at 6 ft+)
       undergroundFt: 3,    // per post, added to the visible height
       bagsPerPost: 4,      // concrete bags per post
       coating: 'standard',
@@ -108,10 +109,11 @@ export const CONFIG = {
     controls: [
       { kind: 'number', name: 'totalLengthFt', label: 'Total run length', unit: 'ft', min: 4, max: 1000, step: 1 },
       {
-        kind: 'segment', name: 'type', label: 'Type', cols: 2,
+        kind: 'segment', name: 'type', label: 'Type', cols: 3,
         options: [
           { value: 'horizontal-slat', label: 'Horizontal Slat' },
           { value: 'wood-mesh', label: 'Wood + Metal Mesh' },
+          { value: 'corrugated', label: 'Corrugated Metal' },
         ],
       },
       { kind: 'range', name: 'height', label: 'Height', min: 3, max: 8, step: 1, display: ftDisplay },
@@ -134,6 +136,10 @@ export const CONFIG = {
           { value: '4x2', label: '4×2 tube' },
         ],
         visibleWhen: (s) => s.type === 'horizontal-slat',
+      },
+      {
+        kind: 'number', name: 'railCount', label: 'Support rails per section (0 = auto)', unit: '', min: 0, max: 6, step: 1,
+        visibleWhen: (s) => s.type === 'corrugated',
       },
       undergroundControl,
       bagsControl,
@@ -536,6 +542,10 @@ export function specRows(type, s) {
     if (s.type === 'wood-mesh') {
       rows.push(['Top profile', optionLabel('fence', 'style', s.style)]);
       rows.push(['Mesh / wood', `${s.meshRatio}% / ${100 - s.meshRatio}%`]);
+    }
+    if (s.type === 'corrugated') {
+      const rails = Number(s.railCount) > 0 ? `${s.railCount} per section` : 'auto (2, or 3 at 6 ft+)';
+      rows.push(['Support rails', `${rails} · 2×2 tube`]);
     }
     rows.push(['Post setting', `${s.undergroundFt ?? 3} ft underground · ${s.bagsPerPost ?? 4} bags each`]);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('fence', 'coating', s.coating)]);

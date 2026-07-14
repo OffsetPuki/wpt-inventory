@@ -59,6 +59,7 @@ const COLOR = oneOf({
 const FENCE_TYPE = oneOf({
   'horizontal-slat': ['horizontal slat', 'lineas horizontales', 'líneas horizontales'],
   'wood-mesh': ['wood + metal mesh', 'madera + malla'],
+  'corrugated': ['corrugated metal', 'corrugated', 'metal corrugado', 'corrugado'],
 });
 
 const TOOLS = {

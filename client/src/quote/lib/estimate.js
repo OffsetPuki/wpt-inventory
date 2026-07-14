@@ -218,6 +218,24 @@ function estimateFence(s, pb) {
     }));
   }
 
+  if (s.type === 'corrugated') {
+    // Corrugated metal sheets screwed to horizontal square-tube girts. Sheets
+    // overlap at the side/end laps, so bill ~10% over the bare face area.
+    const panelArea = round2(faceArea * 1.1);
+    pushPriced(items, matItem(pb, {
+      key: 'panels', materialId: 'corrugated_panel', qty: panelArea,
+      name: `Corrugated metal — ${panelArea} sq ft (${faceArea} sq ft face + 10% lap)`,
+    }));
+    // Horizontal support girts (2×2 square tube) the sheets drill into: top +
+    // bottom, plus a mid rail once the fence is 6 ft+. 0 = auto from height.
+    const railsPerSection = num(s.railCount, 0) > 0 ? num(s.railCount, 0) : (height >= 6 ? 3 : 2);
+    const railFt = railsPerSection * panels * panelWidth;
+    pushPriced(items, matItem(pb, {
+      key: 'rails', materialId: 'tube_2x2', qty: railFt,
+      name: `Support girts — ${railsPerSection}/section × ${panels} sections × ${panelWidth} ft (${matDef(pb, 'tube_2x2').name})`,
+    }));
+  }
+
   if (s.type === 'wood-mesh') {
     // 3 horizontal 4×4×3/16 members per section, length = panel width.
     const railFt = 3 * panels * panelWidth;
