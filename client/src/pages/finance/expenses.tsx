@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
+import { Chip } from "@/components/ui/Chip";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
-import { formatDate, formatMoney, parseMoney } from "@/lib/format";
+import { formatDate, formatMoney, parseMoney, todayYmd } from "@/lib/format";
 import { shrinkAndUpload } from "@/lib/uploadPhoto";
 import {
   EXPENSE_CATEGORIES,
@@ -30,20 +34,6 @@ import {
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const primaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60";
-const secondaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60";
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-}
 
 const EXPENSE_KEYS = [["finance-expenses"], ["finance-stats"], ["finance-reports"]];
 
@@ -78,8 +68,7 @@ function ExpenseFormModal({
   expense?: Expense | null;
   projects: Project[];
 }) {
-  const qc = useQueryClient();
-  const [date, setDate] = useState(todayStr());
+  const [date, setDate] = useState(todayYmd());
   const [vendor, setVendor] = useState("");
   const [category, setCategory] = useState<ExpenseCategory>("materials");
   const [amount, setAmount] = useState("");
@@ -104,7 +93,7 @@ function ExpenseFormModal({
       setNotes(expense.notes ?? "");
       setReceiptUrl(expense.receiptUrl ?? null);
     } else {
-      setDate(todayStr());
+      setDate(todayYmd());
       setVendor("");
       setCategory("materials");
       setAmount("");
@@ -116,8 +105,8 @@ function ExpenseFormModal({
     }
   }, [open, expense]);
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         date,
         vendor: vendor.trim() || null,
@@ -129,30 +118,22 @@ function ExpenseFormModal({
         notes: notes.trim() || null,
         receiptUrl,
       };
-      const res = expense
-        ? await apiRequest("PATCH", `/api/finance/expenses/${expense.id}`, body)
-        : await apiRequest("POST", "/api/finance/expenses", body);
-      return res.json();
+      return expense
+        ? { method: "PATCH", url: `/api/finance/expenses/${expense.id}`, body }
+        : { method: "POST", url: "/api/finance/expenses", body };
     },
-    onSuccess: () => {
-      EXPENSE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: expense ? "Expense updated" : "Expense added" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+    invalidate: EXPENSE_KEYS,
+    successTitle: expense ? "Expense updated" : "Expense added",
+    errorTitle: "Could not save",
+    onSuccess: onClose,
   });
 
-  const remove = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/finance/expenses/${expense!.id}`)).json(),
-    onSuccess: () => {
-      EXPENSE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: "Expense deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const remove = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/finance/expenses/${expense!.id}` }),
+    invalidate: EXPENSE_KEYS,
+    successTitle: "Expense deleted",
+    errorTitle: "Could not delete",
+    onSuccess: onClose,
   });
 
   const handleFile = async (file: File | undefined) => {
@@ -477,13 +458,12 @@ export default function ExpensesPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Receipt className="h-12 w-12" />
-          <p className="text-lg">{filtered ? "No expenses match the filters" : "No expenses yet"}</p>
+        <EmptyState
+          icon={Receipt}
+          message={filtered ? "No expenses match the filters" : "No expenses yet"}
+        >
           {!filtered && (
             <button
               onClick={() => {
@@ -496,7 +476,7 @@ export default function ExpensesPage() {
               Add expense
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
@@ -527,14 +507,9 @@ export default function ExpensesPage() {
                   </td>
                   <td className="px-4 py-3 text-foreground">{e.vendor ?? "—"}</td>
                   <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        "whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        CATEGORY_STYLE[e.category]
-                      )}
-                    >
+                    <Chip className={CATEGORY_STYLE[e.category]}>
                       {EXPENSE_CATEGORY_LABELS[e.category]}
-                    </span>
+                    </Chip>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{projectName(e.projectId)}</td>
                   <td className="px-4 py-3 text-muted-foreground">

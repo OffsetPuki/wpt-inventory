@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
@@ -28,33 +32,17 @@ import {
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
-const STATUS_STYLE: Record<PoStatus, string> = {
-  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  received: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  closed: "bg-zinc-500/10 text-zinc-500",
-  cancelled: "bg-red-500/10 text-red-700 dark:text-red-400",
+const STATUS_TONE: Record<PoStatus, ChipTone> = {
+  draft: "zinc",
+  sent: "blue",
+  received: "emerald",
+  closed: "muted",
+  cancelled: "red",
 };
 
 function StatusChip({ status }: { status: PoStatus }) {
-  return (
-    <span
-      className={cn(
-        "whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium",
-        STATUS_STYLE[status]
-      )}
-    >
-      {PO_STATUS_LABELS[status]}
-    </span>
-  );
+  return <Chip tone={STATUS_TONE[status]}>{PO_STATUS_LABELS[status]}</Chip>;
 }
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const primaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60";
-const secondaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60";
 
 const PO_KEYS = [["finance-pos"], ["finance-stats"]];
 
@@ -161,7 +149,6 @@ function PoFormModal({
   po?: PurchaseOrder | null;
   projects: Project[];
 }) {
-  const qc = useQueryClient();
   const [vendor, setVendor] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -194,8 +181,8 @@ function PoFormModal({
     }
   }, [open, po]);
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         vendor: vendor.trim(),
         expectedDate: expectedDate || null,
@@ -203,35 +190,26 @@ function PoFormModal({
         items: JSON.stringify(draftsToLineItems(drafts)),
         notes: notes.trim() || null,
       };
-      const res = po
-        ? await apiRequest("PATCH", `/api/finance/purchase-orders/${po.id}`, body)
-        : await apiRequest("POST", "/api/finance/purchase-orders", body);
-      return res.json();
+      return po
+        ? { method: "PATCH", url: `/api/finance/purchase-orders/${po.id}`, body }
+        : { method: "POST", url: "/api/finance/purchase-orders", body };
     },
-    onSuccess: () => {
-      PO_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({
-        variant: "success",
-        title: po ? "Purchase order updated" : "Purchase order created",
-      });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+    invalidate: PO_KEYS,
+    successTitle: po ? "Purchase order updated" : "Purchase order created",
+    errorTitle: "Could not save",
+    onSuccess: onClose,
   });
 
-  const setStatus = useMutation({
-    mutationFn: async (status: PoStatus) =>
-      (
-        await apiRequest("PATCH", `/api/finance/purchase-orders/${po!.id}`, { status })
-      ).json(),
-    onSuccess: (_row, status) => {
-      PO_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: `Marked ${PO_STATUS_LABELS[status].toLowerCase()}` });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update", description: e?.message }),
+  const setStatus = useApiMutation<unknown, PoStatus>({
+    request: (status) => ({
+      method: "PATCH",
+      url: `/api/finance/purchase-orders/${po!.id}`,
+      body: { status },
+    }),
+    invalidate: PO_KEYS,
+    successTitle: (_row, status) => `Marked ${PO_STATUS_LABELS[status].toLowerCase()}`,
+    errorTitle: "Could not update",
+    onSuccess: onClose,
   });
 
   const totalCents = draftTotalCents(drafts);
@@ -466,15 +444,12 @@ export default function PurchaseOrdersPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <Package className="h-12 w-12" />
-          <p className="text-lg">
-            No purchase orders{tab ? " with this status" : " yet"}
-          </p>
+        <EmptyState
+          icon={Package}
+          message={`No purchase orders${tab ? " with this status" : " yet"}`}
+        >
           {!tab && !q && (
             <button
               onClick={() => {
@@ -487,7 +462,7 @@ export default function PurchaseOrdersPage() {
               New purchase order
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">

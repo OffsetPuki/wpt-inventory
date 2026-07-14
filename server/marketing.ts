@@ -16,6 +16,7 @@ import {
 // endpoints). Marketing only reads them for funnel/source/campaign reporting,
 // plus one narrow write: the automation sweep flips crm_leads.stale.
 import { leads, estimates, LEAD_STAGES } from "../shared/crm-schema";
+import { pid, qstr, registerSoftDelete } from "./http-util";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -250,10 +251,7 @@ function computeAlerts(now: number): string[] {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerMarketingRoutes(app: Express): void {
-  // Express types `req.params.*` as `string | string[]`; narrow to string.
-  const pid = (v: string | string[]): number => parseInt(v as string, 10);
-  const qstr = (v: unknown): string | undefined =>
-    typeof v === "string" && v.length > 0 ? v : undefined;
+  // `pid`/`qstr` (req.params/req.query narrowing) live in ./http-util.
 
   // ─── Stats (dashboard tile) ───────────────────────────────────────────────
   // Literal paths (/stats, /overview, /settings) are registered before any
@@ -636,19 +634,10 @@ export function registerMarketingRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/marketing/campaigns/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(campaigns)
-      .where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt)))
-      .get();
-    if (!target) return res.status(404).json({ message: "Campaign not found" });
-    db.update(campaigns).set({ deletedAt: Date.now() })
-      .where(eq(campaigns.id, id))
-      .run();
-    audit(req, "marketing.campaign_delete", {
-      targetType: "campaign", targetId: id, targetName: target.name,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/marketing/campaigns/:id", requireElevated, {
+    table: campaigns, notFound: "Campaign not found",
+    action: "marketing.campaign_delete", targetType: "campaign",
+    name: (c) => c.name, audit,
   });
 
   // ─── Reviews ──────────────────────────────────────────────────────────────

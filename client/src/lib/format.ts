@@ -158,3 +158,71 @@ export function formatHours(minutes: number | null | undefined): string {
   if (h === 0) return `${rest}m`;
   return rest === 0 ? `${h}h` : `${h}h ${rest}m`;
 }
+
+// ─── Calendar-date helpers (bare YYYY-MM-DD strings) ──────────────────────────
+
+/** Local "YYYY-MM-DD" for today — used to seed <input type="date"> fields. */
+export function todayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+/** Parse a bare "YYYY-MM-DD" as a LOCAL date (reuses the toLocalDate guard). */
+export function ymdToDate(ymd: string): Date {
+  return toLocalDate(ymd);
+}
+/** Alias of {@link ymdToDate}. */
+export const parseYmd = ymdToDate;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whole days between `ms` (epoch millis) and now; negative if `ms` is in the future. */
+export function daysAgo(ms: number): number {
+  return Math.floor((Date.now() - ms) / DAY_MS);
+}
+
+/** Relative "3 days ago" label; "never" when there is no timestamp, "today" for <1 day. */
+export function relDays(ms: number | null | undefined): string {
+  if (!ms) return "never";
+  const days = daysAgo(ms);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
+
+// ─── Money input helper ────────────────────────────────────────────────────────
+
+/** Integer cents → an editable dollar string; "" for zero, trailing .00 stripped. */
+export function centsToInput(cents: number): string {
+  return cents === 0 ? "" : (cents / 100).toFixed(2).replace(/\.00$/, "");
+}
+
+// ─── JSON column helpers (server stores some columns as raw JSON strings) ──────
+
+/** JSON.parse a string column into an array, tolerating null/malformed input. */
+export function parseJsonArray<T = unknown>(json: string | null | undefined): T[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** JSON.parse a string column into a plain object, tolerating null/malformed input. */
+export function parseJsonObject<
+  T extends Record<string, unknown> = Record<string, unknown>,
+>(json: string | null | undefined): T {
+  if (!json) return {} as T;
+  try {
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as T)
+      : ({} as T);
+  } catch {
+    return {} as T;
+  }
+}

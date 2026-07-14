@@ -11,6 +11,7 @@ import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema"
 import { invoices } from "../shared/finance-schema";
 import { projects } from "../shared/schema";
 import { onQuoteEvent, findOrCreateClientByContact } from "./crm";
+import { insertNumbered } from "./finance";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
@@ -394,34 +395,22 @@ export function registerPublicPortalRoutes(app: Express): void {
           qty: 1,
           unitPriceCents: subtotalCents,
         }]);
-        // ponytail: finance.ts's insertNumbered isn't exported — same
-        // MAX(id)+1, retry-on-UNIQUE numbering inlined; export the helper if
-        // a third module ever needs INV numbers.
-        const base = (sqlite.prepare(
-          "SELECT COALESCE(MAX(id), 0) AS m FROM fin_invoices",
-        ).get() as { m: number }).m + 1;
-        const year = new Date().getFullYear();
-        for (let i = 0; i < 25; i++) {
-          try {
-            db.insert(invoices).values({
-              number: `INV-${year}-${String(base + i).padStart(4, "0")}`,
-              clientId,
-              clientName: quote.customerName,
-              status: "draft",
-              projectId,
-              items,
-              subtotalCents,
-              taxRateBp,
-              taxCents,
-              totalCents: quote.totalCents,
-              notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
-            }).run();
-            return;
-          } catch (e: any) {
-            if (!String(e?.message ?? "").includes("UNIQUE")) throw e;
-          }
-        }
-        throw new Error("Could not allocate a unique INV number");
+        // Shared MAX(id)+1, retry-on-UNIQUE INV numbering (finance.ts).
+        insertNumbered("fin_invoices", "INV", (num) =>
+          db.insert(invoices).values({
+            number: num,
+            clientId,
+            clientName: quote.customerName,
+            status: "draft",
+            projectId,
+            items,
+            subtotalCents,
+            taxRateBp,
+            taxCents,
+            totalCents: quote.totalCents,
+            notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
+          }).run(),
+        );
       } catch (e) {
         console.error("[public-portal] accept→invoice hook failed", e);
       }

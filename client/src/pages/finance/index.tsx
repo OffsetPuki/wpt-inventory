@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { LoadingBlock } from "@/components/ui/Feedback";
 import { formatMoney } from "@/lib/format";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
@@ -64,7 +65,6 @@ interface FinSettingsShape {
 }
 
 function MarkupSettingsCard() {
-  const qc = useQueryClient();
   const { data } = useQuery<FinSettingsShape>({
     queryKey: ["finance-settings"],
     queryFn: async () => (await apiRequest("GET", "/api/finance/settings")).json(),
@@ -78,20 +78,18 @@ function MarkupSettingsCard() {
     }
   }, [data]);
 
-  const save = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("PATCH", "/api/finance/settings", {
-          laborMarkupBp: Math.round((parseFloat(labor) || 0) * 100),
-          expenseMarkupBp: Math.round((parseFloat(expense) || 0) * 100),
-        })
-      ).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["finance-settings"] });
-      toast({ variant: "success", title: "Markups saved" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+  const save = useApiMutation({
+    request: () => ({
+      method: "PATCH",
+      url: "/api/finance/settings",
+      body: {
+        laborMarkupBp: Math.round((parseFloat(labor) || 0) * 100),
+        expenseMarkupBp: Math.round((parseFloat(expense) || 0) * 100),
+      },
+    }),
+    invalidate: [["finance-settings"]],
+    successTitle: "Markups saved",
+    errorTitle: "Could not save",
   });
 
   const numCls =
@@ -217,9 +215,7 @@ export default function FinanceOverviewPage() {
     return (
       <div className="mx-auto max-w-6xl">
         <Header title="Finance" description="Accounting overview" />
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       </div>
     );
   }

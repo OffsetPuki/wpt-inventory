@@ -21,9 +21,8 @@ import { mkTasks, marketingSettings } from "../shared/marketing-schema";
 // Wiring plan, Fix 2 — projects carry a soft clientId ref; the client detail
 // view lists the jobs behind it. Core table, always present.
 import { projects } from "../shared/schema";
-import {
-  parseLineItems, lineItemsSchema, lineItemsTotalCents,
-} from "../shared/biz-common";
+import { computeDocTotals } from "../shared/biz-common";
+import { pid, qstr, registerSoftDelete, registerGetById } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/crm-schema.ts exactly. crm_leads.campaign_id is a soft
@@ -472,17 +471,16 @@ export function onQuoteEvent(
   });
 }
 
-// Server-side totals — never trust client-supplied subtotal/tax/total. Throws
-// (zod) on malformed line items so callers surface a 400.
+// Server-side totals (shared/biz-common) — never trust client-supplied
+// subtotal/tax/total. Throws (zod) on malformed line items so callers surface a
+// 400. No tax clamp here: estimates preserve their prior behaviour (unlike
+// Finance invoices, which floor a negative rate at zero).
 function computeEstimateTotals(itemsJson: string, taxRateBp: number): {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
 } {
-  const items = lineItemsSchema.parse(parseLineItems(itemsJson));
-  const subtotalCents = lineItemsTotalCents(items);
-  const taxCents = Math.round((subtotalCents * taxRateBp) / 10000);
-  return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents };
+  return computeDocTotals(itemsJson, taxRateBp);
 }
 
 // "EST-<year>-<0000>" — seq seeded from max(id)+1 so numbers are roughly
@@ -509,10 +507,7 @@ function insertEstimateWithNumber(
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerCrmRoutes(app: Express): void {
-  // Express types req.params.* as string | string[]; narrow to number.
-  const pid = (v: string | string[]): number => parseInt(v as string, 10);
-  const qstr = (v: unknown): string | undefined =>
-    typeof v === "string" && v.length > 0 ? v : undefined;
+  // `pid`/`qstr` (req.params/req.query narrowing) live in ./http-util.
 
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 
@@ -851,17 +846,9 @@ export function registerCrmRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/crm/leads/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(leads)
-      .where(and(eq(leads.id, id), isNull(leads.deletedAt)))
-      .get();
-    if (!target) return res.status(404).json({ message: "Lead not found" });
-    db.update(leads).set({ deletedAt: Date.now() }).where(eq(leads.id, id)).run();
-    audit(req, "crm.lead_delete", {
-      targetType: "lead", targetId: id, targetName: target.name,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/crm/leads/:id", requireElevated, {
+    table: leads, notFound: "Lead not found",
+    action: "crm.lead_delete", targetType: "lead", name: (r) => r.name, audit,
   });
 
   // ─── Clients ─────────────────────────────────────────────────────────────
@@ -923,13 +910,7 @@ export function registerCrmRoutes(app: Express): void {
     });
   });
 
-  app.get("/api/crm/clients/:id", requireAuth, (req, res) => {
-    const client = db.select().from(clients)
-      .where(and(eq(clients.id, pid(req.params.id)), isNull(clients.deletedAt)))
-      .get();
-    if (!client) return res.status(404).json({ message: "Client not found" });
-    res.json(client);
-  });
+  registerGetById(app, "/api/crm/clients/:id", requireAuth, clients, "Client not found");
 
   app.post("/api/crm/clients", requireAuth, (req, res) => {
     try {
@@ -959,17 +940,9 @@ export function registerCrmRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/crm/clients/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(clients)
-      .where(and(eq(clients.id, id), isNull(clients.deletedAt)))
-      .get();
-    if (!target) return res.status(404).json({ message: "Client not found" });
-    db.update(clients).set({ deletedAt: Date.now() }).where(eq(clients.id, id)).run();
-    audit(req, "crm.client_delete", {
-      targetType: "client", targetId: id, targetName: target.name,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/crm/clients/:id", requireElevated, {
+    table: clients, notFound: "Client not found",
+    action: "crm.client_delete", targetType: "client", name: (r) => r.name, audit,
   });
 
   // ─── Deals ───────────────────────────────────────────────────────────────
@@ -990,13 +963,7 @@ export function registerCrmRoutes(app: Express): void {
     );
   });
 
-  app.get("/api/crm/deals/:id", requireAuth, (req, res) => {
-    const deal = db.select().from(deals)
-      .where(and(eq(deals.id, pid(req.params.id)), isNull(deals.deletedAt)))
-      .get();
-    if (!deal) return res.status(404).json({ message: "Deal not found" });
-    res.json(deal);
-  });
+  registerGetById(app, "/api/crm/deals/:id", requireAuth, deals, "Deal not found");
 
   app.post("/api/crm/deals", requireAuth, (req, res) => {
     try {
@@ -1046,17 +1013,9 @@ export function registerCrmRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/crm/deals/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(deals)
-      .where(and(eq(deals.id, id), isNull(deals.deletedAt)))
-      .get();
-    if (!target) return res.status(404).json({ message: "Deal not found" });
-    db.update(deals).set({ deletedAt: Date.now() }).where(eq(deals.id, id)).run();
-    audit(req, "crm.deal_delete", {
-      targetType: "deal", targetId: id, targetName: target.title,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/crm/deals/:id", requireElevated, {
+    table: deals, notFound: "Deal not found",
+    action: "crm.deal_delete", targetType: "deal", name: (r) => r.title, audit,
   });
 
   // ─── Products / services catalog ─────────────────────────────────────────
@@ -1084,13 +1043,7 @@ export function registerCrmRoutes(app: Express): void {
     );
   });
 
-  app.get("/api/crm/products/:id", requireAuth, (req, res) => {
-    const product = db.select().from(products)
-      .where(and(eq(products.id, pid(req.params.id)), isNull(products.deletedAt)))
-      .get();
-    if (!product) return res.status(404).json({ message: "Product not found" });
-    res.json(product);
-  });
+  registerGetById(app, "/api/crm/products/:id", requireAuth, products, "Product not found");
 
   app.post("/api/crm/products", requireAuth, (req, res) => {
     try {
@@ -1120,17 +1073,9 @@ export function registerCrmRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/crm/products/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(products)
-      .where(and(eq(products.id, id), isNull(products.deletedAt)))
-      .get();
-    if (!target) return res.status(404).json({ message: "Product not found" });
-    db.update(products).set({ deletedAt: Date.now() }).where(eq(products.id, id)).run();
-    audit(req, "crm.product_delete", {
-      targetType: "product", targetId: id, targetName: target.name,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/crm/products/:id", requireElevated, {
+    table: products, notFound: "Product not found",
+    action: "crm.product_delete", targetType: "product", name: (r) => r.name, audit,
   });
 
   // ─── Estimates ───────────────────────────────────────────────────────────
@@ -1158,13 +1103,7 @@ export function registerCrmRoutes(app: Express): void {
     );
   });
 
-  app.get("/api/crm/estimates/:id", requireAuth, (req, res) => {
-    const estimate = db.select().from(estimates)
-      .where(and(eq(estimates.id, pid(req.params.id)), isNull(estimates.deletedAt)))
-      .get();
-    if (!estimate) return res.status(404).json({ message: "Estimate not found" });
-    res.json(estimate);
-  });
+  registerGetById(app, "/api/crm/estimates/:id", requireAuth, estimates, "Estimate not found");
 
   app.post("/api/crm/estimates", requireAuth, (req, res) => {
     try {
@@ -1263,17 +1202,9 @@ export function registerCrmRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/crm/estimates/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(estimates)
-      .where(and(eq(estimates.id, id), isNull(estimates.deletedAt)))
-      .get();
-    if (!target) return res.status(404).json({ message: "Estimate not found" });
-    db.update(estimates).set({ deletedAt: Date.now() }).where(eq(estimates.id, id)).run();
-    audit(req, "crm.estimate_delete", {
-      targetType: "estimate", targetId: id, targetName: target.number,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/crm/estimates/:id", requireElevated, {
+    table: estimates, notFound: "Estimate not found",
+    action: "crm.estimate_delete", targetType: "estimate", name: (r) => r.number, audit,
   });
 
   // ─── Activities (touch log) ──────────────────────────────────────────────

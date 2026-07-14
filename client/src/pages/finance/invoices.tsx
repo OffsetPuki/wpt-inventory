@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
+import { useApiMutation } from "@/hooks/useApiMutation";
+import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
+import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
-import { formatDate, formatMoney, parseMoney, formatBp } from "@/lib/format";
+import { formatDate, formatMoney, parseMoney, formatBp, todayYmd } from "@/lib/format";
 import {
   INVOICE_STATUS_LABELS,
   PAYMENT_METHODS,
@@ -38,40 +42,17 @@ import {
 
 type InvoiceRow = Invoice & { balanceCents: number };
 
-const STATUS_STYLE: Record<InvoiceStatus, string> = {
-  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-  sent: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  partial: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  paid: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  overdue: "bg-red-500/10 text-red-700 dark:text-red-400",
-  void: "bg-zinc-500/10 text-zinc-500",
+const STATUS_TONE: Record<InvoiceStatus, ChipTone> = {
+  draft: "zinc",
+  sent: "blue",
+  partial: "amber",
+  paid: "emerald",
+  overdue: "red",
+  void: "muted",
 };
 
 function StatusChip({ status }: { status: InvoiceStatus }) {
-  return (
-    <span
-      className={cn(
-        "whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium",
-        STATUS_STYLE[status]
-      )}
-    >
-      {INVOICE_STATUS_LABELS[status]}
-    </span>
-  );
-}
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-const primaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60";
-const secondaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60";
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+  return <Chip tone={STATUS_TONE[status]}>{INVOICE_STATUS_LABELS[status]}</Chip>;
 }
 
 const INVOICE_KEYS = [
@@ -183,11 +164,10 @@ function InvoiceFormModal({
   onClose: () => void;
   invoice?: Invoice | null;
 }) {
-  const qc = useQueryClient();
   const [clientId, setClientId] = useState("");
   const [clientName, setClientName] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [issueDate, setIssueDate] = useState(todayStr());
+  const [issueDate, setIssueDate] = useState(todayYmd());
   const [dueDate, setDueDate] = useState("");
   const [drafts, setDrafts] = useState<ItemDraft[]>([{ ...EMPTY_ITEM }]);
   const [taxPct, setTaxPct] = useState("0");
@@ -217,7 +197,7 @@ function InvoiceFormModal({
       setClientId("");
       setClientName("");
       setProjectId("");
-      setIssueDate(todayStr());
+      setIssueDate(todayYmd());
       setDueDate("");
       setDrafts([{ ...EMPTY_ITEM }]);
       setTaxPct("0");
@@ -241,8 +221,8 @@ function InvoiceFormModal({
   const taxCents = Math.round((subtotalCents * taxRateBp) / 10000);
   const totalCents = subtotalCents + taxCents;
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const save = useApiMutation({
+    request: () => {
       const body = {
         clientId: clientId ? Number(clientId) : null,
         clientName: clientId ? undefined : clientName.trim() || null,
@@ -253,21 +233,14 @@ function InvoiceFormModal({
         taxRateBp,
         notes: notes.trim() || null,
       };
-      const res = invoice
-        ? await apiRequest("PATCH", `/api/finance/invoices/${invoice.id}`, body)
-        : await apiRequest("POST", "/api/finance/invoices", body);
-      return res.json();
+      return invoice
+        ? { method: "PATCH", url: `/api/finance/invoices/${invoice.id}`, body }
+        : { method: "POST", url: "/api/finance/invoices", body };
     },
-    onSuccess: () => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({
-        variant: "success",
-        title: invoice ? "Invoice updated" : "Invoice created",
-      });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+    invalidate: INVOICE_KEYS,
+    successTitle: invoice ? "Invoice updated" : "Invoice created",
+    errorTitle: "Could not save",
+    onSuccess: onClose,
   });
 
   return (
@@ -415,7 +388,6 @@ function FromEstimateModal({
   onClose: () => void;
   onCreated: (id: number) => void;
 }) {
-  const qc = useQueryClient();
   const { data: estimates = [], isLoading } = useQuery<Estimate[]>({
     queryKey: ["crm-estimates", "accepted"],
     queryFn: async () =>
@@ -423,23 +395,18 @@ function FromEstimateModal({
     enabled: open,
   });
 
-  const create = useMutation({
-    mutationFn: async (estimateId: number) =>
-      (
-        await apiRequest("POST", `/api/finance/invoices/from-estimate/${estimateId}`)
-      ).json(),
-    onSuccess: (inv: InvoiceRow) => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: `Invoice ${inv.number} created` });
+  const create = useApiMutation<InvoiceRow, number>({
+    request: (estimateId) => ({
+      method: "POST",
+      url: `/api/finance/invoices/from-estimate/${estimateId}`,
+    }),
+    invalidate: INVOICE_KEYS,
+    successTitle: (inv) => `Invoice ${inv.number} created`,
+    errorTitle: "Could not create invoice",
+    onSuccess: (inv) => {
       onClose();
       onCreated(inv.id);
     },
-    onError: (e: any) =>
-      toast({
-        variant: "destructive",
-        title: "Could not create invoice",
-        description: e?.message,
-      }),
   });
 
   return (
@@ -486,12 +453,11 @@ function RecordPaymentForm({
   invoice: InvoiceRow;
   onDone: () => void;
 }) {
-  const qc = useQueryClient();
   const [amount, setAmount] = useState((invoice.balanceCents / 100).toFixed(2));
   const [method, setMethod] = useState<PaymentMethod>("check");
   const [gatewayKey, setGatewayKey] = useState("");
   const [reference, setReference] = useState("");
-  const [paidAt, setPaidAt] = useState(todayStr());
+  const [paidAt, setPaidAt] = useState(todayYmd());
 
   const { data: gateways = [] } = useQuery<PaymentGateway[]>({
     queryKey: ["finance-gateways"],
@@ -500,28 +466,22 @@ function RecordPaymentForm({
   });
   const enabledGateways = gateways.filter((g) => g.enabled);
 
-  const record = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", `/api/finance/invoices/${invoice.id}/payments`, {
-          amountCents: parseMoney(amount),
-          method,
-          gatewayKey: method === "gateway" && gatewayKey ? gatewayKey : undefined,
-          reference: reference.trim() || undefined,
-          paidAt: paidAt || undefined,
-        })
-      ).json(),
-    onSuccess: () => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: "Payment recorded" });
-      onDone();
-    },
-    onError: (e: any) =>
-      toast({
-        variant: "destructive",
-        title: "Could not record payment",
-        description: e?.message,
-      }),
+  const record = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: `/api/finance/invoices/${invoice.id}/payments`,
+      body: {
+        amountCents: parseMoney(amount),
+        method,
+        gatewayKey: method === "gateway" && gatewayKey ? gatewayKey : undefined,
+        reference: reference.trim() || undefined,
+        paidAt: paidAt || undefined,
+      },
+    }),
+    invalidate: INVOICE_KEYS,
+    successTitle: "Payment recorded",
+    errorTitle: "Could not record payment",
+    onSuccess: onDone,
   });
 
   return (
@@ -621,7 +581,6 @@ function InvoiceDetailModal({
   onClose: () => void;
   onEdit: (invoice: Invoice) => void;
 }) {
-  const qc = useQueryClient();
   const [paying, setPaying] = useState(false);
 
   const { data, isLoading } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
@@ -629,58 +588,47 @@ function InvoiceDetailModal({
     queryFn: async () => (await apiRequest("GET", `/api/finance/invoices/${id}`)).json(),
   });
 
-  const setStatus = useMutation({
-    mutationFn: async (status: InvoiceStatus) =>
-      (await apiRequest("PATCH", `/api/finance/invoices/${id}`, { status })).json(),
-    onSuccess: (_row, status) => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({
-        variant: "success",
-        title: status === "void" ? "Invoice voided" : "Invoice marked sent",
-      });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not update", description: e?.message }),
+  const setStatus = useApiMutation<unknown, InvoiceStatus>({
+    request: (status) => ({
+      method: "PATCH",
+      url: `/api/finance/invoices/${id}`,
+      body: { status },
+    }),
+    invalidate: INVOICE_KEYS,
+    successTitle: (_row, status) =>
+      status === "void" ? "Invoice voided" : "Invoice marked sent",
+    errorTitle: "Could not update",
   });
 
-  const reversePayment = useMutation({
-    mutationFn: async (paymentId: number) =>
-      (await apiRequest("DELETE", `/api/finance/payments/${paymentId}`)).json(),
-    onSuccess: () => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: "Payment reversed" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not reverse", description: e?.message }),
+  const reversePayment = useApiMutation<unknown, number>({
+    request: (paymentId) => ({
+      method: "DELETE",
+      url: `/api/finance/payments/${paymentId}`,
+    }),
+    invalidate: INVOICE_KEYS,
+    successTitle: "Payment reversed",
+    errorTitle: "Could not reverse",
   });
 
-  const del = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/finance/invoices/${id}`)).json(),
-    onSuccess: () => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: "Invoice deleted" });
-      onClose();
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+  const del = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/finance/invoices/${id}` }),
+    invalidate: INVOICE_KEYS,
+    successTitle: "Invoice deleted",
+    errorTitle: "Could not delete",
+    onSuccess: onClose,
   });
 
   // Fix 4 (wiring plan): pull the job's billable-but-unbilled expenses and
   // per-worker labor onto this draft invoice as line items.
-  const pullUnbilled = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", `/api/finance/invoices/${id}/pull-unbilled`, {
-          projectId: data?.invoice?.projectId,
-        })
-      ).json(),
-    onSuccess: () => {
-      INVOICE_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      toast({ variant: "success", title: "Unbilled work pulled onto invoice" });
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not pull unbilled work", description: e?.message }),
+  const pullUnbilled = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: `/api/finance/invoices/${id}/pull-unbilled`,
+      body: { projectId: data?.invoice?.projectId },
+    }),
+    invalidate: INVOICE_KEYS,
+    successTitle: "Unbilled work pulled onto invoice",
+    errorTitle: "Could not pull unbilled work",
   });
 
   const inv = data?.invoice;
@@ -981,20 +929,16 @@ export default function InvoicesPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <LoadingBlock />
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-          <FileText className="h-12 w-12" />
-          <p className="text-lg">No invoices{tab ? " with this status" : " yet"}</p>
+        <EmptyState icon={FileText} message={`No invoices${tab ? " with this status" : " yet"}`}>
           {!tab && !q && (
             <button onClick={() => setNewOpen(true)} className={primaryBtn}>
               <Plus className="h-5 w-5" />
               New invoice
             </button>
           )}
-        </div>
+        </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">

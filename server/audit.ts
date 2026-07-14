@@ -39,27 +39,29 @@ function buildEntry(req: Request, action: string, extras: AuditExtras, ip: strin
   };
 }
 
-// Variant used by routes.ts / crm.ts / quotes.ts: socket-fallback IP, logs
-// write failures.
-export function audit(req: Request, action: string, extras: AuditExtras = {}): void {
-  const entry = buildEntry(req, action, extras, clientIp(req));
+// Two variants, one body, distinguished only by IP source + whether a write
+// failure is logged:
+//   - default (routes.ts / crm.ts / quotes.ts / marketing.ts): socket-fallback
+//     IP, logs write failures.
+//   - quiet (pm.ts / hr.ts / finance.ts): ip from req.ip alone (null when
+//     absent, no socket fallback), write failures swallowed.
+export function audit(
+  req: Request,
+  action: string,
+  extras: AuditExtras = {},
+  opts: { quiet?: boolean } = {},
+): void {
+  const ip = opts.quiet ? (req.ip ?? null) : clientIp(req);
+  const entry = buildEntry(req, action, extras, ip);
   setImmediate(() => {
     try {
       storage.appendAudit(entry);
     } catch (e) {
-      console.error("[audit] failed to write entry", e);
+      if (!opts.quiet) console.error("[audit] failed to write entry", e);
     }
   });
 }
 
-// Variant used by pm.ts / hr.ts / finance.ts: ip from req.ip alone (null when
-// absent, no socket fallback), write failures swallowed. Kept as-is so the
-// consolidation is behavior-identical to the copies it replaced.
 export function auditQuiet(req: Request, action: string, extras: AuditExtras = {}): void {
-  const entry = buildEntry(req, action, extras, req.ip ?? null);
-  setImmediate(() => {
-    try {
-      storage.appendAudit(entry);
-    } catch {}
-  });
+  audit(req, action, extras, { quiet: true });
 }

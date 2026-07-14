@@ -1,4 +1,28 @@
-import type { EquipmentPresetSeed, JobTemplateSeed } from "./wpt-presets";
+import type { CustomField, TemplateParam, TemplatePart, Category } from "./schema";
+
+// Seed-data shapes shared by the preset catalogs below. (These used to live in
+// wpt-presets.ts alongside a legacy catalog that has since been removed; the
+// two interfaces are now the only survivors, so they live here with their sole
+// consumer.)
+
+export interface EquipmentPresetSeed {
+  key: string;
+  label: string;
+  blurb: string;
+  icon: string;
+  defaultCategory: Category;
+  examples: string[];
+  customFields: CustomField[];
+}
+
+export interface JobTemplateSeed {
+  key: string;
+  label: string;
+  blurb: string;
+  icon: string;
+  params: TemplateParam[];
+  parts: TemplatePart[];
+}
 
 // ─── CJM Metals seeds ────────────────────────────────────────────────────────
 // Custom metalwork fabricator (Arlington, TX — DFW): gates (incl. automated),

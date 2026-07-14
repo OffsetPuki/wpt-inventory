@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express } from "express";
 import { z } from "zod";
 import { eq, and, or, desc, asc, isNull, like, gte, lt, sql, getTableColumns } from "drizzle-orm";
 import { sqlite, db } from "./storage";
@@ -11,6 +11,7 @@ import {
   TASK_STATUSES,
 } from "../shared/pm-schema";
 import { clients } from "../shared/crm-schema";
+import { pid, qstr, isElevated, registerSoftDelete } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/pm-schema.ts exactly. pm_contracts.client_id is a soft
@@ -177,17 +178,8 @@ function parseWhen(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-// ─── Request helpers ─────────────────────────────────────────────────────────
-
-/** Express types req.query values loosely; narrow to a non-empty string. */
-function qstr(v: unknown): string | undefined {
-  return typeof v === "string" && v.length > 0 ? v : undefined;
-}
-
-function isElevated(req: Request): boolean {
-  const role = req.user?.role;
-  return role === "manager" || role === "technician";
-}
+// `qstr` (req.query → non-empty string) and `isElevated` (manager|technician
+// role check) live in ./http-util.
 
 // ─── Body schemas local to this module ───────────────────────────────────────
 
@@ -212,8 +204,7 @@ const timesheetSubmitSchema = z.object({
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerPmRoutes(app: Express): void {
-  // Express types req.params.* as string | string[]; narrow to number.
-  const pid = (v: string | string[]): number => parseInt(v as string, 10);
+  // `pid` (req.params → number) lives in ./http-util.
 
   // ── Stats ──────────────────────────────────────────────────────────────────
 
@@ -359,14 +350,9 @@ export function registerPmRoutes(app: Express): void {
     res.json(updated);
   });
 
-  app.delete("/api/pm/tasks/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(pmTasks)
-      .where(and(eq(pmTasks.id, id), isNull(pmTasks.deletedAt))).get();
-    if (!existing) return res.status(404).json({ message: "Task not found" });
-    db.update(pmTasks).set({ deletedAt: Date.now() }).where(eq(pmTasks.id, id)).run();
-    audit(req, "pm.task_delete", { targetType: "pm_task", targetId: id, targetName: existing.title });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/pm/tasks/:id", requireAuth, {
+    table: pmTasks, notFound: "Task not found",
+    action: "pm.task_delete", targetType: "pm_task", name: (t) => t.title, audit,
   });
 
   // ── Time tracking ──────────────────────────────────────────────────────────
@@ -736,14 +722,9 @@ export function registerPmRoutes(app: Express): void {
     res.json(updated);
   });
 
-  app.delete("/api/pm/contracts/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(contracts)
-      .where(and(eq(contracts.id, id), isNull(contracts.deletedAt))).get();
-    if (!existing) return res.status(404).json({ message: "Contract not found" });
-    db.update(contracts).set({ deletedAt: Date.now() }).where(eq(contracts.id, id)).run();
-    audit(req, "pm.contract_delete", { targetType: "pm_contract", targetId: id, targetName: existing.title });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/pm/contracts/:id", requireElevated, {
+    table: contracts, notFound: "Contract not found",
+    action: "pm.contract_delete", targetType: "pm_contract", name: (c) => c.title, audit,
   });
 
   // ── Knowledge base ─────────────────────────────────────────────────────────
@@ -818,13 +799,8 @@ export function registerPmRoutes(app: Express): void {
     res.json(updated);
   });
 
-  app.delete("/api/pm/kb/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(kbArticles)
-      .where(and(eq(kbArticles.id, id), isNull(kbArticles.deletedAt))).get();
-    if (!existing) return res.status(404).json({ message: "Article not found" });
-    db.update(kbArticles).set({ deletedAt: Date.now() }).where(eq(kbArticles.id, id)).run();
-    audit(req, "pm.kb_delete", { targetType: "pm_kb_article", targetId: id, targetName: existing.title });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/pm/kb/:id", requireElevated, {
+    table: kbArticles, notFound: "Article not found",
+    action: "pm.kb_delete", targetType: "pm_kb_article", name: (a) => a.title, audit,
   });
 }

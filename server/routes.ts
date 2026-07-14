@@ -40,20 +40,29 @@ const dataDir = process.env.DATA_DIR
 const uploadDir = path.resolve(dataDir, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-// Allowlist of image extensions + mime types we'll accept. JPEG covers the
-// downscaled output from the browser; the others let users paste an existing
-// PNG/WebP/HEIC without the upload silently failing. PDFs, HTML, JS etc. are
-// rejected — otherwise an attacker could upload `evil.html` and have the
-// browser render it from this origin, stealing a worker's localStorage token.
-const ALLOWED_IMAGE_MIME = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/heic",
-  "image/heif",
-]);
-const ALLOWED_IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
+// Allowlist of image extensions + mime types we'll accept, all derived from one
+// source of truth (EXT_TO_MIME). JPEG covers the downscaled output from the
+// browser; the others let users paste an existing PNG/WebP/HEIC without the
+// upload silently failing. PDFs, HTML, JS etc. are rejected — otherwise an
+// attacker could upload `evil.html` and have the browser render it from this
+// origin, stealing a worker's localStorage token.
+//
+// EXT_TO_MIME also maps a saved upload's extension back to a safe Content-Type
+// (used when serving uploads) so the browser can't be tricked into sniffing an
+// uploaded file as HTML/JS.
+const EXT_TO_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+};
+// Accepted extensions (the keys) and accepted mime types (the values,
+// de-duplicated by the Set — .jpg and .jpeg both map to image/jpeg).
+const ALLOWED_IMAGE_EXT = new Set(Object.keys(EXT_TO_MIME));
+const ALLOWED_IMAGE_MIME = new Set(Object.values(EXT_TO_MIME));
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -73,18 +82,6 @@ const upload = multer({
     cb(new Error("Only image uploads are allowed"));
   },
 });
-
-// Map a saved upload's extension back to a safe Content-Type so the browser
-// can't be tricked into sniffing an uploaded file as HTML/JS.
-const EXT_TO_MIME: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".heic": "image/heic",
-  ".heif": "image/heif",
-};
 
 // 5 login attempts per IP per 5 minutes — a 4-digit PIN has only 10k
 // combinations, so without a limiter the entire space is brute-forceable in

@@ -36,3 +36,23 @@ export function parseLineItems(json: string | null | undefined): LineItem[] {
     return [];
   }
 }
+
+// Server-side document totals from a JSON line-items column + a tax rate in
+// basis points. Totals are always recomputed here — client-supplied
+// subtotal/tax/total are ignored so the books can't be desynced by a stale or
+// malicious UI. Throws (zod) on malformed line items so callers surface a 400.
+//
+// `clampTax` floors the tax rate at zero (Finance's fix — a negative rate would
+// refund tax against the subtotal). It is opt-in so each caller keeps its exact
+// prior behaviour: Finance passes clampTax, CRM estimates do not.
+export function computeDocTotals(
+  itemsJson: string,
+  taxRateBp: number,
+  opts: { clampTax?: boolean } = {},
+): { subtotalCents: number; taxCents: number; totalCents: number } {
+  const items = lineItemsSchema.parse(parseLineItems(itemsJson));
+  const subtotalCents = lineItemsTotalCents(items);
+  const bp = opts.clampTax ? Math.max(0, taxRateBp) : taxRateBp;
+  const taxCents = Math.round((subtotalCents * bp) / 10000);
+  return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents };
+}

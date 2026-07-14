@@ -17,6 +17,9 @@ import {
   PAYROLL_STATUSES,
   type Employee, type PayrollRun, type PayslipDeduction,
 } from "../shared/hr-schema";
+import {
+  pid, todayLocal, elevatedRole, registerSoftDelete, registerGetById,
+} from "./http-util";
 
 // ─── HR & Payroll module ─────────────────────────────────────────────────────
 // Self-contained: DDL runs at import time against the shared connection, and
@@ -174,16 +177,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MS_PER_HOUR = 3_600_000;
 const MS_PER_DAY = 86_400_000;
 
-// Express types `req.params.*` loosely; narrow to number.
-const pid = (v: string | string[]): number => parseInt(v as string, 10);
-
-// Local calendar date — payroll periods and pay dates are wall-clock concepts,
-// so comparing against UTC would flip the answer near midnight.
-function todayLocal(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+// `pid` (req.params → number) and `todayLocal` (local YYYY-MM-DD; payroll
+// periods and pay dates are wall-clock concepts, so comparing against UTC would
+// flip the answer near midnight) both live in ./http-util.
 
 // "YYYY-MM-DD" → unix ms at local midnight (start) / end-of-day (end).
 // Returns NaN on garbage input so callers can just skip the filter.
@@ -233,8 +229,7 @@ function openShiftFor(employeeId: number) {
     .get();
 }
 
-const elevatedRole = (req: Request): boolean =>
-  req.user?.role === "manager" || req.user?.role === "technician";
+// `elevatedRole` (manager|technician role check) lives in ./http-util.
 
 // Finance bridge (wiring plan, Fix 1): marking a payroll run PAID posts one
 // labor expense to the books — GROSS total, since withheld deductions are
@@ -443,15 +438,10 @@ export function registerHrRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/hr/employees/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = getEmployee(id);
-    if (!target) return res.status(404).json({ message: "Employee not found" });
-    db.update(employees).set({ deletedAt: Date.now() }).where(eq(employees.id, id)).run();
-    audit(req, "hr.employee_delete", {
-      targetType: "employee", targetId: id, targetName: fullName(target),
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/hr/employees/:id", requireElevated, {
+    table: employees, notFound: "Employee not found",
+    action: "hr.employee_delete", targetType: "employee",
+    name: (e) => fullName(e), audit,
   });
 
   // ─── Attendance ───────────────────────────────────────────────────────────
@@ -972,13 +962,7 @@ export function registerHrRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/hr/openings/:id", requireElevated, (req, res) => {
-    const row = db.select().from(jobOpenings)
-      .where(and(eq(jobOpenings.id, pid(req.params.id)), isNull(jobOpenings.deletedAt)))
-      .get();
-    if (!row) return res.status(404).json({ message: "Job opening not found" });
-    res.json(row);
-  });
+  registerGetById(app, "/api/hr/openings/:id", requireElevated, jobOpenings, "Job opening not found");
 
   app.patch("/api/hr/openings/:id", requireElevated, (req, res) => {
     try {
@@ -993,16 +977,10 @@ export function registerHrRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/hr/openings/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(jobOpenings)
-      .where(and(eq(jobOpenings.id, id), isNull(jobOpenings.deletedAt))).get();
-    if (!target) return res.status(404).json({ message: "Job opening not found" });
-    db.update(jobOpenings).set({ deletedAt: Date.now() }).where(eq(jobOpenings.id, id)).run();
-    audit(req, "hr.opening_delete", {
-      targetType: "job_opening", targetId: id, targetName: target.title,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/hr/openings/:id", requireElevated, {
+    table: jobOpenings, notFound: "Job opening not found",
+    action: "hr.opening_delete", targetType: "job_opening",
+    name: (o) => o.title, audit,
   });
 
   // ─── Recruitment: candidates ─────────────────────────────────────────────

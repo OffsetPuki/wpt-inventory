@@ -19,7 +19,8 @@ import { clients, estimates, type Estimate } from "../shared/crm-schema";
 // The mk_ tables are owned by the marketing module's DDL; every touch below is
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
 import { marketingSettings, mkTasks } from "../shared/marketing-schema";
-import { parseLineItems, lineItemsTotalCents, lineItemsSchema } from "../shared/biz-common";
+import { parseLineItems, computeDocTotals } from "../shared/biz-common";
+import { pid, qstr, todayLocal, usd, registerSoftDelete } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/finance-schema.ts exactly. client_id / estimate_id are soft
@@ -158,30 +159,19 @@ sqlite.exec("INSERT OR IGNORE INTO fin_settings (id) VALUES (1)");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// Local calendar date — invoices/expenses are dated in the shop's timezone,
-// not UTC, so "overdue" flips at local midnight like the owner expects.
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// `todayLocal` (local calendar date) lives in ./http-util — invoices/expenses
+// are dated in the shop's timezone, not UTC, so "overdue" flips at local
+// midnight like the owner expects.
 
 function monthKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-// Totals are always server-computed from the line items — the client-supplied
-// subtotal/tax/total are ignored so the books can't be desynced by a stale UI.
-// Throws (zod) on malformed line items so callers surface a 400, same as the
-// CRM estimate equivalent.
+// Server-computed totals (shared/biz-common). `clampTax` floors a negative tax
+// rate at zero — a negative rate would refund tax against the subtotal — as a
+// backstop even though the schema also rejects it now.
 function computeTotals(itemsJson: string, taxRateBp: number) {
-  const items = lineItemsSchema.parse(parseLineItems(itemsJson));
-  const subtotalCents = lineItemsTotalCents(items);
-  // Tax rate can't go below zero — a negative rate would refund tax against the
-  // subtotal. Clamp as a backstop even though the schema also rejects it now.
-  const bp = Math.max(0, taxRateBp);
-  const taxCents = Math.round((subtotalCents * bp) / 10000);
-  return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents };
+  return computeDocTotals(itemsJson, taxRateBp, { clampTax: true });
 }
 
 // "overdue" is derived, never stored: a sent/partial invoice past its due date
@@ -202,7 +192,7 @@ function presentInvoice(inv: Invoice, today: string) {
 // which only ever grows, so numbers never reuse after a delete. The UNIQUE
 // constraint on `number` is the arbiter under concurrency — on conflict we
 // bump the seq and retry (bounded, so a pathological table can't spin forever).
-function insertNumbered<T>(
+export function insertNumbered<T>(
   table: "fin_invoices" | "fin_purchase_orders",
   prefix: "INV" | "PO",
   doInsert: (num: string) => T
@@ -346,9 +336,8 @@ function queueReviewRequest(inv: Invoice): void {
 // Confirms the money landed the moment it's recorded. Same contract as the
 // review hook: everything deferred + try/catch'd, so recording a payment can
 // never fail or slow down because mail hiccuped. Skips silently with no
-// mailer or no client email on file.
-
-const usd = (cents: number): string => `$${(cents / 100).toFixed(2)}`;
+// mailer or no client email on file. (`usd` — cents → "$x.xx" — lives in
+// ./http-util.)
 
 function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
   setImmediate(async () => {
@@ -456,11 +445,9 @@ function releaseBilledItems(invoiceId: number): void {
 }
 
 export function registerFinanceRoutes(app: Express): void {
-  // Express types `req.params.*` as `string | string[]`; narrow to string.
-  const pid = (v: string | string[]): number => parseInt(v as string, 10);
+  // `pid`/`qstr` live in ./http-util; Express types `req.params.*` as
+  // `string | string[]`, so this key variant narrows to string.
   const pkey = (v: string | string[]): string => v as string;
-  const qstr = (v: unknown): string | undefined =>
-    typeof v === "string" && v.length > 0 ? v : undefined;
 
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 
@@ -1264,15 +1251,9 @@ export function registerFinanceRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/finance/purchase-orders/:id", requireElevated, (req, res) => {
-    const existing = db.select().from(purchaseOrders)
-      .where(and(eq(purchaseOrders.id, pid(req.params.id)), isNull(purchaseOrders.deletedAt)))
-      .get();
-    if (!existing) return res.status(404).json({ message: "Purchase order not found" });
-    db.update(purchaseOrders).set({ deletedAt: Date.now() }).where(eq(purchaseOrders.id, existing.id)).run();
-    audit(req, "finance.po_delete", {
-      targetType: "purchase_order", targetId: existing.id, targetName: existing.number,
-    });
-    res.json({ ok: true });
+  registerSoftDelete(app, "/api/finance/purchase-orders/:id", requireElevated, {
+    table: purchaseOrders, notFound: "Purchase order not found",
+    action: "finance.po_delete", targetType: "purchase_order",
+    name: (po) => po.number, audit,
   });
 }
