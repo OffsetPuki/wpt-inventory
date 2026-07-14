@@ -1,4 +1,4 @@
-import { PRICE_BOOK_SCHEMA } from '../data/priceBook.js';
+import { DEFAULT_PRICE_BOOK, PRICE_BOOK_SCHEMA, MATERIAL_UNITS } from '../data/priceBook.js';
 import { getPath } from '../lib/store.js';
 
 function Field({ field, value, onChange }) {
@@ -26,6 +26,42 @@ function Field({ field, value, onChange }) {
   );
 }
 
+/**
+ * The shared material library editor. One row per material: cost per unit +
+ * waste %. Editing a price here reprices EVERY product that uses the material
+ * (fence posts, gate frames, pergola legs...) and the website ballpark.
+ */
+function MaterialsGroup({ priceBook, onChange }) {
+  const ids = Object.keys(DEFAULT_PRICE_BOOK.materials);
+  return (
+    <div className="pb-group">
+      <h3>Materials — shared library</h3>
+      <p className="note">
+        One price per material, entered once. Every product that uses it — and the
+        website ballpark — reprices automatically. Waste % is blended into the rate.
+      </p>
+      {ids.map((id) => {
+        const def = DEFAULT_PRICE_BOOK.materials[id];
+        const unit = (MATERIAL_UNITS[def.unit] || {}).suffix || '';
+        return (
+          <div key={id}>
+            <Field
+              field={{ path: `materials.${id}.cost`, label: def.name, prefix: '$', suffix: unit, step: 0.25 }}
+              value={getPath(priceBook, `materials.${id}.cost`)}
+              onChange={onChange}
+            />
+            <Field
+              field={{ path: `materials.${id}.wastePct`, label: '↳ waste', suffix: '%', step: 1 }}
+              value={getPath(priceBook, `materials.${id}.wastePct`)}
+              onChange={onChange}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop, onReset }) {
   return (
     <div className="page">
@@ -35,11 +71,14 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
           <h1 className="display" style={{ marginTop: 14 }}>Price book</h1>
           <p className="home-lede" style={{ marginTop: 20 }}>
             Set your rates once. Every quote starts from these numbers — and you can still
-            override any line on the quote itself.
+            override any line on the quote itself. Material prices live in the shared
+            library: change one price, every product that uses it follows.
           </p>
         </div>
 
         <div className="pb-grid">
+          <MaterialsGroup priceBook={priceBook} onChange={onChange} />
+
           {PRICE_BOOK_SCHEMA.map((group) => (
             <div key={group.title} className="pb-group">
               <h3>{group.title}</h3>

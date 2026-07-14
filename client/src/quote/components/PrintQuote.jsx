@@ -20,6 +20,7 @@ export default function PrintQuote({ shop, type, state, designRef, customer, not
 
   const serviceRows = [];
   if (totals.lines.labor.total > 0) serviceRows.push({ name: 'Labor & fabrication', price: totals.lines.labor.total });
+  if (totals.lines.finishing.total > 0) serviceRows.push({ name: 'Installation', price: totals.lines.finishing.total });
   if (totals.lines.delivery.total > 0) serviceRows.push({ name: 'Delivery', price: totals.lines.delivery.total });
 
   const specs = specRows(type, state);
@@ -85,7 +86,13 @@ export default function PrintQuote({ shop, type, state, designRef, customer, not
         </tbody>
         <tfoot>
           <tr><td className="pq-tot-label">Subtotal</td><td className="amount">${fmtMoney(totals.subtotal)}</td></tr>
+          {totals.discountAmt > 0 && (
+            <tr><td className="pq-tot-label">Discount ({totals.discountPct}%)</td><td className="amount">−${fmtMoney(totals.discountAmt)}</td></tr>
+          )}
           <tr><td className="pq-tot-label">Tax ({totals.taxPct || 0}%)</td><td className="amount">${fmtMoney(totals.tax)}</td></tr>
+          {totals.minAdjustment > 0 && (
+            <tr><td className="pq-tot-label">Minimum job charge</td><td className="amount">+${fmtMoney(totals.minAdjustment)}</td></tr>
+          )}
           <tr className="total-row"><td>Total</td><td className="amount">${fmtMoney(totals.total)}</td></tr>
           {pct > 0 && (
             <>

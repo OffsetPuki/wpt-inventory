@@ -48,6 +48,28 @@ export function carCount(w) {
   return 3;
 }
 
+// Coating system (shared by the metal products). Standard shop finish is the
+// $0 baseline; powder / galvanized carry a per-sq-ft upcharge in the price book.
+const COATING_OPTIONS = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'powder', label: 'Powder Coat' },
+  { value: 'galvanized', label: 'Galvanized' },
+];
+const coatingControl = {
+  kind: 'segment', name: 'coating', label: 'Coating', cols: 3,
+  options: COATING_OPTIONS,
+};
+
+// Post-setting shop math (shared): every set post carries extra underground
+// length and bags of concrete — editable per quote, defaulted to the shop
+// standard (+3 ft, 4 bags).
+const undergroundControl = {
+  kind: 'number', name: 'undergroundFt', label: 'Post underground depth', unit: 'ft', min: 0, max: 6, step: 0.5,
+};
+const bagsControl = {
+  kind: 'number', name: 'bagsPerPost', label: 'Concrete bags per post', unit: 'bags', min: 0, max: 12, step: 1,
+};
+
 // -----------------------------------------------------------------------------
 //  Build types
 // -----------------------------------------------------------------------------
@@ -71,6 +93,12 @@ export const CONFIG = {
       height: 6,
       panelWidth: 6,
       slatSpacing: 1,
+      slatCount: 0,        // 0 = auto from height + spacing; set it from the design
+      slatMaterial: '4x1', // 4×1 or 4×2 rectangular tubing
+      undergroundFt: 3,    // per post, added to the visible height
+      bagsPerPost: 4,      // concrete bags per post
+      coating: 'standard',
+      demoFt: 0,           // ft of old fence to tear out
       style: 'flat',
       meshRatio: 25,
       color: '#0A0A0A',
@@ -87,13 +115,29 @@ export const CONFIG = {
       },
       { kind: 'range', name: 'height', label: 'Height', min: 3, max: 8, step: 1, display: ftDisplay },
       {
-        kind: 'segment', name: 'panelWidth', label: 'Panel width', cols: 3,
+        kind: 'segment', name: 'panelWidth', label: 'Panel width (inside posts)', cols: 3,
         options: [4, 6, 8].map((w) => ({ value: w, label: `${w} ft` })),
       },
       {
         kind: 'number', name: 'slatSpacing', label: 'Slat spacing', unit: '"', min: 0.5, max: 20, step: 0.25,
         visibleWhen: (s) => s.type === 'horizontal-slat',
       },
+      {
+        kind: 'number', name: 'slatCount', label: 'Slats per section (0 = auto)', unit: '', min: 0, max: 40, step: 1,
+        visibleWhen: (s) => s.type === 'horizontal-slat',
+      },
+      {
+        kind: 'segment', name: 'slatMaterial', label: 'Slat material', cols: 2,
+        options: [
+          { value: '4x1', label: '4×1 tube' },
+          { value: '4x2', label: '4×2 tube' },
+        ],
+        visibleWhen: (s) => s.type === 'horizontal-slat',
+      },
+      undergroundControl,
+      bagsControl,
+      coatingControl,
+      { kind: 'number', name: 'demoFt', label: 'Old fence removal', unit: 'ft', min: 0, max: 1000, step: 1 },
       {
         kind: 'segment', name: 'style', label: 'Top profile', cols: 2,
         options: [{ value: 'flat', label: 'Flat' }, { value: 'arched', label: 'Arched' }],
@@ -123,6 +167,13 @@ export const CONFIG = {
       height: 6,
       width: 10,
       meshRatio: 25,
+      slatCount: 0,       // 0 = auto from height; set it from the design
+      undergroundFt: 3,   // support-post underground length
+      bagsPerPost: 4,     // concrete bags per support post
+      extraPosts: 'no',   // double swing: +2 support posts
+      operator: 'none',   // gate automation kits
+      coating: 'standard',
+      demoOld: 'no',      // remove the old gate
       color: '#0A0A0A',
       topEdge: 'flat',
       personalization: 'none',
@@ -137,11 +188,28 @@ export const CONFIG = {
         ],
       },
       {
+        kind: 'segment', name: 'extraPosts', label: 'Extra support posts (+2)', cols: 2,
+        options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
+        visibleWhen: (s) => s.type === 'double',
+      },
+      {
+        kind: 'segment', name: 'operator', label: 'Gate operator (motor)', cols: 3,
+        options: [
+          { value: 'none', label: 'None' },
+          { value: 'one', label: '1 motor' },
+          { value: 'two', label: '2 motors' },
+        ],
+      },
+      {
         kind: 'segment', name: 'infill', label: 'Style', cols: 2,
         options: [
           { value: 'horizontal-slat', label: 'Horizontal Slat' },
           { value: 'metal-wood', label: 'Metal + Wood' },
         ],
+      },
+      {
+        kind: 'number', name: 'slatCount', label: 'Slats in design (0 = auto)', unit: '', min: 0, max: 40, step: 1,
+        visibleWhen: (s) => s.infill === 'horizontal-slat',
       },
       {
         kind: 'segment', name: 'arch', label: 'Top shape', cols: 2,
@@ -168,6 +236,13 @@ export const CONFIG = {
       {
         kind: 'segment', name: 'topEdge', label: 'Top edge', cols: 2,
         options: [{ value: 'flat', label: 'Flat' }, { value: 'capped', label: 'Capped' }],
+      },
+      undergroundControl,
+      bagsControl,
+      coatingControl,
+      {
+        kind: 'segment', name: 'demoOld', label: 'Remove old gate', cols: 2,
+        options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
       },
       // Website upsell — laser-cut initials medallion or customer artwork.
       // The initials/art itself lives in the lead's spec text; this drives price.
@@ -196,6 +271,10 @@ export const CONFIG = {
       sides: 'open',
       sidePos: 'right',
       gutters: 'no',
+      anchor: 'plate',    // base plate on slab, or embedded in concrete
+      undergroundFt: 3,
+      bagsPerPost: 4,
+      coating: 'standard',
       color: '#0A0A0A',
       roofColor: '#A7A8A4',
     },
@@ -254,6 +333,16 @@ export const CONFIG = {
         kind: 'segment', name: 'gutters', label: 'Gutters', cols: 2,
         options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
       },
+      {
+        kind: 'segment', name: 'anchor', label: 'Column anchoring', cols: 2,
+        options: [
+          { value: 'plate', label: 'Base plate' },
+          { value: 'embedded', label: 'Set in concrete' },
+        ],
+      },
+      { ...undergroundControl, visibleWhen: (s) => s.anchor === 'embedded' },
+      { ...bagsControl, visibleWhen: (s) => s.anchor === 'embedded' },
+      coatingControl,
       { kind: 'swatch', name: 'color', label: 'Frame finish', options: FINISHES },
       { kind: 'swatch', name: 'roofColor', label: 'Roof finish', options: ROOF_FINISHES },
     ],
@@ -340,6 +429,10 @@ export const CONFIG = {
       depth: 16, // matches the website designer's default
       height: 8,
       shade: 'open',
+      anchor: 'plate',    // base plate on slab, or embedded in concrete
+      undergroundFt: 3,
+      bagsPerPost: 4,
+      coating: 'standard',
       color: '#0A0A0A',
     },
     controls: [
@@ -377,6 +470,16 @@ export const CONFIG = {
           { value: 'panels', label: 'Shade panels' },
         ],
       },
+      {
+        kind: 'segment', name: 'anchor', label: 'Post anchoring', cols: 2,
+        options: [
+          { value: 'plate', label: 'Base plate' },
+          { value: 'embedded', label: 'Set in concrete' },
+        ],
+      },
+      { ...undergroundControl, visibleWhen: (s) => s.anchor === 'embedded' },
+      { ...bagsControl, visibleWhen: (s) => s.anchor === 'embedded' },
+      coatingControl,
       { kind: 'swatch', name: 'color', label: 'Frame finish', options: FINISHES },
     ],
   },
@@ -445,11 +548,18 @@ export function specRows(type, s) {
       ['Height', `${s.height} ft`],
       ['Panel width', `${s.panelWidth} ft`],
     ];
-    if (s.type === 'horizontal-slat') rows.push(['Slat spacing', `${s.slatSpacing}"`]);
+    if (s.type === 'horizontal-slat') {
+      rows.push(['Slat spacing', `${s.slatSpacing}"`]);
+      if (Number(s.slatCount) > 0) rows.push(['Slats per section', `${s.slatCount}`]);
+      rows.push(['Slat material', optionLabel('fence', 'slatMaterial', s.slatMaterial || '4x1')]);
+    }
     if (s.type === 'wood-mesh') {
       rows.push(['Top profile', optionLabel('fence', 'style', s.style)]);
       rows.push(['Mesh / wood', `${s.meshRatio}% / ${100 - s.meshRatio}%`]);
     }
+    rows.push(['Post setting', `${s.undergroundFt ?? 3} ft underground · ${s.bagsPerPost ?? 4} bags each`]);
+    if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('fence', 'coating', s.coating)]);
+    if (Number(s.demoFt) > 0) rows.push(['Removal', `${s.demoFt} ft of old fence`]);
     rows.push(['Finish', fin]);
     rows.push(['Posts', optionLabel('fence', 'topEdge', s.topEdge) + ' top']);
     return rows.map(([label, value]) => ({ label, value }));
@@ -465,6 +575,14 @@ export function specRows(type, s) {
       rows.push(['Wood grain', optionLabel('gate', 'woodDir', s.woodDir)]);
       rows.push(['Mesh', s.mesh === 'yes' ? `Yes — ${s.meshRatio}% / ${100 - s.meshRatio}%` : 'No']);
     }
+    if (s.infill === 'horizontal-slat' && Number(s.slatCount) > 0) rows.push(['Slats in design', `${s.slatCount}`]);
+    if (s.type === 'double' && s.extraPosts === 'yes') rows.push(['Support posts', '4 (2 extra)']);
+    if (s.operator === 'one' || s.operator === 'two') {
+      rows.push(['Gate operator', s.operator === 'two' ? '2 motors' : '1 motor']);
+    }
+    rows.push(['Post setting', `${s.undergroundFt ?? 3} ft underground · ${s.bagsPerPost ?? 4} bags each`]);
+    if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('gate', 'coating', s.coating)]);
+    if (s.demoOld === 'yes') rows.push(['Removal', 'Old gate removed & hauled off']);
     rows.push(['Finish', fin]);
     rows.push(['Top edge', optionLabel('gate', 'topEdge', s.topEdge)]);
     return rows.map(([label, value]) => ({ label, value }));
@@ -490,9 +608,12 @@ export function specRows(type, s) {
       ['Style', optionLabel('pergola', 'style', s.style)],
       ['Size', s.style === 'hexagonal' ? `${s.width} ft across flats` : `${s.width} ft × ${s.depth} ft`],
       ['Head clearance', `${s.height} ft`],
+      ['Legs', optionLabel('pergola', 'legs', s.legs || 'standard')],
       ['Roof', optionLabel('pergola', 'shade', s.shade)],
-      ['Frame finish', fin],
+      ['Anchoring', optionLabel('pergola', 'anchor', s.anchor || 'plate')],
     ];
+    if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('pergola', 'coating', s.coating)]);
+    rows.push(['Frame finish', fin]);
     return rows.map(([label, value]) => ({ label, value }));
   }
   // carport
@@ -510,6 +631,8 @@ export function specRows(type, s) {
   const sides = optionLabel('carport', 'sides', s.sides);
   rows.push(['Sides', s.sides === 'one' ? `${sides} (${optionLabel('carport', 'sidePos', s.sidePos)})` : sides]);
   rows.push(['Gutters', s.gutters === 'yes' ? 'Yes' : 'No']);
+  rows.push(['Anchoring', optionLabel('carport', 'anchor', s.anchor || 'plate')]);
+  if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('carport', 'coating', s.coating)]);
   rows.push(['Frame finish', fin]);
   rows.push(['Roof finish', finishLabel(s.roofColor)]);
   return rows.map(([label, value]) => ({ label, value }));

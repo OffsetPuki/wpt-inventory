@@ -8,10 +8,11 @@ import LineItems from './LineItems.jsx';
  * live preview + auto-priced, hand-editable line items on the right.
  */
 export default function Configurator({
-  type, state, lineState, totals,
-  materialMarkupPct, laborMarkupPct, taxPct, deliveryMiles, deliveryRate,
-  onChangeOption, onEditItem, onEditLabor, onResetOverrides,
-  onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax,
+  type, state, lineState, totals, warnings, materialsSummary, priceLockAt,
+  materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
+  onChangeOption, onEditItem, onEditLabor, onEditInstall,
+  onAddCustomLine, onRemoveCustomLine, onUnlockPrices, onResetOverrides,
+  onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
 }) {
   const controls = visibleControls(type, state);
@@ -37,17 +38,26 @@ export default function Configurator({
             <LineItems
               lineState={lineState}
               totals={totals}
+              warnings={warnings}
+              materialsSummary={materialsSummary}
+              priceLockAt={priceLockAt}
               materialMarkupPct={materialMarkupPct}
               laborMarkupPct={laborMarkupPct}
               taxPct={taxPct}
+              discountPct={discountPct}
               deliveryMiles={deliveryMiles}
               deliveryRate={deliveryRate}
               onEditItem={onEditItem}
               onEditLabor={onEditLabor}
+              onEditInstall={onEditInstall}
+              onAddCustomLine={onAddCustomLine}
+              onRemoveCustomLine={onRemoveCustomLine}
+              onUnlockPrices={onUnlockPrices}
               onReset={onResetOverrides}
               onChangeMaterialMarkup={onChangeMaterialMarkup}
               onChangeLaborMarkup={onChangeLaborMarkup}
               onChangeTax={onChangeTax}
+              onChangeDiscount={onChangeDiscount}
               onChangeDeliveryMiles={onChangeDeliveryMiles}
               onChangeDeliveryRate={onChangeDeliveryRate}
             />

@@ -79,21 +79,29 @@ interface CalcTotals {
   tax: number;
   taxPct: number;
   total: number;
+  discountPct: number;
+  discountAmt: number;
+  minAdjustment: number;
 }
 
 // ─── Best-effort quote lines ─────────────────────────────────────────────────
 // Rebuild the printed document's rows (material items with markup blended in,
-// then labor / delivery / tax) from the stored builder session. The price
-// book may have moved since the quote was built — the stored total is what
-// the customer was told, so if the rebuild doesn't reconcile to the cent we
-// return null and the page shows the total only. Never the cost basis,
-// markup %, or labor rate.
+// then labor / install / delivery / tax) from the stored builder session.
+// Quotes saved by the material-library builder carry a SNAPSHOT of the price
+// book they were priced with (rate versioning) — rebuild against that, so the
+// page stays itemized even after rates move. Older quotes without a snapshot
+// fall back to the current book; if the rebuild doesn't reconcile to the cent
+// with the stored total (what the customer was told) we return null and the
+// page shows the total only. Never the cost basis, markup %, or labor rate.
 
 function bestEffortLines(quote: Quote): { name: string; amountCents: number }[] | null {
   try {
     const sess = parseJson<any>(quote.payload, null);
     if (!sess || typeof sess !== "object" || !sess.state) return null;
-    const lineState = buildLineState(quote.type, sess.state, currentPriceBook(), sess.overrides);
+    const book = sess.priceBookSnapshot && typeof sess.priceBookSnapshot === "object"
+      ? deepMerge(DEFAULT_PRICE_BOOK, sess.priceBookSnapshot)
+      : currentPriceBook();
+    const lineState = buildLineState(quote.type, sess.state, book, sess.overrides);
     // `as` rather than `:` — the engine types `lines` as {} (built dynamically).
     const totals = computeTotals(lineState, {
       materialMarkupPct: sess.materialMarkupPct,
@@ -101,6 +109,8 @@ function bestEffortLines(quote: Quote): { name: string; amountCents: number }[] 
       taxPct: sess.taxPct,
       deliveryMiles: sess.deliveryMiles,
       deliveryPerMile: sess.deliveryPerMile,
+      discountPct: sess.discountPct,
+      minJobCharge: (book as any).minJobCharge,
     }) as unknown as CalcTotals;
     if (Math.round(totals.total * 100) !== quote.totalCents) return null;
 
@@ -114,11 +124,20 @@ function bestEffortLines(quote: Quote): { name: string; amountCents: number }[] 
     if (totals.lines.labor.total > 0) {
       lines.push({ name: "Labor & fabrication", amountCents: Math.round(totals.lines.labor.total * 100) });
     }
+    if (totals.lines.finishing.total > 0) {
+      lines.push({ name: "Installation", amountCents: Math.round(totals.lines.finishing.total * 100) });
+    }
     if (totals.lines.delivery.total > 0) {
       lines.push({ name: "Delivery", amountCents: Math.round(totals.lines.delivery.total * 100) });
     }
+    if (totals.discountAmt > 0) {
+      lines.push({ name: `Discount (${totals.discountPct}%)`, amountCents: -Math.round(totals.discountAmt * 100) });
+    }
     if (totals.tax > 0) {
       lines.push({ name: `Sales tax (${totals.taxPct}%)`, amountCents: Math.round(totals.tax * 100) });
+    }
+    if (totals.minAdjustment > 0) {
+      lines.push({ name: "Minimum job charge", amountCents: Math.round(totals.minAdjustment * 100) });
     }
     return lines.length > 0 ? lines : null;
   } catch {
@@ -147,13 +166,20 @@ export function registerPublicPortalRoutes(app: Express): void {
       if (JSON.stringify(state).length > 8 * 1024) return res.json({ ok: false });
 
       const priceBook = currentPriceBook();
-      const { items, laborHours } = deriveItems(type, state, priceBook);
-      const material = (items as any[]).reduce((sum, it) => sum + lineCost(it), 0);
+      const { items, laborHours, installHours } = deriveItems(type, state, priceBook) as {
+        items: any[]; laborHours: number; installHours?: number;
+      };
+      const material = items.reduce((sum, it) => sum + lineCost(it), 0);
       const materialPrice = material * (1 + (Number(priceBook.materialMarkupPct) || 0) / 100);
+      const laborMarkup = 1 + (Number(priceBook.laborMarkupPct) || 0) / 100;
       const laborPrice = (Number(laborHours) || 0)
-        * (Number(priceBook.laborRatePerHour) || 0)
-        * (1 + (Number(priceBook.laborMarkupPct) || 0) / 100);
-      const base = materialPrice + laborPrice;
+        * (Number(priceBook.laborRatePerHour) || 0) * laborMarkup;
+      const installPrice = (Number(installHours) || 0)
+        * (Number(priceBook.installRatePerHour) || 0) * laborMarkup;
+      // Small jobs still hit the shop's minimum charge (pre-tax, like the range).
+      let base = materialPrice + laborPrice + installPrice;
+      const minCharge = Number(priceBook.minJobCharge) || 0;
+      if (base > 0 && minCharge > 0 && base < minCharge) base = minCharge;
       if (!(base > 0)) return res.json({ ok: false });
 
       // ±: -10% / +15% (installs surprise upward more often than down), each

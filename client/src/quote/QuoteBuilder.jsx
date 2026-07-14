@@ -19,7 +19,7 @@ import { toast } from '@/components/ui/toaster';
 
 import { defaultState } from './data/configurators.js';
 import { DEFAULT_PRICE_BOOK } from './data/priceBook.js';
-import { buildLineState } from './lib/estimate.js';
+import { buildLineState, deriveWarnings, materialTotals } from './lib/estimate.js';
 import { computeTotals } from './lib/quote.js';
 import {
   deepMerge, DEFAULT_SHOP, loadSession, saveSession, setPath,
@@ -54,6 +54,13 @@ function newSession(type, priceBook) {
     customer: { name: '', company: '', phone: '', email: '', location: '' },
     notes: '',
     depositPct: 0,
+    discountPct: 0,
+    // Rate versioning: a NEW quote prices live off the current book. Saving
+    // stamps a snapshot of the book into the payload; a REOPENED quote prices
+    // off its snapshot so old quotes never move when rates change — unless the
+    // owner explicitly unlocks it ("Use today's rates").
+    priceBookSnapshot: null,
+    priceBookSnapshotAt: null,
     // number + quoteId are assigned by the server the first time the quote
     // saves (on reaching the details step) — see saveQuote below.
     number: null,
@@ -76,6 +83,9 @@ function migrateSession(sess, priceBook) {
     laborMarkupPct: sess.laborMarkupPct ?? legacy ?? priceBook.laborMarkupPct,
     deliveryMiles: sess.deliveryMiles ?? 0,
     deliveryPerMile: sess.deliveryPerMile ?? priceBook.deliveryPerMile,
+    discountPct: sess.discountPct ?? 0,
+    priceBookSnapshot: sess.priceBookSnapshot ?? null,
+    priceBookSnapshotAt: sess.priceBookSnapshotAt ?? null,
     quoteId: sess.quoteId ?? null,
     sid: sess.sid ?? newSid(),
   };
@@ -199,9 +209,18 @@ export default function QuoteBuilder({ initialSettings }) {
   });
 
   // ── Derived pricing — only meaningful when a session exists ────────────────
+  // A reopened quote carries a snapshot of the price book from when it was
+  // saved; it prices against THAT book (old quotes don't move when rates
+  // change). New/unlocked quotes price against the live book.
+  const effectiveBook = useMemo(
+    () => (session?.priceBookSnapshot
+      ? deepMerge(DEFAULT_PRICE_BOOK, session.priceBookSnapshot)
+      : priceBook),
+    [session?.priceBookSnapshot, priceBook],
+  );
   const lineState = useMemo(
-    () => (session ? buildLineState(session.type, session.state, priceBook, session.overrides) : null),
-    [session, priceBook],
+    () => (session ? buildLineState(session.type, session.state, effectiveBook, session.overrides) : null),
+    [session, effectiveBook],
   );
   const totals = useMemo(
     () => (lineState ? computeTotals(lineState, {
@@ -210,8 +229,25 @@ export default function QuoteBuilder({ initialSettings }) {
       taxPct: session.taxPct,
       deliveryMiles: session.deliveryMiles,
       deliveryPerMile: session.deliveryPerMile,
+      discountPct: session.discountPct,
+      minJobCharge: effectiveBook.minJobCharge,
     }) : null),
-    [lineState, session],
+    [lineState, session, effectiveBook],
+  );
+  // "Did you forget?" checklist + the per-material purchase totals (cut list).
+  const warnings = useMemo(
+    () => (session && lineState ? deriveWarnings(session.type, session.state, lineState, {
+      materialMarkupPct: session.materialMarkupPct,
+      laborMarkupPct: session.laborMarkupPct,
+      taxPct: session.taxPct,
+      deliveryMiles: session.deliveryMiles,
+      discountPct: session.discountPct,
+    }) : []),
+    [session, lineState],
+  );
+  const materialsSummary = useMemo(
+    () => (lineState ? materialTotals(lineState.items, effectiveBook) : []),
+    [lineState, effectiveBook],
   );
 
   const persistQuote = () => {
@@ -220,7 +256,17 @@ export default function QuoteBuilder({ initialSettings }) {
     // must not fire a second POST before the first returns the quote id. The
     // skipped save is queued and replayed from onSettled.
     if (saveQuote.isPending) { resaveQueued.current = true; return; }
-    saveQuote.mutate({ sess: session, totalCents: Math.round((totals?.total ?? 0) * 100) });
+    // Stamp the book this quote was priced with into the payload (rate
+    // versioning). A locked quote keeps its own snapshot; a live one freezes
+    // the current book as of this save.
+    const sess = {
+      ...session,
+      priceBookSnapshot: session.priceBookSnapshot || priceBook,
+      priceBookSnapshotAt: session.priceBookSnapshot
+        ? (session.priceBookSnapshotAt || session.createdAt)
+        : new Date().toISOString(),
+    };
+    saveQuote.mutate({ sess, totalCents: Math.round((totals?.total ?? 0) * 100) });
   };
   persistQuoteRef.current = persistQuote;
 
@@ -237,7 +283,29 @@ export default function QuoteBuilder({ initialSettings }) {
     });
   const editLabor = (field, value) =>
     setSession((s) => ({ ...s, overrides: { ...s.overrides, labor: { ...(s.overrides.labor || {}), [field]: value } } }));
+  const editInstall = (field, value) =>
+    setSession((s) => ({ ...s, overrides: { ...s.overrides, install: { ...(s.overrides.install || {}), [field]: value } } }));
   const resetOverrides = () => setSession((s) => ({ ...s, overrides: {} }));
+
+  // Custom lines live in overrides (flagged `custom`) so they survive option
+  // changes and reprice-resets are explicit.
+  const addCustomLine = (name) =>
+    setSession((s) => {
+      const items = { ...(s.overrides.items || {}) };
+      items[`custom_${Date.now()}`] = { custom: true, name: name || 'Custom line', kind: 'flat', qty: 1, rate: 0 };
+      return { ...s, overrides: { ...s.overrides, items } };
+    });
+  const removeCustomLine = (key) =>
+    setSession((s) => {
+      const items = { ...(s.overrides.items || {}) };
+      delete items[key];
+      return { ...s, overrides: { ...s.overrides, items } };
+    });
+
+  // Unlock a snapshot-priced quote so it reprices with today's book (the next
+  // save freezes today's book in as the new snapshot).
+  const unlockPrices = () =>
+    setSession((s) => ({ ...s, priceBookSnapshot: null, priceBookSnapshotAt: null }));
   const setCustomer = (field, value) =>
     setSession((s) => ({ ...s, customer: { ...s.customer, [field]: value } }));
 
@@ -312,18 +380,27 @@ export default function QuoteBuilder({ initialSettings }) {
             state={session.state}
             lineState={lineState}
             totals={totals}
+            warnings={warnings}
+            materialsSummary={materialsSummary}
+            priceLockAt={session.priceBookSnapshot ? (session.priceBookSnapshotAt || session.createdAt) : null}
             materialMarkupPct={session.materialMarkupPct}
             laborMarkupPct={session.laborMarkupPct}
             taxPct={session.taxPct}
+            discountPct={session.discountPct}
             deliveryMiles={session.deliveryMiles}
             deliveryRate={session.deliveryPerMile}
             onChangeOption={setStateField}
             onEditItem={editItem}
             onEditLabor={editLabor}
+            onEditInstall={editInstall}
+            onAddCustomLine={addCustomLine}
+            onRemoveCustomLine={removeCustomLine}
+            onUnlockPrices={unlockPrices}
             onResetOverrides={resetOverrides}
             onChangeMaterialMarkup={(v) => patchSession({ materialMarkupPct: v })}
             onChangeLaborMarkup={(v) => patchSession({ laborMarkupPct: v })}
             onChangeTax={(v) => patchSession({ taxPct: v })}
+            onChangeDiscount={(v) => patchSession({ discountPct: v })}
             onChangeDeliveryMiles={(v) => patchSession({ deliveryMiles: v })}
             onChangeDeliveryRate={(v) => patchSession({ deliveryPerMile: v })}
             onBack={goHome}
