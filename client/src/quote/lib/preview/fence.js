@@ -15,7 +15,7 @@
 //   color       : string (hex, e.g. '#0A0A0A')      (default '#0A0A0A')
 //   topEdge     : 'flat' | 'capped'                 (default 'flat')
 
-import { shade } from './svg.js';
+import { shade, corrugatedGradient, corrugatedPitch } from './svg.js';
 
 export function renderFence(state) {
   const s = state || {};
@@ -87,6 +87,12 @@ export function renderFence(state) {
     `</pattern>`
   );
 
+  // Corrugated sheet fill — a repeating ribbed gradient (rounded metal ridges).
+  const corrId = 'fence-corr';
+  const corrPitch = corrugatedPitch(pxPerFt);
+  const usesCorrugated = type === 'corrugated' || (type === 'wood-mesh' && meshMaterial === 'corrugated');
+  if (usesCorrugated) defsParts.push(corrugatedGradient(corrId, color, corrPitch, 0));
+
   // Ground line
   parts.push(`<line x1="0" y1="${GROUND_Y}" x2="${VB_W}" y2="${GROUND_Y}" stroke="rgba(10,10,10,0.2)" stroke-width="1" />`);
 
@@ -137,31 +143,18 @@ export function renderFence(state) {
         parts.push(`<path d="${archStrokePath(innerLeft, innerRight, panelTop, archHeightPx)}" stroke="${color}" stroke-width="2" fill="none" />`);
       }
     } else if (type === 'corrugated') {
-      // Corrugated metal sheet: solid panel with vertical ribs (a light crest +
-      // shadow valley per corrugation) screwed to horizontal square-tube girts.
-      const light = shade(color, 0.3);
-      const dark = shade(color, -0.3);
-      const pxPerInch = pxPerFt / 12;
-      const ribPitch = Math.max(6, 3.5 * pxPerInch); // ~3.5" corrugation pitch
+      // Corrugated metal sheet — ribbed gradient fill (rounded ridges) screwed
+      // to horizontal square-tube girts.
       const innerW = innerRight - innerLeft;
-
-      // Sheet body
-      parts.push(`<rect x="${innerLeft}" y="${panelTop}" width="${innerW}" height="${fenceHeightPx}" fill="${color}" />`);
-      // Vertical corrugation ribs: highlight on each crest, shadow in each valley
-      for (let x = innerLeft + ribPitch / 2; x < innerRight - 0.5; x += ribPitch) {
-        parts.push(`<line x1="${x.toFixed(1)}" y1="${panelTop}" x2="${x.toFixed(1)}" y2="${panelBottom}" stroke="${light}" stroke-width="1.2" opacity="0.85" />`);
-        const vx = x + ribPitch / 2;
-        if (vx < innerRight - 0.5) {
-          parts.push(`<line x1="${vx.toFixed(1)}" y1="${panelTop}" x2="${vx.toFixed(1)}" y2="${panelBottom}" stroke="${dark}" stroke-width="1" opacity="0.6" />`);
-        }
-      }
+      parts.push(`<rect x="${innerLeft}" y="${panelTop}" width="${innerW}" height="${fenceHeightPx}" fill="url(#${corrId})" />`);
       // Horizontal support girts (2×2 tube) the sheet drills into — top, bottom,
       // and a mid rail on 6 ft+ fences (matches the estimator's auto rail count).
       const girtCount = height >= 6 ? 3 : 2;
       const girtThick = Math.max(3, pxPerFt * 0.16);
+      const girtShadow = shade(color, -0.3);
       for (let g = 0; g < girtCount; g++) {
         const gy = panelTop + (fenceHeightPx - girtThick) * (g / (girtCount - 1));
-        parts.push(`<rect x="${innerLeft}" y="${gy.toFixed(1)}" width="${innerW}" height="${girtThick.toFixed(1)}" fill="${dark}" opacity="0.75" />`);
+        parts.push(`<rect x="${innerLeft}" y="${gy.toFixed(1)}" width="${innerW}" height="${girtThick.toFixed(1)}" fill="${girtShadow}" opacity="0.7" />`);
       }
     } else {
       // Wood + Metal Mesh
@@ -180,17 +173,7 @@ export function renderFence(state) {
         parts.push(`<g${clipAttr}>`);
         if (meshMaterial === 'corrugated') {
           // Corrugated sheet in the upper portion instead of the wire mesh.
-          const cLight = shade(color, 0.3);
-          const cDark = shade(color, -0.3);
-          const cPitch = Math.max(6, 3.5 * (pxPerFt / 12));
-          parts.push(`<rect x="${innerLeft}" y="${meshRectY}" width="${innerW}" height="${meshRectH}" fill="${color}" />`);
-          for (let x = innerLeft + cPitch / 2; x < innerRight - 0.5; x += cPitch) {
-            parts.push(`<line x1="${x.toFixed(1)}" y1="${meshRectY}" x2="${x.toFixed(1)}" y2="${midY}" stroke="${cLight}" stroke-width="1.1" opacity="0.85" />`);
-            const vx = x + cPitch / 2;
-            if (vx < innerRight - 0.5) {
-              parts.push(`<line x1="${vx.toFixed(1)}" y1="${meshRectY}" x2="${vx.toFixed(1)}" y2="${midY}" stroke="${cDark}" stroke-width="0.9" opacity="0.6" />`);
-            }
-          }
+          parts.push(`<rect x="${innerLeft}" y="${meshRectY}" width="${innerW}" height="${meshRectH}" fill="url(#${corrId})" />`);
         } else {
           parts.push(`<rect x="${innerLeft}" y="${meshRectY}" width="${innerW}" height="${meshRectH}" fill="url(#${meshId})" />`);
         }

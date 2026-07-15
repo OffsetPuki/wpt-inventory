@@ -20,7 +20,7 @@
  *   state.topEdge   {('flat'|'capped')}                   Post-top treatment.     default 'flat'
  */
 
-import { shade } from './svg.js';
+import { shade, corrugatedGradient, corrugatedPitch } from './svg.js';
 
 export function renderGate(state) {
   // ---- Defensive defaults / normalization (mirrors readState() + draw()'s hidden-control forcing) ----
@@ -81,6 +81,12 @@ export function renderGate(state) {
       `<path d="M0 0 L9 9 M9 0 L0 9" stroke="rgba(10,10,10,0.7)" stroke-width="0.7"/>` +
       `</pattern>`
     );
+  }
+
+  // Corrugated sheet fill — a repeating ribbed gradient (rounded metal ridges).
+  const corrId = 'gate-corr';
+  if (s.infill === 'corrugated') {
+    defsParts.push(corrugatedGradient(corrId, s.color, corrugatedPitch(pxPerFt), 0));
   }
 
   // Fill a wood panel with board seams in the chosen direction.
@@ -162,17 +168,11 @@ export function renderGate(state) {
         drawWood(ix, innerPeakY, iright, iBottom, clipAttr);
       }
     } else if (s.infill === 'corrugated') {
-      // Corrugated metal sheet clipped to the opening, on horizontal support rails.
-      const cLight = shade(s.color, 0.3);
+      // Corrugated metal sheet (ribbed gradient) clipped to the opening, on
+      // horizontal support rails.
       const cDark = shade(s.color, -0.3);
-      const cPitch = Math.max(6, 3.5 * (pxPerFt / 12));
       let g = `<g${clipAttr}>`;
-      g += `<rect x="${ix}" y="${innerPeakY}" width="${iw}" height="${iBottom - innerPeakY}" fill="${s.color}" />`;
-      for (let cx = ix + cPitch / 2; cx < iright - 0.5; cx += cPitch) {
-        g += `<line x1="${cx.toFixed(1)}" y1="${innerPeakY}" x2="${cx.toFixed(1)}" y2="${iBottom}" stroke="${cLight}" stroke-width="1.1" opacity="0.85" />`;
-        const vx = cx + cPitch / 2;
-        if (vx < iright - 0.5) g += `<line x1="${vx.toFixed(1)}" y1="${innerPeakY}" x2="${vx.toFixed(1)}" y2="${iBottom}" stroke="${cDark}" stroke-width="0.9" opacity="0.6" />`;
-      }
+      g += `<rect x="${ix}" y="${innerPeakY}" width="${iw}" height="${iBottom - innerPeakY}" fill="url(#${corrId})" />`;
       const railN = s.height >= 8 ? 3 : 2;
       const railThick = Math.max(2.5, pxPerFt * 0.13);
       for (let r = 0; r < railN; r++) {
