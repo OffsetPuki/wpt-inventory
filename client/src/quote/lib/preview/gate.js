@@ -20,6 +20,8 @@
  *   state.topEdge   {('flat'|'capped')}                   Post-top treatment.     default 'flat'
  */
 
+import { shade } from './svg.js';
+
 export function renderGate(state) {
   // ---- Defensive defaults / normalization (mirrors readState() + draw()'s hidden-control forcing) ----
   const st = state || {};
@@ -159,6 +161,26 @@ export function renderGate(state) {
       } else {
         drawWood(ix, innerPeakY, iright, iBottom, clipAttr);
       }
+    } else if (s.infill === 'corrugated') {
+      // Corrugated metal sheet clipped to the opening, on horizontal support rails.
+      const cLight = shade(s.color, 0.3);
+      const cDark = shade(s.color, -0.3);
+      const cPitch = Math.max(6, 3.5 * (pxPerFt / 12));
+      let g = `<g${clipAttr}>`;
+      g += `<rect x="${ix}" y="${innerPeakY}" width="${iw}" height="${iBottom - innerPeakY}" fill="${s.color}" />`;
+      for (let cx = ix + cPitch / 2; cx < iright - 0.5; cx += cPitch) {
+        g += `<line x1="${cx.toFixed(1)}" y1="${innerPeakY}" x2="${cx.toFixed(1)}" y2="${iBottom}" stroke="${cLight}" stroke-width="1.1" opacity="0.85" />`;
+        const vx = cx + cPitch / 2;
+        if (vx < iright - 0.5) g += `<line x1="${vx.toFixed(1)}" y1="${innerPeakY}" x2="${vx.toFixed(1)}" y2="${iBottom}" stroke="${cDark}" stroke-width="0.9" opacity="0.6" />`;
+      }
+      const railN = s.height >= 8 ? 3 : 2;
+      const railThick = Math.max(2.5, pxPerFt * 0.13);
+      for (let r = 0; r < railN; r++) {
+        const ry = iTop + ((iBottom - iTop) - railThick) * (r / (railN - 1));
+        g += `<rect x="${ix}" y="${ry.toFixed(1)}" width="${iw}" height="${railThick.toFixed(1)}" fill="${cDark}" opacity="0.7" />`;
+      }
+      g += `</g>`;
+      parts.push(g);
     } else {
       // Horizontal slats sit in the rectangular body only — they start below the arch
       // spring line so the top slat never overlaps/collides with the arched frame.

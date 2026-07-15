@@ -30,6 +30,7 @@ export function renderFence(state) {
     ? 'flat'
     : (s.style != null ? s.style : 'flat');
   const meshRatio = parseInt(s.meshRatio, 10) || 25;
+  const meshMaterial = s.meshMaterial != null ? s.meshMaterial : 'mesh';
   const slatSpacing = parseFloat(s.slatSpacing) || 1;
   const color = s.color != null ? s.color : '#0A0A0A';
   const topEdge = s.topEdge != null ? s.topEdge : 'flat';
@@ -174,9 +175,25 @@ export function renderFence(state) {
       // fills the area between the arch curve and the top frame bar, not just the rectangular slab below.
       const meshRectY = archHeightPx > 0 ? (panelTop - archHeightPx) : (panelTop + frameThick);
       const meshRectH = midY - meshRectY;
+      const innerW = innerRight - innerLeft;
       if (meshRectH > 0) {
         parts.push(`<g${clipAttr}>`);
-        parts.push(`<rect x="${innerLeft}" y="${meshRectY}" width="${innerRight - innerLeft}" height="${meshRectH}" fill="url(#${meshId})" />`);
+        if (meshMaterial === 'corrugated') {
+          // Corrugated sheet in the upper portion instead of the wire mesh.
+          const cLight = shade(color, 0.3);
+          const cDark = shade(color, -0.3);
+          const cPitch = Math.max(6, 3.5 * (pxPerFt / 12));
+          parts.push(`<rect x="${innerLeft}" y="${meshRectY}" width="${innerW}" height="${meshRectH}" fill="${color}" />`);
+          for (let x = innerLeft + cPitch / 2; x < innerRight - 0.5; x += cPitch) {
+            parts.push(`<line x1="${x.toFixed(1)}" y1="${meshRectY}" x2="${x.toFixed(1)}" y2="${midY}" stroke="${cLight}" stroke-width="1.1" opacity="0.85" />`);
+            const vx = x + cPitch / 2;
+            if (vx < innerRight - 0.5) {
+              parts.push(`<line x1="${vx.toFixed(1)}" y1="${meshRectY}" x2="${vx.toFixed(1)}" y2="${midY}" stroke="${cDark}" stroke-width="0.9" opacity="0.6" />`);
+            }
+          }
+        } else {
+          parts.push(`<rect x="${innerLeft}" y="${meshRectY}" width="${innerW}" height="${meshRectH}" fill="url(#${meshId})" />`);
+        }
         parts.push(`</g>`);
       }
 

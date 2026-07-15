@@ -103,6 +103,7 @@ export const CONFIG = {
       demoFt: 0,           // ft of old fence to tear out
       style: 'flat',
       meshRatio: 25,
+      meshMaterial: 'mesh', // wood-mesh upper infill: 'mesh' or 'corrugated'
       color: '#0A0A0A',
       topEdge: 'flat',
     },
@@ -151,8 +152,16 @@ export const CONFIG = {
         visibleWhen: (s) => s.type === 'wood-mesh',
       },
       {
-        kind: 'range', name: 'meshRatio', label: 'Mesh portion', min: 25, max: 75, step: 5,
-        display: (v) => `${v}% mesh · ${100 - v}% wood`,
+        kind: 'segment', name: 'meshMaterial', label: 'Upper infill', cols: 2,
+        options: [
+          { value: 'mesh', label: 'Metal Mesh' },
+          { value: 'corrugated', label: 'Corrugated Metal' },
+        ],
+        visibleWhen: (s) => s.type === 'wood-mesh',
+      },
+      {
+        kind: 'range', name: 'meshRatio', label: 'Upper portion', min: 25, max: 75, step: 5,
+        display: (v) => `${v}% top · ${100 - v}% wood`,
         visibleWhen: (s) => s.type === 'wood-mesh',
       },
       { kind: 'swatch', name: 'color', label: 'Finish', options: FINISHES },
@@ -208,10 +217,11 @@ export const CONFIG = {
         ],
       },
       {
-        kind: 'segment', name: 'infill', label: 'Style', cols: 2,
+        kind: 'segment', name: 'infill', label: 'Style', cols: 3,
         options: [
           { value: 'horizontal-slat', label: 'Horizontal Slat' },
           { value: 'metal-wood', label: 'Metal + Wood' },
+          { value: 'corrugated', label: 'Corrugated Metal' },
         ],
       },
       {
@@ -498,7 +508,9 @@ export function visibleControls(type, state) {
 export function summaryLine(type, s) {
   const fin = finishLabel(s.color);
   if (type === 'fence') {
-    const t = optionLabel('fence', 'type', s.type);
+    const t = s.type === 'wood-mesh' && s.meshMaterial === 'corrugated'
+      ? 'Wood + Corrugated'
+      : optionLabel('fence', 'type', s.type);
     const arch = s.type === 'wood-mesh' && s.style === 'arched' ? '⌒ ' : '';
     return `${t} · ${s.totalLengthFt} ft run · ${arch}${s.height} ft tall · ${fin}`;
   }
@@ -541,7 +553,9 @@ export function specRows(type, s) {
     }
     if (s.type === 'wood-mesh') {
       rows.push(['Top profile', optionLabel('fence', 'style', s.style)]);
-      rows.push(['Mesh / wood', `${s.meshRatio}% / ${100 - s.meshRatio}%`]);
+      rows.push(['Upper infill', optionLabel('fence', 'meshMaterial', s.meshMaterial || 'mesh')]);
+      const upper = (s.meshMaterial === 'corrugated') ? 'corrugated' : 'mesh';
+      rows.push([`${upper === 'corrugated' ? 'Corrugated' : 'Mesh'} / wood`, `${s.meshRatio}% / ${100 - s.meshRatio}%`]);
     }
     if (s.type === 'corrugated') {
       const rails = Number(s.railCount) > 0 ? `${s.railCount} per section` : 'auto (2, or 3 at 6 ft+)';
@@ -565,6 +579,7 @@ export function specRows(type, s) {
       rows.push(['Wood grain', optionLabel('gate', 'woodDir', s.woodDir)]);
       rows.push(['Mesh', s.mesh === 'yes' ? `Yes — ${s.meshRatio}% / ${100 - s.meshRatio}%` : 'No']);
     }
+    if (s.infill === 'corrugated') rows.push(['Infill', `Corrugated metal on 2×2 support rails`]);
     if (s.infill === 'horizontal-slat' && Number(s.slatCount) > 0) rows.push(['Slats in design', `${s.slatCount}`]);
     if (s.type === 'double' && s.extraPosts === 'yes') rows.push(['Support posts', '4 (2 extra)']);
     if (s.operator === 'one' || s.operator === 'two') {

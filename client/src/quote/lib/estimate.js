@@ -246,12 +246,21 @@ function estimateFence(s, pb) {
       name: `Horizontal members — 3/section × ${panels} sections × ${panelWidth} ft`,
     }));
     const meshRatio = Math.max(0, Math.min(100, num(s.meshRatio, 0)));
-    const meshArea = round2(faceArea * meshRatio / 100);
-    if (meshArea > 0) {
-      pushPriced(items, matItem(pb, {
-        key: 'mesh', materialId: 'mesh', qty: meshArea,
-        name: `Metal mesh — ${meshArea} sq ft (${meshRatio}% of face)`,
-      }));
+    const upperArea = round2(faceArea * meshRatio / 100);
+    if (upperArea > 0) {
+      if (s.meshMaterial === 'corrugated') {
+        // Corrugated sheet in the upper portion; +10% for side/end laps.
+        const panelArea = round2(upperArea * 1.1);
+        pushPriced(items, matItem(pb, {
+          key: 'mesh', materialId: 'corrugated_panel', qty: panelArea,
+          name: `Corrugated metal — ${panelArea} sq ft (${upperArea} sq ft upper + 10% lap)`,
+        }));
+      } else {
+        pushPriced(items, matItem(pb, {
+          key: 'mesh', materialId: 'mesh', qty: upperArea,
+          name: `Metal mesh — ${upperArea} sq ft (${meshRatio}% of face)`,
+        }));
+      }
     }
     const woodArea = round2(faceArea * (100 - meshRatio) / 100);
     if (woodArea > 0) {
@@ -347,6 +356,20 @@ function estimateGate(s, pb) {
         name: `Metal mesh — ${meshArea} sq ft (${meshRatio}% of face)`,
       }));
     }
+  }
+
+  if (s.infill === 'corrugated') {
+    // Corrugated metal sheet over the gate face (+10% lap), on 2×2 support rails.
+    const panelArea = round2(faceArea * 1.1);
+    pushPriced(items, matItem(pb, {
+      key: 'panels', materialId: 'corrugated_panel', qty: panelArea,
+      name: `Corrugated metal — ${panelArea} sq ft (${faceArea} sq ft face + 10% lap)`,
+    }));
+    const rails = height >= 8 ? 3 : 2;
+    pushPriced(items, matItem(pb, {
+      key: 'rails', materialId: 'tube_2x2', qty: rails * width,
+      name: `Support rails — ${rails} × ${width} ft (${matDef(pb, 'tube_2x2').name})`,
+    }));
   }
 
   // Support posts: 6×6, height + underground, concrete per post. Double swing

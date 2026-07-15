@@ -71,6 +71,7 @@ const TOOLS = {
       { key: 'height', labels: ['height', 'altura'], parse: firstNumber },
       { key: 'panelWidth', labels: ['panel width', 'ancho de panel'], parse: firstNumber },
       { key: 'meshRatio', labels: ['mesh / wood', 'malla / madera'], parse: firstNumber },
+      { key: 'meshMaterial', labels: ['upper infill', 'relleno superior'], parse: oneOf({ corrugated: ['corrugated', 'corrugado'], mesh: ['metal mesh', 'mesh', 'malla'] }) },
       { key: 'slatSpacing', labels: ['slat spacing', 'espacio entre lamas'], parse: firstNumber },
       { key: 'color', labels: ['finish', 'acabado'], parse: COLOR },
       { key: 'topEdge', labels: ['posts', 'postes'], parse: oneOf({ flat: ['flat', 'plano'], capped: ['capped', 'con tapa'] }) },
@@ -82,7 +83,7 @@ const TOOLS = {
     head: () => ({}),
     fields: [
       { key: 'type', labels: ['type'], parse: oneOf({ single: ['single swing'], double: ['double swing'], slide: ['sliding'] }) },
-      { key: 'infill', labels: ['style'], parse: oneOf({ 'horizontal-slat': ['horizontal slat'], 'metal-wood': ['metal + wood'] }) },
+      { key: 'infill', labels: ['style'], parse: oneOf({ 'horizontal-slat': ['horizontal slat'], 'metal-wood': ['metal + wood'], 'corrugated': ['corrugated metal', 'corrugated', 'metal corrugado', 'corrugado'] }) },
       {
         key: 'mesh', labels: ['mesh'],
         parse: (raw) => (norm(raw).startsWith('yes') ? 'yes' : norm(raw).startsWith('no') ? 'no' : undefined),
