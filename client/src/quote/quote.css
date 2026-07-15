@@ -80,7 +80,7 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   border-bottom: 1px solid var(--line);
 }
 
-.qa .topnav { display: flex; align-items: center; gap: 26px; }
+.qa .topnav { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 26px; }
 .qa .topnav button {
   background: none;
   border: 0;
@@ -335,7 +335,7 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .totals-row.grand .k { color: var(--ink); font-size: 0.72rem; letter-spacing: 0.24em; text-transform: uppercase; }
 .qa .totals-row.grand .v { font-family: 'Fraunces', serif; font-weight: 300; font-size: 2.4rem; letter-spacing: -0.03em; }
 
-.qa .markup-tax { display: flex; gap: 24px; padding: 14px 22px; border-top: 1px solid var(--line); }
+.qa .markup-tax { display: flex; flex-wrap: wrap; gap: 14px 24px; padding: 14px 22px; border-top: 1px solid var(--line); }
 .qa .mt-field { display: flex; flex-direction: column; gap: 6px; }
 .qa .mt-field label { font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--steel); }
 
@@ -414,9 +414,10 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 }
 .qa .home-find-link:hover { color: var(--steel); }
 
-.qa .find-bar { display: flex; gap: 12px; align-items: stretch; max-width: 44rem; }
+.qa .find-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; max-width: 44rem; }
 .qa .find-input {
   flex: 1;
+  min-width: 10rem;
   background: transparent;
   border: 1px solid var(--line-strong);
   color: var(--ink);
@@ -512,14 +513,21 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   .qa .cfg-controls { position: static; order: 2; }
   .qa .cfg-right { order: 1; }
   .qa .type-grid { grid-template-columns: 1fr; }
-  .qa .pb-grid { grid-template-columns: 1fr; }
+  .qa .pb-grid { grid-template-columns: minmax(0, 1fr); }
   .qa .fields.two { grid-template-columns: 1fr; }
+  .qa .lead-body { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
   .qa .topbar { padding: 14px 18px; }
-  .qa .topnav { gap: 16px; }
+  .qa .topnav { gap: 8px 16px; }
   .qa .container { padding: 0 18px; }
+  .qa .line-name { flex-wrap: wrap; }
+  .qa .pb-field { flex-wrap: wrap; }
+  .qa .sq-date { margin-left: 0; padding-left: 0; width: 100%; }
+  .qa .pq-head { flex-wrap: wrap; }
+  .qa .print-view { margin: 18px auto; padding: 28px 20px; }
+  .qa .print-toolbar { padding: 14px 18px; }
 }
 
 /* =============================================================================
