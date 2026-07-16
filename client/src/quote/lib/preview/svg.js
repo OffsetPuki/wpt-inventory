@@ -28,16 +28,24 @@ export function pts(arr) {
  * `fill="url(#<id>)"`. `x0` anchors the rib phase (use the sheet's left edge).
  */
 export function corrugatedGradient(id, color, pitchPx, x0 = 0) {
-  const valley = shade(color, -0.45);
-  const flankL = shade(color, 0.16);
-  const crest = shade(color, 0.62);
-  const flankR = shade(color, -0.26);
+  // On very dark finishes valley≈mid≈black, so the rounded ridge collapses into a thin
+  // line. Lift a gunmetal sheen for the mid/highlight tones (valley stays near the true
+  // finish) in proportion to how dark the color is; light finishes get dark≈0 = unchanged.
+  // ponytail: mirrored in the website's fence.astro + gate.astro corrGrad — keep in sync.
+  const h = color.replace('#', '');
+  const bright = (parseInt(h.slice(0, 2), 16) + parseInt(h.slice(2, 4), 16) + parseInt(h.slice(4, 6), 16)) / 3;
+  const dark = Math.max(0, Math.min(1, (60 - bright) / 60));
+  const base = shade(color, 0.55 * dark);
+  const valley = shade(color, -0.45 + 0.18 * dark);
+  const flankL = shade(base, 0.16);
+  const crest = shade(base, 0.62);
+  const flankR = shade(base, -0.26);
   return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" spreadMethod="repeat" `
     + `x1="${x0.toFixed(2)}" y1="0" x2="${(x0 + pitchPx).toFixed(2)}" y2="0">`
     + `<stop offset="0" stop-color="${valley}"/>`
     + `<stop offset="0.2" stop-color="${flankL}"/>`
     + `<stop offset="0.31" stop-color="${crest}"/>`
-    + `<stop offset="0.45" stop-color="${color}"/>`
+    + `<stop offset="0.45" stop-color="${base}"/>`
     + `<stop offset="0.72" stop-color="${flankR}"/>`
     + `<stop offset="1" stop-color="${valley}"/>`
     + `</linearGradient>`;
