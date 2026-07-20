@@ -37,9 +37,10 @@ console.log('\nFence (horizontal slat, 40 ft × 6 ft, 6 ft sections):');
   const conc = item(items, 'concrete');
   check('concrete = 32 bags (4/post)', conc && approx(conc.qty, 32) && conc.materialId === 'concrete_bag', `got ${conc?.qty}`);
 
-  // auto slats: round(72" / (4+1)") = 14 per section × 7 sections × 6 ft = 588 ft
+  // auto slats match the SVG preview: floor((72" − 5 + 1) / (3 + 1)) = 17 per
+  // section × 7 sections × 6 ft = 714 ft (3" slat face — see slatCountFor)
   const slats = item(items, 'slats');
-  check('slats auto = 14/section → 588 ft of 4×1', slats && approx(slats.qty, 588) && slats.materialId === 'tube_4x1', `got ${slats?.qty}`);
+  check('slats auto = 17/section → 714 ft of 4×1', slats && approx(slats.qty, 714) && slats.materialId === 'tube_4x1', `got ${slats?.qty}`);
 
   // manual slat count wins
   const manual = deriveItems('fence', { ...s, slatCount: 5 }, pb);

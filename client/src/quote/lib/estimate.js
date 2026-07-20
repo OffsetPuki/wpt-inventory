@@ -130,8 +130,8 @@ export function materialTotals(items, pb) {
 // ── Shared shop-math pieces ───────────────────────────────────────────────────
 
 /**
- * Slats per section: the entered design count wins; 0/blank auto-fits a 4-inch
- * slat face with the given gap into the visible height.
+ * Slats per section: the entered design count wins; 0/blank auto-fits a 3-inch
+ * slat face with the given gap into the visible height (matches the preview).
  */
 function slatCountFor(heightFt, slatCount, gapIn) {
   const manual = num(slatCount, 0);
