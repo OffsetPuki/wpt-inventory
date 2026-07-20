@@ -4,6 +4,7 @@ import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { type Settings } from "@shared/schema";
 import Header from "@/components/Header";
+import DocumentsCard from "@/components/DocumentsCard";
 import { formatDateTime } from "@/lib/format";
 import { DatabaseBackup, Loader2, Save, Upload } from "lucide-react";
 
@@ -238,6 +239,12 @@ export default function SettingsPage() {
       <Header title="Settings" description="Branding & backup" />
       <div className="flex flex-col gap-5">
         <BrandingTab />
+        {/* Phase G #4: the owner's own COI/W-9 — GCs ask for these on every
+            commercial bid, so they live here ready to download and send. */}
+        <DocumentsCard
+          title="Company documents"
+          description="Your COI, W-9 and other paperwork GCs ask for — with expiry reminders."
+        />
         <BackupCard />
       </div>
     </div>

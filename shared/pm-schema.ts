@@ -32,6 +32,13 @@ export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 export const TIMESHEET_STATUSES = ["open", "submitted", "approved"] as const;
 export type TimesheetStatus = (typeof TIMESHEET_STATUSES)[number];
 
+// Phase G: commercial-work toolkit.
+export const CHANGE_ORDER_STATUSES = ["draft", "approved", "void"] as const;
+export type ChangeOrderStatus = (typeof CHANGE_ORDER_STATUSES)[number];
+
+export const DOCUMENT_KINDS = ["coi", "w9", "lien_waiver", "contract", "other"] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
 // ─── Tables ──────────────────────────────────────────────────────────────────
 
 export const pmTasks = sqliteTable("pm_tasks", {
@@ -137,6 +144,46 @@ export const contracts = sqliteTable("pm_contracts", {
   deletedAt: integer("deleted_at"),
 });
 
+// Phase G #1: commercial change orders — scope/price changes on a job after
+// the contract is signed. amount_cents is SIGNED (deductive COs are negative);
+// only APPROVED rows count toward the job's effective contract total.
+export const changeOrders = sqliteTable("pm_change_orders", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  // Soft ref to pm_contracts.id — informational only, no FK on purpose.
+  contractId: integer("contract_id"),
+  title: text("title").notNull(),
+  description: text("description"),
+  amountCents: integer("amount_cents").notNull().default(0), // signed
+  status: text("status", { enum: CHANGE_ORDER_STATUSES }).notNull().default("draft"),
+  approvedAt: integer("approved_at"), // unix ms
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  deletedAt: integer("deleted_at"),
+});
+
+// Phase G #4: compliance documents (COI / W-9 / lien waivers / signed
+// contracts). project_id NULL = company-level (the owner's own COI/W-9 sent to
+// GCs). file_path is the stored filename in DATA_DIR/uploads; served through
+// an authed endpoint (PDFs are deliberately not reachable via public /uploads).
+export const pmDocuments = sqliteTable("pm_documents", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
+  kind: text("kind", { enum: DOCUMENT_KINDS }).notNull().default("other"),
+  title: text("title").notNull(),
+  filePath: text("file_path").notNull(),
+  expiresAt: text("expires_at"), // "YYYY-MM-DD" — feeds the renewal sweep
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  deletedAt: integer("deleted_at"),
+});
+
 export const kbArticles = sqliteTable("pm_kb_articles", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
@@ -184,6 +231,15 @@ export const insertContractSchema = createInsertSchema(contracts).omit({
   deletedAt: true,
 });
 
+export const insertChangeOrderSchema = createInsertSchema(changeOrders, {
+  amountCents: z.number().int(), // signed — deductive COs are negative
+}).omit({
+  id: true,
+  createdAt: true,
+  deletedAt: true,
+  approvedAt: true, // server-stamped on the draft→approved transition
+});
+
 export const insertKbArticleSchema = createInsertSchema(kbArticles).omit({
   id: true,
   createdAt: true,
@@ -197,10 +253,13 @@ export type PmTask = typeof pmTasks.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type Timesheet = typeof timesheets.$inferSelect;
 export type Contract = typeof contracts.$inferSelect;
+export type ChangeOrder = typeof changeOrders.$inferSelect;
+export type PmDocument = typeof pmDocuments.$inferSelect;
 export type KbArticle = typeof kbArticles.$inferSelect;
 
 export type InsertPmTask = z.infer<typeof insertPmTaskSchema>;
 export type InsertContract = z.infer<typeof insertContractSchema>;
+export type InsertChangeOrder = z.infer<typeof insertChangeOrderSchema>;
 export type InsertKbArticle = z.infer<typeof insertKbArticleSchema>;
 
 // ─── Label maps ──────────────────────────────────────────────────────────────
@@ -240,4 +299,18 @@ export const TIMESHEET_STATUS_LABELS: Record<TimesheetStatus, string> = {
   open: "Open",
   submitted: "Submitted",
   approved: "Approved",
+};
+
+export const CHANGE_ORDER_STATUS_LABELS: Record<ChangeOrderStatus, string> = {
+  draft: "Draft",
+  approved: "Approved",
+  void: "Void",
+};
+
+export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
+  coi: "COI",
+  w9: "W-9",
+  lien_waiver: "Lien waiver",
+  contract: "Contract",
+  other: "Other",
 };

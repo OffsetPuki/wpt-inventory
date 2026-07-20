@@ -1,4 +1,8 @@
 import type { Express } from "express";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
+import multer from "multer";
 import { z } from "zod";
 import { eq, and, or, desc, asc, isNull, like, gte, lt, sql, getTableColumns } from "drizzle-orm";
 import { sqlite, db } from "./storage";
@@ -6,9 +10,10 @@ import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { users, projects } from "../shared/schema";
 import {
-  pmTasks, timeEntries, timesheets, contracts, kbArticles,
-  insertPmTaskSchema, insertTimeEntrySchema, insertContractSchema, insertKbArticleSchema,
-  TASK_STATUSES,
+  pmTasks, timeEntries, timesheets, contracts, changeOrders, pmDocuments, kbArticles,
+  insertPmTaskSchema, insertTimeEntrySchema, insertContractSchema,
+  insertChangeOrderSchema, insertKbArticleSchema,
+  TASK_STATUSES, DOCUMENT_KINDS,
 } from "../shared/pm-schema";
 import { clients } from "../shared/crm-schema";
 import { pid, qstr, isElevated, registerSoftDelete } from "./http-util";
@@ -105,6 +110,35 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_pm_contracts_client ON pm_contracts(client_id);
   CREATE INDEX IF NOT EXISTS idx_pm_contracts_created ON pm_contracts(created_at);
 
+  -- Phase G #1: change orders. contract_id is a soft ref (no FK on purpose).
+  CREATE TABLE IF NOT EXISTS pm_change_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    contract_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT,
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft',
+    approved_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    deleted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pm_change_orders_project ON pm_change_orders(project_id, deleted_at, status);
+
+  -- Phase G #4: compliance documents. project_id NULL = company-level.
+  CREATE TABLE IF NOT EXISTS pm_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL DEFAULT 'other',
+    title TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    expires_at TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    deleted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pm_documents_project ON pm_documents(project_id, deleted_at);
+  CREATE INDEX IF NOT EXISTS idx_pm_documents_expires ON pm_documents(expires_at);
+
   CREATE TABLE IF NOT EXISTS pm_kb_articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -154,6 +188,48 @@ for (const ddl of [
     /* column already exists */
   }
 }
+
+// ─── Document uploads (Phase G #4) ───────────────────────────────────────────
+// Same DATA_DIR/uploads dir + timestamp-random filename style as the multer
+// photo flow in routes.ts, extended to accept PDFs (COIs/W-9s are PDFs). PDFs
+// are deliberately NOT servable via the public /uploads static handler (it
+// only serves image extensions), so document files are only reachable through
+// the authed GET /api/pm/documents/:id/file below — a W-9 carries an EIN/SSN
+// and must not sit behind an unauthenticated URL.
+const dataDir = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.resolve(process.cwd(), "data");
+const docUploadDir = path.resolve(dataDir, "uploads");
+if (!fs.existsSync(docUploadDir)) fs.mkdirSync(docUploadDir, { recursive: true });
+
+// Extension → safe Content-Type, doubling as the accept allowlist (same
+// stance as routes.ts EXT_TO_MIME: never let the browser sniff HTML/JS).
+const DOC_EXT_TO_MIME: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+};
+const DOC_ALLOWED_MIME = new Set(Object.values(DOC_EXT_TO_MIME));
+
+const docUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, docUploadDir),
+    filename: (_req, file, cb) => {
+      const rawExt = path.extname(file.originalname).toLowerCase();
+      const ext = DOC_EXT_TO_MIME[rawExt] ? rawExt : ".pdf";
+      cb(null, `${Date.now()}-${crypto.randomBytes(16).toString("hex")}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB, same as photos
+  fileFilter: (_req, file, cb) => {
+    if (DOC_ALLOWED_MIME.has(file.mimetype.toLowerCase())) return cb(null, true);
+    cb(new Error("Only PDF or image uploads are allowed"));
+  },
+});
 
 // ─── Local date helpers ──────────────────────────────────────────────────────
 // Calendar dates are TEXT "YYYY-MM-DD" in the shop's local timezone; instants
@@ -744,6 +820,158 @@ export function registerPmRoutes(app: Express): void {
   registerSoftDelete(app, "/api/pm/contracts/:id", requireElevated, {
     table: contracts, notFound: "Contract not found",
     action: "pm.contract_delete", targetType: "pm_contract", name: (c) => c.title, audit,
+  });
+
+  // ── Change orders (Phase G #1) ─────────────────────────────────────────────
+  // Same auth tiers as contracts: reads open to everyone signed in, mutations
+  // manager/technician. Approved COs feed the job's effective contract total
+  // (finance.ts project summary).
+
+  app.get("/api/pm/change-orders", requireAuth, (req, res) => {
+    const conditions: any[] = [isNull(changeOrders.deletedAt)];
+    const projectId = qstr(req.query.projectId);
+    const status = qstr(req.query.status);
+    if (projectId) conditions.push(eq(changeOrders.projectId, parseInt(projectId, 10)));
+    if (status) conditions.push(eq(changeOrders.status, status as any));
+    const rows = db.select({
+      ...getTableColumns(changeOrders),
+      projectName: projects.name,
+    })
+      .from(changeOrders)
+      .leftJoin(projects, eq(changeOrders.projectId, projects.id))
+      .where(and(...conditions))
+      .orderBy(desc(changeOrders.createdAt), desc(changeOrders.id))
+      .all();
+    res.json(rows);
+  });
+
+  app.post("/api/pm/change-orders", requireElevated, (req, res) => {
+    let body;
+    try {
+      body = insertChangeOrderSchema.parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message || "Invalid request" });
+    }
+    // Logging an already-approved CO stamps approved_at, same rule as PATCH.
+    const approvedAt = body.status === "approved" ? Date.now() : undefined;
+    const row = db.insert(changeOrders).values({ ...body, approvedAt }).returning().get();
+    audit(req, "pm.change_order_create", {
+      targetType: "pm_change_order", targetId: row.id, targetName: row.title,
+      details: { projectId: row.projectId, amountCents: row.amountCents },
+    });
+    res.status(201).json(row);
+  });
+
+  app.patch("/api/pm/change-orders/:id", requireElevated, (req, res) => {
+    const id = pid(req.params.id);
+    const existing = db.select().from(changeOrders)
+      .where(and(eq(changeOrders.id, id), isNull(changeOrders.deletedAt))).get();
+    if (!existing) return res.status(404).json({ message: "Change order not found" });
+    let patch;
+    try {
+      patch = insertChangeOrderSchema.partial().parse(req.body);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message || "Invalid request" });
+    }
+    // An approved CO is money the customer signed off on — amount edits after
+    // approval would silently move the job's effective contract total.
+    if (patch.amountCents !== undefined && patch.amountCents !== existing.amountCents
+      && existing.status === "approved") {
+      return res.status(400).json({ message: "Approved change orders are locked — void it and add a new one." });
+    }
+    const set: Partial<typeof changeOrders.$inferInsert> = { ...patch };
+    if (patch.status && patch.status !== existing.status) {
+      if (patch.status === "approved") set.approvedAt = Date.now();
+      audit(req, "pm.change_order_status", {
+        targetType: "pm_change_order", targetId: id, targetName: existing.title,
+        details: { from: existing.status, to: patch.status, amountCents: existing.amountCents },
+      });
+    }
+    const updated = db.update(changeOrders).set(set).where(eq(changeOrders.id, id)).returning().get();
+    res.json(updated);
+  });
+
+  registerSoftDelete(app, "/api/pm/change-orders/:id", requireElevated, {
+    table: changeOrders, notFound: "Change order not found",
+    action: "pm.change_order_delete", targetType: "pm_change_order", name: (c) => c.title, audit,
+  });
+
+  // ── Compliance documents (Phase G #4) ──────────────────────────────────────
+  // ?projectId=N → that job's docs; ?company=1 → company-level (project_id
+  // NULL — the owner's own COI/W-9 for sending to GCs); neither → all.
+
+  app.get("/api/pm/documents", requireAuth, (req, res) => {
+    const conditions: any[] = [isNull(pmDocuments.deletedAt)];
+    const projectId = qstr(req.query.projectId);
+    if (projectId) conditions.push(eq(pmDocuments.projectId, parseInt(projectId, 10)));
+    else if (qstr(req.query.company)) conditions.push(isNull(pmDocuments.projectId));
+    const rows = db.select({
+      ...getTableColumns(pmDocuments),
+      projectName: projects.name,
+    })
+      .from(pmDocuments)
+      .leftJoin(projects, eq(pmDocuments.projectId, projects.id))
+      .where(and(...conditions))
+      .orderBy(desc(pmDocuments.createdAt), desc(pmDocuments.id))
+      .all();
+    res.json(rows);
+  });
+
+  app.post(
+    "/api/pm/documents",
+    requireElevated,
+    (req, res, next) => {
+      docUpload.single("file")(req, res, (err: any) => {
+        if (err) return res.status(400).json({ message: err.message || "Upload rejected" });
+        next();
+      });
+    },
+    (req, res) => {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      // multipart fields arrive as strings — parse by hand.
+      const kind = DOCUMENT_KINDS.includes(req.body?.kind) ? req.body.kind : "other";
+      const title = String(req.body?.title ?? "").trim()
+        || req.file.originalname.replace(/\.[^.]+$/, "")
+        || "Document";
+      const expiresAt = YMD_RE.test(String(req.body?.expiresAt ?? "")) ? req.body.expiresAt : null;
+      const projectIdRaw = parseInt(String(req.body?.projectId ?? ""), 10);
+      const projectId = Number.isFinite(projectIdRaw) ? projectIdRaw : null;
+      const row = db.insert(pmDocuments).values({
+        projectId, kind, title, expiresAt,
+        filePath: req.file.filename,
+      }).returning().get();
+      audit(req, "pm.document_upload", {
+        targetType: "pm_document", targetId: row.id, targetName: row.title,
+        details: { kind: row.kind, projectId: row.projectId, expiresAt: row.expiresAt },
+      });
+      res.status(201).json(row);
+    },
+  );
+
+  // Authed download — safe Content-Type from the stored extension, nosniff,
+  // no long-lived cache (the file may hold an EIN/SSN).
+  app.get("/api/pm/documents/:id/file", requireAuth, (req, res) => {
+    const row = db.select().from(pmDocuments)
+      .where(and(eq(pmDocuments.id, pid(req.params.id)), isNull(pmDocuments.deletedAt)))
+      .get();
+    if (!row) return res.status(404).json({ message: "Document not found" });
+    const safeName = path.basename(row.filePath); // strips any traversal
+    const ext = path.extname(safeName).toLowerCase();
+    const mime = DOC_EXT_TO_MIME[ext];
+    const filePath = path.join(docUploadDir, safeName);
+    if (!mime || !fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "File missing from storage" });
+    }
+    res.setHeader("Content-Type", mime);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const dlName = `${row.title.replace(/[^\w .-]+/g, "_")}${ext}`;
+    res.setHeader("Content-Disposition", `attachment; filename="${dlName}"`);
+    res.sendFile(filePath);
+  });
+
+  registerSoftDelete(app, "/api/pm/documents/:id", requireElevated, {
+    table: pmDocuments, notFound: "Document not found",
+    action: "pm.document_delete", targetType: "pm_document", name: (d) => d.title, audit,
   });
 
   // ── Knowledge base ─────────────────────────────────────────────────────────

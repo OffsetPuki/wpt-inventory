@@ -10,23 +10,31 @@ import type { Client } from "@shared/crm-schema";
 import {
   CONTRACT_KIND_LABELS,
   CONTRACT_STATUS_LABELS,
+  CHANGE_ORDER_STATUS_LABELS,
+  type ChangeOrder,
+  type ChangeOrderStatus,
   type ContractKind,
   type ContractStatus,
 } from "@shared/pm-schema";
-import { formatDateTime, formatMoney, formatHours, formatDate } from "@/lib/format";
+import { formatDateTime, formatMoney, formatHours, formatDate, parseMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { inputCls, primaryBtn } from "@/lib/ui-styles";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import ProjectChecklist from "@/components/ProjectChecklist";
+import DocumentsCard from "@/components/DocumentsCard";
 import { uploadPhoto } from "@/lib/uploadPhoto";
 import {
   ArrowLeft,
+  Ban,
+  Check,
   Globe,
   Image as ImageIcon,
   ImageOff,
   Loader2,
   PackageMinus,
   PackagePlus,
+  Plus,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -324,6 +332,178 @@ function ContractsCard({ project }: { project: Project }) {
   );
 }
 
+// Phase G #1: the commercial paper trail — scope/price changes after signing.
+// Approved COs feed the job's effective contract total (finances card).
+const CO_CHIP: Record<ChangeOrderStatus, string> = {
+  draft: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
+  approved: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  void: "bg-zinc-500/10 text-zinc-500",
+};
+
+function ChangeOrdersCard({ projectId }: { projectId: number }) {
+  const { isElevated } = useAuth();
+  const [addOpen, setAddOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+
+  const { data: cos = [] } = useQuery<ChangeOrder[]>({
+    queryKey: ["pm-change-orders", projectId],
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/pm/change-orders?projectId=${projectId}`)).json(),
+    retry: false,
+  });
+
+  const invalidate = [["pm-change-orders", projectId], ["project-fin-summary", projectId]];
+  const create = useApiMutation({
+    request: () => ({
+      method: "POST",
+      url: "/api/pm/change-orders",
+      body: {
+        projectId,
+        title: title.trim(),
+        description: description.trim() || null,
+        amountCents: parseMoney(amount),
+      },
+    }),
+    invalidate,
+    successTitle: "Change order added",
+    errorTitle: "Could not add change order",
+    onSuccess: () => {
+      setAddOpen(false);
+      setTitle("");
+      setAmount("");
+      setDescription("");
+    },
+  });
+  const setStatus = useApiMutation<unknown, { id: number; status: ChangeOrderStatus }>({
+    request: ({ id, status }) => ({
+      method: "PATCH",
+      url: `/api/pm/change-orders/${id}`,
+      body: { status },
+    }),
+    invalidate,
+    successTitle: (_d, v) => (v.status === "approved" ? "Change order approved" : "Change order voided"),
+    errorTitle: "Could not update",
+  });
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">Change orders</h2>
+        {isElevated && (
+          <button
+            onClick={() => setAddOpen(true)}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary"
+          >
+            <Plus className="h-4 w-4" />
+            Add
+          </button>
+        )}
+      </div>
+      {cos.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No change orders. Scope changed after signing? Paper it here before doing the work.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {cos.map((co) => (
+            <li key={co.id} className="flex items-center gap-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={co.description ?? undefined}>
+                {co.title}
+              </span>
+              <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", CO_CHIP[co.status])}>
+                {CHANGE_ORDER_STATUS_LABELS[co.status]}
+              </span>
+              <span
+                className={cn(
+                  "shrink-0 tabular-nums",
+                  co.status === "void" ? "text-muted-foreground line-through" : "text-foreground",
+                )}
+              >
+                {co.amountCents >= 0 ? "+" : ""}{formatMoney(co.amountCents)}
+              </span>
+              {isElevated && co.status === "draft" && (
+                <button
+                  title="Approve — counts toward the contract total"
+                  disabled={setStatus.isPending}
+                  onClick={() => setStatus.mutate({ id: co.id, status: "approved" })}
+                  className="rounded-lg p-1.5 text-emerald-700 hover:bg-accent disabled:opacity-60 dark:text-emerald-400"
+                >
+                  <Check className="h-4 w-4" />
+                </button>
+              )}
+              {isElevated && co.status === "approved" && (
+                <button
+                  title="Void this change order"
+                  disabled={setStatus.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Void change order '${co.title}'?`)) {
+                      setStatus.mutate({ id: co.id, status: "void" });
+                    }
+                  }}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-60"
+                >
+                  <Ban className="h-4 w-4" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="New change order">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!title.trim()) {
+              toast({ variant: "destructive", title: "Give the change order a title" });
+              return;
+            }
+            create.mutate();
+          }}
+          className="flex flex-col gap-4"
+        >
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Title</span>
+            <input
+              className={inputCls}
+              placeholder="Add 20 ft of railing to mezzanine"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Amount $</span>
+            <input
+              className={inputCls}
+              inputMode="decimal"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">
+              Enter a negative amount for a deductive change order (scope removed).
+            </span>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Description (optional)</span>
+            <input
+              className={inputCls}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={create.isPending} className={primaryBtn}>
+            {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
+            Add change order
+          </button>
+        </form>
+      </Modal>
+    </div>
+  );
+}
+
 interface ProjectFinSummary {
   invoices: {
     id: number;
@@ -334,9 +514,11 @@ interface ProjectFinSummary {
   }[];
   totals: {
     contractCents: number;
+    changeOrderCents: number;
     invoicedCents: number;
     paidCents: number;
     outstandingCents: number;
+    retainageHeldCents: number;
     expenseCents: number;
     laborMinutes: number;
     laborCostCents: number;
@@ -360,14 +542,29 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
       (await apiRequest("GET", `/api/finance/projects/${projectId}/summary`)).json(),
     retry: false,
   });
+  // Phase G #3: bill everything still withheld on the job as one release invoice.
+  const billRetainage = useApiMutation<{ number: string }>({
+    request: () => ({
+      method: "POST",
+      url: `/api/finance/projects/${projectId}/bill-retainage`,
+    }),
+    invalidate: [["project-fin-summary", projectId], ["finance-invoices"], ["finance-stats"]],
+    successTitle: (inv) => `Draft invoice ${inv.number} created — send it from Finance → Invoices`,
+    errorTitle: "Could not bill retainage",
+  });
   if (!data) return null;
   const t = data.totals;
   const contractCents = t.contractCents ?? 0;
-  if (t.invoicedCents === 0 && t.expenseCents === 0 && t.laborMinutes === 0 && contractCents === 0) return null;
-  // Phase A #3: the signed contract vs what's been billed. Amber on a DONE job
-  // with contract money still unbilled — that invoice will never send itself.
-  const leftToBillCents = Math.max(0, contractCents - t.invoicedCents);
+  const changeOrderCents = t.changeOrderCents ?? 0;
+  // Phase G #1: approved change orders move the goalposts — reconcile billing
+  // against the EFFECTIVE contract total, not the original signature value.
+  const effectiveCents = contractCents + changeOrderCents;
+  if (t.invoicedCents === 0 && t.expenseCents === 0 && t.laborMinutes === 0 && effectiveCents === 0) return null;
+  // Phase A #3: the contract vs what's been billed. Amber on a DONE job with
+  // contract money still unbilled — that invoice will never send itself.
+  const leftToBillCents = Math.max(0, effectiveCents - t.invoicedCents);
   const underBilled = leftToBillCents > 0 && projectStatus === "done";
+  const retainageHeldCents = t.retainageHeldCents ?? 0;
   const stat = (label: string, value: string, tone?: string) => (
     <div>
       <p className="text-xs uppercase text-muted-foreground">{label}</p>
@@ -377,7 +574,7 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
   return (
     <div className="mb-6 rounded-xl border border-border bg-card p-5">
       <h2 className="mb-4 text-base font-semibold text-foreground">Job finances</h2>
-      {contractCents > 0 && (
+      {effectiveCents > 0 && (
         <p
           className={cn(
             "mb-4 text-sm",
@@ -386,8 +583,9 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
               : "text-muted-foreground",
           )}
         >
-          Contract {formatMoney(contractCents)} · Invoiced {formatMoney(t.invoicedCents)} · Left
-          to bill {formatMoney(leftToBillCents)}
+          Contract {formatMoney(contractCents)}
+          {changeOrderCents !== 0 && <> + COs {formatMoney(changeOrderCents)}</>}
+          {" "}· Invoiced {formatMoney(t.invoicedCents)} · Left to bill {formatMoney(leftToBillCents)}
           {underBilled && " — job is done but under-billed"}
         </p>
       )}
@@ -409,6 +607,22 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
             : "text-red-600 dark:text-red-400",
         )}
       </div>
+      {retainageHeldCents > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2">
+          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+            Retainage held: {formatMoney(retainageHeldCents)}
+          </p>
+          <button
+            onClick={() => billRetainage.mutate()}
+            disabled={billRetainage.isPending}
+            className="ml-auto flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:border-primary disabled:opacity-60"
+            title="Create a draft invoice releasing all retainage withheld on this job"
+          >
+            {billRetainage.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Bill retainage
+          </button>
+        </div>
+      )}
       {data.invoices.length > 0 && (
         <ul className="mt-4 divide-y divide-border border-t border-border">
           {data.invoices.map((inv) => (
@@ -564,6 +778,8 @@ export default function ProjectDetailPage({ id }: { id: string }) {
         <ClientCard clientId={project.clientId} />
         <OpenTasksCard projectId={projectId} />
         <ContractsCard project={project} />
+        <ChangeOrdersCard projectId={projectId} />
+        <DocumentsCard projectId={projectId} />
       </div>
 
       <ProjectChecklist projectId={projectId} />

@@ -90,6 +90,13 @@ export const invoices = sqliteTable("fin_invoices", {
   // Deposit the customer agreed to online (quote depositPct) — display/chase
   // only, never part of the total math. Nullable, ALTER'd in finance.ts.
   depositCents: integer("deposit_cents"),
+  // Phase G #3: commercial retainage the GC withholds. Server-derived from the
+  // retainagePct the editor sends (round(total × pct)); nullable, ALTER'd in
+  // finance.ts. Retainage stays part of totalCents (it IS earned revenue) —
+  // it only reduces the due-now balance until it's billed via the project's
+  // "Bill retainage" release invoice, which stamps retainage_released_at.
+  retainageCents: integer("retainage_cents"),
+  retainageReleasedAt: integer("retainage_released_at"), // unix ms
   // Soft ref to crm_leads (no FK — cross-module). Stamped by the quote-accept
   // hook so a fully paid invoice can push realized revenue back onto the lead.
   leadId: integer("lead_id"),
@@ -206,6 +213,10 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   depositCents: true,
   leadId: true,
   sentAt: true,
+  // Server-derived from the retainagePct payload field — a client writing the
+  // cents directly could desync the balance math from the stored total.
+  retainageCents: true,
+  retainageReleasedAt: true,
   createdAt: true,
   deletedAt: true,
   // Server-derived from items + taxRateBp — never client-writable, or the
@@ -214,6 +225,10 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   taxCents: true,
   totalCents: true,
 });
+
+// Phase G #3: "Retainage withheld %" from the invoice editor. Not a column —
+// the server derives retainage_cents = round(total × pct) from it on save.
+export const retainagePctSchema = z.number().min(0).max(100).nullable().optional();
 
 export const insertInvoicePaymentSchema = z.object({
   amountCents: z.number().int().positive(),

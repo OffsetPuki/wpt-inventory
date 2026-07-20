@@ -10,17 +10,19 @@ import {
   finSettings,
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
   updateGatewaySchema, insertPurchaseOrderSchema,
-  updateFinSettingsSchema, pullUnbilledSchema,
+  updateFinSettingsSchema, pullUnbilledSchema, retainagePctSchema,
   PAYMENT_GATEWAY_CATALOG, EXPENSE_CATEGORY_LABELS,
   type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder,
 } from "../shared/finance-schema";
 import { clients, estimates, type Estimate } from "../shared/crm-schema";
+import { projects } from "../shared/schema";
 // Phase B #9: automated customer emails land on the CRM timeline. The helper
 // is deferred + try/catch'd internally — safe to call from any mail hook.
 import { logEmailActivity } from "./crm";
-// Contract-vs-invoiced reconciliation (Phase A #3). Table object only — the
-// pm module owns the DDL, so the read below is try/catch'd.
-import { contracts } from "../shared/pm-schema";
+// Contract-vs-invoiced reconciliation (Phase A #3) + approved change orders
+// (Phase G #1). Table objects only — the pm module owns the DDL, so the reads
+// below are try/catch'd.
+import { contracts, changeOrders } from "../shared/pm-schema";
 // Cross-module automation hook: a freshly paid invoice queues a review request.
 // The mk_ tables are owned by the marketing module's DDL; every touch below is
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
@@ -135,6 +137,9 @@ for (const ddl of [
   "ALTER TABLE fin_expenses ADD COLUMN invoice_id INTEGER",
   "ALTER TABLE fin_invoices ADD COLUMN deposit_cents INTEGER",
   "ALTER TABLE fin_invoices ADD COLUMN lead_id INTEGER",
+  // Phase G #3: commercial retainage — see shared/finance-schema.ts.
+  "ALTER TABLE fin_invoices ADD COLUMN retainage_cents INTEGER",
+  "ALTER TABLE fin_invoices ADD COLUMN retainage_released_at INTEGER",
 ]) {
   try {
     sqlite.exec(ddl);
@@ -197,8 +202,30 @@ function derivedStatus(inv: Invoice, today: string): InvoiceStatus {
   return inv.status;
 }
 
+// Phase G #3 — revenue honesty: retainage stays part of totalCents (it IS
+// earned revenue), so income/reports/margin never shrink. It only reduces the
+// DUE-NOW balance: balance = total − retainage − paid. The subtraction sticks
+// after release too — the "Bill retainage" release invoice owns collecting it,
+// so counting it due on the source again would double-dun the customer (spec
+// said unreleased-only; deviated to avoid the double-count — the project
+// summary compensates by netting released retainage out of invoicedCents).
+const retainageOf = (inv: Invoice): number => inv.retainageCents ?? 0;
+
+// Retainage still HELD on an invoice — i.e. what "Bill retainage" would
+// collect: unreleased, on an issued (non-draft, non-void) invoice, capped at
+// what's actually uncollected so a GC that paid the full total holds $0.
+const HELD_STATUSES = new Set<InvoiceStatus>(["sent", "partial", "paid", "overdue"]);
+function heldRetainageOf(inv: Invoice): number {
+  if (inv.retainageReleasedAt != null || !HELD_STATUSES.has(inv.status)) return 0;
+  return Math.min(retainageOf(inv), Math.max(0, inv.totalCents - inv.paidCents));
+}
+
 function presentInvoice(inv: Invoice, today: string) {
-  return { ...inv, status: derivedStatus(inv, today), balanceCents: inv.totalCents - inv.paidCents };
+  return {
+    ...inv,
+    status: derivedStatus(inv, today),
+    balanceCents: inv.totalCents - retainageOf(inv) - inv.paidCents,
+  };
 }
 
 // Document numbers: PREFIX-<year>-<4-digit seq>. Seq is derived from max id,
@@ -379,7 +406,7 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
       if (!client?.email) return;
 
       const first = (client.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
-      const balanceCents = inv.totalCents - inv.paidCents;
+      const balanceCents = inv.totalCents - retainageOf(inv) - inv.paidCents;
       const ok = await sendMail({
         to: client.email,
         subject: `Received ${usd(amountCents)} on ${inv.number} — CJM Metals`,
@@ -447,8 +474,9 @@ function queueInvoiceEmail(inv: Invoice): void {
           `Here's your invoice ${inv.number}:\n\n` +
           (lines.length ? `${lines.join("\n")}\n\n` : "") +
           `Total:       ${usd(inv.totalCents)}\n` +
+          (retainageOf(inv) > 0 ? `Retainage withheld: -${usd(retainageOf(inv))}\n` : "") +
           (inv.paidCents > 0 ? `Paid so far: ${usd(inv.paidCents)}\n` : "") +
-          `Balance due: ${usd(inv.totalCents - inv.paidCents)}\n` +
+          `Balance due: ${usd(inv.totalCents - retainageOf(inv) - inv.paidCents)}\n` +
           ((inv.depositCents ?? 0) > 0 ? `Deposit due: ${usd(inv.depositCents!)}\n` : "") +
           (inv.dueDate ? `Due date:    ${inv.dueDate}\n` : "") +
           `\nQuestions? Just reply to this email or give us a call.\n\n` +
@@ -458,7 +486,7 @@ function queueInvoiceEmail(inv: Invoice): void {
       if (ok) {
         logEmailActivity({
           clientId: inv.clientId, leadId: inv.leadId, email: to,
-          subject: `Invoice ${inv.number} sent — ${usd(inv.totalCents - inv.paidCents)} due`,
+          subject: `Invoice ${inv.number} sent — ${usd(inv.totalCents - retainageOf(inv) - inv.paidCents)} due`,
         });
       }
     } catch (e) {
@@ -671,6 +699,19 @@ function releaseBilledItems(invoiceId: number): void {
   } catch { /* pm module absent */ }
 }
 
+// Phase G #3: voiding/deleting a retainage-RELEASE invoice must put the
+// retainage back on "held" — otherwise the money falls into a dead-end (the
+// sources are stamped released but nothing is billing it). The release
+// endpoint keys its invoice with auto:retainage-release:<projectId>:<ts>; and
+// stamps every source with that same ts, so the unwind is an exact match.
+function unreleaseRetainage(inv: Invoice): void {
+  const m = /auto:retainage-release:(\d+):(\d+);/.exec(inv.notes ?? "");
+  if (!m) return;
+  sqlite.prepare(
+    "UPDATE fin_invoices SET retainage_released_at = NULL WHERE project_id = ? AND retainage_released_at = ?",
+  ).run(Number(m[1]), Number(m[2]));
+}
+
 export function registerFinanceRoutes(app: Express): void {
   // `pid`/`qstr` live in ./http-util; Express types `req.params.*` as
   // `string | string[]`, so this key variant narrows to string.
@@ -688,12 +729,13 @@ export function registerFinanceRoutes(app: Express): void {
       isNull(invoices.deletedAt),
       inArray(invoices.status, RECEIVABLE_STATUSES)
     );
+    // Held retainage isn't due yet — it comes off the receivable (Phase G #3).
     const outstandingCents = db.select({
-      v: sql<number>`COALESCE(SUM(${invoices.totalCents} - ${invoices.paidCents}), 0)`,
+      v: sql<number>`COALESCE(SUM(${invoices.totalCents} - COALESCE(${invoices.retainageCents}, 0) - ${invoices.paidCents}), 0)`,
     }).from(invoices).where(receivableWhere).get()?.v ?? 0;
 
     const overdueCents = db.select({
-      v: sql<number>`COALESCE(SUM(${invoices.totalCents} - ${invoices.paidCents}), 0)`,
+      v: sql<number>`COALESCE(SUM(${invoices.totalCents} - COALESCE(${invoices.retainageCents}, 0) - ${invoices.paidCents}), 0)`,
     }).from(invoices).where(and(
       receivableWhere,
       sql`${invoices.dueDate} IS NOT NULL AND ${invoices.dueDate} < ${today}`
@@ -802,7 +844,7 @@ export function registerFinanceRoutes(app: Express): void {
     for (const inv of invoicesAll) {
       if (inv.deletedAt !== null) continue;
       if (!RECEIVABLE_STATUSES.includes(inv.status)) continue;
-      const balance = inv.totalCents - inv.paidCents;
+      const balance = inv.totalCents - retainageOf(inv) - inv.paidCents;
       if (balance <= 0) continue;
       const daysPast = inv.dueDate
         ? Math.floor((todayMs - Date.parse(inv.dueDate)) / 86_400_000)
@@ -871,13 +913,14 @@ export function registerFinanceRoutes(app: Express): void {
   });
 
   app.post("/api/finance/invoices", requireElevated, (req, res) => {
-    let body, itemsJson, totals;
+    let body, itemsJson, totals, retainagePct;
     try {
       // Items arrive as a JSON string (the column shape) or a raw array —
       // same tolerance as the CRM estimate endpoints.
       const raw = { ...req.body };
       if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
       body = insertInvoiceSchema.parse(raw);
+      retainagePct = retainagePctSchema.parse(raw.retainagePct);
       itemsJson = body.items ?? "[]";
       totals = computeTotals(itemsJson, body.taxRateBp ?? 0);
     } catch (e: any) {
@@ -887,10 +930,14 @@ export function registerFinanceRoutes(app: Express): void {
     // correctly even if the CRM client is later renamed or deleted.
     let clientName = body.clientName ?? null;
     if (!clientName && body.clientId != null) clientName = clientNameById(body.clientId);
+    // Phase G #3: retainage cents derived server-side from the pct.
+    const retainageCents = retainagePct
+      ? Math.round((totals.totalCents * retainagePct) / 100)
+      : null;
 
     const row = insertNumbered("fin_invoices", "INV", (num) =>
       db.insert(invoices)
-        .values({ ...body, number: num, items: itemsJson, clientName, ...totals })
+        .values({ ...body, number: num, items: itemsJson, clientName, retainageCents, ...totals })
         .returning()
         .get()
     );
@@ -943,11 +990,12 @@ export function registerFinanceRoutes(app: Express): void {
   app.patch("/api/finance/invoices/:id", requireElevated, (req, res) => {
     const inv = getInvoice(pid(req.params.id));
     if (!inv) return res.status(404).json({ message: "Invoice not found" });
-    let body;
+    let body, retainagePct;
     try {
       const raw = { ...req.body };
       if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
       body = insertInvoiceSchema.partial().parse(raw);
+      retainagePct = retainagePctSchema.parse(raw.retainagePct);
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
@@ -955,8 +1003,9 @@ export function registerFinanceRoutes(app: Express): void {
     // Once money has been recorded against an invoice its line items and
     // totals are immutable — editing them would silently corrupt paid/balance
     // math. The escape hatch is voiding and reissuing. (Totals themselves are
-    // schema-stripped, so items/taxRateBp are the only money inputs.)
-    const touchesMoney = body.items !== undefined || body.taxRateBp !== undefined;
+    // schema-stripped, so items/taxRateBp/retainagePct are the only money inputs.)
+    const touchesMoney =
+      body.items !== undefined || body.taxRateBp !== undefined || retainagePct !== undefined;
     if (touchesMoney && paymentCountFor(inv.id) > 0) {
       return res.status(400).json({
         message: "Invoice has recorded payments — items and totals are locked. Void it and issue a new one.",
@@ -979,6 +1028,12 @@ export function registerFinanceRoutes(app: Express): void {
       // invoice_id IS NULL). Only reachable pre-payment — the lock above already
       // rejected edits once money has been recorded.
       if (body.items !== undefined) releaseBilledItems(inv.id);
+      // Phase G #3: re-derive retainage cents against the (possibly new) total.
+      // Explicit pct wins; an items/tax edit without a pct keeps the old cents.
+      if (retainagePct !== undefined) {
+        const total = (updates.totalCents as number | undefined) ?? inv.totalCents;
+        updates.retainageCents = retainagePct ? Math.round((total * retainagePct) / 100) : null;
+      }
     }
     // Linking a different CRM client re-snapshots the display name the same
     // way POST does; unlinking (clientId: null) keeps the old snapshot so the
@@ -1001,8 +1056,12 @@ export function registerFinanceRoutes(app: Express): void {
         details: { from: inv.status, to: body.status },
       });
       // Fix 4: voiding releases the billed-on stamps so pulled expenses/time
-      // become billable again on the reissued invoice.
-      if (body.status === "void") releaseBilledItems(inv.id);
+      // become billable again on the reissued invoice. Phase G #3: same idea
+      // for a voided retainage-release invoice — the retainage goes back to held.
+      if (body.status === "void") {
+        releaseBilledItems(inv.id);
+        unreleaseRetainage(inv);
+      }
       // Phase A #1: the transition INTO "sent" emails the customer the actual
       // invoice (deferred; a re-PATCH that stays "sent" doesn't re-send).
       if (body.status === "sent") queueInvoiceEmail(row);
@@ -1021,6 +1080,7 @@ export function registerFinanceRoutes(app: Express): void {
     db.update(invoices).set({ deletedAt: Date.now() }).where(eq(invoices.id, inv.id)).run();
     // Fix 4: deleting releases the billed-on stamps (same as voiding).
     releaseBilledItems(inv.id);
+    unreleaseRetainage(inv);
     audit(req, "finance.invoice_delete", {
       targetType: "invoice", targetId: inv.id, targetName: inv.number,
     });
@@ -1047,9 +1107,11 @@ export function registerFinanceRoutes(app: Express): void {
     // Auto-status from the running paid total: covered → paid, anything → partial.
     const paidCents = inv.paidCents + body.amountCents;
     // A $0-total invoice must not auto-settle to "paid" (mirrors the reversal
-    // path's `&& inv.totalCents > 0` guard below).
+    // path's `&& inv.totalCents > 0` guard below). Retainage-aware: the GC
+    // paying everything BUT the withheld retainage settles the invoice — the
+    // retainage is collected later via the release invoice (Phase G #3).
     const status: InvoiceStatus =
-      paidCents >= inv.totalCents && inv.totalCents > 0 ? "paid" : "partial";
+      paidCents >= inv.totalCents - retainageOf(inv) && inv.totalCents > 0 ? "paid" : "partial";
     const updated = db.update(invoices)
       .set({ paidCents, status })
       .where(eq(invoices.id, inv.id))
@@ -1092,7 +1154,7 @@ export function registerFinanceRoutes(app: Express): void {
       let status = inv.status;
       if (inv.status !== "void") {
         status =
-          paidCents >= inv.totalCents && inv.totalCents > 0 ? "paid"
+          paidCents >= inv.totalCents - retainageOf(inv) && inv.totalCents > 0 ? "paid"
           : paidCents > 0 ? "partial"
           : inv.sentAt ? "sent"
           : "draft";
@@ -1238,8 +1300,18 @@ export function registerFinanceRoutes(app: Express): void {
       .orderBy(desc(invoices.id))
       .all();
     const live = invRows.filter((i) => i.status !== "void");
-    const invoicedCents = live.reduce((s, i) => s + i.totalCents, 0);
+    // Phase G #3: a retainage-release invoice re-bills money already inside a
+    // source invoice's total, so gross Σ totals would double-count it. Netting
+    // out RELEASED retainage keeps billed-to-date equal to the sum of the
+    // original invoice totals — retainage counts as revenue exactly once.
+    const releasedRetainageCents = live.reduce(
+      (s, i) => s + (i.retainageReleasedAt != null ? (i.retainageCents ?? 0) : 0), 0);
+    const invoicedCents = live.reduce((s, i) => s + i.totalCents, 0) - releasedRetainageCents;
     const paidCents = live.reduce((s, i) => s + i.paidCents, 0);
+    // Still-held retainage, capped at what's actually uncollected on each
+    // invoice (a GC that ignored the withholding and paid in full holds $0).
+    // Same predicate as the bill-retainage endpoint so card and button agree.
+    const retainageHeldCents = live.reduce((s, i) => s + heldRetainageOf(i), 0);
     const expenseCents = db.select({ s: sql<number>`coalesce(sum(${expenses.amountCents}), 0)` })
       .from(expenses)
       .where(and(isNull(expenses.deletedAt), eq(expenses.projectId, projectId)))
@@ -1283,14 +1355,31 @@ export function registerFinanceRoutes(app: Express): void {
         .get()?.s ?? 0;
     } catch { /* pm module absent — no contract to reconcile */ }
 
+    // Phase G #1: approved change orders move the goalposts — the job's
+    // effective contract total is contractCents + changeOrderCents (signed;
+    // deductive COs subtract). pm_change_orders belongs to pm → try/catch.
+    let changeOrderCents = 0;
+    try {
+      changeOrderCents = db.select({ s: sql<number>`coalesce(sum(${changeOrders.amountCents}), 0)` })
+        .from(changeOrders)
+        .where(and(
+          isNull(changeOrders.deletedAt),
+          eq(changeOrders.projectId, projectId),
+          eq(changeOrders.status, "approved"),
+        ))
+        .get()?.s ?? 0;
+    } catch { /* pm module absent — no change orders */ }
+
     const today = todayLocal();
     res.json({
       invoices: live.map((i) => presentInvoice(i, today)),
       totals: {
         contractCents,
+        changeOrderCents,
         invoicedCents,
         paidCents,
         outstandingCents: invoicedCents - paidCents,
+        retainageHeldCents,
         expenseCents,
         laborMinutes,
         laborCostCents,
@@ -1298,6 +1387,73 @@ export function registerFinanceRoutes(app: Express): void {
         marginCents: invoicedCents - expenseCents - laborCostCents,
       },
     });
+  });
+
+  // ─── Retainage release (Phase G #3) ───────────────────────────────────────
+  // One draft invoice for everything still withheld on the job, stamping the
+  // source invoices released in the same transaction so a double-click can't
+  // bill the retainage twice. Void/delete of the release invoice unwinds the
+  // stamps (unreleaseRetainage above).
+
+  app.post("/api/finance/projects/:id/bill-retainage", requireElevated, (req, res) => {
+    const projectId = pid(req.params.id);
+    const project = db.select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .get();
+    if (!project) return res.status(404).json({ message: "Project not found" });
+
+    const sources = db.select().from(invoices)
+      .where(and(isNull(invoices.deletedAt), eq(invoices.projectId, projectId)))
+      .orderBy(desc(invoices.id))
+      .all()
+      .map((i) => ({ inv: i, cents: heldRetainageOf(i) }))
+      .filter((s) => s.cents > 0);
+    const totalHeld = sources.reduce((s, x) => s + x.cents, 0);
+    if (totalHeld <= 0) {
+      return res.status(400).json({ message: "No retainage held on this job" });
+    }
+
+    // Client identity from the most recent source invoice (they all belong to
+    // the same GC in practice). No tax — the source totals were already taxed.
+    const latest = sources[0].inv;
+    const now = Date.now();
+    const itemsJson = JSON.stringify([{
+      description: `Retainage release — ${project.name}`,
+      qty: 1,
+      unitPriceCents: totalHeld,
+    }]);
+    const totals = computeTotals(itemsJson, 0);
+
+    const row = sqlite.transaction(() => {
+      const created = insertNumbered("fin_invoices", "INV", (num) =>
+        db.insert(invoices).values({
+          number: num,
+          clientId: latest.clientId,
+          clientName: latest.clientName,
+          projectId,
+          status: "draft",
+          issueDate: todayLocal(),
+          items: itemsJson,
+          taxRateBp: 0,
+          ...totals,
+          notes: `auto:retainage-release:${projectId}:${now}; — releases retainage withheld on ${sources.map((s) => s.inv.number).join(", ")}`,
+        }).returning().get()
+      );
+      const stamp = sqlite.prepare("UPDATE fin_invoices SET retainage_released_at = ? WHERE id = ?");
+      for (const s of sources) stamp.run(now, s.inv.id);
+      return created;
+    })();
+
+    audit(req, "finance.retainage_release", {
+      targetType: "invoice", targetId: row.id, targetName: row.number,
+      details: {
+        projectId,
+        totalCents: totalHeld,
+        sourceInvoices: sources.map((s) => ({ id: s.inv.id, number: s.inv.number, cents: s.cents })),
+      },
+    });
+    res.status(201).json(presentInvoice(row, todayLocal()));
   });
 
   app.get("/api/finance/expenses", requireElevated, (req, res) => {

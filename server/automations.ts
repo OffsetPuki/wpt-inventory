@@ -139,14 +139,16 @@ function runBusinessSweep(): void {
   // 1. Overdue invoice chase — email the client (re-remind every 7 days), or
   // queue a task when there's no address on file.
   step("invoice chase", () => {
+    // Balance is retainage-aware (Phase G #3): held retainage isn't due yet,
+    // so a GC that paid everything-but-retainage must not get dunned for it.
     const rows = sqlite.prepare(`
       SELECT i.id, i.number, i.due_date, i.reminded_at, i.client_id, i.lead_id,
-             i.total_cents - i.paid_cents AS balance,
+             i.total_cents - COALESCE(i.retainage_cents, 0) - i.paid_cents AS balance,
              c.name AS client_name, c.email
       FROM fin_invoices i LEFT JOIN crm_clients c ON c.id = i.client_id
       WHERE i.deleted_at IS NULL AND i.status IN ('sent','partial','overdue')
         AND i.due_date IS NOT NULL AND i.due_date < ?
-        AND i.total_cents - i.paid_cents > 0
+        AND i.total_cents - COALESCE(i.retainage_cents, 0) - i.paid_cents > 0
     `).all(today) as any[];
     for (const inv of rows) {
       if (inv.email && mailEnabled() && !isOptedOut(inv.email)) {
@@ -691,6 +693,25 @@ function runBusinessSweep(): void {
     }
   });
 
+  // 18c. Expiring compliance documents (Phase G #4) — a COI or lien waiver
+  // lapsing mid-job stops commercial work cold; nag 30 days out so there's
+  // time to get the renewal from the insurer.
+  step("expiring documents", () => {
+    const kindLabel: Record<string, string> = {
+      coi: "COI", w9: "W-9", lien_waiver: "Lien waiver", contract: "Contract", other: "Document",
+    };
+    const rows = sqlite.prepare(`
+      SELECT id, kind, title, expires_at, project_id FROM pm_documents
+      WHERE deleted_at IS NULL AND expires_at IS NOT NULL
+        AND expires_at >= ? AND expires_at <= ?
+    `).all(today, localDate(now + 30 * DAY_MS)) as any[];
+    for (const d of rows) {
+      ensureTask(`auto:doc-expiring:${d.id}`,
+        `${kindLabel[d.kind] ?? "Document"} '${d.title}' expires ${d.expires_at} — renew it`,
+        "other", null, d.project_id ?? null);
+    }
+  });
+
   // 19. Payroll reminder — anything payable within 2 days and not yet paid.
   step("payroll reminder", () => {
     const runs = sqlite.prepare(`
@@ -787,10 +808,11 @@ function buildDigest(now: number, today: string): string {
 
   const overdueInv = sqlite.prepare(`
     SELECT i.number, COALESCE(c.name, i.client_name, '(no client)') AS who,
-           i.total_cents - i.paid_cents AS balance, i.due_date
+           i.total_cents - COALESCE(i.retainage_cents, 0) - i.paid_cents AS balance, i.due_date
     FROM fin_invoices i LEFT JOIN crm_clients c ON c.id = i.client_id
     WHERE i.deleted_at IS NULL AND i.status IN ('sent','partial','overdue')
-      AND i.due_date IS NOT NULL AND i.due_date < ? AND i.total_cents - i.paid_cents > 0
+      AND i.due_date IS NOT NULL AND i.due_date < ?
+      AND i.total_cents - COALESCE(i.retainage_cents, 0) - i.paid_cents > 0
     ORDER BY i.due_date
   `).all(today) as any[];
   if (overdueInv.length > 0) {
@@ -870,7 +892,8 @@ function buildDigest(now: number, today: string): string {
       "SELECT COALESCE(SUM(amount_cents), 0) AS n FROM fin_expenses WHERE deleted_at IS NULL AND date LIKE ?",
     ).get(`${prefix}%`) as any).n;
     const ar = (sqlite.prepare(`
-      SELECT COALESCE(SUM(total_cents - paid_cents), 0) AS n FROM fin_invoices
+      SELECT COALESCE(SUM(total_cents - COALESCE(retainage_cents, 0) - paid_cents), 0) AS n
+      FROM fin_invoices
       WHERE deleted_at IS NULL AND status IN ('sent','partial','overdue')
     `).get() as any).n;
     parts.push([
@@ -949,7 +972,8 @@ export function registerAttentionRoute(app: Express): void {
       overdueInvoices: n(`
         SELECT COUNT(*) AS n FROM fin_invoices
         WHERE deleted_at IS NULL AND status IN ('sent','partial','overdue')
-          AND due_date IS NOT NULL AND due_date < ? AND total_cents - paid_cents > 0
+          AND due_date IS NOT NULL AND due_date < ?
+          AND total_cents - COALESCE(retainage_cents, 0) - paid_cents > 0
       `, today),
       contractsExpiring: n(`
         SELECT COUNT(*) AS n FROM pm_contracts

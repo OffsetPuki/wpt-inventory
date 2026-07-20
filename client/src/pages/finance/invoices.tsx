@@ -171,7 +171,11 @@ function InvoiceFormModal({
   const [dueDate, setDueDate] = useState("");
   const [drafts, setDrafts] = useState<ItemDraft[]>([{ ...EMPTY_ITEM }]);
   const [taxPct, setTaxPct] = useState("0");
+  const [retainagePct, setRetainagePct] = useState("");
   const [notes, setNotes] = useState("");
+  // Progress-billing helper inputs (Phase G #2).
+  const [progressPct, setProgressPct] = useState("");
+  const [progressAmount, setProgressAmount] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -192,6 +196,12 @@ function InvoiceFormModal({
           : [{ ...EMPTY_ITEM }]
       );
       setTaxPct(String(invoice.taxRateBp / 100));
+      // Cents are stored, pct is the editing surface — recover it from totals.
+      setRetainagePct(
+        (invoice.retainageCents ?? 0) > 0 && invoice.totalCents > 0
+          ? String(Math.round((invoice.retainageCents! / invoice.totalCents) * 10000) / 100)
+          : ""
+      );
       setNotes(invoice.notes ?? "");
     } else {
       setClientId("");
@@ -201,8 +211,11 @@ function InvoiceFormModal({
       setDueDate("");
       setDrafts([{ ...EMPTY_ITEM }]);
       setTaxPct("0");
+      setRetainagePct("");
       setNotes("");
     }
+    setProgressPct("");
+    setProgressAmount("");
   }, [open, invoice]);
 
   const { data: clients = [] } = useQuery<Client[]>({
@@ -216,10 +229,54 @@ function InvoiceFormModal({
     enabled: open,
   });
 
+  // Phase G #2: progress billing — the job's effective contract total and
+  // billed-to-date, straight from the project financial summary the job hub
+  // already uses. Only fetched while a project is linked.
+  const { data: projSummary } = useQuery<{
+    totals: { contractCents: number; changeOrderCents: number; invoicedCents: number };
+  }>({
+    queryKey: ["project-fin-summary", Number(projectId)],
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/finance/projects/${projectId}/summary`)).json(),
+    enabled: open && !!projectId,
+    retry: false,
+  });
+  const effectiveContractCents =
+    (projSummary?.totals.contractCents ?? 0) + (projSummary?.totals.changeOrderCents ?? 0);
+  const billedToDateCents = projSummary?.totals.invoicedCents ?? 0;
+  const project = projects.find((p) => p.id === Number(projectId));
+
+  const addProgressLine = () => {
+    const pctIn = parseFloat(progressPct);
+    const amountCents = pctIn > 0
+      ? Math.round((effectiveContractCents * pctIn) / 100)
+      : parseMoney(progressAmount);
+    if (amountCents <= 0) {
+      toast({ variant: "destructive", title: "Enter a % or $ amount" });
+      return;
+    }
+    const pctLabel = pctIn > 0
+      ? String(Math.round(pctIn * 100) / 100)
+      : ((amountCents / effectiveContractCents) * 100).toFixed(1).replace(/\.0$/, "");
+    const line: ItemDraft = {
+      description: `Progress billing — ${project?.name ?? "job"} (${pctLabel}% of contract)`,
+      qty: "1",
+      unitPrice: (amountCents / 100).toFixed(2),
+    };
+    // Replace a single still-empty starter row instead of leaving it behind.
+    const kept = drafts.filter((d) => d.description.trim() || parseMoney(d.unitPrice) > 0);
+    setDrafts([...kept, line]);
+    setProgressPct("");
+    setProgressAmount("");
+  };
+
   const taxRateBp = Math.round((parseFloat(taxPct) || 0) * 100);
   const subtotalCents = draftSubtotalCents(drafts);
   const taxCents = Math.round((subtotalCents * taxRateBp) / 10000);
   const totalCents = subtotalCents + taxCents;
+  const retainageCents = projectId
+    ? Math.round((totalCents * (parseFloat(retainagePct) || 0)) / 100)
+    : 0;
 
   const save = useApiMutation({
     request: () => {
@@ -231,6 +288,8 @@ function InvoiceFormModal({
         dueDate: dueDate || null,
         items: JSON.stringify(draftsToLineItems(drafts)),
         taxRateBp,
+        // Server derives retainage_cents = round(total × pct); 0 clears it.
+        retainagePct: projectId ? parseFloat(retainagePct) || 0 : undefined,
         notes: notes.trim() || null,
       };
       return invoice
@@ -333,6 +392,54 @@ function InvoiceFormModal({
           <LineItemsEditor drafts={drafts} onChange={setDrafts} />
         </div>
 
+        {/* Phase G #2: progress billing against the job's effective contract
+            total (contract + approved COs) — commercial jobs bill in slices. */}
+        {!!projectId && effectiveContractCents > 0 && (
+          <div className="rounded-lg border border-border bg-background p-3">
+            <p className="text-sm font-semibold text-foreground">Progress billing</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Contract total {formatMoney(effectiveContractCents)} · Billed to date{" "}
+              {formatMoney(billedToDateCents)}
+            </p>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">% of contract</span>
+                <input
+                  className={cn(inputCls, "h-10 w-24 text-sm")}
+                  inputMode="decimal"
+                  placeholder="25"
+                  value={progressPct}
+                  onChange={(e) => setProgressPct(e.target.value)}
+                />
+              </label>
+              <span className="pb-2.5 text-xs text-muted-foreground">or</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">Amount $</span>
+                <input
+                  className={cn(inputCls, "h-10 w-28 text-sm")}
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={progressAmount}
+                  onChange={(e) => setProgressAmount(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={addProgressLine}
+                className="flex h-10 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary"
+              >
+                <Plus className="h-4 w-4" />
+                Add line
+              </button>
+              {parseFloat(progressPct) > 0 && (
+                <span className="pb-2.5 text-xs tabular-nums text-muted-foreground">
+                  = {formatMoney(Math.round((effectiveContractCents * parseFloat(progressPct)) / 100))}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Tax %</span>
@@ -343,6 +450,19 @@ function InvoiceFormModal({
               onChange={(e) => setTaxPct(e.target.value)}
             />
           </label>
+          {/* Phase G #3: only meaningful on project-linked (commercial) work. */}
+          {!!projectId && (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-foreground">Retainage withheld %</span>
+              <input
+                className={inputCls}
+                inputMode="decimal"
+                placeholder="0"
+                value={retainagePct}
+                onChange={(e) => setRetainagePct(e.target.value)}
+              />
+            </label>
+          )}
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Notes (optional)</span>
             <input
@@ -366,6 +486,22 @@ function InvoiceFormModal({
             <span className="text-foreground">Total</span>
             <span className="tabular-nums text-foreground">{formatMoney(totalCents)}</span>
           </div>
+          {retainageCents > 0 && (
+            <>
+              <div className="flex justify-between pt-0.5">
+                <span className="text-amber-700 dark:text-amber-400">Retainage withheld</span>
+                <span className="tabular-nums text-amber-700 dark:text-amber-400">
+                  −{formatMoney(retainageCents)}
+                </span>
+              </div>
+              <div className="flex justify-between pt-0.5 font-medium">
+                <span className="text-foreground">Due now</span>
+                <span className="tabular-nums text-foreground">
+                  {formatMoney(totalCents - retainageCents)}
+                </span>
+              </div>
+            </>
+          )}
           {(invoice?.depositCents ?? 0) > 0 && (
             <div className="flex justify-between pt-0.5">
               <span className="text-amber-700 dark:text-amber-400">Deposit due</span>
@@ -724,6 +860,18 @@ function InvoiceDetailModal({
               <span className="text-foreground">Total</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.totalCents)}</span>
             </div>
+            {/* Phase G #3: retainage reduces the due-now balance only — it
+                stays inside the total because it's earned revenue. */}
+            {(inv.retainageCents ?? 0) > 0 && (
+              <div className="flex justify-between py-0.5">
+                <span className="text-amber-700 dark:text-amber-400">
+                  Retainage {inv.retainageReleasedAt != null ? "(released)" : "withheld"}
+                </span>
+                <span className="tabular-nums text-amber-700 dark:text-amber-400">
+                  −{formatMoney(inv.retainageCents!)}
+                </span>
+              </div>
+            )}
             {(inv.depositCents ?? 0) > 0 && (
               <div className="flex justify-between py-0.5">
                 <span className="text-amber-700 dark:text-amber-400">Deposit due</span>

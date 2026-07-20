@@ -1024,7 +1024,9 @@ export function registerCrmRoutes(app: Express): void {
         invoiceRows = (sqlite.prepare(`
           SELECT id, number, status, due_date AS dueDate,
                  total_cents AS totalCents,
-                 total_cents - paid_cents AS balanceCents
+                 -- Phase G #3: held retainage isn't due yet (finance's
+                 -- presentInvoice does the same subtraction).
+                 total_cents - COALESCE(retainage_cents, 0) - paid_cents AS balanceCents
           FROM fin_invoices
           WHERE deleted_at IS NULL AND client_id = ?
           ORDER BY created_at DESC, id DESC
