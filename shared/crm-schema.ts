@@ -149,6 +149,9 @@ export const deals = sqliteTable("crm_deals", {
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
+  // Phase B #11: last touch (stamped on PATCH) — the stale-deal sweep reads
+  // COALESCE(updated_at, created_at). ALTER'd column, NULL on old rows.
+  updatedAt: integer("updated_at"), // unix ms
   deletedAt: integer("deleted_at"),
 });
 
@@ -229,6 +232,7 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
 export const insertDealSchema = createInsertSchema(deals).omit({
   id: true,
   createdAt: true,
+  updatedAt: true, // server-stamped on PATCH
   deletedAt: true,
   closedAt: true,
 });

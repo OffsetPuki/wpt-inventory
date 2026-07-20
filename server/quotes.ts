@@ -6,7 +6,7 @@ import { audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-schema";
 import { webDesignRowToLead } from "./public-api";
-import { onQuoteEvent } from "./crm";
+import { onQuoteEvent, logEmailActivity } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the costing
@@ -185,6 +185,29 @@ export function registerQuoteRoutes(app: Express): void {
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
+  });
+
+  // ─── Stats (literal path — registered before /:id) ────────────────────────
+  // Phase B #14: the dashboard's quotes tile. Counts by lifecycle status plus
+  // the open pipeline — the money sitting in quotes the customer hasn't said
+  // yes to yet (draft + sent; declined quotes are dead, accepted are closed).
+
+  app.get("/api/quotes/stats", requireAuth, (_req, res) => {
+    const rows = db.select({
+      status: quotes.status,
+      n: sql<number>`count(*)`,
+      totalCents: sql<number>`coalesce(sum(${quotes.totalCents}), 0)`,
+    }).from(quotes)
+      .where(isNull(quotes.deletedAt))
+      .groupBy(quotes.status)
+      .all();
+    const by = new Map(rows.map((r) => [r.status, r]));
+    res.json({
+      draft: by.get("draft")?.n ?? 0,
+      sent: by.get("sent")?.n ?? 0,
+      accepted: by.get("accepted")?.n ?? 0,
+      openPipelineCents: (by.get("draft")?.totalCents ?? 0) + (by.get("sent")?.totalCents ?? 0),
+    });
   });
 
   // ─── Design lookup (literal path — registered before /:id) ────────────────
@@ -472,6 +495,14 @@ export function registerQuoteRoutes(app: Express): void {
           `Questions? Just reply to this email or give us a call.\n\n` +
           `— CJM Metals · Arlington, TX`,
       });
+      // Phase B #9: the share email on the lead's timeline (matched by
+      // address — onQuoteEvent above creates the lead if it's new to CRM).
+      if (emailed) {
+        logEmailActivity({
+          email: to,
+          subject: `Quote ${quote.number} sent — share link emailed`,
+        });
+      }
     }
 
     audit(req, "quote.share", {

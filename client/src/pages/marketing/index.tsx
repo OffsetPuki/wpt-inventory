@@ -1112,7 +1112,8 @@ function ReviewsTab() {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
 
-  const { data: reviews = [], isLoading } = useQuery<Review[]>({
+  // clientName is joined server-side when the review is linked to a CRM client.
+  const { data: reviews = [], isLoading } = useQuery<(Review & { clientName?: string | null })[]>({
     queryKey: ["marketing", "reviews"],
     queryFn: async () => (await apiRequest("GET", "/api/marketing/reviews")).json(),
   });
@@ -1183,6 +1184,9 @@ function ReviewsTab() {
                   <Stars rating={r.rating} />
                   <span className={cn(chipCls, neutralChip)}>{REVIEW_SOURCE_LABELS[r.source]}</span>
                   {r.author && <span className="text-sm font-medium text-foreground">{r.author}</span>}
+                  {r.clientName && r.clientName !== r.author && (
+                    <span className="text-xs text-muted-foreground">Customer: {r.clientName}</span>
+                  )}
                   <span className="text-xs text-muted-foreground">
                     {formatDate(r.reviewDate ?? r.createdAt)}
                   </span>

@@ -1,5 +1,10 @@
 import { sqlite } from "./storage";
 import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
+// Deliberate exception to this module's no-imports stance (Phase B #9): the
+// email-activity logger lives with the crm_activities table it writes, is
+// deferred + try/catch'd internally, and every mail this sweep sends should
+// land on the customer's timeline.
+import { logEmailActivity } from "./crm";
 
 // ─── Business automations ────────────────────────────────────────────────────
 // Hourly cross-module sweep (plus one on boot), same shape as
@@ -104,7 +109,7 @@ function runBusinessSweep(): void {
   // queue a task when there's no address on file.
   step("invoice chase", () => {
     const rows = sqlite.prepare(`
-      SELECT i.id, i.number, i.due_date, i.reminded_at,
+      SELECT i.id, i.number, i.due_date, i.reminded_at, i.client_id, i.lead_id,
              i.total_cents - i.paid_cents AS balance,
              c.name AS client_name, c.email
       FROM fin_invoices i LEFT JOIN crm_clients c ON c.id = i.client_id
@@ -131,6 +136,10 @@ function runBusinessSweep(): void {
           if (ok) {
             sqlite.prepare("UPDATE fin_invoices SET reminded_at = ? WHERE id = ?")
               .run(Date.now(), inv.id);
+            logEmailActivity({
+              clientId: inv.client_id, leadId: inv.lead_id,
+              subject: `Overdue reminder — ${inv.number}, ${fmtUsd(inv.balance)} outstanding`,
+            });
           }
         });
       } else {
@@ -193,6 +202,10 @@ function runBusinessSweep(): void {
         });
         if (ok) {
           sqlite.prepare("UPDATE quotes SET nudge_sent_at = ? WHERE id = ?").run(Date.now(), q.id);
+          logEmailActivity({
+            email,
+            subject: `Quote nudge — ${q.number} share link re-sent`,
+          });
         }
       });
     }
@@ -300,6 +313,24 @@ function runBusinessSweep(): void {
     for (const l of rows) {
       ensureTask(`auto:lead-follow-up:${l.id}`, `Follow up with ${l.name}`, "follow_up", l.id);
       clear.run(l.id);
+    }
+  });
+
+  // 8b. Stale deals (Phase B #11) — open pipeline money untouched for 14+
+  // days. updated_at is stamped by the deal PATCH; older rows fall back to
+  // created_at. The month in the dedupe key re-nags monthly until it moves.
+  step("stale deals", () => {
+    const month = today.slice(0, 7); // "YYYY-MM"
+    const rows = sqlite.prepare(`
+      SELECT id, title, COALESCE(updated_at, created_at) AS touched
+      FROM crm_deals
+      WHERE deleted_at IS NULL AND stage NOT IN ('won','lost')
+        AND COALESCE(updated_at, created_at) < ?
+    `).all(now - 14 * DAY_MS) as any[];
+    for (const d of rows) {
+      const days = Math.floor((now - d.touched) / DAY_MS);
+      ensureTask(`auto:stale-deal:${d.id}:${month}`,
+        `Deal '${d.title}' has sat untouched for ${days} days`, "follow_up");
     }
   });
 

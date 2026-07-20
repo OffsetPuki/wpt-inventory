@@ -76,6 +76,11 @@ export const reviews = sqliteTable("mk_reviews", {
   // Published reviews appear on the public testimonials feed that
   // www.cjmmetals.com renders — opt-in per review.
   published: integer("published", { mode: "boolean" }).notNull().default(false),
+  // Phase B #12: who reviewed us. Soft refs (ALTER'd columns) — client_id
+  // points at crm_clients, request_id at the review_requests invitation the
+  // website submit came through. NULL on manually logged reviews.
+  clientId: integer("client_id"),
+  requestId: integer("request_id"),
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()

@@ -4,8 +4,9 @@ import { db } from "./storage";
 import { requireAuth } from "./auth";
 import { items, projects } from "../shared/schema";
 import { clients, leads, deals, products, estimates } from "../shared/crm-schema";
-import { pmTasks, kbArticles } from "../shared/pm-schema";
-import { invoices, purchaseOrders } from "../shared/finance-schema";
+import { pmTasks, kbArticles, contracts } from "../shared/pm-schema";
+import { invoices, purchaseOrders, expenses } from "../shared/finance-schema";
+import { quotes } from "../shared/quote-schema";
 import { employees, candidates } from "../shared/hr-schema";
 import { campaigns } from "../shared/marketing-schema";
 
@@ -121,6 +122,26 @@ export function registerSearchRoutes(app: Express): void {
       }
     });
 
+    // Phase B #14: builder quotes — the number a customer reads over the phone.
+    source(() => {
+      for (const r of db.select({ id: quotes.id, number: quotes.number, customerName: quotes.customerName })
+        .from(quotes)
+        .where(and(isNull(quotes.deletedAt), or(likeEsc(quotes.number, p), likeEsc(quotes.customerName, p))))
+        .limit(PER_SOURCE).all()) {
+        hits.push({ type: "Quotes", label: r.number, sublabel: r.customerName, href: "/crm/quotes" });
+      }
+    });
+
+    // Phase B #14: contracts (their GET is requireAuth, so no role gate here).
+    source(() => {
+      for (const r of db.select({ id: contracts.id, title: contracts.title, kind: contracts.kind })
+        .from(contracts)
+        .where(and(isNull(contracts.deletedAt), or(likeEsc(contracts.title, p), likeEsc(contracts.kind, p))))
+        .limit(PER_SOURCE).all()) {
+        hits.push({ type: "Contracts", label: r.title, sublabel: r.kind, href: "/pm/contracts" });
+      }
+    });
+
     source(() => {
       for (const r of db.select({ id: pmTasks.id, title: pmTasks.title })
         .from(pmTasks)
@@ -180,6 +201,16 @@ export function registerSearchRoutes(app: Express): void {
           .where(likeEsc(candidates.name, p))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Candidates", label: r.name, href: "/hr/recruitment" });
+        }
+      });
+
+      // Phase B #14: expenses — money data, elevated only like invoices.
+      source(() => {
+        for (const r of db.select({ id: expenses.id, vendor: expenses.vendor, date: expenses.date })
+          .from(expenses)
+          .where(and(isNull(expenses.deletedAt), or(likeEsc(expenses.vendor, p), likeEsc(expenses.notes, p))))
+          .limit(PER_SOURCE).all()) {
+          hits.push({ type: "Expenses", label: r.vendor ?? "(no vendor)", sublabel: r.date, href: "/finance/expenses" });
         }
       });
 

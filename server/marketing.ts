@@ -15,7 +15,7 @@ import {
 // Cross-module READ: the CRM module owns crm_leads / crm_estimates (tables +
 // endpoints). Marketing only reads them for funnel/source/campaign reporting,
 // plus one narrow write: the automation sweep flips crm_leads.stale.
-import { leads, estimates, LEAD_STAGES } from "../shared/crm-schema";
+import { leads, estimates, clients, LEAD_STAGES } from "../shared/crm-schema";
 import { pid, qstr, registerSoftDelete } from "./http-util";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -147,6 +147,21 @@ try {
   sqlite.exec("ALTER TABLE mk_settings ADD COLUMN lead_time_updated_at INTEGER");
 } catch {
   /* column already exists */
+}
+
+// Phase B #12: reviews tied to the customer. Soft refs — review_requests
+// gains client_id (stamped at creation by finance's queueReviewRequest);
+// mk_reviews gains client_id + request_id (stamped by the public submit).
+for (const ddl of [
+  "ALTER TABLE review_requests ADD COLUMN client_id INTEGER",
+  "ALTER TABLE mk_reviews ADD COLUMN client_id INTEGER",
+  "ALTER TABLE mk_reviews ADD COLUMN request_id INTEGER",
+]) {
+  try {
+    sqlite.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
 }
 
 // Singleton settings row — the automation sweep and the alert thresholds read
@@ -664,7 +679,20 @@ export function registerMarketingRoutes(app: Express): void {
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(reviews.createdAt))
       .all();
-    res.json(rows);
+    // Phase B #12: resolve the customer's name when the review is linked to a
+    // CRM client. crm_clients belongs to the CRM module → try/catch.
+    let names = new Map<number, string>();
+    try {
+      const ids = [...new Set(rows.map((r) => r.clientId).filter((v): v is number => v != null))];
+      if (ids.length > 0) {
+        names = new Map(db.select({ id: clients.id, name: clients.name }).from(clients)
+          .where(inArray(clients.id, ids)).all().map((r) => [r.id, r.name]));
+      }
+    } catch { /* crm module absent */ }
+    res.json(rows.map((r) => ({
+      ...r,
+      clientName: r.clientId != null ? names.get(r.clientId) ?? null : null,
+    })));
   });
 
   app.post("/api/marketing/reviews", requireElevated, (req, res) => {

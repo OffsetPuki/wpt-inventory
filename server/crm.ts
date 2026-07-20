@@ -22,7 +22,7 @@ import { mkTasks, marketingSettings } from "../shared/marketing-schema";
 // view lists the jobs behind it. Core table, always present.
 import { projects } from "../shared/schema";
 import { computeDocTotals } from "../shared/biz-common";
-import { pid, qstr, registerSoftDelete, registerGetById } from "./http-util";
+import { pid, qstr, todayLocal, registerSoftDelete, registerGetById } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/crm-schema.ts exactly. crm_leads.campaign_id is a soft
@@ -168,6 +168,14 @@ for (const col of ["utm_source", "utm_medium", "utm_campaign"]) {
   } catch {
     /* column already exists */
   }
+}
+
+// Phase B #11: deal last-touch stamp (PATCH sets it; the stale-deal sweep in
+// automations.ts reads COALESCE(updated_at, created_at)).
+try {
+  sqlite.exec("ALTER TABLE crm_deals ADD COLUMN updated_at INTEGER");
+} catch {
+  /* column already exists */
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -403,6 +411,50 @@ function stampInvoiceLead(quoteNumber: string, leadId: number): void {
   } catch {
     /* finance module absent */
   }
+}
+
+// Phase B #9: every automated customer email leaves a timeline entry, so the
+// activity feed matches what the customer actually received (no double-contact
+// surprises). Callers pass whatever they have in hand — a clientId/leadId, or
+// just the address the mail went to (resolved to the most recent live lead by
+// normalized email, same matching stance as onQuoteEvent). Skips silently when
+// nothing resolves. Deferred + try/catch: mail flows never fail over CRM.
+export function logEmailActivity(info: {
+  clientId?: number | null;
+  leadId?: number | null;
+  email?: string | null;
+  subject: string;
+}): void {
+  setImmediate(() => {
+    try {
+      let leadId = info.leadId ?? null;
+      const clientId = info.clientId ?? null;
+      if (leadId == null && clientId == null) {
+        const emailNorm = (info.email ?? "").trim().toLowerCase();
+        if (!emailNorm) return;
+        // ponytail: JS scan over live leads, newest first — fine at shop scale.
+        leadId = db.select({ id: leads.id, email: leads.email }).from(leads)
+          .where(isNull(leads.deletedAt))
+          .orderBy(desc(leads.createdAt), desc(leads.id))
+          .all()
+          .find((l) => (l.email ?? "").trim().toLowerCase() === emailNorm)?.id ?? null;
+        if (leadId == null) return;
+      }
+      const values = { kind: "email" as const, notes: `Emailed: ${info.subject}` };
+      if (leadId != null) {
+        db.insert(crmActivities).values({
+          ...values, entityType: "lead", entityId: leadId,
+        }).run();
+      }
+      if (clientId != null) {
+        db.insert(crmActivities).values({
+          ...values, entityType: "client", entityId: clientId,
+        }).run();
+      }
+    } catch (e) {
+      console.error("[crm] email activity log failed", e);
+    }
+  });
 }
 
 export function onQuoteEvent(
@@ -791,19 +843,66 @@ export function registerCrmRoutes(app: Express): void {
     }
 
     // serviceArea is "ZIP or city" on the lead — closest thing to a city.
+    // Phase B #8: the pre-sale history rides along — lead notes land on the
+    // client card, and the lead's activity feed is copied to the client's
+    // (client feeds query entityType='client' only, so without the copy the
+    // new card opens blank).
     const client = db.insert(clients).values({
       name: lead.name,
       email: lead.email,
       phone: lead.phone,
       city: lead.serviceArea,
+      notes: lead.notes ? `From lead: ${lead.notes}` : null,
     }).returning().get();
     db.update(leads).set({ clientId: client.id }).where(eq(leads.id, id)).run();
+    for (const a of db.select().from(crmActivities)
+      .where(and(eq(crmActivities.entityType, "lead"), eq(crmActivities.entityId, lead.id)))
+      .all()) {
+      db.insert(crmActivities).values({
+        entityType: "client",
+        entityId: client.id,
+        userId: a.userId,
+        kind: a.kind,
+        notes: a.notes,
+        createdAt: a.createdAt,
+      }).run();
+    }
 
     audit(req, "crm.lead_convert", {
       targetType: "lead", targetId: lead.id, targetName: lead.name,
       details: { clientId: client.id },
     });
     res.status(201).json(client);
+  });
+
+  // Extras for the lead detail modal beyond the list row it already has:
+  // the website design the lead configured (Phase B #13 — web_designs.lead_id
+  // is written on intake but was never read back) and the lead's deals
+  // (Phase B #11). web_designs belongs to the website module → raw SQL +
+  // try/catch; the design PNG is already in the lead's photo strip.
+  app.get("/api/crm/leads/:id/detail", requireAuth, (req, res) => {
+    const id = pid(req.params.id);
+    const lead = db.select({ id: leads.id }).from(leads)
+      .where(and(eq(leads.id, id), isNull(leads.deletedAt)))
+      .get();
+    if (!lead) return res.status(404).json({ message: "Lead not found" });
+    let design: unknown = null;
+    try {
+      design = sqlite.prepare(`
+        SELECT ref, source_tool AS sourceTool, best_time AS bestTime,
+               contact, service, location, design_spec AS designSpec,
+               created_at AS createdAt
+        FROM web_designs WHERE lead_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT 1
+      `).get(id) ?? null;
+    } catch { /* website module absent */ }
+    res.json({
+      design,
+      deals: db.select().from(deals)
+        .where(and(eq(deals.leadId, id), isNull(deals.deletedAt)))
+        .orderBy(desc(deals.createdAt))
+        .all(),
+    });
   });
 
   app.patch("/api/crm/leads/:id", requireAuth, (req, res) => {
@@ -907,8 +1006,54 @@ export function registerCrmRoutes(app: Express): void {
       .where(and(eq(clients.id, id), isNull(clients.deletedAt)))
       .get();
     if (!client) return res.status(404).json({ message: "Client not found" });
+
+    // Phase B #7: the client's invoices + balance owed. Money data — only for
+    // roles that can open Finance (same rule as global search). fin_invoices
+    // belongs to the finance module → raw SQL + try/catch. "overdue" derived
+    // exactly like finance's presentInvoice; voided rows excluded from balance
+    // by carrying balanceCents only on receivable statuses' math (UI sums
+    // non-void, non-paid balances).
+    const isElev = req.user?.role === "manager" || req.user?.role === "technician";
+    let invoiceRows: {
+      id: number; number: string; status: string;
+      totalCents: number; balanceCents: number; dueDate: string | null;
+    }[] = [];
+    if (isElev) {
+      try {
+        const today = todayLocal();
+        invoiceRows = (sqlite.prepare(`
+          SELECT id, number, status, due_date AS dueDate,
+                 total_cents AS totalCents,
+                 total_cents - paid_cents AS balanceCents
+          FROM fin_invoices
+          WHERE deleted_at IS NULL AND client_id = ?
+          ORDER BY created_at DESC, id DESC
+        `).all(id) as any[]).map((r) => ({
+          ...r,
+          status: (r.status === "sent" || r.status === "partial")
+            && r.dueDate && r.dueDate < today ? "overdue" : r.status,
+        }));
+      } catch { /* finance module absent */ }
+    }
+
+    // Phase B #12: has this customer reviewed us? mk_reviews belongs to
+    // marketing → raw SQL + try/catch.
+    let reviewCount = 0;
+    try {
+      reviewCount = (sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM mk_reviews WHERE client_id = ?",
+      ).get(id) as { n: number }).n;
+    } catch { /* marketing module absent / column not migrated */ }
+
     res.json({
       client,
+      invoices: invoiceRows,
+      reviewCount,
+      // Phase B #11: the client's deals, visible from the customer record.
+      deals: db.select().from(deals)
+        .where(and(eq(deals.clientId, id), isNull(deals.deletedAt)))
+        .orderBy(desc(deals.createdAt))
+        .all(),
       leads: db.select().from(leads)
         .where(and(eq(leads.clientId, id), isNull(leads.deletedAt)))
         .orderBy(desc(leads.createdAt))
@@ -975,6 +1120,11 @@ export function registerCrmRoutes(app: Express): void {
     }
     const ownerId = qstr(req.query.ownerId);
     if (ownerId) conds.push(eq(deals.ownerId, parseInt(ownerId, 10)));
+    // Phase B #11: deals from the person's record.
+    const clientId = qstr(req.query.clientId);
+    if (clientId) conds.push(eq(deals.clientId, parseInt(clientId, 10)));
+    const leadId = qstr(req.query.leadId);
+    if (leadId) conds.push(eq(deals.leadId, parseInt(leadId, 10)));
     res.json(
       db.select().from(deals)
         .where(and(...conds))
@@ -1013,7 +1163,8 @@ export function registerCrmRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
 
-    const update: Partial<typeof deals.$inferInsert> = { ...parsed };
+    // Phase B #11: any edit counts as a touch — the stale-deal sweep keys off it.
+    const update: Partial<typeof deals.$inferInsert> = { ...parsed, updatedAt: Date.now() };
     const stageChanged = parsed.stage !== undefined && parsed.stage !== existing.stage;
     if (stageChanged) {
       // closedAt tracks the win/lose moment; reopening a closed deal clears it.

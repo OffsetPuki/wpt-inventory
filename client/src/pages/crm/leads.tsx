@@ -20,11 +20,13 @@ import {
   LEAD_SOURCE_LABELS,
   WIN_LOSS_REASON_LABELS,
   ACTIVITY_KIND_LABELS,
+  DEAL_STAGE_LABELS,
   type Lead,
   type LeadStage,
   type LeadSource,
   type WinLossReason,
   type CrmActivity,
+  type Deal,
 } from "@shared/crm-schema";
 import type { Campaign } from "@shared/marketing-schema";
 import type { PublicUser } from "@shared/schema";
@@ -66,6 +68,13 @@ function daysSince(v: string | number | Date | null | undefined): number | null 
   const t = new Date(v as any).getTime();
   if (isNaN(t)) return null;
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+// unix ms → local "YYYY-MM-DD" for <input type="date">.
+function toDateInput(ms: number | null | undefined): string {
+  if (ms == null) return "";
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // ─── New lead dialog ──────────────────────────────────────────────────────────
@@ -299,12 +308,31 @@ function LeadDetailModal({
   );
   const [assignedTo, setAssignedTo] = useState(lead.assignedTo != null ? String(lead.assignedTo) : "");
   const [notes, setNotes] = useState(lead.notes ?? "");
+  // Phase B #10: feeds the automations sweep (nextFollowUpAt → auto task).
+  const [followUp, setFollowUp] = useState(toDateInput(lead.nextFollowUpAt));
   const [activityNote, setActivityNote] = useState("");
 
   const { data: activities = [], isLoading: activitiesLoading } = useQuery<CrmActivity[]>({
     queryKey: ["crm-activities", "lead", lead.id],
     queryFn: async () =>
       (await apiRequest("GET", `/api/crm/activities?entityType=lead&entityId=${lead.id}`)).json(),
+  });
+
+  // Phase B #11/#13: the lead's deals + the website design they configured.
+  const { data: extras } = useQuery<{
+    design: {
+      ref: string;
+      sourceTool: string | null;
+      bestTime: string | null;
+      contact: string | null;
+      service: string | null;
+      location: string | null;
+      designSpec: string | null;
+    } | null;
+    deals: Deal[];
+  }>({
+    queryKey: ["crm-lead-detail", lead.id],
+    queryFn: async () => (await apiRequest("GET", `/api/crm/leads/${lead.id}/detail`)).json(),
   });
 
   const save = useApiMutation({
@@ -325,6 +353,9 @@ function LeadDetailModal({
           serviceRequested: serviceRequested.trim() || null,
           serviceArea: serviceArea.trim() || null,
           estimatedValueCents: parseMoney(estimatedValue),
+          // 9am local so the follow-up task lands in that morning's sweep;
+          // clearing the field PATCHes null.
+          nextFollowUpAt: followUp ? new Date(`${followUp}T09:00:00`).getTime() : null,
           ...(clearsClose && lead.stage === "won" ? { revenueClosedCents: 0 } : {}),
           ...(isElevated ? { assignedTo: assignedTo ? parseInt(assignedTo, 10) : null } : {}),
           notes: notes.trim() || null,
@@ -445,6 +476,18 @@ function LeadDetailModal({
               <span className="text-sm font-medium text-foreground">Estimated value ($)</span>
               <input className={inputCls} inputMode="decimal" value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} />
             </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-foreground">Next follow-up</span>
+              <input
+                type="date"
+                className={inputCls}
+                value={followUp}
+                onChange={(e) => setFollowUp(e.target.value)}
+              />
+              <span className="text-xs text-muted-foreground">
+                A follow-up task is created automatically on this date
+              </span>
+            </label>
             {isElevated && (
               <label className="flex flex-col gap-1.5">
                 <span className="text-sm font-medium text-foreground">Assigned to</span>
@@ -510,6 +553,59 @@ function LeadDetailModal({
             )}
           </div>
         </form>
+
+        {extras?.design && (
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Website design</h3>
+            <div className="rounded-xl border border-border bg-background p-4 text-sm">
+              <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                <p>
+                  <span className="text-muted-foreground">Design ref: </span>
+                  <span className="font-mono">{extras.design.ref}</span>
+                </p>
+                {extras.design.sourceTool && (
+                  <p><span className="text-muted-foreground">From: </span>{extras.design.sourceTool}</p>
+                )}
+                {extras.design.service && (
+                  <p><span className="text-muted-foreground">Service: </span>{extras.design.service}</p>
+                )}
+                {extras.design.location && (
+                  <p><span className="text-muted-foreground">Location: </span>{extras.design.location}</p>
+                )}
+                {extras.design.bestTime && (
+                  <p><span className="text-muted-foreground">Best time to call: </span>{extras.design.bestTime}</p>
+                )}
+              </div>
+              {extras.design.designSpec && (
+                <p className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                  {extras.design.designSpec}
+                </p>
+              )}
+              <p className="mt-2 text-xs text-muted-foreground">
+                The design preview image is saved in this lead's photos.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {(extras?.deals.length ?? 0) > 0 && (
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Deals</h3>
+            <ul className="divide-y divide-border">
+              {extras!.deals.map((d) => (
+                <li key={d.id} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground">{d.title}</span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <Chip className="bg-muted text-muted-foreground">{DEAL_STAGE_LABELS[d.stage]}</Chip>
+                    <span className="text-sm tabular-nums text-muted-foreground">
+                      {formatMoney(d.valueCents)}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div>
           <h3 className="mb-3 text-sm font-medium text-muted-foreground">Activity</h3>

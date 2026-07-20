@@ -15,6 +15,9 @@ import {
   type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder,
 } from "../shared/finance-schema";
 import { clients, estimates, type Estimate } from "../shared/crm-schema";
+// Phase B #9: automated customer emails land on the CRM timeline. The helper
+// is deferred + try/catch'd internally — safe to call from any mail hook.
+import { logEmailActivity } from "./crm";
 // Contract-vs-invoiced reconciliation (Phase A #3). Table object only — the
 // pm module owns the DDL, so the read below is try/catch'd.
 import { contracts } from "../shared/pm-schema";
@@ -300,11 +303,25 @@ function queueReviewRequest(inv: Invoice): void {
       const name = client?.name ?? inv.clientName ?? null;
       const email = client?.email ?? null;
 
+      // Phase B #12: tie the invitation to the customer — clientId straight
+      // off the invoice; leadId from the Phase A stamp, else the client's most
+      // recent won lead (crm table → try/catch, degrades to NULL).
+      let leadId: number | null = inv.leadId ?? null;
+      if (leadId == null && inv.clientId != null) {
+        try {
+          leadId = (sqlite.prepare(`
+            SELECT id FROM crm_leads
+            WHERE deleted_at IS NULL AND client_id = ? AND stage = 'won'
+            ORDER BY created_at DESC, id DESC LIMIT 1
+          `).get(inv.clientId) as { id: number } | undefined)?.id ?? null;
+        } catch { /* crm module absent */ }
+      }
+
       const token = crypto.randomBytes(24).toString("hex");
       const inserted = sqlite.prepare(`
-        INSERT INTO review_requests (token, name, email, invoice_id)
-        VALUES (?, ?, ?, ?)
-      `).run(token, name, email, inv.id);
+        INSERT INTO review_requests (token, name, email, invoice_id, client_id, lead_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(token, name, email, inv.id, inv.clientId ?? null, leadId);
 
       if (mailEnabled() && email) {
         const first = (name ?? "").trim().split(/\s+/)[0] || "there";
@@ -323,6 +340,10 @@ function queueReviewRequest(inv: Invoice): void {
         if (ok) {
           sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
             .run(Date.now(), inserted.lastInsertRowid);
+          logEmailActivity({
+            clientId: inv.clientId, leadId,
+            subject: `Review request after ${inv.number} was paid`,
+          });
         }
       }
 
@@ -359,7 +380,7 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
 
       const first = (client.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
       const balanceCents = inv.totalCents - inv.paidCents;
-      await sendMail({
+      const ok = await sendMail({
         to: client.email,
         subject: `Received ${usd(amountCents)} on ${inv.number} — CJM Metals`,
         text:
@@ -370,6 +391,13 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
             : `Your invoice is paid in full — thank you!\n\n`) +
           `— CJM Metals · Arlington, TX`,
       });
+      // Phase B #9: receipt on the timeline.
+      if (ok) {
+        logEmailActivity({
+          clientId: inv.clientId, leadId: inv.leadId,
+          subject: `Payment receipt — ${usd(amountCents)} received on ${inv.number}`,
+        });
+      }
     } catch (e) {
       console.error("[finance] payment-receipt hook failed", e);
     }
@@ -411,7 +439,7 @@ function queueInvoiceEmail(inv: Invoice): void {
         }
       } catch { /* quote module absent — stock signature */ }
 
-      await sendMail({
+      const ok = await sendMail({
         to,
         subject: `Invoice ${inv.number} from CJM Metals${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
         text:
@@ -426,6 +454,13 @@ function queueInvoiceEmail(inv: Invoice): void {
           `\nQuestions? Just reply to this email or give us a call.\n\n` +
           `— ${shopBlock}`,
       });
+      // Phase B #9: the invoice email on the timeline.
+      if (ok) {
+        logEmailActivity({
+          clientId: inv.clientId, leadId: inv.leadId, email: to,
+          subject: `Invoice ${inv.number} sent — ${usd(inv.totalCents - inv.paidCents)} due`,
+        });
+      }
     } catch (e) {
       console.error("[finance] invoice-sent email hook failed", e);
     }

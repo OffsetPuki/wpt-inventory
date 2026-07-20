@@ -10,7 +10,7 @@ import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/qu
 import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
 import { invoices } from "../shared/finance-schema";
 import { projects } from "../shared/schema";
-import { onQuoteEvent, findOrCreateClientByContact } from "./crm";
+import { onQuoteEvent, findOrCreateClientByContact, logEmailActivity } from "./crm";
 import { insertNumbered } from "./finance";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
@@ -487,8 +487,8 @@ export function registerPublicPortalRoutes(app: Express): void {
           : null)
         || "";
       if (to) {
-        setImmediate(() => {
-          void sendMail({
+        setImmediate(async () => {
+          const ok = await sendMail({
             to,
             subject: `Quote ${quote.number} accepted — CJM Metals`,
             text:
@@ -497,6 +497,14 @@ export function registerPublicPortalRoutes(app: Express): void {
               `to schedule the work.\n\n` +
               `— CJM Metals · Arlington, TX`,
           });
+          // Phase B #9: the confirmation on the lead's timeline (matched by
+          // address — onQuoteEvent above wins/creates the lead).
+          if (ok) {
+            logEmailActivity({
+              email: to,
+              subject: `Quote ${quote.number} accepted — confirmation sent`,
+            });
+          }
         });
       }
     }
@@ -513,11 +521,13 @@ export function registerPublicPortalRoutes(app: Express): void {
     token: string;
     name: string | null;
     email: string | null;
+    invoice_id: number | null;
+    client_id: number | null;
     submitted_at: number | null;
   }
   const findReviewRequest = (token: string): ReviewRequestRow | undefined =>
     sqlite.prepare(
-      "SELECT id, token, name, email, submitted_at FROM review_requests WHERE token = ?",
+      "SELECT id, token, name, email, invoice_id, client_id, submitted_at FROM review_requests WHERE token = ?",
     ).get(String(token)) as ReviewRequestRow | undefined;
 
   app.get("/api/public/review-request/:token", publicLimiter(60), (req, res) => {
@@ -550,6 +560,17 @@ export function registerPublicPortalRoutes(app: Express): void {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const author = body.author || rr.name || null;
+    // Phase B #12: stamp who reviewed us. client_id comes off the invitation
+    // (stamped at creation since Phase B); older requests fall back to the
+    // invoice's client. fin_invoices belongs to finance → try/catch.
+    let reviewClientId = rr.client_id;
+    if (reviewClientId == null && rr.invoice_id != null) {
+      try {
+        reviewClientId = (sqlite.prepare(
+          "SELECT client_id FROM fin_invoices WHERE id = ?",
+        ).get(rr.invoice_id) as { client_id: number | null } | undefined)?.client_id ?? null;
+      } catch { /* finance module absent */ }
+    }
     const row = db.insert(reviews).values({
       source: "website",
       author,
@@ -557,6 +578,8 @@ export function registerPublicPortalRoutes(app: Express): void {
       text: body.text || null,
       reviewDate: today,
       published: false,
+      clientId: reviewClientId,
+      requestId: rr.id,
     }).returning().get();
     sqlite.prepare(
       "UPDATE review_requests SET submitted_at = ?, review_id = ? WHERE id = ?",

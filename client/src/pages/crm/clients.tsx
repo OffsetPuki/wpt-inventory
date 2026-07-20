@@ -14,12 +14,15 @@ import {
   LEAD_STAGE_LABELS,
   ESTIMATE_STATUS_LABELS,
   ACTIVITY_KIND_LABELS,
+  DEAL_STAGE_LABELS,
   type Client,
   type Lead,
   type LeadStage,
   type Estimate,
   type EstimateStatus,
   type CrmActivity,
+  type Deal,
+  type DealStage,
 } from "@shared/crm-schema";
 import { type Project, type ProjectStatus } from "@shared/schema";
 import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote, Trash2 } from "lucide-react";
@@ -52,6 +55,27 @@ const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
   done: "Done",
   on_hold: "On Hold",
 };
+
+const DEAL_STAGE_TONE: Record<DealStage, ChipTone> = {
+  qualified: "zinc",
+  proposal: "blue",
+  negotiation: "amber",
+  won: "emerald",
+  lost: "red",
+};
+
+// Derived server-side (crm client detail) — matches Finance's status set.
+const INVOICE_STATUS_TONE: Record<string, ChipTone> = {
+  draft: "zinc",
+  sent: "blue",
+  partial: "amber",
+  paid: "emerald",
+  overdue: "red",
+  void: "zinc",
+};
+
+// Money still owed to us — same rule as Finance's receivable statuses.
+const OWED_STATUSES = ["sent", "partial", "overdue"];
 
 function parseTags(json: string | null): string[] {
   return parseJsonArray(json).filter((t): t is string => typeof t === "string" && !!t);
@@ -165,12 +189,24 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
 
 // ─── Detail dialog ────────────────────────────────────────────────────────────
 
+interface ClientInvoice {
+  id: number;
+  number: string;
+  status: string;
+  totalCents: number;
+  balanceCents: number;
+  dueDate: string | null;
+}
+
 interface ClientDetail {
   client: Client;
   leads: Lead[];
   estimates: Estimate[];
   activities: CrmActivity[];
   projects: Project[];
+  invoices: ClientInvoice[]; // empty for non-elevated roles
+  deals: Deal[];
+  reviewCount: number;
 }
 
 function ClientDetailModal({
@@ -247,6 +283,12 @@ function ClientDetailModal({
                   <span className="text-muted-foreground">Since: </span>
                   {formatDate(client.createdAt as any)}
                 </p>
+                {data.reviewCount > 0 && (
+                  <p>
+                    <span className="text-muted-foreground">Reviews: </span>
+                    <span className="text-amber-500">★</span> {data.reviewCount} review{data.reviewCount === 1 ? "" : "s"}
+                  </p>
+                )}
                 {client.notes && (
                   <p className="sm:col-span-2">
                     <span className="text-muted-foreground">Notes: </span>{client.notes}
@@ -284,6 +326,72 @@ function ClientDetailModal({
               </div>
             )}
           </div>
+
+          {isElevated && (
+            <div>
+              <h3 className="mb-2 text-sm font-medium text-muted-foreground">Invoices</h3>
+              {data.invoices.length === 0 ? (
+                <p className="py-2 text-sm text-muted-foreground">No invoices for this client</p>
+              ) : (
+                <>
+                  {(() => {
+                    const owedCents = data.invoices
+                      .filter((inv) => OWED_STATUSES.includes(inv.status))
+                      .reduce((s, inv) => s + inv.balanceCents, 0);
+                    return (
+                      <p className={`mb-1 text-sm font-medium ${owedCents > 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                        Balance owed: {formatMoney(owedCents)}
+                      </p>
+                    );
+                  })()}
+                  <ul className="divide-y divide-border">
+                    {data.invoices.map((inv) => (
+                      <li key={inv.id} className="flex items-center justify-between gap-3 py-2.5">
+                        <span className="min-w-0 truncate text-sm text-foreground">
+                          <span className="font-mono text-xs text-muted-foreground">{inv.number}</span>
+                          {inv.dueDate && (
+                            <span className="ml-2 text-xs text-muted-foreground">due {formatDate(inv.dueDate)}</span>
+                          )}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-3">
+                          <Chip tone={INVOICE_STATUS_TONE[inv.status] ?? "zinc"}>
+                            {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
+                          </Chip>
+                          <span className="text-sm tabular-nums text-foreground">
+                            {formatMoney(inv.totalCents)}
+                            {inv.balanceCents > 0 && inv.status !== "void" && inv.balanceCents !== inv.totalCents && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                ({formatMoney(inv.balanceCents)} left)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+
+          {data.deals.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-medium text-muted-foreground">Deals</h3>
+              <ul className="divide-y divide-border">
+                {data.deals.map((d) => (
+                  <li key={d.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="min-w-0 truncate text-sm font-medium text-foreground">{d.title}</span>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <Chip tone={DEAL_STAGE_TONE[d.stage]}>{DEAL_STAGE_LABELS[d.stage]}</Chip>
+                      <span className="text-sm tabular-nums text-muted-foreground">
+                        {formatMoney(d.valueCents)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div>
             <h3 className="mb-2 text-sm font-medium text-muted-foreground">Leads</h3>

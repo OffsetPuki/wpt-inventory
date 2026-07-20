@@ -72,6 +72,13 @@ interface InventoryStats {
   checkouts7d: number;
 }
 
+interface QuoteStats {
+  draft: number;
+  sent: number;
+  accepted: number;
+  openPipelineCents: number;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function useStats<T>(key: string, url: string) {
@@ -182,6 +189,7 @@ export default function DashboardPage() {
   const fin = useStats<FinanceStats>("finance-stats", "/api/finance/stats");
   const finReports = useStats<FinanceReports>("finance-reports", "/api/finance/reports");
   const inv = useStats<InventoryStats>("stats", "/api/stats");
+  const quotes = useStats<QuoteStats>("quotes-stats", "/api/quotes/stats");
 
   const alerts = mk.data?.alerts ?? [];
   const monthly = finReports.data?.monthly ?? [];
@@ -366,6 +374,22 @@ export default function DashboardPage() {
           value={mk.data?.overdueTasks}
           tone={mk.data && mk.data.overdueTasks > 0 ? "warn" : "default"}
           href="/marketing"
+        />
+      </Section>
+
+      <Section title="Quotes" href="/crm/quotes" isLoading={quotes.isLoading} cols={4}>
+        <StatCard label="Drafts" value={quotes.data?.draft} href="/crm/quotes" />
+        <StatCard
+          label="Waiting on customer"
+          value={quotes.data?.sent}
+          tone={quotes.data && quotes.data.sent > 0 ? "warn" : "default"}
+          href="/crm/quotes"
+        />
+        <StatCard label="Accepted" value={quotes.data?.accepted} tone="good" href="/crm/quotes" />
+        <StatCard
+          label="Open pipeline"
+          value={quotes.data && formatMoney(quotes.data.openPipelineCents)}
+          href="/crm/quotes"
         />
       </Section>
 
