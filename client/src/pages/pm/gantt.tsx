@@ -69,6 +69,28 @@ export default function PmGanttPage() {
     queryFn: async () => (await apiRequest("GET", "/api/pm/tasks")).json(),
   });
 
+  // Phase D #24c: approved HR leave, matched to assignees via the userId the
+  // leave endpoint now carries (hr_employees.user_id). Non-elevated users only
+  // receive their own requests — markers degrade gracefully.
+  const { data: leave = [] } = useQuery<
+    { userId: number | null; employeeName?: string; startDate: string; endDate: string; status: string }[]
+  >({
+    queryKey: ["hr-leave"],
+    queryFn: async () => (await apiRequest("GET", "/api/hr/leave")).json(),
+    retry: false,
+  });
+  const approvedLeave = useMemo(
+    () => leave.filter((l) => l.status === "approved" && l.userId != null),
+    [leave]
+  );
+  // ponytail: linear scan per task — fine at shop scale.
+  const leaveFor = (t: TaskRow) =>
+    t.assigneeId != null && t.startDate && t.dueDate
+      ? approvedLeave.find(
+          (l) => l.userId === t.assigneeId && l.startDate <= t.dueDate! && l.endDate >= t.startDate!
+        )
+      : undefined;
+
   const scheduled = useMemo(
     () => tasks.filter((t) => t.startDate && t.dueDate),
     [tasks]
@@ -233,6 +255,7 @@ export default function PmGanttPage() {
                       const startIdx = Math.max(0, dayDiff(range.start, t.startDate!));
                       const span = dayDiff(t.startDate!, t.dueDate!) + 1;
                       const w = Math.max(DAY_W, span * DAY_W);
+                      const onLeave = leaveFor(t);
                       return (
                         <div
                           key={t.id}
@@ -243,6 +266,14 @@ export default function PmGanttPage() {
                             className="flex shrink-0 items-center border-r border-border px-3"
                           >
                             <span className="truncate text-sm text-foreground">{t.title}</span>
+                            {onLeave && (
+                              <span
+                                title={`${onLeave.employeeName ?? t.assigneeName ?? "Assignee"} is on leave ${onLeave.startDate} → ${onLeave.endDate}`}
+                                className="ml-1.5 shrink-0 text-amber-600 dark:text-amber-400"
+                              >
+                                ⚠
+                              </span>
+                            )}
                           </div>
                           <div className="relative" style={{ width: chartW }}>
                             <button

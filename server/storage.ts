@@ -264,6 +264,9 @@ addColumnIfMissing("projects", "client_id", "client_id INTEGER");
 addColumnIfMissing("items", "material_key", "material_key TEXT");
 // Phase C #19 — adjustments carry the job that consumed the stock (soft ref).
 addColumnIfMissing("adjustments", "project_id", "project_id INTEGER");
+// Phase D #22 — stamped when a job's status transitions to done; anchors the
+// warranty-window math in the automations sweep.
+addColumnIfMissing("projects", "completed_at", "completed_at INTEGER");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id)");
@@ -812,7 +815,15 @@ export const storage = {
         vals.customer = this.crmClientName(data.clientId) ?? undefined;
       }
     }
-    if (data.status !== undefined) vals.status = data.status;
+    if (data.status !== undefined) {
+      vals.status = data.status;
+      // Phase D #22: entering done stamps completion; leaving done clears it
+      // (same rule as pm_tasks.completed_at).
+      const before = this.getProjectById(id);
+      if (before && before.status !== data.status) {
+        vals.completedAt = data.status === "done" ? Date.now() : null;
+      }
+    }
     if (data.notes !== undefined) vals.notes = data.notes;
     if (data.jobNumber !== undefined) vals.jobNumber = data.jobNumber;
     if (Object.keys(vals).length === 0) return this.getProjectById(id);

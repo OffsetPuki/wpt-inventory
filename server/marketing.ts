@@ -152,10 +152,13 @@ try {
 // Phase B #12: reviews tied to the customer. Soft refs — review_requests
 // gains client_id (stamped at creation by finance's queueReviewRequest);
 // mk_reviews gains client_id + request_id (stamped by the public submit).
+// Phase D #20: mk_tasks gains project_id (soft ref to projects) so chase
+// tasks can surface on the job hub.
 for (const ddl of [
   "ALTER TABLE review_requests ADD COLUMN client_id INTEGER",
   "ALTER TABLE mk_reviews ADD COLUMN client_id INTEGER",
   "ALTER TABLE mk_reviews ADD COLUMN request_id INTEGER",
+  "ALTER TABLE mk_tasks ADD COLUMN project_id INTEGER",
 ]) {
   try {
     sqlite.exec(ddl);
@@ -189,14 +192,18 @@ function fmtUsd(cents: number): string {
 // Fire-and-forget task creation for on-event hooks (used here, by hr.ts and
 // routes.ts): defers the insert via setImmediate like audit(), and dedupes on
 // an open task with the same title so repeated events don't pile up copies.
-export function queueTaskOnce(title: string, kind: (typeof MK_TASK_KINDS)[number] = "other"): void {
+export function queueTaskOnce(
+  title: string,
+  kind: (typeof MK_TASK_KINDS)[number] = "other",
+  projectId: number | null = null, // Phase D #20: surfaces the task on the job hub
+): void {
   setImmediate(() => {
     try {
       const dupe = db.select({ id: mkTasks.id }).from(mkTasks)
         .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
         .get();
       if (!dupe) {
-        db.insert(mkTasks).values({ title, kind, status: "open", autoCreated: true }).run();
+        db.insert(mkTasks).values({ title, kind, projectId, status: "open", autoCreated: true }).run();
       }
     } catch (e) {
       console.error("[marketing] queueTaskOnce failed", e);
@@ -618,6 +625,36 @@ export function registerMarketingRoutes(app: Express): void {
       targetType: "campaign", targetId: row.id, targetName: row.name,
       details: { channel: row.channel, budgetCents: row.budgetCents },
     });
+    // Phase D #24d: UTM late-binding — leads that arrived tagged with this
+    // campaign's name before the campaign existed get linked now, so CPL /
+    // ROI reporting sees them. Deferred + try/catch'd like the other on-event
+    // hooks; actor snapshotted synchronously (req may be recycled).
+    const actor = {
+      userId: req.user?.userId ?? null,
+      userName: req.user?.name ?? null,
+      role: req.user?.role ?? null,
+      ip: req.ip ?? null,
+    };
+    setImmediate(() => {
+      try {
+        const r = db.update(leads).set({ campaignId: row.id })
+          .where(and(
+            isNull(leads.deletedAt),
+            isNull(leads.campaignId),
+            sql`lower(${leads.utmCampaign}) = ${row.name.toLowerCase()}`,
+          )).run();
+        if (r.changes > 0) {
+          storage.appendAudit({
+            ...actor,
+            action: "marketing.campaign_lead_backfill",
+            targetType: "campaign", targetId: row.id, targetName: row.name,
+            details: { leads: r.changes },
+          });
+        }
+      } catch (e) {
+        console.error("[marketing] utm campaign backfill failed", e);
+      }
+    });
     res.status(201).json(row);
   });
 
@@ -774,6 +811,9 @@ export function registerMarketingRoutes(app: Express): void {
     }
     const assignedTo = qstr(req.query.assignedTo);
     if (assignedTo !== undefined) conds.push(eq(mkTasks.assignedTo, parseInt(assignedTo, 10)));
+    // Phase D #20: the job hub lists the chase tasks stamped with its project.
+    const projectId = qstr(req.query.projectId);
+    if (projectId !== undefined) conds.push(eq(mkTasks.projectId, parseInt(projectId, 10)));
 
     const due = qstr(req.query.due);
     if (due) {

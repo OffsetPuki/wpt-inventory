@@ -117,6 +117,12 @@ export const contracts = sqliteTable("pm_contracts", {
   valueCents: integer("value_cents").notNull().default(0),
   startDate: text("start_date"), // "YYYY-MM-DD"
   endDate: text("end_date"), // "YYYY-MM-DD"
+  // Phase D #21: the quote this contract was drawn from — soft ref to
+  // quotes.number (the accept-created job's jobNumber equals it too).
+  quoteRef: text("quote_ref"),
+  // Phase D #22: warranty window in months from the linked job's completion;
+  // the automations sweep turns it into a pre-expiry callback task.
+  warrantyMonths: integer("warranty_months"),
   // Per-kind structured fields (JSON Record<string,string>) — a job contract
   // stores scope/payment/warranty, an NDA stores purpose/term, etc. The field
   // definitions live in the contracts page (KIND_FIELDS); the PDF renders

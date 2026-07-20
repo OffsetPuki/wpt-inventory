@@ -8,7 +8,7 @@ import { registerRoutes } from "./routes";
 import { registerLegalRoutes } from "./legal";
 import { startSessionReaper } from "./auth";
 import { startMarketingAutomations } from "./marketing";
-import { startBusinessAutomations } from "./automations";
+import { startBusinessAutomations, registerAttentionRoute } from "./automations";
 import { serveStatic } from "./static";
 import { setupVite } from "./vite";
 
@@ -133,6 +133,8 @@ startBusinessAutomations();
 
 // ── Register routes ──
 registerRoutes(app);
+// Dashboard "Needs attention" feed — reuses the sweep's queries (Phase D #20c).
+registerAttentionRoute(app);
 
 // Public legal pages (/privacy, /eula). Registered before the SPA catch-all
 // so they return real HTML and resolve without auth or the React shell.

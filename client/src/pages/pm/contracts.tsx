@@ -295,6 +295,18 @@ async function contractPdf(
 
 // ─── Create / edit dialog ────────────────────────────────────────────────────
 
+// Phase D #21: "New contract" links from a job hub arrive with these — the
+// form opens already pointed at the project/client (and the accepted quote's
+// ref + value when the job came from one).
+export interface ContractPrefill {
+  title?: string;
+  projectId?: string;
+  clientId?: string;
+  clientName?: string;
+  quoteRef?: string;
+  valueCents?: number;
+}
+
 function ContractDialog({
   open,
   onClose,
@@ -302,6 +314,7 @@ function ContractDialog({
   projects,
   clients,
   onCreated,
+  prefill,
 }: {
   open: boolean;
   onClose: () => void;
@@ -309,6 +322,7 @@ function ContractDialog({
   projects: Project[];
   clients: Client[];
   onCreated?: (row: Contract) => void;
+  prefill?: ContractPrefill | null;
 }) {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<ContractKind>("contract");
@@ -317,6 +331,8 @@ function ContractDialog({
   const [clientNameText, setClientNameText] = useState("");
   const [projectSel, setProjectSel] = useState("");
   const [valueStr, setValueStr] = useState("");
+  const [quoteRef, setQuoteRef] = useState("");
+  const [warrantyMonthsStr, setWarrantyMonthsStr] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [body, setBody] = useState("");
@@ -328,21 +344,31 @@ function ContractDialog({
 
   useEffect(() => {
     if (!open) return;
-    setTitle(contract?.title ?? "");
+    // Prefill only seeds a NEW contract; editing always shows the stored row.
+    const pre = contract ? null : prefill;
+    setTitle(contract?.title ?? pre?.title ?? "");
     setKind(contract?.kind ?? "contract");
     setStatus(contract?.status ?? "draft");
-    setClientSel(contract?.clientId ? String(contract.clientId) : "");
-    setClientNameText(contract?.clientId ? "" : contract?.clientName ?? "");
-    setProjectSel(contract?.projectId ? String(contract.projectId) : "");
+    setClientSel(contract?.clientId ? String(contract.clientId) : pre?.clientId ?? "");
+    setClientNameText(contract?.clientId ? "" : contract?.clientName ?? pre?.clientName ?? "");
+    setProjectSel(contract?.projectId ? String(contract.projectId) : pre?.projectId ?? "");
     setValueStr(
-      contract && contract.valueCents ? String(contract.valueCents / 100) : ""
+      contract && contract.valueCents
+        ? String(contract.valueCents / 100)
+        : pre?.valueCents
+          ? String(pre.valueCents / 100)
+          : ""
+    );
+    setQuoteRef(contract?.quoteRef ?? pre?.quoteRef ?? "");
+    setWarrantyMonthsStr(
+      contract?.warrantyMonths != null ? String(contract.warrantyMonths) : ""
     );
     setStartDate(contract?.startDate ?? "");
     setEndDate(contract?.endDate ?? "");
     setBody(contract?.body ?? "");
     setNotes(contract?.notes ?? "");
     setFieldVals(parseJsonObject<Record<string, string>>(contract?.fields));
-  }, [open, contract]);
+  }, [open, contract, prefill]);
 
   const save = useApiMutation<Contract>({
     request: () => {
@@ -361,6 +387,11 @@ function ContractDialog({
         clientName: clientSel ? null : clientNameText.trim() || null,
         projectId: projectSel ? Number(projectSel) : null,
         valueCents: parseMoney(valueStr),
+        quoteRef: quoteRef.trim() || null,
+        warrantyMonths: (() => {
+          const n = parseInt(warrantyMonthsStr, 10);
+          return Number.isFinite(n) && n > 0 ? n : null;
+        })(),
         startDate: startDate || null,
         endDate: endDate || null,
         fields: JSON.stringify(picked),
@@ -505,6 +536,15 @@ function ContractDialog({
             />
           </label>
           <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Quote ref (optional)</span>
+            <input
+              className={inputCls}
+              value={quoteRef}
+              onChange={(e) => setQuoteRef(e.target.value)}
+              placeholder="Q-2026-0001"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Start date</span>
             <input
               type="date"
@@ -566,6 +606,22 @@ function ContractDialog({
                 )}
               </label>
             ))}
+            {kind === "contract" && (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-foreground">Warranty (months)</span>
+                <input
+                  type="number"
+                  min="0"
+                  className={inputCls}
+                  value={warrantyMonthsStr}
+                  onChange={(e) => setWarrantyMonthsStr(e.target.value)}
+                  placeholder="12"
+                />
+                <span className="text-xs text-muted-foreground">
+                  When the job is marked done, a callback task is queued 30 days before the warranty ends.
+                </span>
+              </label>
+            )}
           </div>
         )}
         <label className="flex flex-col gap-1.5">
@@ -688,6 +744,20 @@ function ContractViewModal({
               <p className="text-xs uppercase text-muted-foreground">Dates</p>
               <p className="mt-0.5 font-medium text-foreground">{dateSpan(contract)}</p>
             </div>
+            {contract.quoteRef && (
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Quote</p>
+                <p className="mt-0.5 font-medium text-foreground">{contract.quoteRef}</p>
+              </div>
+            )}
+            {contract.warrantyMonths != null && contract.warrantyMonths > 0 && (
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Warranty</p>
+                <p className="mt-0.5 font-medium text-foreground">
+                  {contract.warrantyMonths} month{contract.warrantyMonths === 1 ? "" : "s"}
+                </p>
+              </div>
+            )}
           </div>
           {fieldSections.map(({ f, v }) => (
             <div key={f.key}>
@@ -798,11 +868,31 @@ function ContractViewModal({
 
 // ─── Contracts page ──────────────────────────────────────────────────────────
 
+// Parse a job hub's "New contract" deep link. Hash routing (wouter
+// useHashLocation) keeps the query inside the hash — check there first,
+// window.location.search as fallback (same deep-link idea as home.tsx).
+function readPrefillFromUrl(): ContractPrefill | null {
+  const qs = window.location.hash.split("?")[1] ?? window.location.search.replace(/^\?/, "");
+  const p = new URLSearchParams(qs);
+  if (p.get("new") !== "1") return null;
+  const valueCents = parseInt(p.get("valueCents") ?? "", 10);
+  return {
+    title: p.get("title") ?? undefined,
+    projectId: p.get("projectId") ?? undefined,
+    clientId: p.get("clientId") ?? undefined,
+    clientName: p.get("clientName") ?? undefined,
+    quoteRef: p.get("quoteRef") ?? undefined,
+    valueCents: Number.isFinite(valueCents) && valueCents > 0 ? valueCents : undefined,
+  };
+}
+
 export default function PmContractsPage() {
   const { isElevated } = useAuth();
   const [kindTab, setKindTab] = useState<"" | ContractKind>("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // Deep link from a job hub → open the create dialog prefilled (Phase D #21).
+  const [prefill] = useState<ContractPrefill | null>(readPrefillFromUrl);
+  const [dialogOpen, setDialogOpen] = useState(() => !!prefill);
   const [editing, setEditing] = useState<ContractRow | null>(null);
   const [viewing, setViewing] = useState<ContractRow | null>(null);
 
@@ -971,6 +1061,7 @@ export default function PmContractsPage() {
           contract={editing}
           projects={projects}
           clients={clients}
+          prefill={prefill}
           onCreated={(row) =>
             setViewing({
               ...row,

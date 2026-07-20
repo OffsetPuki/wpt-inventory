@@ -79,6 +79,22 @@ interface QuoteStats {
   openPipelineCents: number;
 }
 
+// Phase D #20c: merged task inbox + the money signals the marketing-only
+// alerts banner ignores (server: GET /api/dashboard/attention).
+interface Attention {
+  tasks: {
+    source: "marketing" | "pm";
+    id: number;
+    title: string;
+    dueAt: number | null;
+    overdue: boolean;
+    projectId: number | null;
+  }[];
+  overdueInvoices: number;
+  contractsExpiring: number;
+  lowStock: number;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function useStats<T>(key: string, url: string) {
@@ -190,6 +206,7 @@ export default function DashboardPage() {
   const finReports = useStats<FinanceReports>("finance-reports", "/api/finance/reports");
   const inv = useStats<InventoryStats>("stats", "/api/stats");
   const quotes = useStats<QuoteStats>("quotes-stats", "/api/quotes/stats");
+  const att = useStats<Attention>("dashboard-attention", "/api/dashboard/attention");
 
   const alerts = mk.data?.alerts ?? [];
   const monthly = finReports.data?.monthly ?? [];
@@ -224,6 +241,79 @@ export default function DashboardPage() {
               {a}
             </Link>
           ))}
+        </div>
+      )}
+
+      {/* Needs attention — the automation sink's open tasks + overdue board
+          tasks, plus money signals the banner above doesn't carry. */}
+      {att.data &&
+        (att.data.tasks.length > 0 ||
+          att.data.overdueInvoices > 0 ||
+          att.data.contractsExpiring > 0 ||
+          att.data.lowStock > 0) && (
+        <div className="mb-6 rounded-2xl border border-border bg-card p-5">
+          <h2 className="text-base font-semibold text-foreground">Needs attention</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {att.data.overdueInvoices > 0 && (
+              <Link
+                href="/finance/invoices"
+                className="rounded-full bg-red-500/10 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-500/20 dark:text-red-400"
+              >
+                {att.data.overdueInvoices} overdue invoice{att.data.overdueInvoices === 1 ? "" : "s"}
+              </Link>
+            )}
+            {att.data.contractsExpiring > 0 && (
+              <Link
+                href="/pm/contracts"
+                className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+              >
+                {att.data.contractsExpiring} contract{att.data.contractsExpiring === 1 ? "" : "s"} ending ≤30d
+              </Link>
+            )}
+            {att.data.lowStock > 0 && (
+              <Link
+                href="/home?lowStock=1"
+                className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+              >
+                {att.data.lowStock} item{att.data.lowStock === 1 ? "" : "s"} low on stock
+              </Link>
+            )}
+          </div>
+          {att.data.tasks.length > 0 && (
+            <ul className="mt-3 divide-y divide-border">
+              {att.data.tasks.slice(0, 10).map((t) => (
+                <li key={`${t.source}-${t.id}`}>
+                  <Link
+                    href={t.source === "pm" ? "/pm/board" : "/marketing"}
+                    className="flex items-center justify-between gap-3 py-2 hover:bg-accent/40"
+                  >
+                    <span className="min-w-0 truncate text-sm text-foreground">{t.title}</span>
+                    <span className="flex shrink-0 items-center gap-2 text-xs">
+                      <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">
+                        {t.source === "pm" ? "Board" : "Follow-up"}
+                      </span>
+                      {t.dueAt != null && (
+                        <span
+                          className={
+                            t.overdue
+                              ? "font-medium text-red-600 dark:text-red-400"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {formatDate(t.dueAt)}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              {att.data.tasks.length > 10 && (
+                <li className="py-2 text-xs text-muted-foreground">
+                  +{att.data.tasks.length - 10} more
+                </li>
+              )}
+            </ul>
+          )}
         </div>
       )}
 

@@ -572,9 +572,15 @@ export function registerHrRoutes(app: Express): void {
   // ─── Leave ────────────────────────────────────────────────────────────────
 
   app.get("/api/hr/leave", requireAuth, (req, res) => {
+    // userId (the employee's linked login) rides along so the Gantt can match
+    // task assignees against approved leave (Phase D #24c).
     if (elevatedRole(req)) {
       return res.json(
-        db.select({ ...getTableColumns(leaveRequests), employeeName: employeeNameSql })
+        db.select({
+          ...getTableColumns(leaveRequests),
+          employeeName: employeeNameSql,
+          userId: employees.userId,
+        })
           .from(leaveRequests)
           .innerJoin(employees, eq(leaveRequests.employeeId, employees.id))
           .orderBy(desc(leaveRequests.createdAt)).all()
@@ -587,6 +593,7 @@ export function registerHrRoutes(app: Express): void {
       db.select().from(leaveRequests)
         .where(eq(leaveRequests.employeeId, emp.id))
         .orderBy(desc(leaveRequests.createdAt)).all()
+        .map((r) => ({ ...r, userId: req.user!.userId }))
     );
   });
 

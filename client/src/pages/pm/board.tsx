@@ -15,7 +15,7 @@ import {
   type TaskPriority,
 } from "@shared/pm-schema";
 import { Plus, Loader2, Search, SquareKanban } from "lucide-react";
-import { TaskDialog, inputCls, type TaskRow } from "./task-dialog";
+import { TaskDialog, inputCls, fmtH, type TaskRow } from "./task-dialog";
 
 const PRIORITY_DOT: Record<TaskPriority, string> = {
   low: "bg-zinc-400",
@@ -233,20 +233,33 @@ export default function PmBoardPage() {
                       </span>
                     )}
                     <div className="mt-2 flex items-center justify-between">
-                      {t.dueDate ? (
-                        <span
-                          className={cn(
-                            "text-xs",
-                            overdue
-                              ? "font-medium text-red-600 dark:text-red-400"
-                              : "text-muted-foreground"
-                          )}
-                        >
-                          {formatDate(t.dueDate)}
-                        </span>
-                      ) : (
-                        <span />
-                      )}
+                      <span className="flex items-center gap-2">
+                        {t.dueDate && (
+                          <span
+                            className={cn(
+                              "text-xs",
+                              overdue
+                                ? "font-medium text-red-600 dark:text-red-400"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {formatDate(t.dueDate)}
+                          </span>
+                        )}
+                        {/* Phase D #24b: logged vs estimate, red when over. */}
+                        {(t.loggedMin ?? 0) > 0 && t.estimateHours != null && (
+                          <span
+                            className={cn(
+                              "text-xs tabular-nums",
+                              (t.loggedMin ?? 0) > t.estimateHours * 60
+                                ? "font-medium text-red-600 dark:text-red-400"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {fmtH(t.loggedMin ?? 0)}/{t.estimateHours}h
+                          </span>
+                        )}
+                      </span>
                       {t.assigneeName && (
                         <span
                           title={t.assigneeName}

@@ -141,6 +141,20 @@ try {
   /* column already exists */
 }
 
+// Phase D #21/#22: quote_ref (soft ref to quotes.number — the quote this
+// contract was drawn from) and warranty_months (warranty window from the
+// linked job's completion; consumed by the automations warranty sweep).
+for (const ddl of [
+  "ALTER TABLE pm_contracts ADD COLUMN quote_ref TEXT",
+  "ALTER TABLE pm_contracts ADD COLUMN warranty_months INTEGER",
+]) {
+  try {
+    sqlite.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
+}
+
 // ─── Local date helpers ──────────────────────────────────────────────────────
 // Calendar dates are TEXT "YYYY-MM-DD" in the shop's local timezone; instants
 // are unix ms. Weeks run Monday→Sunday to match the timesheet cycle.
@@ -263,6 +277,11 @@ export function registerPmRoutes(app: Express): void {
       ...getTableColumns(pmTasks),
       projectName: projects.name,
       assigneeName: users.name,
+      // Phase D #24b: actual time logged against the task — the client shows
+      // "Logged Xh / est Yh" so estimates finally meet reality.
+      loggedMin: sql<number>`coalesce((
+        SELECT sum(te.duration_min) FROM pm_time_entries te WHERE te.task_id = ${pmTasks.id}
+      ), 0)`,
     })
       .from(pmTasks)
       .leftJoin(projects, eq(pmTasks.projectId, projects.id))

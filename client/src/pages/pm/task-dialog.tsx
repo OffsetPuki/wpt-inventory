@@ -18,7 +18,17 @@ import { Loader2, Timer, Trash2 } from "lucide-react";
 
 // ─── Create / edit task dialog (shared by the board and gantt pages) ─────────
 
-export type TaskRow = PmTask & { projectName: string | null; assigneeName: string | null };
+// loggedMin: actual minutes logged against the task (Phase D #24b).
+export type TaskRow = PmTask & {
+  projectName: string | null;
+  assigneeName: string | null;
+  loggedMin?: number;
+};
+
+/** Minutes → compact hours string ("2.5h"). */
+export function fmtH(minutes: number): string {
+  return `${(Math.round((minutes / 60) * 10) / 10).toString()}h`;
+}
 
 export const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
@@ -230,6 +240,20 @@ export function TaskDialog({
               value={estimateHours}
               onChange={(e) => setEstimateHours(e.target.value)}
             />
+            {/* Phase D #24b: estimate meets reality — red once logged > est. */}
+            {task && (task.loggedMin ?? 0) > 0 && (
+              <span
+                className={cn(
+                  "text-xs",
+                  task.estimateHours != null && (task.loggedMin ?? 0) > task.estimateHours * 60
+                    ? "font-medium text-red-600 dark:text-red-400"
+                    : "text-muted-foreground"
+                )}
+              >
+                Logged {fmtH(task.loggedMin ?? 0)}
+                {task.estimateHours != null && ` / est ${task.estimateHours}h`}
+              </span>
+            )}
           </label>
         </div>
 

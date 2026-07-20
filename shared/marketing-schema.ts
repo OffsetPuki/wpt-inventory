@@ -95,6 +95,7 @@ export const mkTasks = sqliteTable("mk_tasks", {
   title: text("title").notNull(),
   kind: text("kind", { enum: MK_TASK_KINDS }).notNull().default("other"),
   leadId: integer("lead_id"), // soft ref to crm_leads (no FK: avoids cross-file cycle)
+  projectId: integer("project_id"), // Phase D #20: soft ref to projects (no FK: same reason)
   campaignId: integer("campaign_id").references(() => campaigns.id, {
     onDelete: "set null",
   }),

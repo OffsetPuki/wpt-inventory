@@ -1,4 +1,6 @@
+import type { Express } from "express";
 import { sqlite } from "./storage";
+import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
 // Deliberate exception to this module's no-imports stance (Phase B #9): the
 // email-activity logger lives with the crm_activities table it writes, is
@@ -57,15 +59,21 @@ function fmtUsd(cents: number): string {
 // key rides in notes instead. Returns true when a task was actually created.
 // ponytail: open-only check like marketing's — a done/dismissed task whose
 // condition persists gets re-created next sweep; check all statuses if it nags.
-function ensureTask(key: string, title: string, kind = "other", leadId: number | null = null): boolean {
+function ensureTask(
+  key: string,
+  title: string,
+  kind = "other",
+  leadId: number | null = null,
+  projectId: number | null = null, // Phase D #20: surfaces the task on the job hub
+): boolean {
   const open = sqlite.prepare(
     "SELECT id FROM mk_tasks WHERE status = 'open' AND notes = ?",
   ).get(key);
   if (open) return false;
   sqlite.prepare(`
-    INSERT INTO mk_tasks (title, kind, lead_id, status, auto_created, due_at, notes)
-    VALUES (?, ?, ?, 'open', 1, ?, ?)
-  `).run(title, kind, leadId, Date.now(), key);
+    INSERT INTO mk_tasks (title, kind, lead_id, project_id, status, auto_created, due_at, notes)
+    VALUES (?, ?, ?, ?, 'open', 1, ?, ?)
+  `).run(title, kind, leadId, projectId, Date.now(), key);
   return true;
 }
 
@@ -258,7 +266,8 @@ function runBusinessSweep(): void {
       const oldest = Math.min(ex?.oldest ?? Infinity, tm?.oldest ?? Infinity);
       if (p.status !== "done" && oldest > now - 14 * DAY_MS) continue;
       ensureTask(`auto:unbilled:${p.id}:${month}`,
-        `Unbilled work on ${p.name}: ${fmtUsd(cents)} waiting — pull it into an invoice`);
+        `Unbilled work on ${p.name}: ${fmtUsd(cents)} waiting — pull it into an invoice`,
+        "other", null, p.id);
     }
   });
 
@@ -299,6 +308,26 @@ function runBusinessSweep(): void {
       flip.run(e.id);
       ensureTask(`auto:estimate-expired:${e.number}`,
         `${e.number} expired — re-quote or chase?`, "quote_reminder");
+    }
+  });
+
+  // 7b. Estimate pre-expiry nudge (Phase D #24a) — still 'sent' (step 7 flips
+  // lapsed ones to 'expired' after the date) and valid_until inside 3 days:
+  // chase the customer BEFORE the price lapses, not after.
+  step("estimate pre-expiry nudge", () => {
+    const rows = sqlite.prepare(`
+      SELECT e.id, e.number, e.valid_until,
+             COALESCE(c.name, l.name, e.title) AS who
+      FROM crm_estimates e
+      LEFT JOIN crm_clients c ON c.id = e.client_id
+      LEFT JOIN crm_leads l ON l.id = e.lead_id
+      WHERE e.deleted_at IS NULL AND e.status = 'sent'
+        AND e.valid_until IS NOT NULL AND e.valid_until >= ? AND e.valid_until <= ?
+    `).all(today, localDate(now + 3 * DAY_MS)) as any[];
+    for (const e of rows) {
+      ensureTask(`auto:estimate-expiring:${e.id}`,
+        `Estimate ${e.number} for ${e.who} expires ${e.valid_until} — follow up before it lapses`,
+        "quote_reminder");
     }
   });
 
@@ -577,6 +606,28 @@ function runBusinessSweep(): void {
     }
   });
 
+  // 18b. Warranty windows (Phase D #22) — signed/active contracts with a
+  // warranty_months and a completed linked job: warranty end = completion +
+  // months; inside the last 30 days, queue the callback/inspection task.
+  step("warranty windows", () => {
+    const rows = sqlite.prepare(`
+      SELECT c.id, c.warranty_months, p.id AS project_id, p.name AS project_name, p.completed_at
+      FROM pm_contracts c JOIN projects p ON p.id = c.project_id
+      WHERE c.deleted_at IS NULL AND c.status IN ('signed','active')
+        AND c.warranty_months > 0
+        AND p.deleted_at IS NULL AND p.completed_at IS NOT NULL
+    `).all() as any[];
+    for (const r of rows) {
+      const end = new Date(r.completed_at);
+      end.setMonth(end.getMonth() + r.warranty_months);
+      const endMs = end.getTime();
+      if (endMs < now || endMs > now + 30 * DAY_MS) continue;
+      ensureTask(`auto:warranty:${r.id}`,
+        `Warranty on ${r.project_name} ends ${localDate(endMs)} — schedule the callback/inspection`,
+        "other", null, r.project_id);
+    }
+  });
+
   // 19. Payroll reminder — anything payable within 2 days and not yet paid.
   step("payroll reminder", () => {
     const runs = sqlite.prepare(`
@@ -735,6 +786,85 @@ function buildDigest(now: number, today: string): string {
   }
 
   return parts.join("\n\n");
+}
+
+// ─── Dashboard "Needs attention" feed (Phase D #20c) ─────────────────────────
+// Lives here because the money-signal queries are the same ones the owner
+// digest and sweep already run (overdue invoices, contracts ending ≤30d, low
+// stock); the task list is the mk_tasks automation sink + overdue pm_tasks.
+// Registered from index.ts right after registerRoutes. Each block try/catch'd
+// so a missing module table degrades to zeros, same stance as the sweep.
+
+export function registerAttentionRoute(app: Express): void {
+  app.get("/api/dashboard/attention", requireElevated, (_req, res) => {
+    const now = Date.now();
+    const today = localDate(now);
+    type AttentionTask = {
+      source: "marketing" | "pm";
+      id: number;
+      title: string;
+      dueAt: number | null;
+      overdue: boolean;
+      projectId: number | null;
+    };
+    const tasks: AttentionTask[] = [];
+    try {
+      const mk = sqlite.prepare(`
+        SELECT id, title, due_at, project_id FROM mk_tasks WHERE status = 'open'
+        ORDER BY due_at IS NULL, due_at, created_at DESC LIMIT 8
+      `).all() as any[];
+      for (const t of mk) {
+        tasks.push({
+          source: "marketing", id: t.id, title: t.title,
+          dueAt: t.due_at ?? null,
+          overdue: t.due_at != null && t.due_at < now,
+          projectId: t.project_id ?? null,
+        });
+      }
+    } catch { /* marketing module absent */ }
+    try {
+      const pm = sqlite.prepare(`
+        SELECT id, title, due_date, project_id FROM pm_tasks
+        WHERE deleted_at IS NULL AND status != 'done'
+          AND due_date IS NOT NULL AND due_date < ?
+        ORDER BY due_date LIMIT 8
+      `).all(today) as any[];
+      for (const t of pm) {
+        tasks.push({
+          source: "pm", id: t.id, title: t.title,
+          dueAt: Date.parse(t.due_date) || null,
+          overdue: true,
+          projectId: t.project_id ?? null,
+        });
+      }
+    } catch { /* pm module absent */ }
+
+    const n = (q: string, ...args: unknown[]): number => {
+      try {
+        return (sqlite.prepare(q).get(...args) as any)?.n ?? 0;
+      } catch {
+        return 0;
+      }
+    };
+    res.json({
+      tasks,
+      // Same predicates as the owner digest / sweep steps 1, 18 and 14.
+      overdueInvoices: n(`
+        SELECT COUNT(*) AS n FROM fin_invoices
+        WHERE deleted_at IS NULL AND status IN ('sent','partial','overdue')
+          AND due_date IS NOT NULL AND due_date < ? AND total_cents - paid_cents > 0
+      `, today),
+      contractsExpiring: n(`
+        SELECT COUNT(*) AS n FROM pm_contracts
+        WHERE deleted_at IS NULL AND status IN ('signed','active')
+          AND end_date IS NOT NULL AND end_date >= ? AND end_date <= ?
+      `, today, localDate(now + 30 * DAY_MS)),
+      lowStock: n(`
+        SELECT COUNT(*) AS n FROM items
+        WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold
+      `),
+    });
+  });
 }
 
 // Same shape as startMarketingAutomations: run once on boot, then hourly;

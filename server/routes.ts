@@ -469,7 +469,11 @@ export function registerRoutes(app: Express): void {
         const unresolved = storage.getChecklist(id)
           .filter((r) => r.status === "pending" || r.status === "ordered").length;
         if (unresolved > 0) {
-          queueTaskOnce(`Project ${project.name} closed with ${unresolved} unresolved checklist items`);
+          queueTaskOnce(
+            `Project ${project.name} closed with ${unresolved} unresolved checklist items`,
+            "other",
+            id, // Phase D #20: the task shows on this job's hub
+          );
         }
         // #19d: a closed job stops holding stock for its unresolved rows.
         try { storage.releaseProjectReservations(id); } catch (e) {

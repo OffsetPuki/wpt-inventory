@@ -166,6 +166,9 @@ export const projects = sqliteTable("projects", {
   status: text("status", { enum: PROJECT_STATUSES })
     .notNull()
     .default("active"),
+  // Phase D #22: stamped when status transitions to done (cleared if reopened)
+  // — the anchor for warranty-window math in the automations sweep.
+  completedAt: integer("completed_at"),
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()

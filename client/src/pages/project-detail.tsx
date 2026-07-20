@@ -7,6 +7,12 @@ import { toast } from "@/components/ui/toaster";
 import { useApiMutation } from "@/hooks/useApiMutation";
 import { PROJECT_STATUSES, type Project, type ProjectStatus } from "@shared/schema";
 import type { Client } from "@shared/crm-schema";
+import {
+  CONTRACT_KIND_LABELS,
+  CONTRACT_STATUS_LABELS,
+  type ContractKind,
+  type ContractStatus,
+} from "@shared/pm-schema";
 import { formatDateTime, formatMoney, formatHours, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import Header from "@/components/Header";
@@ -197,10 +203,25 @@ interface ProjectTaskRow {
   dueDate: string | null;
 }
 
+interface ProjectMkTaskRow {
+  id: number;
+  title: string;
+  dueAt: number | null;
+}
+
 function OpenTasksCard({ projectId }: { projectId: number }) {
   const { data: tasks = [] } = useQuery<ProjectTaskRow[]>({
     queryKey: ["project-tasks", projectId],
     queryFn: async () => (await apiRequest("GET", `/api/pm/tasks?projectId=${projectId}`)).json(),
+    retry: false,
+  });
+  // Phase D #20: the automation sink's chase tasks stamped with this job
+  // (unbilled nags, "schedule the job", warranty callbacks…) — listed under
+  // the board tasks, labeled so the two inboxes stay distinguishable.
+  const { data: mkTasks = [] } = useQuery<ProjectMkTaskRow[]>({
+    queryKey: ["project-mk-tasks", projectId],
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/marketing/tasks?status=open&projectId=${projectId}`)).json(),
     retry: false,
   });
   const open = tasks.filter((t) => t.status !== "done");
@@ -208,9 +229,9 @@ function OpenTasksCard({ projectId }: { projectId: number }) {
     <div className="rounded-xl border border-border bg-card p-5">
       <h2 className="mb-3 text-base font-semibold text-foreground">
         Open tasks{" "}
-        <span className="font-normal text-muted-foreground">— {open.length}</span>
+        <span className="font-normal text-muted-foreground">— {open.length + mkTasks.length}</span>
       </h2>
-      {open.length === 0 ? (
+      {open.length === 0 && mkTasks.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Nothing open. Plan the job in{" "}
           <Link href="/pm/board" className="underline hover:text-foreground">Projects → Board</Link>.
@@ -232,8 +253,73 @@ function OpenTasksCard({ projectId }: { projectId: number }) {
               <Link href="/pm/board" className="underline hover:text-foreground">board</Link>
             </li>
           )}
+          {mkTasks.map((t) => (
+            <li key={`mk-${t.id}`} className="flex items-center justify-between gap-3 py-2">
+              <Link href="/marketing" className="min-w-0 truncate text-sm text-foreground hover:underline">
+                {t.title}
+              </Link>
+              <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                Follow-up
+              </span>
+            </li>
+          ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Phase D #21: the agreements governing this job, plus a one-click "New
+// contract" that lands on the contracts page prefilled with this project /
+// client — and, when the job came from an online-accepted quote (jobNumber ==
+// quote.number), the quote ref and value too.
+function ContractsCard({ project }: { project: Project }) {
+  const { data: contracts = [] } = useQuery<
+    { id: number; title: string; kind: ContractKind; status: ContractStatus; valueCents: number }[]
+  >({
+    queryKey: ["pm-contracts", "project", project.id],
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/pm/contracts?projectId=${project.id}`)).json(),
+    retry: false,
+  });
+  const { data: quotes = [] } = useQuery<{ number: string; totalCents: number }[]>({
+    queryKey: ["quotes"],
+    queryFn: async () => (await apiRequest("GET", "/api/quotes")).json(),
+    retry: false,
+  });
+  const quote = quotes.find((q) => q.number === project.jobNumber);
+  const params = new URLSearchParams({ new: "1", projectId: String(project.id) });
+  params.set("title", project.name);
+  if (project.clientId != null) params.set("clientId", String(project.clientId));
+  else if (project.customer) params.set("clientName", project.customer);
+  if (quote) {
+    params.set("quoteRef", quote.number);
+    params.set("valueCents", String(quote.totalCents));
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-3 text-base font-semibold text-foreground">Contracts</h2>
+      {contracts.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No contract on this job yet.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {contracts.map((c) => (
+            <li key={c.id} className="flex items-center gap-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 truncate font-medium text-foreground">{c.title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {CONTRACT_KIND_LABELS[c.kind]} · {CONTRACT_STATUS_LABELS[c.status]}
+              </span>
+              <span className="shrink-0 tabular-nums text-foreground">{formatMoney(c.valueCents)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Link
+        href={`/pm/contracts?${params.toString()}`}
+        className="mt-3 inline-block text-sm text-muted-foreground underline hover:text-foreground"
+      >
+        New contract{quote ? ` from quote ${quote.number}` : ""}
+      </Link>
     </div>
   );
 }
@@ -477,6 +563,7 @@ export default function ProjectDetailPage({ id }: { id: string }) {
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <ClientCard clientId={project.clientId} />
         <OpenTasksCard projectId={projectId} />
+        <ContractsCard project={project} />
       </div>
 
       <ProjectChecklist projectId={projectId} />

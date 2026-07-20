@@ -330,9 +330,12 @@ export function registerPublicPortalRoutes(app: Express): void {
     const depositCents = Number.isFinite(depositPct) && depositPct > 0
       ? Math.round(quote.totalCents * (depositPct / 100))
       : null;
+    // Hoisted so the task hook below (a later setImmediate in the same FIFO
+    // queue, so it runs after this one) can stamp the job on the task (#20).
+    let projectId: number | null = null;
     setImmediate(() => {
-      let projectId: number | null = null;
       let clientId: number | null = null;
+      let invoiceNumber: string | null = null;
       try {
         clientId = findOrCreateClientByContact({
           name: quote.customerName,
@@ -466,8 +469,9 @@ export function registerPublicPortalRoutes(app: Express): void {
           unitPriceCents: subtotalCents,
         }]);
         // Shared MAX(id)+1, retry-on-UNIQUE INV numbering (finance.ts).
-        insertNumbered("fin_invoices", "INV", (num) =>
-          db.insert(invoices).values({
+        insertNumbered("fin_invoices", "INV", (num) => {
+          invoiceNumber = num;
+          return db.insert(invoices).values({
             number: num,
             clientId,
             clientName: quote.customerName,
@@ -480,10 +484,28 @@ export function registerPublicPortalRoutes(app: Express): void {
             totalCents: quote.totalCents,
             depositCents,
             notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
-          }).run(),
-        );
+          }).run();
+        });
       } catch (e) {
         console.error("[public-portal] accept→invoice hook failed", e);
+      }
+      // Phase D #23: one audit entry recording what the acceptance actually
+      // spawned (job + draft invoice) — the quote.accepted entry above fires
+      // before these hooks run, so it can't know. Same portal identity.
+      try {
+        storage.appendAudit({
+          userId: null,
+          userName: "cjmmetals.com",
+          role: null,
+          action: "quote.accept_spawn",
+          targetType: "quote",
+          targetId: quote.id,
+          targetName: quote.number,
+          ip,
+          details: { clientId, projectId, invoiceNumber },
+        });
+      } catch {
+        /* audit is best-effort */
       }
     });
 
@@ -501,6 +523,7 @@ export function registerPublicPortalRoutes(app: Express): void {
         db.insert(mkTasks).values({
           title,
           kind: "follow_up",
+          projectId, // Phase D #20: set by the project hook that ran just before
           status: "open",
           autoCreated: true,
           dueAt: Date.now(),
