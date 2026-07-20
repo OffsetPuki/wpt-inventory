@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import crypto from "crypto";
 import { eq, and, or, desc, asc, isNull, inArray, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
@@ -12,9 +12,12 @@ import {
   updateGatewaySchema, insertPurchaseOrderSchema,
   updateFinSettingsSchema, pullUnbilledSchema,
   PAYMENT_GATEWAY_CATALOG, EXPENSE_CATEGORY_LABELS,
-  type Invoice, type InvoiceStatus, type Expense,
+  type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder,
 } from "../shared/finance-schema";
 import { clients, estimates, type Estimate } from "../shared/crm-schema";
+// Contract-vs-invoiced reconciliation (Phase A #3). Table object only — the
+// pm module owns the DDL, so the read below is try/catch'd.
+import { contracts } from "../shared/pm-schema";
 // Cross-module automation hook: a freshly paid invoice queues a review request.
 // The mk_ tables are owned by the marketing module's DDL; every touch below is
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
@@ -122,12 +125,19 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_fin_po_created ON fin_purchase_orders(created_at);
 `);
 
-// Additive migration (wiring plan, Fix 4): fin_expenses.invoice_id arrived
-// after installs existed. The throw on re-run is expected.
-try {
-  sqlite.exec("ALTER TABLE fin_expenses ADD COLUMN invoice_id INTEGER");
-} catch {
-  /* column already exists */
+// Additive migrations: columns that arrived after installs existed. The throw
+// on re-run is expected. deposit_cents / lead_id are Phase A (findings 2 & 6) —
+// lead_id is a soft ref into crm_leads, same stance as projects.client_id.
+for (const ddl of [
+  "ALTER TABLE fin_expenses ADD COLUMN invoice_id INTEGER",
+  "ALTER TABLE fin_invoices ADD COLUMN deposit_cents INTEGER",
+  "ALTER TABLE fin_invoices ADD COLUMN lead_id INTEGER",
+]) {
+  try {
+    sqlite.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
 }
 sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_fin_expenses_invoice ON fin_expenses(invoice_id);
@@ -362,6 +372,131 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
       });
     } catch (e) {
       console.error("[finance] payment-receipt hook failed", e);
+    }
+  });
+}
+
+// ─── Invoice "sent" → email the customer (Phase A #1) ────────────────────────
+// The invoice itself, the moment it goes out — before this the customer's
+// first contact about a bill was the overdue chaser. Same contract as the
+// receipt hook: deferred + try/catch, skips silently with no mailer/address.
+
+function queueInvoiceEmail(inv: Invoice): void {
+  setImmediate(async () => {
+    try {
+      if (!mailEnabled()) return;
+      const client = inv.clientId != null
+        ? db.select({ name: clients.name, email: clients.email })
+            .from(clients).where(eq(clients.id, inv.clientId)).get()
+        : undefined;
+      // Fallback: any email typed into the invoice notes (unlinked clients).
+      const to = client?.email
+        || (inv.notes ?? "").match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/)?.[0];
+      if (!to) return;
+
+      const first = (client?.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
+      const lines = parseLineItems(inv.items).map((it) =>
+        `  - ${it.description} — ${it.qty} × ${usd(it.unitPriceCents)} = ${usd(Math.round(it.qty * it.unitPriceCents))}`);
+
+      // Shop identity — the same quote_settings singleton the shared quote
+      // page renders; a missing table/row degrades to the stock signature.
+      let shopBlock = "CJM Metals · Arlington, TX";
+      try {
+        const row = sqlite.prepare("SELECT shop FROM quote_settings WHERE id = 1")
+          .get() as { shop?: string } | undefined;
+        const shop = row?.shop ? JSON.parse(row.shop) : null;
+        if (shop?.name) {
+          shopBlock = [shop.name, shop.location, shop.phone, shop.email]
+            .filter(Boolean).join(" · ");
+        }
+      } catch { /* quote module absent — stock signature */ }
+
+      await sendMail({
+        to,
+        subject: `Invoice ${inv.number} from CJM Metals${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
+        text:
+          `Hi ${first},\n\n` +
+          `Here's your invoice ${inv.number}:\n\n` +
+          (lines.length ? `${lines.join("\n")}\n\n` : "") +
+          `Total:       ${usd(inv.totalCents)}\n` +
+          (inv.paidCents > 0 ? `Paid so far: ${usd(inv.paidCents)}\n` : "") +
+          `Balance due: ${usd(inv.totalCents - inv.paidCents)}\n` +
+          ((inv.depositCents ?? 0) > 0 ? `Deposit due: ${usd(inv.depositCents!)}\n` : "") +
+          (inv.dueDate ? `Due date:    ${inv.dueDate}\n` : "") +
+          `\nQuestions? Just reply to this email or give us a call.\n\n` +
+          `— ${shopBlock}`,
+      });
+    } catch (e) {
+      console.error("[finance] invoice-sent email hook failed", e);
+    }
+  });
+}
+
+// ─── PO received → materials expense (Phase A #4) ────────────────────────────
+// Material spend on a received PO lands in fin_expenses so project margin,
+// quoted-vs-actual and monthly totals see it. Not billable — the job's quote
+// already prices the materials, and billable=1 would double-bill via
+// pull-unbilled. Deduped by the auto: key in notes (postPayrollExpense style).
+
+function queuePoExpense(req: Request, po: PurchaseOrder): void {
+  setImmediate(() => {
+    try {
+      if (po.totalCents <= 0) return;
+      const dupe = sqlite.prepare(
+        "SELECT id FROM fin_expenses WHERE deleted_at IS NULL AND notes LIKE ?",
+      ).get(`%auto:po:${po.id};%`);
+      if (dupe) return;
+      const row = db.insert(expenses).values({
+        date: todayLocal(),
+        vendor: po.vendor,
+        category: "materials",
+        amountCents: po.totalCents,
+        paymentMethod: "other",
+        projectId: po.projectId,
+        billable: false,
+        notes: `auto:po:${po.id}; — ${po.number} received from ${po.vendor}`,
+      }).returning().get();
+      audit(req, "finance.po_expense_post", {
+        targetType: "expense", targetId: row.id, targetName: po.number,
+        details: { poId: po.id, amountCents: po.totalCents },
+      });
+    } catch (e) {
+      console.error("[finance] po→expense hook failed", e);
+    }
+  });
+}
+
+// ─── Fully paid → close the loop (Phase A #6) ────────────────────────────────
+// A settled invoice pushes realized revenue back onto its CRM lead (stamped by
+// the quote-accept hook — only ever RAISED, a partial refund story must not
+// shrink closed revenue) and retires the accept hook's "Schedule the job"
+// task. Cross-module tables → raw SQL, everything deferred + try/catch'd.
+
+function queuePaidCloseLoop(req: Request, inv: Invoice): void {
+  setImmediate(() => {
+    try {
+      // The accept hook wrote "From quote Q-2026-0001 — …" into notes; that
+      // number keys the task it created (public-portal.ts).
+      const quoteNumber = /^From quote (\S+)/.exec(inv.notes ?? "")?.[1];
+      if (inv.leadId == null && !quoteNumber) return;
+      if (inv.leadId != null) {
+        sqlite.prepare(`
+          UPDATE crm_leads SET revenue_closed_cents = ?
+          WHERE id = ? AND deleted_at IS NULL AND revenue_closed_cents < ?
+        `).run(inv.totalCents, inv.leadId, inv.totalCents);
+      }
+      if (quoteNumber) {
+        sqlite.prepare(`
+          UPDATE mk_tasks SET status = 'done', completed_at = ?
+          WHERE status = 'open' AND auto_created = 1 AND title LIKE ?
+        `).run(Date.now(), `Schedule the job — quote ${quoteNumber} accepted%`);
+      }
+      audit(req, "finance.invoice_paid_sync", {
+        targetType: "invoice", targetId: inv.id, targetName: inv.number,
+        details: { leadId: inv.leadId, quoteNumber: quoteNumber ?? null, totalCents: inv.totalCents },
+      });
+    } catch (e) {
+      console.error("[finance] paid close-loop hook failed", e);
     }
   });
 }
@@ -776,6 +911,9 @@ export function registerFinanceRoutes(app: Express): void {
       // Fix 4: voiding releases the billed-on stamps so pulled expenses/time
       // become billable again on the reissued invoice.
       if (body.status === "void") releaseBilledItems(inv.id);
+      // Phase A #1: the transition INTO "sent" emails the customer the actual
+      // invoice (deferred; a re-PATCH that stays "sent" doesn't re-send).
+      if (body.status === "sent") queueInvoiceEmail(row);
     }
     res.json(presentInvoice(row, todayLocal()));
   });
@@ -826,8 +964,13 @@ export function registerFinanceRoutes(app: Express): void {
       .returning()
       .get();
 
-    // Newly settled → queue the review ask (deferred; can never break this path).
-    if (status === "paid" && inv.status !== "paid") queueReviewRequest(updated);
+    // Newly settled → queue the review ask, push realized revenue back onto
+    // the CRM lead and retire the "Schedule the job" task (Phase A #6). All
+    // deferred; none can break this path.
+    if (status === "paid" && inv.status !== "paid") {
+      queueReviewRequest(updated);
+      queuePaidCloseLoop(req, updated);
+    }
     // Every recorded payment → receipt email to the customer (same contract).
     queuePaymentReceipt(updated, body.amountCents);
 
@@ -1033,10 +1176,26 @@ export function registerFinanceRoutes(app: Express): void {
       }
     } catch { /* pm module absent — no time on the job */ }
 
+    // Phase A #3: the signed contract's value vs what's actually been billed —
+    // a done job with contract money left unbilled is the cash leak this
+    // whole card exists to catch. pm_contracts belongs to pm → try/catch.
+    let contractCents = 0;
+    try {
+      contractCents = db.select({ s: sql<number>`coalesce(sum(${contracts.valueCents}), 0)` })
+        .from(contracts)
+        .where(and(
+          isNull(contracts.deletedAt),
+          eq(contracts.projectId, projectId),
+          inArray(contracts.status, ["active", "signed"]),
+        ))
+        .get()?.s ?? 0;
+    } catch { /* pm module absent — no contract to reconcile */ }
+
     const today = todayLocal();
     res.json({
       invoices: live.map((i) => presentInvoice(i, today)),
       totals: {
+        contractCents,
         invoicedCents,
         paidCents,
         outstandingCents: invoicedCents - paidCents,
@@ -1247,6 +1406,9 @@ export function registerFinanceRoutes(app: Express): void {
         targetType: "purchase_order", targetId: existing.id, targetName: existing.number,
         details: { from: existing.status, to: body.status },
       });
+      // Phase A #4: materials landing at the shop are money spent — book the
+      // expense (deduped, so received→closed→received can't double-book).
+      if (body.status === "received") queuePoExpense(req, row);
     }
     res.json(row);
   });

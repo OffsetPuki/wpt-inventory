@@ -366,6 +366,14 @@ function InvoiceFormModal({
             <span className="text-foreground">Total</span>
             <span className="tabular-nums text-foreground">{formatMoney(totalCents)}</span>
           </div>
+          {(invoice?.depositCents ?? 0) > 0 && (
+            <div className="flex justify-between pt-0.5">
+              <span className="text-amber-700 dark:text-amber-400">Deposit due</span>
+              <span className="tabular-nums text-amber-700 dark:text-amber-400">
+                {formatMoney(invoice!.depositCents!)}
+              </span>
+            </div>
+          )}
         </div>
 
         <button type="submit" disabled={save.isPending} className={primaryBtn}>
@@ -716,6 +724,14 @@ function InvoiceDetailModal({
               <span className="text-foreground">Total</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.totalCents)}</span>
             </div>
+            {(inv.depositCents ?? 0) > 0 && (
+              <div className="flex justify-between py-0.5">
+                <span className="text-amber-700 dark:text-amber-400">Deposit due</span>
+                <span className="tabular-nums text-amber-700 dark:text-amber-400">
+                  {formatMoney(inv.depositCents!)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between py-0.5">
               <span className="text-muted-foreground">Paid</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.paidCents)}</span>

@@ -323,6 +323,13 @@ export function registerPublicPortalRoutes(app: Express): void {
     const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
       quote.payload, {},
     ).customer ?? {};
+    // Phase A #2: the deposit % the customer saw on the printed/shared quote
+    // lives in the builder session next to taxPct. Stamped on the draft
+    // invoice + surfaced on the "Schedule the job" task so it gets chased.
+    const depositPct = Number(parseJson<{ depositPct?: unknown }>(quote.payload, {}).depositPct);
+    const depositCents = Number.isFinite(depositPct) && depositPct > 0
+      ? Math.round(quote.totalCents * (depositPct / 100))
+      : null;
     setImmediate(() => {
       let projectId: number | null = null;
       let clientId: number | null = null;
@@ -408,6 +415,7 @@ export function registerPublicPortalRoutes(app: Express): void {
             taxRateBp,
             taxCents,
             totalCents: quote.totalCents,
+            depositCents,
             notes: `From quote ${quote.number} — accepted on cjmmetals.com`,
           }).run(),
         );
@@ -433,7 +441,8 @@ export function registerPublicPortalRoutes(app: Express): void {
           status: "open",
           autoCreated: true,
           dueAt: Date.now(),
-          notes: `$${(quote.totalCents / 100).toFixed(2)} — job ${quote.number} is in Projects, draft invoice in Finance.`,
+          notes: `$${(quote.totalCents / 100).toFixed(2)} — job ${quote.number} is in Projects, draft invoice in Finance.`
+            + (depositCents ? ` Deposit due: $${(depositCents / 100).toFixed(2)}.` : ""),
         }).run();
       } catch (e) {
         console.error("[public-portal] accept→task hook failed", e);

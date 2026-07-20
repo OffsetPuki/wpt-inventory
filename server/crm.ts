@@ -389,6 +389,22 @@ function winLeadForAcceptedQuote(
   }).run();
 }
 
+// Phase A #6: tie the accept hook's auto-created invoice to the lead so a
+// later full payment can push realized revenue back onto it (finance.ts,
+// queuePaidCloseLoop). The invoice hook runs in an earlier-queued setImmediate
+// on the same tick, so the row exists by the time this runs. fin_invoices
+// belongs to finance → raw SQL + try/catch; lead_id IS NULL keeps a re-accept
+// from re-pointing an already-stamped invoice.
+function stampInvoiceLead(quoteNumber: string, leadId: number): void {
+  try {
+    sqlite.prepare(
+      "UPDATE fin_invoices SET lead_id = ? WHERE deleted_at IS NULL AND lead_id IS NULL AND notes LIKE ?",
+    ).run(leadId, `From quote ${quoteNumber} — %`);
+  } catch {
+    /* finance module absent */
+  }
+}
+
 export function onQuoteEvent(
   evt: "sent" | "accepted",
   info: QuoteContactInfo & {
@@ -444,7 +460,10 @@ export function onQuoteEvent(
             : `Quote ${info.quoteNumber} shared with this contact`,
         }).run();
         if (evt === "sent") ensureQuoteReminder(created, now);
-        else maybeCreateReviewTask(created, now);
+        else {
+          maybeCreateReviewTask(created, now);
+          stampInvoiceLead(info.quoteNumber, created.id);
+        }
         return;
       }
 
@@ -465,6 +484,7 @@ export function onQuoteEvent(
       // Idempotent per quote (fix 2): a double accept of the same quote can't
       // double-count revenue or duplicate the acceptance activity.
       winLeadForAcceptedQuote(lead, info.quoteNumber, info.totalCents || 0, now);
+      stampInvoiceLead(info.quoteNumber, lead.id);
     } catch (e) {
       console.error("[crm] quote lifecycle hook failed", e);
     }

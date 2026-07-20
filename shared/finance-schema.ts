@@ -87,6 +87,12 @@ export const invoices = sqliteTable("fin_invoices", {
   taxCents: integer("tax_cents").notNull().default(0),
   totalCents: integer("total_cents").notNull().default(0),
   paidCents: integer("paid_cents").notNull().default(0),
+  // Deposit the customer agreed to online (quote depositPct) — display/chase
+  // only, never part of the total math. Nullable, ALTER'd in finance.ts.
+  depositCents: integer("deposit_cents"),
+  // Soft ref to crm_leads (no FK — cross-module). Stamped by the quote-accept
+  // hook so a fully paid invoice can push realized revenue back onto the lead.
+  leadId: integer("lead_id"),
   sentAt: integer("sent_at"), // unix ms
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -195,6 +201,10 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   id: true,
   number: true, // server-assigned
   paidCents: true,
+  // Server-managed by the quote-accept hook — a client write could fake a
+  // deposit or re-point the CRM lead the paid sync updates.
+  depositCents: true,
+  leadId: true,
   sentAt: true,
   createdAt: true,
   deletedAt: true,

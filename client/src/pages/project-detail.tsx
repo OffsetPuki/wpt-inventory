@@ -247,6 +247,7 @@ interface ProjectFinSummary {
     balanceCents: number;
   }[];
   totals: {
+    contractCents: number;
     invoicedCents: number;
     paidCents: number;
     outstandingCents: number;
@@ -266,7 +267,7 @@ const INV_CHIP: Record<string, string> = {
 };
 
 // Elevated-only (caller gates on isManager): billed vs collected vs cost.
-function JobFinancesCard({ projectId }: { projectId: number }) {
+function JobFinancesCard({ projectId, projectStatus }: { projectId: number; projectStatus: string }) {
   const { data } = useQuery<ProjectFinSummary>({
     queryKey: ["project-fin-summary", projectId],
     queryFn: async () =>
@@ -275,7 +276,12 @@ function JobFinancesCard({ projectId }: { projectId: number }) {
   });
   if (!data) return null;
   const t = data.totals;
-  if (t.invoicedCents === 0 && t.expenseCents === 0 && t.laborMinutes === 0) return null;
+  const contractCents = t.contractCents ?? 0;
+  if (t.invoicedCents === 0 && t.expenseCents === 0 && t.laborMinutes === 0 && contractCents === 0) return null;
+  // Phase A #3: the signed contract vs what's been billed. Amber on a DONE job
+  // with contract money still unbilled — that invoice will never send itself.
+  const leftToBillCents = Math.max(0, contractCents - t.invoicedCents);
+  const underBilled = leftToBillCents > 0 && projectStatus === "done";
   const stat = (label: string, value: string, tone?: string) => (
     <div>
       <p className="text-xs uppercase text-muted-foreground">{label}</p>
@@ -285,6 +291,20 @@ function JobFinancesCard({ projectId }: { projectId: number }) {
   return (
     <div className="mb-6 rounded-xl border border-border bg-card p-5">
       <h2 className="mb-4 text-base font-semibold text-foreground">Job finances</h2>
+      {contractCents > 0 && (
+        <p
+          className={cn(
+            "mb-4 text-sm",
+            underBilled
+              ? "font-medium text-amber-700 dark:text-amber-400"
+              : "text-muted-foreground",
+          )}
+        >
+          Contract {formatMoney(contractCents)} · Invoiced {formatMoney(t.invoicedCents)} · Left
+          to bill {formatMoney(leftToBillCents)}
+          {underBilled && " — job is done but under-billed"}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         {stat("Billed", formatMoney(t.invoicedCents))}
         {stat("Collected", formatMoney(t.paidCents))}
@@ -452,7 +472,7 @@ export default function ProjectDetailPage({ id }: { id: string }) {
       )}
 
       {isManager && <UnbilledCard projectId={projectId} />}
-      {isManager && <JobFinancesCard projectId={projectId} />}
+      {isManager && <JobFinancesCard projectId={projectId} projectStatus={project.status} />}
 
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <ClientCard clientId={project.clientId} />

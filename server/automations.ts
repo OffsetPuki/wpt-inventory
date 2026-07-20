@@ -210,6 +210,45 @@ function runBusinessSweep(): void {
     }
   });
 
+  // 4b. Unbilled-work chaser (Phase A #5) — billable expenses/time sitting on
+  // a job with no invoice_id stamp (same predicate as finance's
+  // collectUnbilled), where the job is done or the oldest item is 14+ days
+  // old. The month in the dedupe key re-nags monthly until it's billed.
+  // Labor priced at the HR pay rate (salary pro-rated at 2080 h/yr), no
+  // markups — it's a nag amount, not an invoice.
+  // ponytail: two lookups per live project — fine at shop scale.
+  step("unbilled-work chaser", () => {
+    const month = today.slice(0, 7); // "YYYY-MM"
+    const projs = sqlite.prepare(
+      "SELECT id, name, status FROM projects WHERE deleted_at IS NULL",
+    ).all() as any[];
+    const expQ = sqlite.prepare(`
+      SELECT COALESCE(SUM(amount_cents), 0) AS cents, MIN(created_at) AS oldest
+      FROM fin_expenses
+      WHERE deleted_at IS NULL AND billable = 1 AND invoice_id IS NULL AND project_id = ?
+    `);
+    const timeQ = sqlite.prepare(`
+      SELECT COALESCE(SUM(CAST(te.duration_min AS REAL) / 60.0 *
+               CASE WHEN e.pay_type = 'salary' THEN COALESCE(e.pay_rate_cents, 0) / 2080.0
+                    ELSE COALESCE(e.pay_rate_cents, 0) END), 0) AS cents,
+             MIN(te.started_at) AS oldest
+      FROM pm_time_entries te
+      LEFT JOIN hr_employees e ON e.user_id = te.user_id AND e.deleted_at IS NULL
+      WHERE te.project_id = ? AND te.billable = 1 AND te.invoice_id IS NULL
+        AND te.ended_at IS NOT NULL AND te.duration_min > 0
+    `);
+    for (const p of projs) {
+      const ex = expQ.get(p.id) as any;
+      const tm = timeQ.get(p.id) as any;
+      const cents = Math.round((ex?.cents ?? 0) + (tm?.cents ?? 0));
+      if (cents <= 0) continue;
+      const oldest = Math.min(ex?.oldest ?? Infinity, tm?.oldest ?? Infinity);
+      if (p.status !== "done" && oldest > now - 14 * DAY_MS) continue;
+      ensureTask(`auto:unbilled:${p.id}:${month}`,
+        `Unbilled work on ${p.name}: ${fmtUsd(cents)} waiting — pull it into an invoice`);
+    }
+  });
+
   // 5. Late vendor POs.
   step("late vendor POs", () => {
     const rows = sqlite.prepare(`
