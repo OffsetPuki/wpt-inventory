@@ -43,6 +43,7 @@ const HrRecruitmentPage = lazy(() => import("./pages/hr/recruitment"));
 const HrReviewsPage = lazy(() => import("./pages/hr/reviews"));
 const PmBoardPage = lazy(() => import("./pages/pm/board"));
 const PmGanttPage = lazy(() => import("./pages/pm/gantt"));
+const PmSchedulePage = lazy(() => import("./pages/pm/schedule"));
 const PmTimePage = lazy(() => import("./pages/pm/time"));
 const PmTimesheetsPage = lazy(() => import("./pages/pm/timesheets"));
 const PmContractsPage = lazy(() => import("./pages/pm/contracts"));
@@ -195,6 +196,9 @@ export default function App() {
           </Route>
           <Route path="/pm/gantt">
             <PmGanttPage />
+          </Route>
+          <Route path="/pm/schedule">
+            <PmSchedulePage />
           </Route>
           <Route path="/pm/time">
             <PmTimePage />
