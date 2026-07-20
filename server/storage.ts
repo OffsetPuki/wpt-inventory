@@ -18,7 +18,8 @@ import {
 // ─── Database initialization ─────────────────────────────────────────────────
 
 // DATA_DIR lets a host point storage at a persistent volume (e.g. /data on Railway).
-const dataDir = process.env.DATA_DIR
+// Exported for backup.ts, which snapshots the DB into <dataDir>/backups.
+export const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.resolve(process.cwd(), "data");
 if (!fs.existsSync(dataDir)) {

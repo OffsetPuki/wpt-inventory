@@ -1,7 +1,12 @@
 import type { Express } from "express";
+import fs from "fs";
+import path from "path";
 import { sqlite } from "./storage";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
+// Leaf module like mailer — snapshot/rotation mechanics live there, the
+// scheduling (nightly + weekly offsite, steps 21/21b) lives here.
+import { maybeNightlyBackup, latestSnapshot } from "./backup";
 // Deliberate exception to this module's no-imports stance (Phase B #9): the
 // email-activity logger lives with the crm_activities table it writes, is
 // deferred + try/catch'd internally, and every mail this sweep sends should
@@ -31,6 +36,7 @@ for (const ddl of [
   "ALTER TABLE hr_attendance ADD COLUMN overdue_notified_at INTEGER", // clock-out nag, unix ms
   "ALTER TABLE mk_settings ADD COLUMN lead_time_updated_at INTEGER", // stamped on settings save
   "ALTER TABLE mk_settings ADD COLUMN last_digest_date TEXT", // 'YYYY-MM-DD' of last owner digest
+  "ALTER TABLE mk_settings ADD COLUMN last_backup_week TEXT", // 'YYYY-WW' of last weekly offsite email/reminder
 ]) {
   try {
     sqlite.exec(ddl);
@@ -46,6 +52,16 @@ for (const ddl of [
 function localDate(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ISO week key ("2026-29") for the weekly offsite-backup dedupe.
+function isoWeek(ms: number): string {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); // the Thursday of this week
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  const week = 1 + Math.round(((d.getTime() - jan4.getTime()) / DAY_MS - 3 + ((jan4.getDay() + 6) % 7)) / 7);
+  return `${d.getFullYear()}-${String(week).padStart(2, "0")}`;
 }
 
 // Whole dollars when clean, cents otherwise (same as marketing.ts).
@@ -91,19 +107,20 @@ interface SweepSettings {
   lead_time_weeks: number | null;
   lead_time_updated_at: number | null;
   last_digest_date: string | null;
+  last_backup_week: string | null;
 }
 
 function getSettings(): SweepSettings {
   try {
     const row = sqlite.prepare(`
-      SELECT quote_follow_up_days, lead_time_weeks, lead_time_updated_at, last_digest_date
+      SELECT quote_follow_up_days, lead_time_weeks, lead_time_updated_at, last_digest_date, last_backup_week
       FROM mk_settings WHERE id = 1
     `).get() as SweepSettings | undefined;
     if (row) return row;
   } catch {
     /* mk_settings not migrated yet — fall through to defaults */
   }
-  return { quote_follow_up_days: 3, lead_time_weeks: null, lead_time_updated_at: null, last_digest_date: null };
+  return { quote_follow_up_days: 3, lead_time_weeks: null, lead_time_updated_at: null, last_digest_date: null, last_backup_week: null };
 }
 
 // ─── The sweep ───────────────────────────────────────────────────────────────
@@ -652,6 +669,40 @@ function runBusinessSweep(): void {
     setImmediate(() => {
       void sendOwnerMail({ subject: `[CJM Suite] Daily digest — ${today}`, text });
     });
+  });
+
+  // 21. Nightly DB snapshot (Phase E) — >20h age gate makes it fire about once
+  // a day off the hourly tick; rotation keeps the 7 newest in DATA_DIR/backups.
+  step("nightly backup", () => {
+    maybeNightlyBackup(now);
+  });
+
+  // 21b. Weekly offsite copy (Phase E) — small enough and SMTP configured:
+  // email the latest snapshot to the owner; otherwise a reminder task to use
+  // Admin → Download backup. Stamped before either branch (same stance as the
+  // digest) so one week never gets both, or two of either.
+  step("weekly offsite backup", () => {
+    const week = isoWeek(now);
+    if (cfg.last_backup_week === week) return;
+    const snap = latestSnapshot(); // step 21 just ran, so this exists
+    if (!snap) return;
+    sqlite.prepare("UPDATE mk_settings SET last_backup_week = ? WHERE id = 1").run(week);
+    if (mailEnabled() && snap.bytes < 8 * 1024 * 1024) {
+      const filename = path.basename(snap.file);
+      setImmediate(() => {
+        void sendOwnerMail({
+          subject: `CJM Suite weekly backup — ${today}`,
+          text:
+            `Attached is this week's gzipped snapshot of the suite database (${filename}).\n\n` +
+            `Keep a copy somewhere off the server — your PC, OneDrive, a USB stick. ` +
+            `See RESTORE.md in the repo for how to restore it.`,
+          attachments: [{ filename, content: fs.readFileSync(snap.file) }],
+        });
+      });
+    } else {
+      ensureTask(`auto:backup-download:${week}`,
+        "Download an offsite backup of the suite database (Admin → Download backup)");
+    }
   });
 }
 

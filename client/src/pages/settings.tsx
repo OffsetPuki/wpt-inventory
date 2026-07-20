@@ -4,7 +4,8 @@ import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { type Settings } from "@shared/schema";
 import Header from "@/components/Header";
-import { Loader2, Save, Upload } from "lucide-react";
+import { formatDateTime } from "@/lib/format";
+import { DatabaseBackup, Loader2, Save, Upload } from "lucide-react";
 
 const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
@@ -165,12 +166,79 @@ function BrandingTab() {
   );
 }
 
+// ─── Backup card (Phase E) ───────────────────────────────────────────────────
+// The download must go through fetch + a blob URL: the API authenticates via
+// the x-auth header, so a plain <a href> navigation would land a 401.
+
+function fmtBytes(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function BackupCard() {
+  const [downloading, setDownloading] = useState(false);
+
+  const { data: status } = useQuery<{
+    dbBytes: number;
+    lastSnapshotAt: number | null;
+    lastSnapshotBytes: number | null;
+  }>({
+    queryKey: ["backup-status"],
+    queryFn: async () => (await apiRequest("GET", "/api/admin/backup/status")).json(),
+  });
+
+  async function downloadBackup() {
+    setDownloading(true);
+    try {
+      const res = await apiRequest("GET", "/api/admin/backup");
+      const blob = await res.blob();
+      const name =
+        res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ??
+        "cjm-backup.db.gz";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ variant: "success", title: "Backup downloaded", description: name });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Backup failed", description: e?.message });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h2 className="text-base font-semibold text-foreground">Database backup</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Database size: {fmtBytes(status?.dbBytes)} · Last nightly snapshot:{" "}
+        {status?.lastSnapshotAt ? formatDateTime(status.lastSnapshotAt) : "none yet"}
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Download a fresh copy and keep it off this server — your PC, OneDrive, a USB stick.
+      </p>
+      <button
+        onClick={downloadBackup}
+        disabled={downloading}
+        className="mt-4 flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-foreground hover:border-primary disabled:opacity-60"
+      >
+        {downloading ? <Loader2 className="h-5 w-5 animate-spin" /> : <DatabaseBackup className="h-5 w-5" />}
+        Download backup
+      </button>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl">
-      <Header title="Settings" description="Branding" />
+      <Header title="Settings" description="Branding & backup" />
       <div className="flex flex-col gap-5">
         <BrandingTab />
+        <BackupCard />
       </div>
     </div>
   );

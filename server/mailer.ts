@@ -26,6 +26,8 @@ export interface MailMessage {
   subject: string;
   text: string;
   replyTo?: string;
+  /** File attachments (Phase E: the weekly backup email). Buffer content only. */
+  attachments?: { filename: string; content: Buffer }[];
 }
 
 function mailFrom(): string | null {
@@ -78,6 +80,14 @@ async function sendViaResend(msg: MailMessage): Promise<boolean> {
       subject: msg.subject,
       text: msg.text,
       ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+      ...(msg.attachments
+        ? {
+            attachments: msg.attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content.toString("base64"),
+            })),
+          }
+        : {}),
     }),
   });
   if (!res.ok) {
@@ -93,6 +103,7 @@ async function sendViaSmtp(msg: MailMessage): Promise<boolean> {
     subject: msg.subject,
     text: msg.text,
     replyTo: msg.replyTo,
+    attachments: msg.attachments,
   });
   return true;
 }
@@ -115,11 +126,11 @@ export async function sendMail(msg: MailMessage): Promise<boolean> {
 }
 
 /** Notify the owner (OWNER_EMAIL → TO_EMAIL → SMTP_USER). Same never-throws contract. */
-export async function sendOwnerMail(msg: { subject: string; text: string }): Promise<boolean> {
+export async function sendOwnerMail(msg: Omit<MailMessage, "to">): Promise<boolean> {
   const to = ownerAddress();
   if (!to) {
     console.warn(`[mailer] no owner address configured — "${msg.subject}" not sent`);
     return false;
   }
-  return sendMail({ to, subject: msg.subject, text: msg.text });
+  return sendMail({ ...msg, to });
 }

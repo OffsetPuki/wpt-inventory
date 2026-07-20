@@ -24,6 +24,8 @@ import { registerPublicPortalRoutes } from "./public-portal";
 // Quote builder (ported CJM Quote app). Imports public-api's web_designs row
 // mapper, so it loads after public-api's DDL has created that table.
 import { registerQuoteRoutes } from "./quotes";
+// DB snapshot download + status (Phase E) — technician-only.
+import { registerBackupRoutes } from "./backup";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
@@ -822,6 +824,7 @@ export function registerRoutes(app: Express): void {
   registerPublicRoutes(app);
   registerQuoteRoutes(app);
   registerPublicPortalRoutes(app);
+  registerBackupRoutes(app);
 
   // ─── Serve uploaded files ──────────────────────────────────────────────
 
