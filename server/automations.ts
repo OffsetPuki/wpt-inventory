@@ -1,9 +1,9 @@
 import type { Express } from "express";
 import fs from "fs";
 import path from "path";
-import { sqlite } from "./storage";
+import { sqlite, storage } from "./storage";
 import { requireElevated } from "./auth";
-import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
+import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
 // Leaf module like mailer — snapshot/rotation mechanics live there, the
 // scheduling (nightly + weekly offsite, steps 21/21b) lives here.
 import { maybeNightlyBackup, latestSnapshot } from "./backup";
@@ -24,6 +24,11 @@ import { logEmailActivity } from "./crm";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com";
+// Where the suite ITSELF is reachable — the /q/optout unsubscribe endpoint
+// lives on this server, not the marketing site. Set PUBLIC_APP_URL to the
+// suite's public URL (e.g. the Railway domain); the website fallback needs a
+// /q/optout proxy page on the site.
+const APP_URL = process.env.PUBLIC_APP_URL || PUBLIC_SITE_URL;
 
 // ─── Additive migrations (import time) ───────────────────────────────────────
 // Columns this sweep stamps on tables owned by other modules — added here with
@@ -32,7 +37,8 @@ const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.co
 // tables already exist when these run.
 for (const ddl of [
   "ALTER TABLE fin_invoices ADD COLUMN reminded_at INTEGER", // last chase email, unix ms
-  "ALTER TABLE quotes ADD COLUMN nudge_sent_at INTEGER", // one-shot customer nudge, unix ms
+  "ALTER TABLE quotes ADD COLUMN nudge_sent_at INTEGER", // follow-up #1 (pre-Phase-F: one-shot nudge), unix ms
+  "ALTER TABLE quotes ADD COLUMN fu2_sent_at INTEGER", // follow-up #2 ("last note"), unix ms
   "ALTER TABLE hr_attendance ADD COLUMN overdue_notified_at INTEGER", // clock-out nag, unix ms
   "ALTER TABLE mk_settings ADD COLUMN lead_time_updated_at INTEGER", // stamped on settings save
   "ALTER TABLE mk_settings ADD COLUMN last_digest_date TEXT", // 'YYYY-MM-DD' of last owner digest
@@ -143,7 +149,7 @@ function runBusinessSweep(): void {
         AND i.total_cents - i.paid_cents > 0
     `).all(today) as any[];
     for (const inv of rows) {
-      if (inv.email && mailEnabled()) {
+      if (inv.email && mailEnabled() && !isOptedOut(inv.email)) {
         if (inv.reminded_at != null && inv.reminded_at > now - 7 * DAY_MS) continue;
         setImmediate(async () => {
           const first = String(inv.client_name ?? "").trim().split(/\s+/)[0] || "there";
@@ -188,16 +194,27 @@ function runBusinessSweep(): void {
     }
   });
 
-  // 3. Customer quote nudge — once ever per quote, email them their share link.
-  step("quote nudge", () => {
+  // 3. Customer follow-up ladder (Phase F) — two automated emails per shared
+  // quote with a customer email: #1 at ≥2 days ("any questions?"), #2 at
+  // ≥7 days ("last note"). nudge_sent_at (the pre-Phase-F one-shot nudge
+  // stamp) doubles as the FU1 stamp, so already-nudged quotes go straight to
+  // FU2. Stops for good on accept/decline/delete or an email_optouts row;
+  // every send carries the /q/optout unsubscribe link (token = share token).
+  step("quote follow-up ladder", () => {
     if (!mailEnabled()) return;
-    const cutoff = now - cfg.quote_follow_up_days * DAY_MS;
     const rows = sqlite.prepare(`
-      SELECT id, number, customer_name, payload, design_ref, share_token FROM quotes
-      WHERE deleted_at IS NULL AND status = 'sent' AND sent_at IS NOT NULL AND sent_at < ?
-        AND nudge_sent_at IS NULL AND share_token IS NOT NULL
-    `).all(cutoff) as any[];
+      SELECT id, number, customer_name, total_cents, payload, design_ref,
+             share_token, sent_at, nudge_sent_at
+      FROM quotes
+      WHERE deleted_at IS NULL AND status = 'sent' AND share_token IS NOT NULL
+        AND sent_at IS NOT NULL AND sent_at < ?
+        AND (nudge_sent_at IS NULL OR (fu2_sent_at IS NULL AND sent_at < ?))
+    `).all(now - 2 * DAY_MS, now - 7 * DAY_MS) as any[];
     for (const q of rows) {
+      const stage = q.nudge_sent_at == null ? 1 : 2;
+      // A late FU1 (mailer was off for a week) never chains straight into FU2
+      // on the next hourly tick — give it the same 2-day gap.
+      if (stage === 2 && q.nudge_sent_at > now - 2 * DAY_MS) continue;
       // Email: the builder's customer card (in the payload), else the website
       // design the quote was started from.
       let email: string | undefined;
@@ -211,26 +228,54 @@ function runBusinessSweep(): void {
           .get(String(q.design_ref).toUpperCase()) as any;
         email = d?.email || undefined;
       }
-      if (!email) continue;
+      if (!email || isOptedOut(email)) continue;
       const url = `${PUBLIC_SITE_URL}/quote/${q.share_token}`;
+      const first = String(q.customer_name ?? "").trim().split(/\s+/)[0] || "there";
+      const unsubscribe =
+        `\n\nNo more emails about this quote: ${APP_URL}/q/optout?token=${q.share_token}`;
+      const msg = stage === 1
+        ? {
+            subject: `Any questions about your quote? — ${q.number}`,
+            text:
+              `Hi ${first},\n\n` +
+              `Just checking in — any questions about your quote ${q.number} ` +
+              `(${fmtUsd(q.total_cents)})? You can view it, and accept it ` +
+              `online, here:\n\n` +
+              `${url}\n\n` +
+              `Happy to walk through any part of it — just reply to this ` +
+              `email or give us a call.\n\n` +
+              `— CJM Metals · Arlington, TX` + unsubscribe,
+          }
+        : {
+            subject: `Last note on quote ${q.number} — CJM Metals`,
+            text:
+              `Hi ${first},\n\n` +
+              `Last note from us — happy to adjust the design or the price ` +
+              `if the quote isn't quite right. It's still open here:\n\n` +
+              `${url}\n\n` +
+              `— CJM Metals · Arlington, TX` + unsubscribe,
+          };
       setImmediate(async () => {
-        const ok = await sendMail({
-          to: email!,
-          subject: `Your quote from CJM Metals — ${q.number}`,
-          text:
-            `Hi ${q.customer_name || "there"},\n\n` +
-            `Your quote ${q.number} from CJM Metals is ready when you are. ` +
-            `View it (and accept it online) here:\n\n` +
-            `${url}\n\n` +
-            `Questions? Just reply to this email or give us a call.\n\n` +
-            `— CJM Metals · Arlington, TX`,
+        const ok = await sendMail({ to: email!, ...msg });
+        if (!ok) return;
+        sqlite.prepare(
+          `UPDATE quotes SET ${stage === 1 ? "nudge_sent_at" : "fu2_sent_at"} = ? WHERE id = ?`,
+        ).run(Date.now(), q.id);
+        logEmailActivity({
+          email,
+          subject: `Quote follow-up #${stage} — ${q.number} share link re-sent`,
         });
-        if (ok) {
-          sqlite.prepare("UPDATE quotes SET nudge_sent_at = ? WHERE id = ?").run(Date.now(), q.id);
-          logEmailActivity({
-            email,
-            subject: `Quote nudge — ${q.number} share link re-sent`,
+        try {
+          storage.appendAudit({
+            userName: "automations",
+            action: "quote.follow_up",
+            targetType: "quote",
+            targetId: q.id,
+            targetName: q.number,
+            details: { stage, email },
           });
+        } catch {
+          /* audit is best-effort */
         }
       });
     }
@@ -421,6 +466,7 @@ function runBusinessSweep(): void {
     // 15-min age floor: finance.ts stamps sent_at only after its send resolves,
     // so a brand-new row may still be in flight — don't race it into a double send.
     for (const rr of rows) {
+      if (isOptedOut(rr.email)) continue;
       setImmediate(async () => {
         const first = String(rr.name ?? "").trim().split(/\s+/)[0] || "there";
         const ok = await sendMail({

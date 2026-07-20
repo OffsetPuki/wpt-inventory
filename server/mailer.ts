@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
+import { sqlite } from "./storage";
 
 // ─── Outbound mail ───────────────────────────────────────────────────────────
 // One tiny facade the whole suite sends through. Two transports, tried in
@@ -20,6 +21,43 @@ import type { Transporter } from "nodemailer";
 //                 defaults to the SMTP user for SMTP
 //   OWNER_EMAIL — where sendOwnerMail delivers (falls back to TO_EMAIL, the
 //                 website's owner-notification address, then SMTP_USER)
+
+// ─── Email opt-outs (Phase F) ────────────────────────────────────────────────
+// Per-ADDRESS unsubscribe list for automated customer emails (quote follow-up
+// ladder, overdue-invoice chaser, review requests). Owner-initiated sends
+// (invoice email, share link, receipts) deliberately ignore it — the customer
+// opted out of the robot, not the business. Rows come from the public
+// /q/optout endpoint (public-portal.ts). Lives here because every automated
+// sender already imports this module.
+
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS email_optouts (
+    email TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`);
+
+const normalizeEmail = (e: string): string => e.trim().toLowerCase();
+
+/** Has this address unsubscribed from automated emails? Never throws. */
+export function isOptedOut(email: string | null | undefined): boolean {
+  if (!email || !email.trim()) return false;
+  try {
+    return !!sqlite.prepare("SELECT 1 FROM email_optouts WHERE email = ?")
+      .get(normalizeEmail(email));
+  } catch {
+    return false;
+  }
+}
+
+/** Record an unsubscribe. Returns true when a new row was written. */
+export function optOutEmail(email: string): boolean {
+  const norm = normalizeEmail(email);
+  if (!norm) return false;
+  return sqlite.prepare(
+    "INSERT OR IGNORE INTO email_optouts (email, created_at) VALUES (?, ?)",
+  ).run(norm, Date.now()).changes > 0;
+}
 
 export interface MailMessage {
   to: string;

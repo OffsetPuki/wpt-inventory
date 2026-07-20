@@ -4,7 +4,7 @@ import { eq, and, or, desc, asc, isNull, inArray, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
-import { mailEnabled, sendMail } from "./mailer";
+import { mailEnabled, sendMail, isOptedOut } from "./mailer";
 import {
   invoices, invoicePayments, expenses, paymentGateways, purchaseOrders,
   finSettings,
@@ -323,7 +323,7 @@ function queueReviewRequest(inv: Invoice): void {
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(token, name, email, inv.id, inv.clientId ?? null, leadId);
 
-      if (mailEnabled() && email) {
+      if (mailEnabled() && email && !isOptedOut(email)) {
         const first = (name ?? "").trim().split(/\s+/)[0] || "there";
         const ok = await sendMail({
           to: email,

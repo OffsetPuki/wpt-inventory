@@ -363,6 +363,21 @@ export function registerQuoteRoutes(app: Express): void {
   // List — payload excluded: it's the big JSON blob, and the Saved view only
   // needs the identity columns. GET /:id returns the full row.
   app.get("/api/quotes", requireAuth, (_req, res) => {
+    // Phase F: which quotes' customers unsubscribed from automated follow-ups.
+    // Same email resolution as the sweep (payload customer card, else the
+    // linked website design), matched against the normalized opt-out list.
+    let optedOut = new Set<number>();
+    try {
+      optedOut = new Set((sqlite.prepare(`
+        SELECT q.id FROM quotes q
+        LEFT JOIN web_designs d ON upper(d.ref) = upper(q.design_ref)
+        JOIN email_optouts o ON o.email = lower(trim(
+          coalesce(nullif(json_extract(q.payload, '$.customer.email'), ''), d.email)))
+        WHERE q.deleted_at IS NULL
+      `).all() as { id: number }[]).map((r) => r.id));
+    } catch {
+      /* optouts/designs table absent — no flags */
+    }
     res.json(
       db.select({
         id: quotes.id,
@@ -374,12 +389,15 @@ export function registerQuoteRoutes(app: Express): void {
         status: quotes.status,
         sentAt: quotes.sentAt,
         acceptedAt: quotes.acceptedAt,
+        fu1SentAt: quotes.fu1SentAt,
+        fu2SentAt: quotes.fu2SentAt,
         createdAt: quotes.createdAt,
         updatedAt: quotes.updatedAt,
       }).from(quotes)
         .where(isNull(quotes.deletedAt))
         .orderBy(desc(quotes.createdAt), desc(quotes.id))
-        .all(),
+        .all()
+        .map((r) => ({ ...r, optedOut: optedOut.has(r.id) })),
     );
   });
 

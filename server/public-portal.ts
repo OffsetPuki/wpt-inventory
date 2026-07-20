@@ -4,7 +4,8 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { hasLeadKey } from "./public-api";
-import { mailEnabled, sendMail, sendOwnerMail } from "./mailer";
+import { mailEnabled, sendMail, sendOwnerMail, optOutEmail } from "./mailer";
+import { renderPublicPage } from "./legal";
 import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
 import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
@@ -275,6 +276,49 @@ export function registerPublicPortalRoutes(app: Express): void {
           : null,
       },
     });
+  });
+
+  // ─── Email opt-out (Phase F) ──────────────────────────────────────────────
+  // The unsubscribe link at the bottom of every automated follow-up email.
+  // Token = the quote's share token (no new secrets); the quote's customer
+  // email (payload card, else the linked design) lands in email_optouts and
+  // every automated sender skips it from then on. Registered before the SPA
+  // catch-all (like /privacy), so it renders real HTML with no auth. Always
+  // the same confirmation page — an invalid token learns nothing.
+
+  app.get("/q/optout", publicLimiter(30), (req, res) => {
+    const quote = findSharedQuote(String(req.query.token ?? ""));
+    if (quote) {
+      const email =
+        parseJson<{ customer?: { email?: string } }>(quote.payload, {}).customer?.email
+        || (quote.designRef
+          ? (sqlite.prepare("SELECT email FROM web_designs WHERE upper(ref) = ?")
+              .get(quote.designRef.toUpperCase()) as { email: string | null } | undefined)?.email
+          : null)
+        || "";
+      if (email && optOutEmail(email)) {
+        try {
+          storage.appendAudit({
+            userName: "cjmmetals.com",
+            action: "email.optout",
+            targetType: "quote",
+            targetId: quote.id,
+            targetName: quote.number,
+            ip: req.ip ?? null,
+            details: { email: email.trim().toLowerCase() },
+          });
+        } catch {
+          /* audit is best-effort */
+        }
+      }
+    }
+    res.type("html").send(renderPublicPage(
+      "You're unsubscribed",
+      `<p class="lead">You won't get further emails about this quote.</p>
+       <p>Changed your mind, or have a question? Just reply to any of our
+       earlier emails or give us a call — we're happy to help.</p>`,
+      { effective: false },
+    ));
   });
 
   app.post("/api/public/quote/:token/accept", publicLimiter(30), (req, res) => {

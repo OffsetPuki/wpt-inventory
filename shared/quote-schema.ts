@@ -36,6 +36,11 @@ export const quotes = sqliteTable("quotes", {
   acceptedAt: integer("accepted_at"), // unix ms — customer accepted via the link
   acceptNote: text("accept_note"), // optional message left when accepting
   acceptIp: text("accept_ip"), // where the acceptance came from (dispute trail)
+  // Phase F follow-up ladder stamps (sweep-managed, server/automations.ts).
+  // fu1 reuses the pre-Phase-F one-shot "nudge" column — already-nudged quotes
+  // skip straight to follow-up #2.
+  fu1SentAt: integer("nudge_sent_at"), // unix ms — "any questions?" email
+  fu2SentAt: integer("fu2_sent_at"), // unix ms — "last note" email
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -67,6 +72,8 @@ export const insertQuoteSchema = createInsertSchema(quotes).omit({
   acceptedAt: true,
   acceptNote: true,
   acceptIp: true,
+  fu1SentAt: true, // sweep-managed (Phase F ladder)
+  fu2SentAt: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,

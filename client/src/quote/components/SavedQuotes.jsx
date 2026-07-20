@@ -215,6 +215,14 @@ export default function SavedQuotes({ onOpen }) {
                     />
                     <span className="sq-number">{q.number}</span>
                     <span className={`sq-status ${q.status || 'draft'}`}>{STATUS_LABEL[q.status] || 'Draft'}</span>
+                    {/* Automated follow-up ladder state (Phase F) — the hourly
+                        sweep emails sent quotes at 2 and 7 days unless the
+                        customer unsubscribed. */}
+                    {(q.optedOut || q.fu2SentAt || q.fu1SentAt) && (
+                      <span className="sq-meta" title="Automated follow-up emails">
+                        {q.optedOut ? 'Opted out of emails' : q.fu2SentAt ? 'FU 2 sent' : 'FU 1 sent'}
+                      </span>
+                    )}
                     <span className="sq-meta">
                       {typeLabel(q.type)}{q.customerName ? ` · ${q.customerName}` : ''}{q.designRef ? ` · ${q.designRef}` : ''}
                     </span>
