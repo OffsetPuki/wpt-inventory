@@ -10,6 +10,10 @@ export interface LineItem {
   unitPriceCents: number;
   unit?: string;
   productId?: number;
+  // Phase C #17/#18: soft ref into the quote price book's materials{} — a PO
+  // line that carries one auto-stocks the matching inventory item (by
+  // items.material_key) when the PO is received.
+  materialKey?: string;
 }
 
 export const lineItemSchema = z.object({
@@ -18,6 +22,7 @@ export const lineItemSchema = z.object({
   unitPriceCents: z.number().int().nonnegative(),
   unit: z.string().optional(),
   productId: z.number().int().optional(),
+  materialKey: z.string().optional(),
 });
 
 export const lineItemsSchema = z.array(lineItemSchema);

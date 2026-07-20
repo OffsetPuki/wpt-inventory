@@ -27,6 +27,35 @@ function BuyList({ ids, onClose }) {
     queryFn: async () => (await apiRequest('GET', `/api/quotes/buy-list?ids=${[...ids].join(',')}`)).json(),
   });
 
+  // Buy list → a draft PO in Finance (#17). Lines carry materialKey so marking
+  // the PO received stocks the mapped inventory items in. Vendor and prices are
+  // the owner's to fill — the PO lands at $0.
+  const [poNumber, setPoNumber] = useState(null);
+  const createPo = useMutation({
+    mutationFn: async () => {
+      const items = data.combined
+        .filter((m) => (Number(m.qty) || 0) > 0)
+        .map((m) => ({
+          description: m.name,
+          qty: m.qty,
+          unitPriceCents: 0,
+          unit: m.unit || undefined,
+          materialKey: m.id,
+        }));
+      const numbers = data.quotes.map((q) => q.number).join(', ');
+      return (await apiRequest('POST', '/api/finance/purchase-orders', {
+        vendor: '',
+        items,
+        notes: `Buy list from quote${data.quotes.length === 1 ? '' : 's'} ${numbers}. Set the vendor and prices, then mark received to book the expense and stock in.`,
+      })).json();
+    },
+    onSuccess: (po) => {
+      setPoNumber(po.number);
+      toast({ variant: 'success', title: `Purchase order ${po.number} created`, description: 'Fill in the vendor and prices in Finance → Purchase orders.' });
+    },
+    onError: (e) => toast({ variant: 'destructive', title: 'Could not create purchase order', description: e?.message }),
+  });
+
   const copy = async () => {
     const lines = [
       `CJM Metals — buy list (${data.quotes.map((q) => q.number).join(', ')})`,
@@ -45,12 +74,22 @@ function BuyList({ ids, onClose }) {
       <div className="estimate-head">
         <span className="eyebrow">Buy list — {ids.size} {ids.size === 1 ? 'quote' : 'quotes'} combined (incl. waste)</span>
         <span>
+          {data && data.combined.length > 0 && !poNumber && (
+            <button className="estimate-reset" onClick={() => createPo.mutate()} disabled={createPo.isPending} style={{ marginRight: 8 }}>
+              {createPo.isPending ? 'Creating…' : 'Create purchase order'}
+            </button>
+          )}
           {data && data.combined.length > 0 && (
             <button className="estimate-reset" onClick={copy} style={{ marginRight: 8 }}>Copy for supplier</button>
           )}
           <button className="estimate-reset" onClick={onClose}>Close</button>
         </span>
       </div>
+      {poNumber && (
+        <p className="hint">
+          Purchase order <strong>{poNumber}</strong> created — <a href="/finance/purchase-orders">open it in Finance</a> to set the vendor and prices.
+        </p>
+      )}
       {isLoading && <p className="hint">Adding up materials…</p>}
       {error && <p className="find-error">{error.message || 'Could not build the buy list.'}</p>}
       {data && data.combined.length === 0 && (

@@ -260,6 +260,10 @@ addColumnIfMissing("items", "deleted_at", "deleted_at INTEGER");
 addColumnIfMissing("projects", "deleted_at", "deleted_at INTEGER");
 // Wiring plan, Fix 2 — jobs link to a CRM client by id (soft ref, see schema.ts).
 addColumnIfMissing("projects", "client_id", "client_id INTEGER");
+// Phase C #15 — items map onto the quote price book's material ids.
+addColumnIfMissing("items", "material_key", "material_key TEXT");
+// Phase C #19 — adjustments carry the job that consumed the stock (soft ref).
+addColumnIfMissing("adjustments", "project_id", "project_id INTEGER");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id)");
@@ -593,6 +597,7 @@ export const storage = {
       mfgPartNumber: data.mfgPartNumber || null,
       itemType: data.itemType || "stock",
       quantityReserved: data.quantityReserved ?? 0,
+      materialKey: data.materialKey || null,
       equipmentType: data.equipmentType || null,
       customAttrs: data.customAttrs ? JSON.stringify(data.customAttrs) : null,
     };
@@ -605,7 +610,7 @@ export const storage = {
       "name", "category", "photoUrl", "quantity", "notes",
       "area", "rackLetter", "rackLevel", "subLocation", "shelf", "bin",
       "lowStockThreshold", "partNumber", "mfgPartNumber", "itemType",
-      "quantityReserved", "equipmentType",
+      "quantityReserved", "equipmentType", "materialKey",
     ];
     for (const f of fields) {
       if (data[f] !== undefined) vals[f] = data[f];
@@ -637,7 +642,7 @@ export const storage = {
   },
 
   // ── Adjustments ──────────────────────────────────────────────────────────
-  createAdjustment(itemId: number, userId: number, data: { delta: number; reason: string; notes?: string }): Adjustment {
+  createAdjustment(itemId: number, userId: number, data: { delta: number; reason: string; notes?: string; projectId?: number | null }): Adjustment {
     // Stock mutation + ledger row must commit together or not at all — a failed
     // INSERT must never leave the quantity changed with no adjustment record.
     return db.transaction((tx) => {
@@ -653,6 +658,7 @@ export const storage = {
         delta: data.delta,
         reason: data.reason as any,
         notes: data.notes || null,
+        projectId: data.projectId ?? null,
       }).returning().get();
     });
   },
@@ -1014,7 +1020,14 @@ export const storage = {
     }).returning().get();
   },
 
-  updateChecklistRow(id: number, data: any): ProjectChecklistRow | undefined {
+  // Phase C #19: status transitions on an item-linked row move real stock.
+  //   → done    : quantity −qty, reservation released, install_on_job
+  //               adjustment stamped with the project.
+  //   → skipped : reservation released only.
+  // Only the TRANSITION acts (prior status is read in the same transaction),
+  // so re-saving an already-done row is a no-op; reservations are only
+  // released when the row still held one (prior status pending/ordered).
+  updateChecklistRow(id: number, data: any, actorUserId?: number): ProjectChecklistRow | undefined {
     const vals: any = {};
     if (data.status !== undefined) vals.status = data.status;
     if (data.qty !== undefined) vals.qty = String(data.qty);
@@ -1023,7 +1036,65 @@ export const storage = {
     if (data.notes !== undefined) vals.notes = data.notes;
     if (data.unit !== undefined) vals.unit = data.unit;
     if (Object.keys(vals).length === 0) return undefined;
-    return db.update(projectChecklist).set(vals).where(eq(projectChecklist.id, id)).returning().get();
+    return db.transaction((tx) => {
+      const prev = tx.select().from(projectChecklist).where(eq(projectChecklist.id, id)).get();
+      if (!prev) return undefined;
+      const row = tx.update(projectChecklist).set(vals).where(eq(projectChecklist.id, id)).returning().get();
+
+      const to = vals.status;
+      if (!to || to === prev.status || !prev.itemId || actorUserId == null) return row;
+      const qty = Math.max(0, Math.ceil(Number(prev.qty) || 0));
+      const hadReservation = prev.status === "pending" || prev.status === "ordered";
+      if (qty === 0) return row;
+      // Item must still be live — a row pointing at a trashed item just flips
+      // its label, no stock move (matches createAdjustment's active check).
+      const item = tx.select().from(items)
+        .where(and(eq(items.id, prev.itemId), sql`${items.deletedAt} IS NULL`)).get();
+      if (!item) return row;
+
+      const releaseReservation = sqlite.prepare(
+        "UPDATE items SET quantity_reserved = quantity_reserved - MIN(?, quantity_reserved) WHERE id = ?",
+      );
+      if (to === "done") {
+        sqlite.prepare("UPDATE items SET quantity = quantity - ? WHERE id = ?").run(qty, prev.itemId);
+        if (hadReservation) releaseReservation.run(qty, prev.itemId);
+        tx.insert(adjustments).values({
+          itemId: prev.itemId,
+          userId: actorUserId,
+          delta: -qty,
+          reason: "install_on_job",
+          notes: `auto:checklist-done:${prev.id}; — ${prev.label}`,
+          projectId: prev.projectId,
+        }).run();
+      } else if (to === "skipped" && hadReservation) {
+        releaseReservation.run(qty, prev.itemId);
+      }
+      // ponytail: un-doing a done row (done → pending) does not restore stock —
+      // add a reverse adjustment here if mis-ticks turn out to be common.
+      return row;
+    });
+  },
+
+  // Phase C #19d: a job that closes or gets trashed lets go of the stock its
+  // open checklist rows were holding. min() clamps so reserved never goes
+  // negative. ponytail: rows keep their status, so re-opening the project (or
+  // later ticking one of these rows done) won't re-take / may over-release a
+  // reservation — track a per-row reserved flag if that ever bites.
+  releaseProjectReservations(projectId: number): void {
+    const rows = sqlite.prepare(`
+      SELECT item_id AS itemId, qty FROM project_checklist
+      WHERE project_id = ? AND item_id IS NOT NULL AND status IN ('pending', 'ordered')
+    `).all(projectId) as { itemId: number; qty: string }[];
+    if (rows.length === 0) return;
+    const release = sqlite.prepare(
+      "UPDATE items SET quantity_reserved = quantity_reserved - MIN(?, quantity_reserved) WHERE id = ?",
+    );
+    sqlite.transaction(() => {
+      for (const r of rows) {
+        const qty = Math.max(0, Math.ceil(Number(r.qty) || 0));
+        if (qty > 0) release.run(qty, r.itemId);
+      }
+    })();
   },
 
   deleteChecklistRow(id: number): void {

@@ -52,6 +52,10 @@ interface ItemDraft {
   description: string;
   qty: string;
   unitPrice: string;
+  // Carried through edits invisibly (#18): a buy-list PO line keeps its
+  // price-book link so marking the PO received still stocks the item in.
+  unit?: string;
+  materialKey?: string;
 }
 
 const EMPTY_ITEM: ItemDraft = { description: "", qty: "1", unitPrice: "" };
@@ -65,6 +69,8 @@ function draftsToLineItems(drafts: ItemDraft[]): LineItem[] {
       description: d.description.trim(),
       qty: parseFloat(d.qty),
       unitPriceCents: parseMoney(d.unitPrice),
+      ...(d.unit ? { unit: d.unit } : {}),
+      ...(d.materialKey ? { materialKey: d.materialKey } : {}),
     }));
 }
 
@@ -168,6 +174,8 @@ function PoFormModal({
               description: it.description,
               qty: String(it.qty),
               unitPrice: (it.unitPriceCents / 100).toFixed(2),
+              unit: it.unit,
+              materialKey: it.materialKey,
             }))
           : [{ ...EMPTY_ITEM }]
       );

@@ -38,6 +38,7 @@ export const ADJUSTMENT_REASON_LABELS: Record<AdjustmentReason, string> = {
   missing: "Missing",
   count_correction: "Count Correction",
   returned_from_field: "Returned from Field",
+  purchased: "Purchased",
 };
 
 // ─── Item JSON hydration (server returns these columns as raw JSON strings) ────

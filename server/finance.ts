@@ -501,6 +501,63 @@ function queuePoExpense(req: Request, po: PurchaseOrder): void {
   });
 }
 
+// ─── PO received → stock in (Phase C #18) ────────────────────────────────────
+// PO lines that carry a materialKey (stamped by the buy-list → PO flow) raise
+// the matching inventory item's quantity via a proper 'purchased' adjustment,
+// so receiving a PO books the expense (above) AND puts the steel on the shelf.
+// Adjustments belong to the core inventory module → raw SQL, house style.
+// Deduped by the auto:po-stockin:<id> key in adjustment notes so a status
+// bounce (received → closed → received) can't double-add.
+
+function queuePoStockIn(req: Request, po: PurchaseOrder): void {
+  const actorUserId = req.user?.userId;
+  if (actorUserId == null) return; // adjustments.user_id is NOT NULL
+  setImmediate(() => {
+    try {
+      const lines = parseLineItems(po.items).filter(
+        (l) => l.materialKey && Math.ceil(Number(l.qty) || 0) > 0,
+      );
+      if (lines.length === 0) return;
+      const dupe = sqlite.prepare(
+        "SELECT id FROM adjustments WHERE notes LIKE ?",
+      ).get(`auto:po-stockin:${po.id};%`);
+      if (dupe) return;
+
+      const findItem = sqlite.prepare(
+        "SELECT id FROM items WHERE material_key = ? AND deleted_at IS NULL",
+      );
+      const bump = sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?");
+      const ledger = sqlite.prepare(`
+        INSERT INTO adjustments (item_id, user_id, delta, reason, notes, project_id)
+        VALUES (?, ?, ?, 'purchased', ?, ?)
+      `);
+      const stocked: { itemId: number; qty: number }[] = [];
+      sqlite.transaction(() => {
+        for (const l of lines) {
+          const item = findItem.get(l.materialKey) as { id: number } | undefined;
+          if (!item) continue;
+          const qty = Math.ceil(Number(l.qty) || 0);
+          bump.run(qty, item.id);
+          ledger.run(
+            item.id, actorUserId, qty,
+            `auto:po-stockin:${po.id}; — ${po.number} received${po.vendor ? ` from ${po.vendor}` : ""}`,
+            po.projectId,
+          );
+          stocked.push({ itemId: item.id, qty });
+        }
+      })();
+      if (stocked.length > 0) {
+        audit(req, "finance.po_stock_in", {
+          targetType: "purchase_order", targetId: po.id, targetName: po.number,
+          details: { items: stocked },
+        });
+      }
+    } catch (e) {
+      console.error("[finance] po→stock-in hook failed", e);
+    }
+  });
+}
+
 // ─── Fully paid → close the loop (Phase A #6) ────────────────────────────────
 // A settled invoice pushes realized revenue back onto its CRM lead (stamped by
 // the quote-accept hook — only ever RAISED, a partial refund story must not
@@ -1443,7 +1500,11 @@ export function registerFinanceRoutes(app: Express): void {
       });
       // Phase A #4: materials landing at the shop are money spent — book the
       // expense (deduped, so received→closed→received can't double-book).
-      if (body.status === "received") queuePoExpense(req, row);
+      // Phase C #18: and material lines put stock on the shelf (deduped too).
+      if (body.status === "received") {
+        queuePoExpense(req, row);
+        queuePoStockIn(req, row);
+      }
     }
     res.json(row);
   });

@@ -52,6 +52,10 @@ export const ADJUSTMENT_REASONS = [
   "missing",
   "count_correction",
   "returned_from_field",
+  // Phase C #18: stock-in when a purchase order is marked received. None of
+  // the original reasons means "we bought more" — count_correction would
+  // pollute count-audit reporting.
+  "purchased",
 ] as const;
 export type AdjustmentReason = (typeof ADJUSTMENT_REASONS)[number];
 
@@ -96,6 +100,10 @@ export const items = sqliteTable("items", {
   mfgPartNumber: text("mfg_part_number"),
   itemType: text("item_type", { enum: ITEM_TYPES }).notNull().default("stock"),
   quantityReserved: integer("quantity_reserved").notNull().default(0),
+  // Phase C #15: soft ref into the quote price book's materials{} (e.g.
+  // "tube_4x4_316") — the bridge between inventory stock and quote pricing.
+  // No FK: the price book lives in JSON, not a table.
+  materialKey: text("material_key"),
   // Equipment preset linkage
   equipmentType: text("equipment_type"),
   customAttrs: text("custom_attrs"), // JSON Record<string, string|number|null>
@@ -118,6 +126,9 @@ export const adjustments = sqliteTable("adjustments", {
   delta: integer("delta").notNull(),
   reason: text("reason", { enum: ADJUSTMENT_REASONS }).notNull(),
   notes: text("notes"),
+  // Phase C #19: which job consumed the stock (soft ref like transactions.projectId,
+  // but added post-ship so no FK — see storage.ts addColumnIfMissing).
+  projectId: integer("project_id"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),

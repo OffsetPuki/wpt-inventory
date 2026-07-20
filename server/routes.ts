@@ -471,6 +471,10 @@ export function registerRoutes(app: Express): void {
         if (unresolved > 0) {
           queueTaskOnce(`Project ${project.name} closed with ${unresolved} unresolved checklist items`);
         }
+        // #19d: a closed job stops holding stock for its unresolved rows.
+        try { storage.releaseProjectReservations(id); } catch (e) {
+          console.error("[projects] reservation release failed", e);
+        }
       }
     }
     res.json(project);
@@ -479,6 +483,10 @@ export function registerRoutes(app: Express): void {
   app.delete("/api/projects/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = storage.getProjectById(id);
+    // #19d: release before the soft delete — a trashed job holds no stock.
+    try { storage.releaseProjectReservations(id); } catch (e) {
+      console.error("[projects] reservation release failed", e);
+    }
     storage.deleteProject(id);
     audit(req, "project.delete", {
       targetType: "project", targetId: id, targetName: target?.name ?? null,
@@ -628,7 +636,8 @@ export function registerRoutes(app: Express): void {
     const role = req.user?.role;
     const elevated = role === "manager" || role === "technician";
     const patch = elevated ? req.body : { status: req.body?.status };
-    const row = storage.updateChecklistRow(pid(req.params.id), patch);
+    // Actor id lets the status transition write its stock adjustment (#19).
+    const row = storage.updateChecklistRow(pid(req.params.id), patch, req.user?.userId);
     if (!row) return res.status(404).json({ message: "Checklist row not found" });
     res.json(row);
   });

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   CATEGORIES,
   AREAS,
@@ -8,7 +9,11 @@ import {
   type ItemType,
 } from "@shared/schema";
 import { CATEGORY_LABELS, AREA_LABELS, ITEM_TYPE_LABELS, itemAttrs } from "@/lib/format";
+import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
+// The quote price book's shared material library — one physical steel, priced
+// in quotes AND stocked here; materialKey is the bridge (Phase C #15).
+import { DEFAULT_PRICE_BOOK } from "@/quote/data/priceBook.js";
 import PhotoSlots from "./PhotoSlots";
 import { cn } from "@/lib/utils";
 import { Zap, Flame, Cpu, Package, Wrench, Loader2 } from "lucide-react";
@@ -61,6 +66,7 @@ export interface ItemFormSeed {
   lowStockThreshold?: number;
   itemType?: ItemType;
   quantityReserved?: number;
+  materialKey?: string | null;
   notes?: string | null;
 }
 
@@ -133,7 +139,19 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
   const [quantityReserved, setQuantityReserved] = useState<string>(
     String(seed.quantityReserved ?? 0)
   );
+  const [materialKey, setMaterialKey] = useState(seed.materialKey ?? "");
   const [notes, setNotes] = useState(seed.notes ?? "");
+
+  // Price-book materials for the "Quote material" mapping: owner's saved
+  // overrides merged over the defaults, same as the quote builder.
+  const { data: quoteSettings } = useQuery<{ priceBook?: { materials?: Record<string, any> } }>({
+    queryKey: ["quote-settings"],
+    queryFn: async () => (await apiRequest("GET", "/api/quotes/settings")).json(),
+  });
+  const materials: Record<string, { name?: string }> = { ...DEFAULT_PRICE_BOOK.materials };
+  for (const [k, v] of Object.entries(quoteSettings?.priceBook?.materials ?? {})) {
+    materials[k] = { ...(materials as any)[k], ...(v as object) };
+  }
 
   // Every area gets full location detail (rack / level / sub-location / shelf).
   const showLocation = area !== "";
@@ -163,6 +181,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
       lowStockThreshold: Number(lowStockThreshold) || 0,
       itemType,
       quantityReserved: Number(quantityReserved) || 0,
+      materialKey: materialKey || null,
       notes: notes.trim() || null,
     };
     onSubmit(payload);
@@ -366,6 +385,26 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
               />
             </Field>
           )}
+          <div className="sm:col-span-2">
+            <Field label="Quote material (optional)">
+              <select
+                className={inputCls}
+                value={materialKey}
+                onChange={(e) => setMaterialKey(e.target.value)}
+              >
+                <option value="">— Not a quoted material —</option>
+                {Object.entries(materials).map(([key, m]) => (
+                  <option key={key} value={key}>
+                    {m?.name || key}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Link this item to the quote price book so accepted quotes reserve it
+              and received purchase orders stock it in.
+            </p>
+          </div>
         </div>
       </Section>
 

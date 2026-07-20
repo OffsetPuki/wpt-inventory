@@ -15,7 +15,7 @@ import { insertNumbered } from "./finance";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
-import { deriveItems, lineCost, buildLineState } from "../client/src/quote/lib/estimate.js";
+import { deriveItems, lineCost, buildLineState, materialTotals } from "../client/src/quote/lib/estimate.js";
 import { computeTotals } from "../client/src/quote/lib/quote.js";
 import { distributeToTotal } from "../client/src/quote/lib/calc.js";
 import { deepMerge, DEFAULT_SHOP } from "../client/src/quote/lib/store.js";
@@ -373,6 +373,69 @@ export function registerPublicPortalRoutes(app: Express): void {
         }
       } catch (e) {
         console.error("[public-portal] accept→project hook failed", e);
+      }
+      // Phase C #16: seed the job's checklist from the quote's own material
+      // math (same buildLineState → materialTotals path the buy list uses), and
+      // reserve stock on any inventory item mapped to the material (#15's
+      // material_key bridge). Guard: only a project with NO checklist rows yet
+      // gets seeded, so re-accepts and template-built jobs are never touched.
+      try {
+        if (projectId != null
+          && !sqlite.prepare("SELECT 1 FROM project_checklist WHERE project_id = ? LIMIT 1").get(projectId)) {
+          const sess = parseJson<any>(quote.payload, null);
+          if (sess && typeof sess === "object" && sess.state) {
+            const book: any = sess.priceBookSnapshot && typeof sess.priceBookSnapshot === "object"
+              ? deepMerge(DEFAULT_PRICE_BOOK, sess.priceBookSnapshot)
+              : currentPriceBook();
+            const ls = buildLineState(quote.type, sess.state, book, sess.overrides) as any;
+            const mats = materialTotals(ls.items, book) as
+              { id: string; name: string; unit: string; qty: number }[];
+            const insertRow = sqlite.prepare(`
+              INSERT INTO project_checklist
+                (project_id, label, qty, unit, category, item_id, status, notes, order_index)
+              VALUES (?, ?, ?, ?, 'raw_materials', ?, 'pending', ?, ?)
+            `);
+            const findItem = sqlite.prepare(
+              "SELECT id FROM items WHERE material_key = ? AND deleted_at IS NULL",
+            );
+            const reserve = sqlite.prepare(
+              "UPDATE items SET quantity_reserved = quantity_reserved + ? WHERE id = ?",
+            );
+            let seeded = 0;
+            sqlite.transaction(() => {
+              mats.forEach((m, i) => {
+                // Estimate qtys carry waste in the RATE, not the qty — apply the
+                // material's waste % here so the shop pulls/orders enough.
+                const wastePct = Math.max(0, Number(book.materials?.[m.id]?.wastePct) || 0);
+                const qty = Math.ceil((Number(m.qty) || 0) * (1 + wastePct / 100));
+                if (qty <= 0) return;
+                const item = findItem.get(m.id) as { id: number } | undefined;
+                insertRow.run(
+                  projectId, m.name, String(qty), m.unit || null, item?.id ?? null,
+                  `auto:quote-seed:${quote.number}; — ${m.qty} ${m.unit}${wastePct ? ` + ${wastePct}% waste` : ""}`,
+                  i,
+                );
+                if (item) reserve.run(qty, item.id);
+                seeded++;
+              });
+            })();
+            if (seeded > 0) {
+              storage.appendAudit({
+                userId: null,
+                userName: "cjmmetals.com",
+                role: null,
+                action: "project.checklist_seed",
+                targetType: "project",
+                targetId: projectId,
+                targetName: quote.number,
+                ip,
+                details: { quoteId: quote.id, rows: seeded },
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[public-portal] accept→checklist hook failed", e);
       }
       try {
         // Re-accept / double-click dedupe: skip if any live invoice already

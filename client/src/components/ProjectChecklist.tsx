@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
-import { CHECKLIST_STATUS, type ChecklistRowWithItem, type ChecklistStatus } from "@shared/schema";
+import { CHECKLIST_STATUS, type ChecklistRowWithItem, type ChecklistStatus, type Item } from "@shared/schema";
 import { cn } from "@/lib/utils";
 import { Plus, Trash2, Loader2 } from "lucide-react";
 
@@ -31,12 +31,16 @@ const inputCls =
 const ChecklistRow = memo(function ChecklistRow({
   row,
   isManager,
+  items,
   onStatusChange,
+  onLinkItem,
   onDelete,
 }: {
   row: ChecklistRowWithItem;
   isManager: boolean;
+  items: Item[];
   onStatusChange: (id: number, status: ChecklistStatus) => void;
+  onLinkItem: (id: number, itemId: number) => void;
   onDelete: (id: number) => void;
 }) {
   return (
@@ -66,6 +70,24 @@ const ChecklistRow = memo(function ChecklistRow({
         ) : (
           <span className="text-foreground">{row.label}</span>
         )}
+        {/* #19b: managers link a free-text row to a real inventory item so
+            checking it off moves stock. */}
+        {isManager && !row.item && items.length > 0 && (
+          <select
+            className="mt-1 block h-7 max-w-[220px] rounded-md border border-input bg-background px-1.5 text-xs text-muted-foreground outline-none focus:border-primary"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) onLinkItem(row.id, Number(e.target.value));
+            }}
+          >
+            <option value="">Link inventory item…</option>
+            {items.map((it) => (
+              <option key={it.id} value={it.id}>
+                {it.name}
+              </option>
+            ))}
+          </select>
+        )}
       </td>
       <td className="py-2 pr-3 text-muted-foreground">
         {row.qty}
@@ -94,11 +116,19 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
   const [newLabel, setNewLabel] = useState("");
   const [newQty, setNewQty] = useState("1");
   const [newUnit, setNewUnit] = useState("");
+  const [newItemId, setNewItemId] = useState("");
 
   const { data: rows = [], isLoading } = useQuery<ChecklistRowWithItem[]>({
     queryKey: ["checklist", projectId],
     queryFn: async () =>
       (await apiRequest("GET", `/api/projects/${projectId}/checklist`)).json(),
+  });
+
+  // Inventory items for the optional row↔item link (#19b) — managers only.
+  const { data: allItems = [] } = useQuery<Item[]>({
+    queryKey: ["items"],
+    queryFn: async () => (await apiRequest("GET", "/api/items")).json(),
+    enabled: isManager,
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["checklist", projectId] });
@@ -116,14 +146,23 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
         label: newLabel.trim(),
         qty: newQty.trim() || "1",
         unit: newUnit.trim() || undefined,
+        itemId: newItemId ? Number(newItemId) : undefined,
       }),
     onSuccess: () => {
       setNewLabel("");
       setNewQty("1");
       setNewUnit("");
+      setNewItemId("");
       invalidate();
     },
     onError: (e: any) => toast({ variant: "destructive", title: "Could not add", description: e?.message }),
+  });
+
+  const linkItem = useMutation({
+    mutationFn: async ({ id, itemId }: { id: number; itemId: number }) =>
+      apiRequest("PATCH", `/api/checklist/${id}`, { itemId }),
+    onSuccess: invalidate,
+    onError: (e: any) => toast({ variant: "destructive", title: "Could not link item", description: e?.message }),
   });
 
   const delRow = useMutation({
@@ -135,6 +174,10 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
   const handleStatusChange = useCallback(
     (id: number, status: ChecklistStatus) => setStatus.mutate({ id, status }),
     [setStatus],
+  );
+  const handleLinkItem = useCallback(
+    (id: number, itemId: number) => linkItem.mutate({ id, itemId }),
+    [linkItem],
   );
   const handleDelete = useCallback((id: number) => delRow.mutate(id), [delRow]);
 
@@ -176,7 +219,9 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
                   key={r.id}
                   row={r}
                   isManager={isManager}
+                  items={allItems}
                   onStatusChange={handleStatusChange}
+                  onLinkItem={handleLinkItem}
                   onDelete={handleDelete}
                 />
               ))}
@@ -214,6 +259,19 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
             value={newUnit}
             onChange={(e) => setNewUnit(e.target.value)}
           />
+          <select
+            className={cn(inputCls, "w-44")}
+            value={newItemId}
+            onChange={(e) => setNewItemId(e.target.value)}
+            title="Link to an inventory item so checking it off moves stock"
+          >
+            <option value="">No inventory link</option>
+            {allItems.map((it) => (
+              <option key={it.id} value={it.id}>
+                {it.name}
+              </option>
+            ))}
+          </select>
           <button
             type="submit"
             disabled={addRow.isPending}
