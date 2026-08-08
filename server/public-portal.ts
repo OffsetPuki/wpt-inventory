@@ -271,6 +271,17 @@ export function registerPublicPortalRoutes(app: Express): void {
         acceptedAt: iso(quote.acceptedAt),
         shop: currentShop(),
         lines: bestEffortLines(quote),
+        // Simulation renders / drawings the owner attached. Only our own
+        // /uploads paths go out — a payload that somehow carried an absolute
+        // URL would otherwise turn the customer's quote page into a beacon
+        // for whatever host was in it.
+        attachments: (Array.isArray(sess?.attachments) ? sess.attachments : [])
+          .filter((a: any) => a && typeof a.url === "string" && /^\/uploads\/[\w.-]+$/.test(a.url))
+          .slice(0, 6)
+          .map((a: any) => ({
+            url: a.url,
+            caption: typeof a.caption === "string" ? a.caption.slice(0, 300) : "",
+          })),
         taxNote: Number.isFinite(taxPct) && taxPct > 0
           ? `Total includes ${taxPct}% sales tax.`
           : null,

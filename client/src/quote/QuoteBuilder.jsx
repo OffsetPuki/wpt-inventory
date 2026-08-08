@@ -55,6 +55,8 @@ function newSession(type, priceBook) {
     customer: { name: '', company: '', phone: '', email: '', location: '' },
     notes: '',
     depositPct: 0,
+    // Simulation renders / shop drawings shown to the customer ({url, caption}).
+    attachments: [],
     discountPct: 0,
     // Rate versioning: a NEW quote prices live off the current book. Saving
     // stamps a snapshot of the book into the payload; a REOPENED quote prices
@@ -88,6 +90,7 @@ function migrateSession(sess, priceBook) {
     discountPct: sess.discountPct ?? 0,
     priceBookSnapshot: sess.priceBookSnapshot ?? null,
     priceBookSnapshotAt: sess.priceBookSnapshotAt ?? null,
+    attachments: Array.isArray(sess.attachments) ? sess.attachments : [],
     quoteId: sess.quoteId ?? null,
     sid: sess.sid ?? newSid(),
   };
@@ -435,9 +438,11 @@ export default function QuoteBuilder({ initialSettings }) {
             customer={session.customer}
             notes={session.notes}
             depositPct={session.depositPct}
+            attachments={session.attachments}
             quoteId={session.quoteId}
             onChangeCustomer={setCustomer}
             onChangeNotes={(v) => patchSession({ notes: v })}
+            onChangeAttachments={(v) => patchSession({ attachments: v })}
             onChangeDeposit={(v) => patchSession({ depositPct: v })}
             onBack={() => setView('configure')}
             onPreview={() => { setView('print'); persistQuote(); }}
@@ -464,6 +469,7 @@ export default function QuoteBuilder({ initialSettings }) {
               customer={session.customer}
               notes={session.notes}
               depositPct={session.depositPct}
+              attachments={session.attachments}
               number={session.number || '—'}
               createdAt={session.createdAt}
               lineState={lineState}

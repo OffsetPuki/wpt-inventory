@@ -8,8 +8,9 @@ import { specRows, summaryLine, typeLabel } from '../data/configurators.js';
  * shop info, their details, the design, priced line items, and totals. Never the
  * cost basis, markup %, or labor rate.
  */
-export default function PrintQuote({ shop, type, state, designRef, customer, notes, depositPct, number, createdAt, lineState, totals }) {
+export default function PrintQuote({ shop, type, state, designRef, customer, notes, depositPct, number, createdAt, lineState, totals, attachments }) {
   const items = lineState.items || [];
+  const shots = (Array.isArray(attachments) ? attachments : []).filter((a) => a && a.url);
 
   // Blend material markup into each line so the parts sum EXACTLY to the material total.
   const weights = items.map((it) => lineCost(it));
@@ -102,6 +103,20 @@ export default function PrintQuote({ shop, type, state, designRef, customer, not
           )}
         </tfoot>
       </table>
+
+      {shots.length > 0 && (
+        <div className="pq-shots">
+          <div className="pq-shots-title">Engineering &amp; simulation</div>
+          <div className="pq-shots-grid">
+            {shots.map((a, i) => (
+              <figure key={i} className="pq-shot">
+                <img src={a.url} alt={a.caption || 'Project simulation'} />
+                {a.caption && a.caption.trim() && <figcaption>{a.caption}</figcaption>}
+              </figure>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="pq-footer">
         <div className="pq-terms">

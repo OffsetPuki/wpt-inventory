@@ -1,10 +1,11 @@
 import { summaryLine, typeLabel } from '../data/configurators.js';
 import { fmtMoney } from '../lib/format.js';
 import ShareQuote from './ShareQuote.jsx';
+import Attachments from './Attachments.jsx';
 
 export default function QuoteForm({
-  type, state, totals, designRef, customer, notes, depositPct, quoteId,
-  onChangeCustomer, onChangeNotes, onChangeDeposit, onBack, onPreview, onPersist,
+  type, state, totals, designRef, customer, notes, depositPct, quoteId, attachments,
+  onChangeCustomer, onChangeNotes, onChangeAttachments, onChangeDeposit, onBack, onPreview, onPersist,
 }) {
   const field = (key, label, props = {}) => (
     <label className="field">
@@ -42,6 +43,7 @@ export default function QuoteForm({
               <span>Deposit %</span>
               <input type="number" min="0" max="100" step="5" value={depositPct} onChange={(e) => onChangeDeposit(e.target.value)} />
             </label>
+            <Attachments items={attachments} onChange={onChangeAttachments} />
           </div>
 
           <div className="cfg-right">
