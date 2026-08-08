@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { fmtMoney, round2 } from '../lib/format.js';
-import { lineCost } from '../lib/estimate.js';
+import { lineCost, matRate, MAT_KIND, MAT_QTY_UNIT } from '../lib/estimate.js';
 
 // Field labels per generic item kind.
 const KIND_FIELDS = {
@@ -8,6 +9,15 @@ const KIND_FIELDS = {
   length: { qty: 'Length', qtyUnit: 'ft', rate: 'Rate', rateUnit: '$/ft' },
   flat:   null,
 };
+
+// How a hand-added line is measured. Anything but "flat" gets a quantity field
+// on the row (length in ft, pieces, sq ft) instead of just a dollar amount.
+const KIND_OPTIONS = [
+  ['length', 'By the foot'],
+  ['unit', 'By the piece'],
+  ['area', 'By the square foot'],
+  ['flat', 'Flat amount'],
+];
 
 function Num({ value, onChange, ...rest }) {
   return (
@@ -64,6 +74,75 @@ function ItemRow({ item, onEdit, onRemove }) {
   );
 }
 
+/**
+ * "+ Add line" form. Picking a material from the shared library fills in the
+ * name, how it's measured and today's rate (waste blended in) — so an extra
+ * length of 3×2 angle iron prices and lands in the buy list like any derived
+ * line. Leave the material blank to type a one-off line yourself.
+ */
+function AddLineForm({ priceBook, onAdd, onCancel }) {
+  const materials = (priceBook && priceBook.materials) || {};
+  const [name, setName] = useState('');
+  const [materialId, setMaterialId] = useState('');
+  const [kind, setKind] = useState('length');
+
+  const pickMaterial = (id) => {
+    setMaterialId(id);
+    const m = materials[id];
+    if (!m) return;
+    setKind(MAT_KIND[m.unit] || 'unit');
+    if (!name.trim()) setName(m.name);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    const m = materials[materialId];
+    const label = name.trim() || (m && m.name);
+    if (!label) return;
+    onAdd({
+      name: label,
+      kind,
+      rate: m ? matRate(priceBook, materialId) : 0,
+      ...(m ? { materialId, unit: MAT_QTY_UNIT[m.unit] || '' } : {}),
+    });
+  };
+
+  return (
+    <form className="line" onSubmit={submit}>
+      <div className="line-name" style={{ gridColumn: '1 / -1' }}>
+        <span className="dot" style={{ opacity: 1 }} />
+        <input
+          className="cell"
+          style={{ width: '18rem' }}
+          placeholder='Line description — e.g. "3×2 angle iron — table frame"'
+          value={name}
+          autoFocus
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+      <div className="line-controls">
+        <span className="line-field">
+          <label>Material</label>
+          <select className="cell" style={{ width: '13rem' }} value={materialId} onChange={(e) => pickMaterial(e.target.value)}>
+            <option value="">— none (price it yourself) —</option>
+            {Object.keys(materials).map((id) => (
+              <option key={id} value={id}>{materials[id].name}</option>
+            ))}
+          </select>
+        </span>
+        <span className="line-field">
+          <label>Measured</label>
+          <select className="cell" style={{ width: '9rem' }} value={kind} onChange={(e) => setKind(e.target.value)}>
+            {KIND_OPTIONS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+        </span>
+        <button type="submit" className="estimate-reset">Add</button>
+        <button type="button" className="estimate-reset" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
 /** Hours × rate row shared by shop labor and installation. */
 function HoursRow({ title, data, onEdit }) {
   const cost = (Number(data.hours) || 0) * (Number(data.rate) || 0);
@@ -86,7 +165,7 @@ function HoursRow({ title, data, onEdit }) {
 }
 
 export default function LineItems({
-  lineState, totals, warnings, materialsSummary, priceLockAt,
+  lineState, totals, warnings, materialsSummary, priceLockAt, priceBook,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
   onEditItem, onEditLabor, onEditInstall, onAddCustomLine, onRemoveCustomLine, onSetLineRemoved,
   onUnlockPrices, onReset,
@@ -101,10 +180,7 @@ export default function LineItems({
   const rawCost = round2(totals.subtotal - totals.totalMarkup);
   const warnList = warnings || [];
 
-  const addCustom = () => {
-    const name = window.prompt('Name for the custom line (e.g. "Core drilling — 4 holes"):');
-    if (name && name.trim()) onAddCustomLine(name.trim());
-  };
+  const [adding, setAdding] = useState(false);
 
   // A custom line is deleted for good; a derived one is struck off and can be
   // put back from the "Taken off this quote" list below.
@@ -118,7 +194,7 @@ export default function LineItems({
       <div className="estimate-head">
         <span className="eyebrow">Estimate — itemized</span>
         <span>
-          <button className="estimate-reset" onClick={addCustom} style={{ marginRight: 8 }}>
+          <button className="estimate-reset" onClick={() => setAdding(true)} style={{ marginRight: 8 }}>
             + Add line
           </button>
           <button className="estimate-reset" onClick={onReset} disabled={!edited}>
@@ -147,6 +223,14 @@ export default function LineItems({
         {items.map((item) => (
           <ItemRow key={item.key} item={item} onEdit={onEditItem} onRemove={removeLine} />
         ))}
+
+        {adding && (
+          <AddLineForm
+            priceBook={priceBook}
+            onAdd={(spec) => { onAddCustomLine(spec); setAdding(false); }}
+            onCancel={() => setAdding(false)}
+          />
+        )}
 
         {/* Shop fabrication */}
         <HoursRow title="Shop labor & fabrication" data={labor} onEdit={onEditLabor} />

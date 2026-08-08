@@ -55,8 +55,10 @@ export function matRate(pb, id) {
   return round2(num(m.cost, 0) * (1 + waste / 100));
 }
 
-const MAT_KIND = { ft: 'length', sqft: 'area', piece: 'unit', bag: 'unit', set: 'unit' };
-const MAT_QTY_UNIT = { ft: 'ft', sqft: 'sq ft', piece: 'pieces', bag: 'bags', set: 'sets' };
+// Exported so the "+ Add line" picker can price a hand-added material line the
+// same way the formulas do.
+export const MAT_KIND = { ft: 'length', sqft: 'area', piece: 'unit', bag: 'unit', set: 'unit' };
+export const MAT_QTY_UNIT = { ft: 'ft', sqft: 'sq ft', piece: 'pieces', bag: 'bags', set: 'sets' };
 
 /** Build a line item priced from the material library. */
 function matItem(pb, { key, materialId, qty, name }) {
@@ -805,7 +807,13 @@ export function buildLineState(type, state, priceBook, overrides) {
     if (merged.some((m) => m.key === key)) return;
     const o = ovItems[key];
     if (!o || !o.custom) return;
-    merged.push({ key, name: o.name || 'Custom line', kind: o.kind || 'flat', qty: o.qty ?? 1, rate: o.rate ?? 0, edited: true, custom: true });
+    // materialId/unit ride along when the line was added off the material
+    // library, so a hand-added length of angle iron lands in the buy list too.
+    merged.push({
+      key, name: o.name || 'Custom line', kind: o.kind || 'flat',
+      qty: o.qty ?? 1, rate: o.rate ?? 0, edited: true, custom: true,
+      ...(o.materialId ? { materialId: o.materialId, unit: o.unit || '' } : {}),
+    });
   });
 
   // Lines the owner struck off this quote ("customer supplies the hardware").

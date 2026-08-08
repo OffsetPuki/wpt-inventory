@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { DEFAULT_PRICE_BOOK, PRICE_BOOK_SCHEMA, MATERIAL_UNITS } from '../data/priceBook.js';
 import { getPath } from '../lib/store.js';
 
@@ -51,21 +52,50 @@ function Freshness({ updatedAt }) {
  * drives the freshness tags and the server's stale-price reminder task.
  */
 function MaterialsGroup({ priceBook, onChange }) {
-  const ids = Object.keys(DEFAULT_PRICE_BOOK.materials);
+  const materials = priceBook.materials || {};
+  const [name, setName] = useState('');
+  const [unit, setUnit] = useState('ft');
+  const [cost, setCost] = useState('');
+
+  const addMaterial = (e) => {
+    e.preventDefault();
+    const label = name.trim();
+    if (!label) return;
+    const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'material';
+    let id = base;
+    for (let i = 2; materials[id]; i++) id = `${base}_${i}`;
+    onChange('materials', {
+      ...materials,
+      [id]: { name: label, unit, cost: Number(cost) || 0, wastePct: 10, updatedAt: Date.now() },
+    });
+    setName(''); setCost('');
+  };
+
+  // Only materials YOU added can be deleted — the built-in ones are referenced
+  // by the product formulas (and would come straight back from the defaults).
+  const removeMaterial = (id) => {
+    if (!window.confirm(`Delete "${materials[id].name}" from the material library?`)) return;
+    const next = { ...materials };
+    delete next[id];
+    onChange('materials', next);
+  };
+
   return (
     <div className="pb-group">
       <h3>Materials — shared library</h3>
       <p className="note">
         One price per material, entered once. Every product that uses it — and the
         website ballpark — reprices automatically. Waste % is blended into the rate.
+        Add your own here; they show up in the quote's "+ Add line" picker.
       </p>
-      {ids.map((id) => {
-        const def = DEFAULT_PRICE_BOOK.materials[id];
-        const unit = (MATERIAL_UNITS[def.unit] || {}).suffix || '';
+      {Object.keys(materials).map((id) => {
+        const def = materials[id];
+        const suffix = (MATERIAL_UNITS[def.unit] || {}).suffix || '';
+        const own = !DEFAULT_PRICE_BOOK.materials[id];
         return (
           <div key={id}>
             <Field
-              field={{ path: `materials.${id}.cost`, label: def.name, prefix: '$', suffix: unit, step: 0.25 }}
+              field={{ path: `materials.${id}.cost`, label: def.name, prefix: '$', suffix, step: 0.25 }}
               value={getPath(priceBook, `materials.${id}.cost`)}
               onChange={onChange}
             />
@@ -75,9 +105,43 @@ function MaterialsGroup({ priceBook, onChange }) {
               value={getPath(priceBook, `materials.${id}.wastePct`)}
               onChange={onChange}
             />
+            {own && (
+              <button type="button" className="estimate-reset" onClick={() => removeMaterial(id)}>
+                ✕ delete material
+              </button>
+            )}
           </div>
         );
       })}
+
+      <form className="pb-field" style={{ flexWrap: 'wrap', gap: 8, paddingTop: 18 }} onSubmit={addMaterial}>
+        <input
+          className="pb-input"
+          style={{ width: '11rem', textAlign: 'left' }}
+          placeholder="New material — e.g. 3×2 angle iron"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <select className="pb-input" style={{ width: '6rem', textAlign: 'left' }} value={unit} onChange={(e) => setUnit(e.target.value)}>
+          {Object.keys(MATERIAL_UNITS).map((u) => (
+            <option key={u} value={u}>{MATERIAL_UNITS[u].suffix}</option>
+          ))}
+        </select>
+        <span className="pb-input-wrap">
+          <span className="aff">$</span>
+          <input
+            className="pb-input"
+            style={{ width: '4.5rem' }}
+            type="number"
+            min="0"
+            step="0.25"
+            placeholder="0"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+          />
+        </span>
+        <button type="submit" className="estimate-reset">+ Add material</button>
+      </form>
     </div>
   );
 }

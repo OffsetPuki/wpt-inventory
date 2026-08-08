@@ -297,10 +297,13 @@ export default function QuoteBuilder({ initialSettings }) {
 
   // Custom lines live in overrides (flagged `custom`) so they survive option
   // changes and reprice-resets are explicit.
-  const addCustomLine = (name) =>
+  // spec = { name, kind, rate, materialId?, unit? } from the add-line form.
+  const addCustomLine = (spec) =>
     setSession((s) => {
       const items = { ...(s.overrides.items || {}) };
-      items[`custom_${Date.now()}`] = { custom: true, name: name || 'Custom line', kind: 'flat', qty: 1, rate: 0 };
+      items[`custom_${Date.now()}`] = {
+        custom: true, name: 'Custom line', kind: 'flat', qty: 1, rate: 0, ...spec,
+      };
       return { ...s, overrides: { ...s.overrides, items } };
     });
   const removeCustomLine = (key) =>
@@ -423,6 +426,7 @@ export default function QuoteBuilder({ initialSettings }) {
             warnings={warnings}
             materialsSummary={materialsSummary}
             priceLockAt={session.priceBookSnapshot ? (session.priceBookSnapshotAt || session.createdAt) : null}
+            priceBook={effectiveBook}
             materialMarkupPct={session.materialMarkupPct}
             laborMarkupPct={session.laborMarkupPct}
             taxPct={session.taxPct}

@@ -8,7 +8,7 @@ import LineItems from './LineItems.jsx';
  * live preview + auto-priced, hand-editable line items on the right.
  */
 export default function Configurator({
-  type, state, lineState, totals, warnings, materialsSummary, priceLockAt,
+  type, state, lineState, totals, warnings, materialsSummary, priceLockAt, priceBook,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
   onChangeOption, onEditItem, onEditLabor, onEditInstall,
   onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onUnlockPrices, onResetOverrides,
@@ -41,6 +41,7 @@ export default function Configurator({
               warnings={warnings}
               materialsSummary={materialsSummary}
               priceLockAt={priceLockAt}
+              priceBook={priceBook}
               materialMarkupPct={materialMarkupPct}
               laborMarkupPct={laborMarkupPct}
               taxPct={taxPct}

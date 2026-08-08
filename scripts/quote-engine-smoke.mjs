@@ -196,5 +196,32 @@ console.log('\nBackward compatibility (pre-materials sessions):');
   check('old pergola state prices with 1×1 deco', item(lp.items, 'legDeco') != null);
 }
 
+// ── 11. Hand-added lines (the "+ Add line" form) ──────────────────────────────
+console.log('\nCustom lines:');
+{
+  // An owner-added material line: 3×2 angle iron they added to the library,
+  // 14 ft of it, on a table quote. It must price by the foot AND show up in
+  // the buy list — not sit there as a flat dollar amount.
+  const book = deepMerge(pb, {
+    materials: { angle_3x2: { name: '3×2 angle iron', unit: 'ft', cost: 4, wastePct: 10 } },
+  });
+  const ov = {
+    items: {
+      custom_1: {
+        custom: true, name: '3×2 angle iron — table frame', kind: 'length',
+        materialId: 'angle_3x2', unit: 'ft', qty: 14, rate: matRate(book, 'angle_3x2'),
+      },
+      custom_2: { custom: true, name: 'Core drilling', kind: 'flat', qty: 1, rate: 120 },
+    },
+  };
+  const ls = buildLineState('table', defaultState('table'), book, ov);
+  const angle = item(ls.items, 'custom_1');
+  check('length line costs qty × rate', angle && approx(lineCost(angle), 14 * 4.4), `got ${angle && lineCost(angle)}`);
+  check('flat line still costs the amount', approx(lineCost(item(ls.items, 'custom_2')), 120));
+  const sum = materialTotals(ls.items, book);
+  const bought = sum.find((m) => m.id === 'angle_3x2');
+  check('added material lands in the buy list', bought && approx(bought.qty, 14) && bought.name === '3×2 angle iron', JSON.stringify(bought));
+}
+
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);
 process.exit(failures === 0 ? 0 : 1);
