@@ -9,6 +9,7 @@
  */
 
 import { shade, pts } from './svg.js';
+import { formatTick } from '../measure.js';
 
 export function renderPergola(state) {
   const VB_W = 800;
@@ -16,9 +17,9 @@ export function renderPergola(state) {
   const OBQ_X = 0.46;
   const OBQ_Y = 0.34;
 
-  const width = parseInt(state.width, 10) || 12;
-  const depth = parseInt(state.depth, 10) || 12;
-  const height = parseInt(state.height, 10) || 8;
+  const width = parseFloat(state.width) || 12;
+  const depth = parseFloat(state.depth) || 12;
+  const height = parseFloat(state.height) || 8;
   const shaded = state.shade === 'panels';
   const frame = state.color || '#0A0A0A';
   const frameDark = shade(frame, -0.25);
@@ -110,13 +111,13 @@ export function renderPergola(state) {
   parts.push(`<line x1="${x0.toFixed(1)}" y1="${wY}" x2="${xR.toFixed(1)}" y2="${wY}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${x0.toFixed(1)}" y1="${wY - 3}" x2="${x0.toFixed(1)}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${xR.toFixed(1)}" y1="${wY - 3}" x2="${xR.toFixed(1)}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${((x0 + xR) / 2).toFixed(1)}" y="${wY + 13}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}">${width} FT</text>`);
+  parts.push(`<text x="${((x0 + xR) / 2).toFixed(1)}" y="${wY + 13}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}">${formatTick(width, 'ft')}</text>`);
   parts.push(`<line x1="${(xR + 10).toFixed(1)}" y1="${(GROUND_Y + 6).toFixed(1)}" x2="${(xR + dvx + 10).toFixed(1)}" y2="${(GROUND_Y - dvy + 6).toFixed(1)}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${(xR + dvx / 2 + 26).toFixed(1)}" y="${(GROUND_Y - dvy / 2 + 4).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1" fill="${dimText}">${depth} FT</text>`);
+  parts.push(`<text x="${(xR + dvx / 2 + 26).toFixed(1)}" y="${(GROUND_Y - dvy / 2 + 4).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1" fill="${dimText}">${formatTick(depth, 'ft')}</text>`);
   const hX = x0 - 22;
   const hMidY = (eaveY + GROUND_Y) / 2;
   parts.push(`<line x1="${hX.toFixed(1)}" y1="${eaveY.toFixed(1)}" x2="${hX.toFixed(1)}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${(hX - 6).toFixed(1)}" y="${hMidY.toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}" transform="rotate(-90 ${(hX - 6).toFixed(1)} ${hMidY.toFixed(1)})">${height} FT</text>`);
+  parts.push(`<text x="${(hX - 6).toFixed(1)}" y="${hMidY.toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}" transform="rotate(-90 ${(hX - 6).toFixed(1)} ${hMidY.toFixed(1)})">${formatTick(height, 'ft')}</text>`);
 
   return parts.join('');
 }

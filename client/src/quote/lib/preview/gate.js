@@ -21,6 +21,7 @@
  */
 
 import { shade, corrugatedGradient, corrugatedPitch } from './svg.js';
+import { formatTick } from '../measure.js';
 
 export function renderGate(state) {
   // ---- Defensive defaults / normalization (mirrors readState() + draw()'s hidden-control forcing) ----
@@ -31,8 +32,8 @@ export function renderGate(state) {
     arch: st.arch || 'flat',
     mesh: st.mesh || 'no',
     woodDir: st.woodDir || 'horizontal',
-    height: parseInt(st.height, 10) || 6,
-    width: parseInt(st.width, 10) || 10,
+    height: parseFloat(st.height) || 6,
+    width: parseFloat(st.width) || 10,
     meshRatio: parseInt(st.meshRatio, 10) || 25,
     color: st.color || '#0A0A0A',
     topEdge: st.topEdge || 'flat',
@@ -282,13 +283,13 @@ export function renderGate(state) {
     parts.push(`<line x1="${startX}" y1="${wY}" x2="${startX + gW}" y2="${wY}" stroke="${dim}" stroke-width="0.5" />`);
     parts.push(`<line x1="${startX}" y1="${wY - 3}" x2="${startX}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
     parts.push(`<line x1="${startX + gW}" y1="${wY - 3}" x2="${startX + gW}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
-    parts.push(`<text x="${startX + gW / 2}" y="${wY + 18}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)">${s.width} FT</text>`);
+    parts.push(`<text x="${startX + gW / 2}" y="${wY + 18}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)">${formatTick(s.width, 'ft')}</text>`);
   }
   const hX = startX - 22;
   parts.push(`<line x1="${hX}" y1="${topY}" x2="${hX}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${hX - 3}" y1="${topY}" x2="${hX + 3}" y2="${topY}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${hX - 3}" y1="${GROUND_Y}" x2="${hX + 3}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${hX - 6}" y="${(topY + GROUND_Y) / 2}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)" transform="rotate(-90 ${hX - 6} ${(topY + GROUND_Y) / 2})">${s.height} FT</text>`);
+  parts.push(`<text x="${hX - 6}" y="${(topY + GROUND_Y) / 2}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)" transform="rotate(-90 ${hX - 6} ${(topY + GROUND_Y) / 2})">${formatTick(s.height, 'ft')}</text>`);
 
   return '<defs>' + defsParts.join('') + '</defs>' + parts.join('');
 }

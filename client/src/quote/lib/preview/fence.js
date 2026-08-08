@@ -16,14 +16,15 @@
 //   topEdge     : 'flat' | 'capped'                 (default 'flat')
 
 import { shade, corrugatedGradient, corrugatedPitch } from './svg.js';
+import { formatTick } from '../measure.js';
 
 export function renderFence(state) {
   const s = state || {};
 
   // ---- Normalize state (replaces readState + DOM defaults/fallbacks) ----
   const type = s.type != null ? s.type : 'horizontal-slat';
-  const height = parseInt(s.height, 10) || 6;
-  const panelWidth = parseInt(s.panelWidth, 10) || 6;
+  const height = parseFloat(s.height) || 6;
+  const panelWidth = parseFloat(s.panelWidth) || 6;
   // The source forces style='flat' when type==='horizontal-slat' (the style picker
   // is hidden for that type). Replicate that normalization purely.
   const style = (type === 'horizontal-slat' || type === 'corrugated')
@@ -238,7 +239,7 @@ export function renderFence(state) {
   parts.push(`<line x1="${startX}" y1="${wY}" x2="${startX + fenceWidthPx}" y2="${wY}" stroke="${dimStroke}" stroke-width="0.5" />`);
   parts.push(`<line x1="${startX}" y1="${wY - 3}" x2="${startX}" y2="${wY + 3}" stroke="${dimStroke}" stroke-width="0.5" />`);
   parts.push(`<line x1="${startX + fenceWidthPx}" y1="${wY - 3}" x2="${startX + fenceWidthPx}" y2="${wY + 3}" stroke="${dimStroke}" stroke-width="0.5" />`);
-  parts.push(`<text x="${startX + fenceWidthPx / 2}" y="${wY + 12}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)">${totalWidthFt} FT</text>`);
+  parts.push(`<text x="${startX + fenceWidthPx / 2}" y="${wY + 12}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)">${formatTick(totalWidthFt, 'ft')}</text>`);
   // Height — measured to the top of the posts (for Wood + Metal Mesh the posts rise above
   // the panel, so postRise > 0 and the dimension reaches the post top; it's 0 otherwise).
   const hX = startX - 22;
@@ -247,7 +248,7 @@ export function renderFence(state) {
   parts.push(`<line x1="${hX}" y1="${hTopY}" x2="${hX}" y2="${GROUND_Y}" stroke="${dimStroke}" stroke-width="0.5" />`);
   parts.push(`<line x1="${hX - 3}" y1="${hTopY}" x2="${hX + 3}" y2="${hTopY}" stroke="${dimStroke}" stroke-width="0.5" />`);
   parts.push(`<line x1="${hX - 3}" y1="${GROUND_Y}" x2="${hX + 3}" y2="${GROUND_Y}" stroke="${dimStroke}" stroke-width="0.5" />`);
-  parts.push(`<text x="${hX - 6}" y="${hMidY}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)" transform="rotate(-90 ${hX - 6} ${hMidY})">${totalHeightFt} FT</text>`);
+  parts.push(`<text x="${hX - 6}" y="${hMidY}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)" transform="rotate(-90 ${hX - 6} ${hMidY})">${formatTick(totalHeightFt, 'ft')}</text>`);
 
   return '<defs>' + defsParts.join('') + '</defs>' + parts.join('');
 }

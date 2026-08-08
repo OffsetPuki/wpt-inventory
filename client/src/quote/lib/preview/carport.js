@@ -24,6 +24,7 @@
  */
 
 import { shade, pts } from './svg.js';
+import { formatTick } from '../measure.js';
 
 export function renderCarport(state) {
   const VB_W = 800;
@@ -66,9 +67,9 @@ export function renderCarport(state) {
   //     normalization the original draw() applied when a control was hidden ---
   const roof = state.roof || 'gable';
   const mounting = state.mounting || 'freestanding';
-  const width = parseInt(state.width, 10) || 20;
-  const depth = parseInt(state.depth, 10) || 20;
-  const height = parseInt(state.height, 10) || 9;
+  const width = parseFloat(state.width) || 20;
+  const depth = parseFloat(state.depth) || 20;
+  const height = parseFloat(state.height) || 9;
   const pitch = parseInt(state.pitch, 10) || 3;       // Gable rise per 12 (x:12) — 3:12 default
   const elevation = parseInt(state.elevation, 10) || 15; // Lean-to slope angle in degrees — 15° default
   const panel = state.panel || 'corrugated';
@@ -362,20 +363,20 @@ export function renderCarport(state) {
   parts.push(`<line x1="${x0.toFixed(1)}" y1="${wY}" x2="${xR.toFixed(1)}" y2="${wY}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${x0.toFixed(1)}" y1="${wY - 3}" x2="${x0.toFixed(1)}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${xR.toFixed(1)}" y1="${wY - 3}" x2="${xR.toFixed(1)}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${((x0 + xR) / 2).toFixed(1)}" y="${wY + 13}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}">${s.width} FT</text>`);
+  parts.push(`<text x="${((x0 + xR) / 2).toFixed(1)}" y="${wY + 13}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}">${formatTick(s.width, 'ft')}</text>`);
   // Depth — along the right base, receding back
   const fb = [xR, GROUND_Y];
   const bb = [xR + dvx, GROUND_Y - dvy];
   const dOff = [10, 6];
   parts.push(`<line x1="${(fb[0] + dOff[0]).toFixed(1)}" y1="${(fb[1] + dOff[1]).toFixed(1)}" x2="${(bb[0] + dOff[0]).toFixed(1)}" y2="${(bb[1] + dOff[1]).toFixed(1)}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${((fb[0] + bb[0]) / 2 + 16).toFixed(1)}" y="${((fb[1] + bb[1]) / 2 + 4).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1" fill="${dimText}">${s.depth} FT</text>`);
+  parts.push(`<text x="${((fb[0] + bb[0]) / 2 + 16).toFixed(1)}" y="${((fb[1] + bb[1]) / 2 + 4).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1" fill="${dimText}">${formatTick(s.depth, 'ft')}</text>`);
   // Height — on the left, from front eave to ground
   const hX = x0 - overhang - 18;
   const hMidY = (eaveY + GROUND_Y) / 2;
   parts.push(`<line x1="${hX.toFixed(1)}" y1="${eaveY.toFixed(1)}" x2="${hX.toFixed(1)}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${(hX - 3).toFixed(1)}" y1="${eaveY.toFixed(1)}" x2="${(hX + 3).toFixed(1)}" y2="${eaveY.toFixed(1)}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${(hX - 3).toFixed(1)}" y1="${GROUND_Y}" x2="${(hX + 3).toFixed(1)}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${(hX - 6).toFixed(1)}" y="${hMidY.toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}" transform="rotate(-90 ${(hX - 6).toFixed(1)} ${hMidY.toFixed(1)})">${s.height} FT</text>`);
+  parts.push(`<text x="${(hX - 6).toFixed(1)}" y="${hMidY.toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}" transform="rotate(-90 ${(hX - 6).toFixed(1)} ${hMidY.toFixed(1)})">${formatTick(s.height, 'ft')}</text>`);
 
   return (defs.length ? '<defs>' + defs.join('') + '</defs>' : '') + parts.join('');
 }

@@ -14,6 +14,7 @@
 
 import { shade, pts } from './svg.js';
 import { tableBaseFootprint } from '../../data/configurators.js';
+import { formatTick } from '../measure.js';
 
 export function renderTable(state) {
   const VB_W = 800;
@@ -136,15 +137,15 @@ export function renderTable(state) {
   parts.push(`<line x1="${tL.toFixed(1)}" y1="${wY}" x2="${tR.toFixed(1)}" y2="${wY}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${tL.toFixed(1)}" y1="${wY - 3}" x2="${tL.toFixed(1)}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${tR.toFixed(1)}" y1="${wY - 3}" x2="${tR.toFixed(1)}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${((tL + tR) / 2).toFixed(1)}" y="${wY + 13}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}">${topLenFt} FT TOP</text>`);
+  parts.push(`<text x="${((tL + tR) / 2).toFixed(1)}" y="${wY + 13}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}">${formatTick(topLenFt, 'ft')} TOP</text>`);
   parts.push(`<line x1="${(xR + 10).toFixed(1)}" y1="${(GROUND_Y + 6).toFixed(1)}" x2="${(xR + dvx + 10).toFixed(1)}" y2="${(GROUND_Y - dvy + 6).toFixed(1)}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${(xR + dvx / 2 + 30).toFixed(1)}" y="${(GROUND_Y - dvy / 2 + 4).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1" fill="${dimText}">${topWidthIn} IN</text>`);
+  parts.push(`<text x="${(xR + dvx / 2 + 30).toFixed(1)}" y="${(GROUND_Y - dvy / 2 + 4).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1" fill="${dimText}">${formatTick(topWidthIn, 'in')}</text>`);
   const hX = x0 - 24;
   const hMidY = (railY + GROUND_Y) / 2;
   parts.push(`<line x1="${hX.toFixed(1)}" y1="${railY.toFixed(1)}" x2="${hX.toFixed(1)}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${(hX - 3).toFixed(1)}" y1="${railY.toFixed(1)}" x2="${(hX + 3).toFixed(1)}" y2="${railY.toFixed(1)}" stroke="${dim}" stroke-width="0.5" />`);
   parts.push(`<line x1="${(hX - 3).toFixed(1)}" y1="${GROUND_Y}" x2="${(hX + 3).toFixed(1)}" y2="${GROUND_Y}" stroke="${dim}" stroke-width="0.5" />`);
-  parts.push(`<text x="${(hX - 7).toFixed(1)}" y="${hMidY.toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}" transform="rotate(-90 ${(hX - 7).toFixed(1)} ${hMidY.toFixed(1)})">${frameHeightIn} IN FRAME</text>`);
+  parts.push(`<text x="${(hX - 7).toFixed(1)}" y="${hMidY.toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="${dimText}" transform="rotate(-90 ${(hX - 7).toFixed(1)} ${hMidY.toFixed(1)})">${formatTick(frameHeightIn, 'in')} FRAME</text>`);
 
   return parts.join('');
 }

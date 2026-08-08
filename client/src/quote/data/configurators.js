@@ -10,9 +10,16 @@
 //    { kind, name, label, visibleWhen?(state), ...kindFields }
 //      kind 'segment' : options:[{value,label}], cols
 //      kind 'swatch'  : options:[{value,label}]  (value is a hex color)
-//      kind 'range'   : min, max, step, display(value,state)
+//      kind 'range'   : min, max, step, unit?, display(value)?, note(value)?
 //      kind 'number'  : min, max, step, unit
+//
+//  A control whose `unit` is a length ('ft' / 'in' / '"') is rendered as a
+//  feet-and-inches box instead of a number spinner, so dimensions can be typed
+//  the way they're measured (6' 4-1/2"). Values stay plain decimals in the
+//  control's own unit — see lib/measure.js.
 // =============================================================================
+
+import { formatMeasure, formatTick } from '../lib/measure.js';
 
 // Frame / metal finishes (shared by all three types).
 export const FINISHES = [
@@ -102,12 +109,12 @@ export function tableBaseFootprint(s) {
   };
 }
 
-/** 8.25 → "8 ft 3 in" — the same reading the website's designer shows. */
-export function ftIn(ft) {
-  const whole = Math.floor((Number(ft) || 0) + 1e-6);
-  const inches = Math.round(((Number(ft) || 0) - whole) * 12);
-  return inches ? `${whole} ft ${inches} in` : `${whole} ft`;
-}
+// Dimension formatting. Long form (FT/IN) for printed spec rows — "6 ft 4-1/2 in";
+// tick form (ft/inch) for the tight one-line summaries — 6'4-1/2".
+const FT = (v) => formatMeasure(v, 'ft');
+const IN = (v) => formatMeasure(v, 'in');
+const ft = (v) => formatTick(v, 'ft');
+const inch = (v) => formatTick(v, 'in');
 
 export const CONFIG = {
   // ---- Fence ----------------------------------------------------------------
@@ -141,7 +148,7 @@ export const CONFIG = {
           { value: 'corrugated', label: 'Corrugated Metal' },
         ],
       },
-      { kind: 'range', name: 'height', label: 'Height', min: 3, max: 8, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'height', label: 'Height', unit: 'ft', min: 3, max: 8, step: 1, display: ftDisplay },
       {
         kind: 'segment', name: 'panelWidth', label: 'Panel width (inside posts)', cols: 3,
         options: [4, 6, 8].map((w) => ({ value: w, label: `${w} ft` })),
@@ -256,8 +263,8 @@ export const CONFIG = {
         kind: 'segment', name: 'arch', label: 'Top shape', cols: 2,
         options: [{ value: 'flat', label: 'Flat' }, { value: 'arched', label: 'Arched' }],
       },
-      { kind: 'range', name: 'height', label: 'Height', min: 4, max: 10, step: 1, display: ftDisplay },
-      { kind: 'range', name: 'width', label: 'Width', min: 3, max: 20, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'height', label: 'Height', unit: 'ft', min: 4, max: 10, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'width', label: 'Width', unit: 'ft', min: 3, max: 20, step: 1, display: ftDisplay },
       {
         kind: 'segment', name: 'woodDir', label: 'Wood grain', cols: 2,
         options: [{ value: 'horizontal', label: 'Horizontal' }, { value: 'vertical', label: 'Vertical' }],
@@ -336,11 +343,12 @@ export const CONFIG = {
         ],
       },
       {
-        kind: 'range', name: 'width', label: 'Width (span)', min: 10, max: 40, step: 1,
-        display: (v) => `${v} ft · ${carCount(v)} ${carCount(v) === 1 ? 'car' : 'cars'}`,
+        kind: 'range', name: 'width', label: 'Width (span)', unit: 'ft', min: 10, max: 40, step: 1,
+        // The measure box owns the number now, so the car count rides along as a note.
+        note: (v) => `${carCount(v)} ${carCount(v) === 1 ? 'car' : 'cars'}`,
       },
-      { kind: 'range', name: 'depth', label: 'Depth', min: 16, max: 40, step: 2, display: ftDisplay },
-      { kind: 'range', name: 'height', label: 'Clearance', min: 7, max: 14, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'depth', label: 'Depth', unit: 'ft', min: 16, max: 40, step: 2, display: ftDisplay },
+      { kind: 'range', name: 'height', label: 'Clearance', unit: 'ft', min: 7, max: 14, step: 1, display: ftDisplay },
       {
         kind: 'range', name: 'pitch', label: 'Roof pitch', min: 1, max: 6, step: 1,
         display: (v) => `${v}:12`, visibleWhen: (s) => s.roof === 'gable',
@@ -442,7 +450,7 @@ export const CONFIG = {
           { value: 'wood', label: 'Wood cap' },
         ],
       },
-      { kind: 'range', name: 'height', label: 'Height', min: 34, max: 48, step: 1, display: (v) => `${v} in` },
+      { kind: 'range', name: 'height', label: 'Height', unit: 'in', min: 34, max: 48, step: 1, display: (v) => `${v} in` },
       {
         kind: 'segment', name: 'mounting', label: 'Mounting', cols: 2,
         options: [
@@ -481,9 +489,9 @@ export const CONFIG = {
           { value: 'sides', label: 'Side Screens' },
         ],
       },
-      { kind: 'range', name: 'width', label: 'Width', min: 8, max: 24, step: 1, display: ftDisplay },
-      { kind: 'range', name: 'depth', label: 'Depth', min: 8, max: 24, step: 1, display: ftDisplay },
-      { kind: 'range', name: 'height', label: 'Head clearance', min: 7, max: 12, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'width', label: 'Width', unit: 'ft', min: 8, max: 24, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'depth', label: 'Depth', unit: 'ft', min: 8, max: 24, step: 1, display: ftDisplay },
+      { kind: 'range', name: 'height', label: 'Head clearance', unit: 'ft', min: 7, max: 12, step: 1, display: ftDisplay },
       {
         kind: 'segment', name: 'shade', label: 'Roof', cols: 2,
         options: [
@@ -576,33 +584,33 @@ export function summaryLine(type, s) {
       ? 'Wood + Corrugated'
       : optionLabel('fence', 'type', s.type);
     const arch = s.type === 'wood-mesh' && s.style === 'arched' ? '⌒ ' : '';
-    return `${t} · ${s.totalLengthFt} ft run · ${arch}${s.height} ft tall · ${fin}`;
+    return `${t} · ${ft(s.totalLengthFt)} run · ${arch}${ft(s.height)} tall · ${fin}`;
   }
   if (type === 'gate') {
     const t = optionLabel('gate', 'type', s.type);
     const inf = optionLabel('gate', 'infill', s.infill);
     const meshTag = s.infill === 'metal-wood' && s.mesh === 'yes' ? ' + mesh' : '';
     const arch = s.arch === 'arched' ? '⌒ ' : '';
-    return `${t} · ${inf}${meshTag} · ${arch}${s.width}×${s.height} ft · ${fin}`;
+    return `${t} · ${inf}${meshTag} · ${arch}${ft(s.width)}×${ft(s.height)} · ${fin}`;
   }
   if (type === 'railing') {
     const app = optionLabel('railing', 'app', s.app);
     const inf = s.app === 'handrail' ? '' : ` · ${optionLabel('railing', 'infill', s.infill)}`;
-    return `${app}${inf} · ${s.lengthFt} ft · ${s.height} in · ${fin}`;
+    return `${app}${inf} · ${ft(s.lengthFt)} · ${inch(s.height)} · ${fin}`;
   }
   if (type === 'pergola') {
     const legs = optionLabel('pergola', 'legs', s.legs);
     const shade = s.shade === 'panels' ? ' · shade panels' : '';
-    return `${legs} · ${s.width}×${s.depth} ft · ${s.height} ft${shade} · ${fin}`;
+    return `${legs} · ${ft(s.width)}×${ft(s.depth)} · ${ft(s.height)}${shade} · ${fin}`;
   }
   if (type === 'table') {
     const tt = optionLabel('table', 'tableType', s.tableType || 'bar');
     const n = Number(s.qty) > 1 ? `${s.qty} × ` : '';
-    return `${n}${tt} · ${s.lengthFt} ft × ${s.widthIn} in top · ${s.frameHeightIn} in frame · ${fin}`;
+    return `${n}${tt} · ${ft(s.lengthFt)} × ${inch(s.widthIn)} top · ${inch(s.frameHeightIn)} frame · ${fin}`;
   }
   // carport
   const roof = optionLabel('carport', 'roof', s.roof);
-  return `${roof} · ${s.width}×${s.depth} ft · ${s.height} ft clearance · ${fin}`;
+  return `${roof} · ${ft(s.width)}×${ft(s.depth)} · ${ft(s.height)} clearance · ${fin}`;
 }
 
 /** Spec rows for the printable quote (label / value pairs). */
@@ -611,12 +619,12 @@ export function specRows(type, s) {
   if (type === 'fence') {
     const rows = [
       ['Style', optionLabel('fence', 'type', s.type)],
-      ['Total run length', `${s.totalLengthFt} ft`],
-      ['Height', `${s.height} ft`],
-      ['Panel width', `${s.panelWidth} ft`],
+      ['Total run length', FT(s.totalLengthFt)],
+      ['Height', FT(s.height)],
+      ['Panel width', FT(s.panelWidth)],
     ];
     if (s.type === 'horizontal-slat') {
-      rows.push(['Slat spacing', `${s.slatSpacing}"`]);
+      rows.push(['Slat spacing', IN(s.slatSpacing)]);
       if (Number(s.slatCount) > 0) rows.push(['Slats per section', `${s.slatCount}`]);
       rows.push(['Slat material', optionLabel('fence', 'slatMaterial', s.slatMaterial || '4x1')]);
     }
@@ -630,9 +638,9 @@ export function specRows(type, s) {
       const rails = Number(s.railCount) > 0 ? `${s.railCount} per section` : 'auto (2, or 3 at 6 ft+)';
       rows.push(['Support rails', `${rails} · 2×2 tube`]);
     }
-    rows.push(['Post setting', `${s.undergroundFt ?? 3} ft underground · ${s.bagsPerPost ?? 4} bags each`]);
+    rows.push(['Post setting', `${FT(s.undergroundFt ?? 3)} underground · ${s.bagsPerPost ?? 4} bags each`]);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('fence', 'coating', s.coating)]);
-    if (Number(s.demoFt) > 0) rows.push(['Removal', `${s.demoFt} ft of old fence`]);
+    if (Number(s.demoFt) > 0) rows.push(['Removal', `${FT(s.demoFt)} of old fence`]);
     rows.push(['Finish', fin]);
     rows.push(['Posts', optionLabel('fence', 'topEdge', s.topEdge) + ' top']);
     return rows.map(([label, value]) => ({ label, value }));
@@ -642,7 +650,7 @@ export function specRows(type, s) {
       ['Type', optionLabel('gate', 'type', s.type)],
       ['Style', optionLabel('gate', 'infill', s.infill)],
       ['Top shape', optionLabel('gate', 'arch', s.arch)],
-      ['Size', `${s.width} ft wide × ${s.height} ft tall`],
+      ['Size', `${FT(s.width)} wide × ${FT(s.height)} tall`],
     ];
     if (s.infill === 'metal-wood') {
       rows.push(['Wood grain', optionLabel('gate', 'woodDir', s.woodDir)]);
@@ -654,7 +662,7 @@ export function specRows(type, s) {
     if (s.operator === 'one' || s.operator === 'two') {
       rows.push(['Gate operator', s.operator === 'two' ? '2 motors' : '1 motor']);
     }
-    rows.push(['Post setting', `${s.undergroundFt ?? 3} ft underground · ${s.bagsPerPost ?? 4} bags each`]);
+    rows.push(['Post setting', `${FT(s.undergroundFt ?? 3)} underground · ${s.bagsPerPost ?? 4} bags each`]);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('gate', 'coating', s.coating)]);
     if (s.demoOld === 'yes') rows.push(['Removal', 'Old gate removed & hauled off']);
     rows.push(['Finish', fin]);
@@ -665,8 +673,8 @@ export function specRows(type, s) {
     const isHand = s.app === 'handrail';
     const rows = [
       ['Application', optionLabel('railing', 'app', s.app)],
-      ['Total run length', `${s.lengthFt} ft`],
-      ['Height', `${s.height} in`],
+      ['Total run length', FT(s.lengthFt)],
+      ['Height', IN(s.height)],
     ];
     if (!isHand) {
       rows.push(['Infill', optionLabel('railing', 'infill', s.infill)]);
@@ -679,8 +687,8 @@ export function specRows(type, s) {
   }
   if (type === 'pergola') {
     const rows = [
-      ['Size', `${s.width} ft × ${s.depth} ft`],
-      ['Head clearance', `${s.height} ft`],
+      ['Size', `${FT(s.width)} × ${FT(s.depth)}`],
+      ['Head clearance', FT(s.height)],
       ['Legs', optionLabel('pergola', 'legs', s.legs || 'standard')],
       ['Roof', optionLabel('pergola', 'shade', s.shade)],
       ['Anchoring', optionLabel('pergola', 'anchor', s.anchor || 'plate')],
@@ -695,10 +703,10 @@ export function specRows(type, s) {
     const overall = (Number(s.frameHeightIn) || 0) + thick;
     const rows = [['Type', optionLabel('table', 'tableType', s.tableType || 'bar')]];
     if (Number(s.qty) > 1) rows.push(['Quantity', `${s.qty} tables`]);
-    rows.push(['Top size', `${s.lengthFt} ft × ${s.widthIn} in`]);
-    rows.push(['Steel base', `${ftIn(base.lengthFt)} × ${Math.round(base.widthIn)} in`]);
-    rows.push(['Frame height', `${s.frameHeightIn} in`]);
-    rows.push(['Overall height', `${overall} in with a ${thick} in top`]);
+    rows.push(['Top size', `${FT(s.lengthFt)} × ${IN(s.widthIn)}`]);
+    rows.push(['Steel base', `${FT(base.lengthFt)} × ${IN(base.widthIn)}`]);
+    rows.push(['Frame height', IN(s.frameHeightIn)]);
+    rows.push(['Overall height', `${IN(overall)} with a ${IN(thick)} top`]);
     rows.push(['Foot rest', s.footrest === 'no' ? 'No' : 'Yes']);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('table', 'coating', s.coating)]);
     rows.push(['Finish', fin]);
@@ -712,9 +720,9 @@ export function specRows(type, s) {
   const rows = [
     ['Roof', optionLabel('carport', 'roof', s.roof)],
     ['Mounting', optionLabel('carport', 'mounting', s.mounting)],
-    ['Size', `${s.width} ft wide × ${s.depth} ft deep`],
+    ['Size', `${FT(s.width)} wide × ${FT(s.depth)} deep`],
     ['Capacity', `${cars} ${cars === 1 ? 'car' : 'cars'}`],
-    ['Clearance', `${s.height} ft`],
+    ['Clearance', FT(s.height)],
   ];
   if (s.roof === 'gable') rows.push(['Roof pitch', `${s.pitch}:12`]);
   if (s.roof === 'lean-to') rows.push(['Roof elevation', `${s.elevation}°`]);

@@ -1,3 +1,4 @@
+import { formatTick } from '../measure.js';
 // Railing SVG preview renderer — pure, DOM-free port of the Astro preview generator.
 //
 // Ported verbatim (geometry/constants/colors unchanged) from the draw() IIFE in
@@ -25,7 +26,7 @@ export function renderRailing(state) {
     app: st.app != null ? st.app : 'balcony',
     infill: st.infill != null ? st.infill : 'pickets',
     toprail: st.toprail != null ? st.toprail : 'flat',
-    height: parseInt(st.height, 10) || 36,
+    height: parseFloat(st.height) || 36,
     length: Math.max(3, Number(st.lengthFt) || 12),
     spacing: st.spacing != null ? st.spacing : 'standard',
     mounting: st.mounting != null ? st.mounting : 'surface',
@@ -208,14 +209,14 @@ export function renderRailing(state) {
     parts.push(`<line x1="${startX}" y1="${wY}" x2="${endX}" y2="${wY}" stroke="${dim}" stroke-width="0.5"/>`);
     parts.push(`<line x1="${startX}" y1="${wY - 3}" x2="${startX}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5"/>`);
     parts.push(`<line x1="${endX}" y1="${wY - 3}" x2="${endX}" y2="${wY + 3}" stroke="${dim}" stroke-width="0.5"/>`);
-    parts.push(`<text x="${(startX + endX) / 2}" y="${wY + 16}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)">${s.length} FT</text>`);
+    parts.push(`<text x="${(startX + endX) / 2}" y="${wY + 16}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)">${formatTick(s.length, 'ft')}</text>`);
   }
 
   const hX = startX - 26;
   parts.push(`<line x1="${hX}" y1="${hTopY}" x2="${hX}" y2="${hBotY}" stroke="${dim}" stroke-width="0.5"/>`);
   parts.push(`<line x1="${hX - 3}" y1="${hTopY}" x2="${hX + 3}" y2="${hTopY}" stroke="${dim}" stroke-width="0.5"/>`);
   parts.push(`<line x1="${hX - 3}" y1="${hBotY}" x2="${hX + 3}" y2="${hBotY}" stroke="${dim}" stroke-width="0.5"/>`);
-  parts.push(`<text x="${hX - 6}" y="${(hTopY + hBotY) / 2}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)" transform="rotate(-90 ${hX - 6} ${(hTopY + hBotY) / 2})">${s.height} IN</text>`);
+  parts.push(`<text x="${hX - 6}" y="${(hTopY + hBotY) / 2}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="2" fill="rgba(10,10,10,0.5)" transform="rotate(-90 ${hX - 6} ${(hTopY + hBotY) / 2})">${formatTick(s.height, 'in')}</text>`);
 
   return parts.join('');
 }
