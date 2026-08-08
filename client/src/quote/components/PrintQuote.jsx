@@ -8,9 +8,11 @@ import { specRows, summaryLine, typeLabel } from '../data/configurators.js';
  * shop info, their details, the design, priced line items, and totals. Never the
  * cost basis, markup %, or labor rate.
  */
-export default function PrintQuote({ shop, type, state, designRef, customer, notes, depositPct, number, createdAt, lineState, totals, attachments }) {
+export default function PrintQuote({ shop, type, state, designRef, customer, notes, depositPct, number, createdAt, lineState, totals, features, attachments }) {
   const items = lineState.items || [];
   const shots = (Array.isArray(attachments) ? attachments : []).filter((a) => a && a.url);
+  // One design feature per line, blank lines dropped.
+  const feats = String(features || '').split('\n').map((f) => f.trim()).filter(Boolean);
 
   // Blend material markup into each line so the parts sum EXACTLY to the material total.
   const weights = items.map((it) => lineCost(it));
@@ -68,6 +70,15 @@ export default function PrintQuote({ shop, type, state, designRef, customer, not
           {specs.map((sp, i) => (
             <span key={i} className="pq-spec"><b>{sp.label}:</b> {sp.value}</span>
           ))}
+        </div>
+      )}
+
+      {feats.length > 0 && (
+        <div className="pq-feats">
+          <div className="pq-feats-title">What&rsquo;s built into it</div>
+          <ul className="pq-feats-list">
+            {feats.map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
         </div>
       )}
 

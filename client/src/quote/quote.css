@@ -586,6 +586,28 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .pq-terms { font-size: 0.8rem; color: var(--steel); display: flex; flex-direction: column; gap: 6px; padding-bottom: 24px; }
 .qa .pq-thanks { font-family: 'Fraunces', serif; font-style: italic; font-weight: 300; font-size: 1.05rem; color: var(--ink); margin-top: 16px; }
 
+/* ---- Design features (builder panel) -------------------------------------- */
+
+.qa .feats { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.qa .feats-head > span { font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--steel); }
+.qa .feats-hint { margin: 8px 0 0; font-size: 0.78rem; color: var(--steel); line-height: 1.5; }
+.qa .feats-input {
+  margin-top: 12px; width: 100%; background: transparent;
+  border: 1px solid var(--line-strong); color: var(--ink);
+  font-family: inherit; font-size: 0.85rem; line-height: 1.6; padding: 10px 12px; resize: vertical;
+}
+.qa .feats-input:focus { outline: none; border-color: var(--ink); }
+
+/* ---- Design features on the printed quote --------------------------------- */
+
+.qa .pq-feats { padding: 20px 0; border-bottom: 1px solid var(--line); }
+.qa .pq-feats-title {
+  font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--steel); margin-bottom: 10px;
+}
+.qa .pq-feats-list { margin: 0; padding-left: 18px; display: grid; gap: 5px; }
+.qa .pq-feats-list li { font-size: 0.88rem; color: var(--ink); line-height: 1.5; }
+
 /* ---- Quote attachments (builder panel) ------------------------------------ */
 
 .qa .attach { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
@@ -632,6 +654,7 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   .qa .no-print { display: none !important; }
   /* Keep a simulation render and its caption on one page */
   .qa .pq-shot { break-inside: avoid; page-break-inside: avoid; }
+  .qa .pq-feats { break-inside: avoid; page-break-inside: avoid; }
   .qa .pq-shots { break-inside: avoid-page; }
   /* Hide the suite shell (sidebar + topbars) so only the quote prints.
      qa-printing is set on <body> while the print view is open. */

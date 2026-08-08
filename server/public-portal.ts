@@ -271,6 +271,13 @@ export function registerPublicPortalRoutes(app: Express): void {
         acceptedAt: iso(quote.acceptedAt),
         shop: currentShop(),
         lines: bestEffortLines(quote),
+        // "What's built into it" — one design feature per line in the payload.
+        features: String(sess?.features ?? "")
+          .split("\n")
+          .map((f: string) => f.trim())
+          .filter(Boolean)
+          .slice(0, 20)
+          .map((f: string) => f.slice(0, 200)),
         // Simulation renders / drawings the owner attached. Only our own
         // /uploads paths go out — a payload that somehow carried an absolute
         // URL would otherwise turn the customer's quote page into a beacon

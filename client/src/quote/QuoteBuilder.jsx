@@ -55,6 +55,8 @@ function newSession(type, priceBook) {
     customer: { name: '', company: '', phone: '', email: '', location: '' },
     notes: '',
     depositPct: 0,
+    // What we built in — one design feature per line, printed as bullets.
+    features: '',
     // Simulation renders / shop drawings shown to the customer ({url, caption}).
     attachments: [],
     discountPct: 0,
@@ -90,6 +92,7 @@ function migrateSession(sess, priceBook) {
     discountPct: sess.discountPct ?? 0,
     priceBookSnapshot: sess.priceBookSnapshot ?? null,
     priceBookSnapshotAt: sess.priceBookSnapshotAt ?? null,
+    features: typeof sess.features === 'string' ? sess.features : '',
     attachments: Array.isArray(sess.attachments) ? sess.attachments : [],
     quoteId: sess.quoteId ?? null,
     sid: sess.sid ?? newSid(),
@@ -438,10 +441,12 @@ export default function QuoteBuilder({ initialSettings }) {
             customer={session.customer}
             notes={session.notes}
             depositPct={session.depositPct}
+            features={session.features}
             attachments={session.attachments}
             quoteId={session.quoteId}
             onChangeCustomer={setCustomer}
             onChangeNotes={(v) => patchSession({ notes: v })}
+            onChangeFeatures={(v) => patchSession({ features: v })}
             onChangeAttachments={(v) => patchSession({ attachments: v })}
             onChangeDeposit={(v) => patchSession({ depositPct: v })}
             onBack={() => setView('configure')}
@@ -469,6 +474,7 @@ export default function QuoteBuilder({ initialSettings }) {
               customer={session.customer}
               notes={session.notes}
               depositPct={session.depositPct}
+              features={session.features}
               attachments={session.attachments}
               number={session.number || '—'}
               createdAt={session.createdAt}

@@ -4,8 +4,8 @@ import ShareQuote from './ShareQuote.jsx';
 import Attachments from './Attachments.jsx';
 
 export default function QuoteForm({
-  type, state, totals, designRef, customer, notes, depositPct, quoteId, attachments,
-  onChangeCustomer, onChangeNotes, onChangeAttachments, onChangeDeposit, onBack, onPreview, onPersist,
+  type, state, totals, designRef, customer, notes, depositPct, quoteId, features, attachments,
+  onChangeCustomer, onChangeNotes, onChangeFeatures, onChangeAttachments, onChangeDeposit, onBack, onPreview, onPersist,
 }) {
   const field = (key, label, props = {}) => (
     <label className="field">
@@ -43,6 +43,24 @@ export default function QuoteForm({
               <span>Deposit %</span>
               <input type="number" min="0" max="100" step="5" value={depositPct} onChange={(e) => onChangeDeposit(e.target.value)} />
             </label>
+            <div className="feats">
+              <div className="feats-head"><span>Design features</span></div>
+              <p className="feats-hint">
+                What you built into this one, one per line — they print on the quote as
+                bullets so the customer sees the work behind the number.
+              </p>
+              <textarea
+                rows="5"
+                className="feats-input"
+                value={features || ''}
+                placeholder={[
+                  'Fully welded, ground smooth and sealed',
+                  'Reinforced center stretcher for a 300 lb top load',
+                  'Adjustable levelers for uneven floors',
+                ].join('\n')}
+                onChange={(e) => onChangeFeatures(e.target.value)}
+              />
+            </div>
             <Attachments items={attachments} onChange={onChangeAttachments} />
           </div>
 
