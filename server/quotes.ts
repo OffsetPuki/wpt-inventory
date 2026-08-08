@@ -122,14 +122,26 @@ function effectiveBook(sess: { priceBookSnapshot?: unknown } | null): Record<str
   return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
 }
 
-// "Q-<year>-<0000>" — same allocation scheme as estimate numbers: seq seeded
-// from max(id)+1, bounded retry on UNIQUE collision.
+// Where the shop's own quote book stood when the suite took over. New numbers
+// continue from here instead of restarting at 1 — customers who have been
+// quoted before see the sequence they expect. Inert once numbering passes it.
+const NUMBER_START = 631;
+
+// "Q-<year>-<0000>" — bounded retry on UNIQUE collision.
+//
+// The sequence is seeded from the highest number already ISSUED, not from
+// max(id): row ids and quote numbers came apart the moment numbering started
+// at 631, and a number a customer is holding must never be handed out twice.
+// One continuous ledger across years (the tail always starts at offset 8), so
+// January doesn't reset the count.
 function insertQuoteWithNumber(
   values: Omit<typeof quotes.$inferInsert, "number">,
 ): typeof quotes.$inferSelect {
   const year = new Date().getFullYear();
-  let seq = (db.select({ m: sql<number>`coalesce(max(${quotes.id}), 0)` })
-    .from(quotes).get()?.m ?? 0) + 1;
+  const issued = db.select({
+    m: sql<number>`coalesce(max(cast(substr(${quotes.number}, 8) as integer)), 0)`,
+  }).from(quotes).get()?.m ?? 0;
+  let seq = Math.max(issued + 1, NUMBER_START);
   for (let attempt = 0; attempt < 50; attempt++, seq++) {
     const number = `Q-${year}-${String(seq).padStart(4, "0")}`;
     try {
