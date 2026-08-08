@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { fmtMoney, round2 } from '../lib/format.js';
-import { lineCost, matRate, MAT_KIND, MAT_QTY_UNIT } from '../lib/estimate.js';
+import { lineCost, matRate, materialLibrary, MAT_KIND, MAT_QTY_UNIT } from '../lib/estimate.js';
 
 // Field labels per generic item kind.
 const KIND_FIELDS = {
@@ -125,7 +125,7 @@ function AddLineForm({ priceBook, onAdd, onCancel }) {
           <label>Material</label>
           <select className="cell" style={{ width: '13rem' }} value={materialId} onChange={(e) => pickMaterial(e.target.value)}>
             <option value="">— none (price it yourself) —</option>
-            {Object.keys(materials).map((id) => (
+            {materialLibrary(priceBook).map((id) => (
               <option key={id} value={id}>{materials[id].name}</option>
             ))}
           </select>

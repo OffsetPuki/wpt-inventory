@@ -6,7 +6,7 @@
 
 import { DEFAULT_PRICE_BOOK } from '../client/src/quote/data/priceBook.js';
 import {
-  deriveItems, buildLineState, deriveWarnings, materialTotals, lineCost, matRate,
+  deriveItems, buildLineState, deriveWarnings, materialTotals, materialLibrary, lineCost, matRate,
 } from '../client/src/quote/lib/estimate.js';
 import { computeTotals } from '../client/src/quote/lib/quote.js';
 import { defaultState } from '../client/src/quote/data/configurators.js';
@@ -221,6 +221,22 @@ console.log('\nCustom lines:');
   const sum = materialTotals(ls.items, book);
   const bought = sum.find((m) => m.id === 'angle_3x2');
   check('added material lands in the buy list', bought && approx(bought.qty, 14) && bought.name === '3×2 angle iron', JSON.stringify(bought));
+}
+
+// ── 12. Deleted materials ─────────────────────────────────────────────────────
+console.log('\nDeleted materials:');
+{
+  // A built-in can't just lose its key — the defaults merge it back — so it's
+  // tombstoned: out of the library, priced at $0, and flagged on the quote.
+  const book = deepMerge(pb, { removedMaterials: ['concrete_bag'] });
+  check('leaves the visible library', !materialLibrary(book).includes('concrete_bag'));
+  check('other materials stay', materialLibrary(book).includes('tube_4x4_316'));
+  check('prices at $0', matRate(book, 'concrete_bag') === 0);
+  const ls = buildLineState('fence', defaultState('fence'), book, {});
+  const conc = item(ls.items, 'concrete');
+  check('its line is flagged, not silently charged', conc && conc.unpriced === true && lineCost(conc) === 0, JSON.stringify(conc));
+  // Putting it back restores the seeded price — nothing was destroyed.
+  check('restores when put back', matRate(deepMerge(pb, { removedMaterials: [] }), 'concrete_bag') === 7);
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);

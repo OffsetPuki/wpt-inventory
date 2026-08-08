@@ -43,9 +43,29 @@ function num(v, dflt) {
   return Number.isFinite(n) ? n : dflt;
 }
 
+/**
+ * Materials the owner deleted from the library. Built-in ones can't simply be
+ * dropped — they'd merge straight back from the defaults — so deletion is a
+ * tombstone: hidden from the library, and priced at $0 (any formula still
+ * reaching for one flags "⚠ unset rate" instead of quietly charging for it).
+ */
+function isRemoved(pb, id) {
+  const list = pb && pb.removedMaterials;
+  return Array.isArray(list) && list.includes(id);
+}
+
 /** Material definition from the shared library. */
 export function matDef(pb, id) {
-  return ((pb && pb.materials) || {})[id] || { name: id, unit: 'ft', cost: 0, wastePct: 0 };
+  const m = ((pb && pb.materials) || {})[id];
+  if (!m) return { name: id, unit: 'ft', cost: 0, wastePct: 0 };
+  if (isRemoved(pb, id)) return { ...m, cost: 0, wastePct: 0 };
+  return m;
+}
+
+/** The visible library — what the price book and "+ Add line" list. */
+export function materialLibrary(pb) {
+  const all = (pb && pb.materials) || {};
+  return Object.keys(all).filter((id) => !isRemoved(pb, id));
 }
 
 /** Effective $/unit for a material: cost with its waste % blended in. */

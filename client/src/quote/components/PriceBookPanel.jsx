@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { DEFAULT_PRICE_BOOK, PRICE_BOOK_SCHEMA, MATERIAL_UNITS } from '../data/priceBook.js';
+import { materialLibrary } from '../lib/estimate.js';
 import { getPath } from '../lib/store.js';
 
 function Field({ field, value, onChange }) {
@@ -53,6 +54,8 @@ function Freshness({ updatedAt }) {
  */
 function MaterialsGroup({ priceBook, onChange }) {
   const materials = priceBook.materials || {};
+  const removed = Array.isArray(priceBook.removedMaterials) ? priceBook.removedMaterials : [];
+  const visible = materialLibrary(priceBook);
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('ft');
   const [cost, setCost] = useState('');
@@ -71,14 +74,24 @@ function MaterialsGroup({ priceBook, onChange }) {
     setName(''); setCost('');
   };
 
-  // Only materials YOU added can be deleted — the built-in ones are referenced
-  // by the product formulas (and would come straight back from the defaults).
+  // A material you added is deleted outright. A built-in one is tombstoned
+  // instead — the defaults would merge it straight back — so it can be put
+  // back, and any product formula still using it prices at $0 and says so.
   const removeMaterial = (id) => {
-    if (!window.confirm(`Delete "${materials[id].name}" from the material library?`)) return;
-    const next = { ...materials };
-    delete next[id];
-    onChange('materials', next);
+    const builtIn = !!DEFAULT_PRICE_BOOK.materials[id];
+    const warn = builtIn
+      ? `Delete "${materials[id].name}"?\n\nAny product priced with it (posts, frames, roofs...) will show $0 and flag an unset rate until you put it back.`
+      : `Delete "${materials[id].name}" from the material library?`;
+    if (!window.confirm(warn)) return;
+    if (builtIn) {
+      onChange('removedMaterials', [...removed, id]);
+    } else {
+      const next = { ...materials };
+      delete next[id];
+      onChange('materials', next);
+    }
   };
+  const restoreMaterial = (id) => onChange('removedMaterials', removed.filter((r) => r !== id));
 
   return (
     <div className="pb-group">
@@ -88,10 +101,9 @@ function MaterialsGroup({ priceBook, onChange }) {
         website ballpark — reprices automatically. Waste % is blended into the rate.
         Add your own here; they show up in the quote's "+ Add line" picker.
       </p>
-      {Object.keys(materials).map((id) => {
+      {visible.map((id) => {
         const def = materials[id];
         const suffix = (MATERIAL_UNITS[def.unit] || {}).suffix || '';
-        const own = !DEFAULT_PRICE_BOOK.materials[id];
         return (
           <div key={id}>
             <Field
@@ -105,14 +117,28 @@ function MaterialsGroup({ priceBook, onChange }) {
               value={getPath(priceBook, `materials.${id}.wastePct`)}
               onChange={onChange}
             />
-            {own && (
-              <button type="button" className="estimate-reset" onClick={() => removeMaterial(id)}>
-                ✕ delete material
-              </button>
-            )}
+            <button type="button" className="estimate-reset" onClick={() => removeMaterial(id)}>
+              ✕ delete material
+            </button>
           </div>
         );
       })}
+
+      {removed.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <p className="note" style={{ margin: '0 0 6px' }}>Deleted — not priced on any quote:</p>
+          {removed.map((id) => (
+            <div key={id} className="pb-field">
+              <span className="pb-label" style={{ textDecoration: 'line-through', opacity: 0.6 }}>
+                {(materials[id] || {}).name || id}
+              </span>
+              <button type="button" className="estimate-reset" onClick={() => restoreMaterial(id)}>
+                ↩ restore
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <form className="pb-field" style={{ flexWrap: 'wrap', gap: 8, paddingTop: 18 }} onSubmit={addMaterial}>
         <input
