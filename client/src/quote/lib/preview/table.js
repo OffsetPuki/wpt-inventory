@@ -78,8 +78,8 @@ export function renderTable(state) {
     ])}" fill="${frameDark}" />`);
   }
 
-  // ---- cross members between the side frames, one every ~16 in ----
-  const crossCount = Math.max(3, Math.round((baseLenFt * 12) / 16) + 1);
+  // ---- top-frame cross members, one every ~24 in (matches the estimator) ----
+  const crossCount = Math.max(2, Math.round((baseLenFt * 12) / 24) + 1);
   const crossT = Math.max(2, pxPerFt * (2 / 12));
   for (let i = 0; i <= crossCount; i++) {
     const px = x0 + (lenPx * i) / crossCount;

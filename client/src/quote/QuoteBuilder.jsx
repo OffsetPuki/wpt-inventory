@@ -310,6 +310,22 @@ export default function QuoteBuilder({ initialSettings }) {
       return { ...s, overrides: { ...s.overrides, items } };
     });
 
+  // Strike a derived line off this quote (or put it back). Custom lines are
+  // deleted outright above — you typed them, so removing means gone; a derived
+  // line is regenerated from the design every time, so it needs a flag.
+  const setLineRemoved = (key, removed) =>
+    setSession((s) => {
+      const items = { ...(s.overrides.items || {}) };
+      const next = { ...(items[key] || {}) };
+      if (removed) next.removed = true;
+      else delete next.removed;
+      // An override that no longer says anything is just noise — drop it, so
+      // "Reset to price book" stays an honest signal of real edits.
+      if (Object.keys(next).length === 0) delete items[key];
+      else items[key] = next;
+      return { ...s, overrides: { ...s.overrides, items } };
+    });
+
   // Unlock a snapshot-priced quote so it reprices with today's book (the next
   // save freezes today's book in as the new snapshot).
   const unlockPrices = () =>
@@ -419,6 +435,7 @@ export default function QuoteBuilder({ initialSettings }) {
             onEditInstall={editInstall}
             onAddCustomLine={addCustomLine}
             onRemoveCustomLine={removeCustomLine}
+            onSetLineRemoved={setLineRemoved}
             onUnlockPrices={unlockPrices}
             onResetOverrides={resetOverrides}
             onChangeMaterialMarkup={(v) => patchSession({ materialMarkupPct: v })}

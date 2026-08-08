@@ -586,6 +586,16 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .pq-terms { font-size: 0.8rem; color: var(--steel); display: flex; flex-direction: column; gap: 6px; padding-bottom: 24px; }
 .qa .pq-thanks { font-family: 'Fraunces', serif; font-style: italic; font-weight: 300; font-size: 1.05rem; color: var(--ink); margin-top: 16px; }
 
+/* ---- Struck-off line items ------------------------------------------------ */
+
+/* The ✕ only shows on hover/focus so the list stays calm to read */
+.qa .line-remove { margin-left: 8px; opacity: 0; transition: opacity 0.15s ease; }
+.qa .line:hover .line-remove,
+.qa .line-remove:focus-visible { opacity: 1; }
+.qa .removed-line .line-name { color: var(--steel); text-decoration: line-through; }
+.qa .removed-line .line-remove { opacity: 1; text-decoration: none; }
+.qa .removed-line .line-cost { color: var(--steel); }
+
 /* ---- Design features (builder panel) -------------------------------------- */
 
 .qa .feats { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }

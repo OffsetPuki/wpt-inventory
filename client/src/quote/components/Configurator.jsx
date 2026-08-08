@@ -11,7 +11,7 @@ export default function Configurator({
   type, state, lineState, totals, warnings, materialsSummary, priceLockAt,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
   onChangeOption, onEditItem, onEditLabor, onEditInstall,
-  onAddCustomLine, onRemoveCustomLine, onUnlockPrices, onResetOverrides,
+  onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onUnlockPrices, onResetOverrides,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
 }) {
@@ -52,6 +52,7 @@ export default function Configurator({
               onEditInstall={onEditInstall}
               onAddCustomLine={onAddCustomLine}
               onRemoveCustomLine={onRemoveCustomLine}
+              onSetLineRemoved={onSetLineRemoved}
               onUnlockPrices={onUnlockPrices}
               onReset={onResetOverrides}
               onChangeMaterialMarkup={onChangeMaterialMarkup}

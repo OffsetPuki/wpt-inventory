@@ -650,10 +650,17 @@ function estimatePergola(s, pb) {
  * The shop math is measured straight off the CJM bar-table Fusion model, so a
  * default 8 ft × 21 in table reproduces the real cut list:
  *   4 legs           2×3 tube × frame height
- *   4 long rails     2×3 tube, inset behind the legs (top pair + lower pair)
- *   cross members    2×2 tube, one every ~16 in, 6 in in from each edge
- *   foot rest        2×2 tube, full run (optional)
+ *   4 top rails      2×3 tube, inset 8 in behind the legs
+ *   5 cross members  2×3 tube, one every ~24 in across the top frame
+ *   foot rest        2×2 tube: a full-length rail on two 12 in end supports
  *   foot plates      1/2 in plate, 6 in deep under each end frame
+ *
+ * The foot rest's two end supports belong to the FOOT REST, not the top frame —
+ * they sit at its height (7–9 in off the floor), not up at 38 in with the rest
+ * of the cross members. Counting them as cross members made a table quoted
+ * without a foot rest pay for brackets it doesn't get, and a table WITH one pay
+ * for the foot rest twice.
+ *
  * Everything scales with `qty` — furniture goes out in sets far more often
  * than a fence does.
  */
@@ -668,9 +675,9 @@ function estimateTable(s, pb) {
   const baseWidthFt = base.widthIn / 12;
   const planArea = round2(base.lengthFt * baseWidthFt * qty);
 
-  const railFt = Math.max(0, base.lengthFt - 0.5);            // rails stop behind the legs
+  const railFt = Math.max(0, base.lengthFt - 8 / 12);          // rails stop 8 in short of the ends
   const crossFt = Math.max(4, base.widthIn - 12) / 12;         // 6 in in from each edge
-  const crossCount = Math.max(3, Math.round((base.lengthFt * 12) / 16) + 1);
+  const crossCount = Math.max(2, Math.round((base.lengthFt * 12) / 24) + 1);
 
   const items = [];
 
@@ -680,16 +687,18 @@ function estimateTable(s, pb) {
   }));
   pushPriced(items, matItem(pb, {
     key: 'rails', materialId: 'tube_2x3', qty: 4 * railFt * qty,
-    name: `Top & lower rails — ${4 * qty} × ${round2(railFt)} ft (2×3 tube)`,
+    name: `Top rails — ${4 * qty} × ${round2(railFt)} ft (2×3 tube)`,
   }));
   pushPriced(items, matItem(pb, {
-    key: 'cross', materialId: 'tube_2x2', qty: crossCount * crossFt * qty,
-    name: `Cross members — ${crossCount * qty} × ${Math.round(crossFt * 12)} in (2×2 tube, one every 16 in)`,
+    key: 'cross', materialId: 'tube_2x3', qty: crossCount * crossFt * qty,
+    name: `Top cross members — ${crossCount * qty} × ${Math.round(crossFt * 12)} in (2×3 tube, one every 24 in)`,
   }));
   if (s.footrest !== 'no') {
+    // The rail AND its two end supports — one line, so the foot rest's whole
+    // cost appears exactly once and disappears entirely when it's not wanted.
     pushPriced(items, matItem(pb, {
-      key: 'footrest', materialId: 'tube_2x2', qty: railFt * qty,
-      name: `Foot rest — ${qty} × ${round2(railFt)} ft (2×2 tube)`,
+      key: 'footrest', materialId: 'tube_2x2', qty: (railFt + 2 * crossFt) * qty,
+      name: `Foot rest — ${qty} × ${round2(railFt)} ft rail on ${2 * qty} × ${Math.round(crossFt * 12)} in supports (2×2 tube)`,
     }));
   }
   pushPriced(items, matItem(pb, {
@@ -799,9 +808,23 @@ export function buildLineState(type, state, priceBook, overrides) {
     merged.push({ key, name: o.name || 'Custom line', kind: o.kind || 'flat', qty: o.qty ?? 1, rate: o.rate ?? 0, edited: true, custom: true });
   });
 
+  // Lines the owner struck off this quote ("customer supplies the hardware").
+  // They leave `items` entirely, so pricing, the materials summary and the
+  // printed quote need no special-casing — but they're handed back so the UI
+  // can offer them for restore instead of stranding them behind a full reset.
+  const removedItems = [];
+  const kept = [];
+  for (const it of merged) {
+    if (ovItems[it.key] && ovItems[it.key].removed) removedItems.push({ ...it, removed: true });
+    else kept.push(it);
+  }
+  merged.length = 0;
+  merged.push(...kept);
+
   // Consumables ride on the material subtotal — recompute from the
-  // POST-override lines (including custom ones) so per-quote edits move it
-  // too. An explicit override on the consumables line itself still wins.
+  // POST-override lines (including custom ones, minus removed ones) so
+  // per-quote edits move it too. An explicit override on the consumables line
+  // itself still wins.
   if (!ovItems.consumables) {
     const ci = merged.findIndex((m) => m.key === 'consumables');
     if (ci !== -1) {
@@ -825,7 +848,7 @@ export function buildLineState(type, state, priceBook, overrides) {
     edited: ov.install?.hours != null || ov.install?.rate != null,
   };
 
-  return { items: merged, labor, install };
+  return { items: merged, removedItems, labor, install };
 }
 
 // -----------------------------------------------------------------------------

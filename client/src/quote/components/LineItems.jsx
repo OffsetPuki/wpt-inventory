@@ -29,13 +29,12 @@ function ItemRow({ item, onEdit, onRemove }) {
       <div className="line-name">
         <span className="dot" />{item.name}
         {item.unpriced && <span className="line-warn" title="A rate driving this line isn't set in the Price Book — open it and fill in the missing rate.">⚠ unset rate</span>}
-        {item.custom && onRemove && (
+        {onRemove && (
           <button
             type="button"
-            className="estimate-reset"
-            style={{ marginLeft: 8 }}
-            title="Remove this custom line"
-            onClick={() => onRemove(item.key)}
+            className="estimate-reset line-remove"
+            title={item.custom ? 'Delete this custom line' : 'Take this line off the quote (you can put it back)'}
+            onClick={() => onRemove(item)}
           >
             ✕
           </button>
@@ -89,13 +88,14 @@ function HoursRow({ title, data, onEdit }) {
 export default function LineItems({
   lineState, totals, warnings, materialsSummary, priceLockAt,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
-  onEditItem, onEditLabor, onEditInstall, onAddCustomLine, onRemoveCustomLine,
+  onEditItem, onEditLabor, onEditInstall, onAddCustomLine, onRemoveCustomLine, onSetLineRemoved,
   onUnlockPrices, onReset,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate,
 }) {
   const { items, labor, install } = lineState;
-  const edited = items.some((it) => it.edited) || labor.edited || (install && install.edited);
+  const removedItems = lineState.removedItems || [];
+  const edited = items.some((it) => it.edited) || removedItems.length > 0 || labor.edited || (install && install.edited);
   const unpricedCount = items.filter((it) => it.unpriced).length;
   const deliveryCost = (Number(deliveryMiles) || 0) * (Number(deliveryRate) || 0);
   const rawCost = round2(totals.subtotal - totals.totalMarkup);
@@ -104,6 +104,13 @@ export default function LineItems({
   const addCustom = () => {
     const name = window.prompt('Name for the custom line (e.g. "Core drilling — 4 holes"):');
     if (name && name.trim()) onAddCustomLine(name.trim());
+  };
+
+  // A custom line is deleted for good; a derived one is struck off and can be
+  // put back from the "Taken off this quote" list below.
+  const removeLine = (item) => {
+    if (item.custom) onRemoveCustomLine(item.key);
+    else onSetLineRemoved(item.key, true);
   };
 
   return (
@@ -138,7 +145,7 @@ export default function LineItems({
 
       <div className="lines">
         {items.map((item) => (
-          <ItemRow key={item.key} item={item} onEdit={onEditItem} onRemove={onRemoveCustomLine} />
+          <ItemRow key={item.key} item={item} onEdit={onEditItem} onRemove={removeLine} />
         ))}
 
         {/* Shop fabrication */}
@@ -163,6 +170,34 @@ export default function LineItems({
           </div>
         </div>
       </div>
+
+      {/* Lines struck off this quote — parked here, not lost. */}
+      {removedItems.length > 0 && (
+        <div className="lines" style={{ marginTop: 10 }}>
+          <div className="estimate-head">
+            <span className="eyebrow">Taken off this quote</span>
+            <button className="estimate-reset" onClick={() => removedItems.forEach((it) => onSetLineRemoved(it.key, false))}>
+              Put all back
+            </button>
+          </div>
+          {removedItems.map((item) => (
+            <div key={item.key} className="line removed-line">
+              <div className="line-name">
+                <span className="dot" />{item.name}
+                <button
+                  type="button"
+                  className="estimate-reset line-remove"
+                  title="Put this line back on the quote"
+                  onClick={() => onSetLineRemoved(item.key, false)}
+                >
+                  ↩ restore
+                </button>
+              </div>
+              <div className="line-cost">—</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Shop materials summary — what to actually buy, per shared material. */}
       {materialsSummary && materialsSummary.length > 0 && (
