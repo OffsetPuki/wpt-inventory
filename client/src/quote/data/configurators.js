@@ -81,9 +81,33 @@ export const TYPES = [
   { key: 'carport', label: 'Carport', tagline: 'Free-standing or attached cover' },
   { key: 'railing', label: 'Railing', tagline: 'Stairs, balconies & handrails' },
   { key: 'pergola', label: 'Pergola', tagline: 'Rectangular shade structure' },
+  { key: 'table',   label: 'Table',   tagline: 'Steel base — customer brings the top' },
 ];
 
 const ftDisplay = (v) => `${v} ft`;
+
+// ── Table base geometry ──────────────────────────────────────────────────────
+// Measured off the CJM bar-table Fusion design: the steel base runs 1.5 in past
+// the wood top on every side (a 96 × 21 in top sits on a 99 × 24 in base). The
+// sliders everywhere — website and shop — set the TOP size, because that's what
+// the customer goes and buys, so the base footprint is always derived from it.
+export const TABLE_BASE_OVERHANG_IN = 1.5;
+
+/** Steel-base footprint for a given top size → { lengthFt, widthIn }. */
+export function tableBaseFootprint(s) {
+  const over = TABLE_BASE_OVERHANG_IN;
+  return {
+    lengthFt: (Number(s.lengthFt) || 0) + (2 * over) / 12,
+    widthIn: (Number(s.widthIn) || 0) + 2 * over,
+  };
+}
+
+/** 8.25 → "8 ft 3 in" — the same reading the website's designer shows. */
+export function ftIn(ft) {
+  const whole = Math.floor((Number(ft) || 0) + 1e-6);
+  const inches = Math.round(((Number(ft) || 0) - whole) * 12);
+  return inches ? `${whole} ft ${inches} in` : `${whole} ft`;
+}
 
 export const CONFIG = {
   // ---- Fence ----------------------------------------------------------------
@@ -480,6 +504,46 @@ export const CONFIG = {
       { kind: 'swatch', name: 'color', label: 'Frame finish', options: FINISHES },
     ],
   },
+
+  // ---- Table ------------------------------------------------------------------
+  // Mirrors the website's table designer (CJM/src/pages/customize/table.astro).
+  // CJM builds the STEEL BASE ONLY — the customer supplies their own wood top,
+  // so every size here describes the top they're buying and the base is built
+  // to suit it. Sizes run wider than the website's sliders on purpose: the shop
+  // takes phone orders the web tool won't cover.
+  table: {
+    defaults: {
+      tableType: 'bar',
+      qty: 1,
+      lengthFt: 8,         // top length — the website designer's default
+      widthIn: 21,         // top width
+      frameHeightIn: 40,   // steel base height
+      topThicknessIn: 2,   // the top the CUSTOMER supplies — 40 + 2 = 42 in bar height
+      footrest: 'yes',
+      coating: 'standard',
+      color: '#0A0A0A',
+    },
+    controls: [
+      // One per design in the website's TABLES list — add here when a new
+      // Fusion model ships there.
+      {
+        kind: 'segment', name: 'tableType', label: 'Table type', cols: 3,
+        options: [{ value: 'bar', label: 'Bar Table' }],
+      },
+      { kind: 'number', name: 'qty', label: 'How many', unit: 'tables', min: 1, max: 50, step: 1 },
+      { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', min: 2, max: 16, step: 0.5 },
+      { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', min: 12, max: 48, step: 1 },
+      { kind: 'number', name: 'frameHeightIn', label: 'Frame height', unit: 'in', min: 16, max: 46, step: 1 },
+      { kind: 'number', name: 'topThicknessIn', label: "Customer's top thickness", unit: 'in', min: 0.5, max: 4, step: 0.25 },
+      {
+        kind: 'segment', name: 'footrest', label: 'Foot rest', cols: 2,
+        options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }],
+      },
+      coatingControl,
+      // Same four swatches the website's table tool offers (adds White).
+      { kind: 'swatch', name: 'color', label: 'Finish', options: RAILING_FINISHES },
+    ],
+  },
 };
 
 export function typeLabel(type) {
@@ -530,6 +594,11 @@ export function summaryLine(type, s) {
     const legs = optionLabel('pergola', 'legs', s.legs);
     const shade = s.shade === 'panels' ? ' · shade panels' : '';
     return `${legs} · ${s.width}×${s.depth} ft · ${s.height} ft${shade} · ${fin}`;
+  }
+  if (type === 'table') {
+    const tt = optionLabel('table', 'tableType', s.tableType || 'bar');
+    const n = Number(s.qty) > 1 ? `${s.qty} × ` : '';
+    return `${n}${tt} · ${s.lengthFt} ft × ${s.widthIn} in top · ${s.frameHeightIn} in frame · ${fin}`;
   }
   // carport
   const roof = optionLabel('carport', 'roof', s.roof);
@@ -618,6 +687,24 @@ export function specRows(type, s) {
     ];
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('pergola', 'coating', s.coating)]);
     rows.push(['Frame finish', fin]);
+    return rows.map(([label, value]) => ({ label, value }));
+  }
+  if (type === 'table') {
+    const base = tableBaseFootprint(s);
+    const thick = Number(s.topThicknessIn) || 0;
+    const overall = (Number(s.frameHeightIn) || 0) + thick;
+    const rows = [['Type', optionLabel('table', 'tableType', s.tableType || 'bar')]];
+    if (Number(s.qty) > 1) rows.push(['Quantity', `${s.qty} tables`]);
+    rows.push(['Top size', `${s.lengthFt} ft × ${s.widthIn} in`]);
+    rows.push(['Steel base', `${ftIn(base.lengthFt)} × ${Math.round(base.widthIn)} in`]);
+    rows.push(['Frame height', `${s.frameHeightIn} in`]);
+    rows.push(['Overall height', `${overall} in with a ${thick} in top`]);
+    rows.push(['Foot rest', s.footrest === 'no' ? 'No' : 'Yes']);
+    if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('table', 'coating', s.coating)]);
+    rows.push(['Finish', fin]);
+    // The product boundary, stated on the printed quote so there's no argument
+    // later about who was buying the wood.
+    rows.push(['Scope', 'Steel base only — customer supplies the wood top']);
     return rows.map(([label, value]) => ({ label, value }));
   }
   // carport

@@ -50,6 +50,20 @@ const ICONS = {
       <line x1="30" y1="164" x2="290" y2="164" strokeOpacity="0.25" />
     </svg>
   ),
+  table: (
+    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      {/* wood top — dashed, because the customer supplies it */}
+      <path d="M24 58 H272 V68 H24 Z" strokeOpacity="0.45" strokeDasharray="5 3" />
+      <path d="M24 58 L46 46 H294 L272 58" strokeOpacity="0.45" strokeDasharray="5 3" />
+      <path d="M294 46 V56 L272 68" strokeOpacity="0.45" strokeDasharray="5 3" />
+      {/* steel base */}
+      <path d="M56 68 V158" /><path d="M240 68 V158" />
+      <path d="M40 158 H72" /><path d="M224 158 H256" />
+      <path d="M78 56 V146" strokeOpacity="0.4" /><path d="M262 56 V146" strokeOpacity="0.4" />
+      <path d="M56 132 H240" />
+      <path d="M14 158 H306" strokeOpacity="0.25" />
+    </svg>
+  ),
 };
 
 export default function Home({ onPick, onFind }) {

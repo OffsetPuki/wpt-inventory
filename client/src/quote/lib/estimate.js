@@ -32,7 +32,7 @@
 // =============================================================================
 
 import { round2 } from './format.js';
-import { optionLabel, finishLabel } from '../data/configurators.js';
+import { optionLabel, finishLabel, tableBaseFootprint } from '../data/configurators.js';
 
 // ── Number & material helpers ─────────────────────────────────────────────────
 
@@ -643,7 +643,80 @@ function estimatePergola(s, pb) {
   };
 }
 
-const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola };
+/**
+ * Table base. CJM builds the STEEL BASE ONLY — the customer's wood top is not
+ * a line on this quote, by design.
+ *
+ * The shop math is measured straight off the CJM bar-table Fusion model, so a
+ * default 8 ft × 21 in table reproduces the real cut list:
+ *   4 legs           2×3 tube × frame height
+ *   4 long rails     2×3 tube, inset behind the legs (top pair + lower pair)
+ *   cross members    2×2 tube, one every ~16 in, 6 in in from each edge
+ *   foot rest        2×2 tube, full run (optional)
+ *   foot plates      1/2 in plate, 6 in deep under each end frame
+ * Everything scales with `qty` — furniture goes out in sets far more often
+ * than a fence does.
+ */
+function estimateTable(s, pb) {
+  const t = pb.table || {};
+  const qty = Math.max(1, Math.round(num(s.qty, 1)));
+  const topLenFt = Math.max(0, num(s.lengthFt, 0));
+  const frameHeightIn = num(s.frameHeightIn, 40);
+  const frameHeightFt = frameHeightIn / 12;
+
+  const base = tableBaseFootprint({ lengthFt: topLenFt, widthIn: num(s.widthIn, 0) });
+  const baseWidthFt = base.widthIn / 12;
+  const planArea = round2(base.lengthFt * baseWidthFt * qty);
+
+  const railFt = Math.max(0, base.lengthFt - 0.5);            // rails stop behind the legs
+  const crossFt = Math.max(4, base.widthIn - 12) / 12;         // 6 in in from each edge
+  const crossCount = Math.max(3, Math.round((base.lengthFt * 12) / 16) + 1);
+
+  const items = [];
+
+  pushPriced(items, matItem(pb, {
+    key: 'legs', materialId: 'tube_2x3', qty: 4 * frameHeightFt * qty,
+    name: `Legs — ${4 * qty} × ${round2(frameHeightIn)} in (2×3 tube)`,
+  }));
+  pushPriced(items, matItem(pb, {
+    key: 'rails', materialId: 'tube_2x3', qty: 4 * railFt * qty,
+    name: `Top & lower rails — ${4 * qty} × ${round2(railFt)} ft (2×3 tube)`,
+  }));
+  pushPriced(items, matItem(pb, {
+    key: 'cross', materialId: 'tube_2x2', qty: crossCount * crossFt * qty,
+    name: `Cross members — ${crossCount * qty} × ${Math.round(crossFt * 12)} in (2×2 tube, one every 16 in)`,
+  }));
+  if (s.footrest !== 'no') {
+    pushPriced(items, matItem(pb, {
+      key: 'footrest', materialId: 'tube_2x2', qty: railFt * qty,
+      name: `Foot rest — ${qty} × ${round2(railFt)} ft (2×2 tube)`,
+    }));
+  }
+  pushPriced(items, matItem(pb, {
+    key: 'footPlates', materialId: 'plate_1_2', qty: 2 * 0.5 * baseWidthFt * qty,
+    name: `Foot plates — ${2 * qty} × 6 in × ${Math.round(base.widthIn)} in (1/2 in plate)`,
+  }));
+  // Tabs + hardware that fasten the customer's top down. Priced per table
+  // because it's a fixed little kit, not a function of size.
+  pushPriced(items, {
+    key: 'topFastening', kind: 'unit', qty,
+    name: `Top fastening — tabs + hardware (${qty} ${qty === 1 ? 'table' : 'tables'})`,
+    rate: round2(num(t.topFasteningPerTable, 0)),
+  });
+
+  const coat = coatingItem(pb, s, planArea);
+  if (coat) items.push(coat);
+  const fin = finishItem('table', s, pb, planArea);
+  if (fin) items.push(fin);
+
+  return {
+    items,
+    laborHours: round2(qty * (num(t.fabHoursPerTable, 0) + num(t.fabHoursPerFt, 0) * topLenFt)),
+    installHours: round2(qty * num(t.deliveryHoursPerTable, 0)),
+  };
+}
+
+const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable };
 
 /**
  * Consumables (wire, gas, discs, primer/paint, fasteners) scale with FABRICATED
@@ -821,6 +894,10 @@ export function deriveWarnings(type, state, lineState, pricing) {
     if (!(num(s.demoFt, 0) > 0)) info('Old fence removal not included.');
   }
   if (type === 'gate' && s.demoOld !== 'yes') info('Old gate removal not included.');
+  if (type === 'table') {
+    info('Steel base only — confirm the customer knows they are buying the wood top.');
+    if (!has('topFastening')) info('No top-fastening hardware — how is their top attaching?');
+  }
 
   return out;
 }

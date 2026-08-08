@@ -62,6 +62,11 @@ const FENCE_TYPE = oneOf({
   'corrugated': ['corrugated metal', 'corrugated', 'metal corrugado', 'corrugado'],
 });
 
+// One entry per design in the website's TABLES list (customize/table.astro).
+const TABLE_TYPE = oneOf({
+  bar: ['bar table', 'mesa alta', 'bar'],
+});
+
 const TOOLS = {
   fence: {
     head: (headline) => ({ type: FENCE_TYPE(headline) }),
@@ -164,6 +169,53 @@ const TOOLS = {
     ],
   },
 
+  // Website spec (customize/table.astro), EN + ES:
+  //   Custom design — Table: Bar Table (frame only)
+  //   Type: Bar Table                  |  Tipo: Mesa Alta
+  //   Top size: 6 ft × 24 in           |  Cubierta: 6 ft × 24 in
+  //   Steel base: 6 ft 2 in × 27 in    |  Base de acero: …      (derived — skipped)
+  //   Height: 42 in overall · 40 in frame | Altura: 42 in en total · base de 40 in
+  //   Finish: Matte Black              |  Acabado: Negro Mate
+  //   Scope: Customer supplies the wood top
+  table: {
+    // Headline: "Table: Bar Table (frame only)" / "Mesa: Mesa Alta (solo la base)".
+    // Strip the leading noun and the trailing scope note down to the design
+    // name itself, since oneOf() only matches from the start of the string.
+    head: (headline) => {
+      const name = String(headline).split(':').slice(1).join(':').replace(/\(.*$/, '').trim();
+      return { tableType: TABLE_TYPE(name || headline) };
+    },
+    fields: [
+      { key: 'tableType', labels: ['type', 'tipo'], parse: TABLE_TYPE },
+      {
+        key: 'lengthFt', labels: ['top size', 'cubierta'], parse: firstNumber,
+        also: (raw, state) => {
+          const nums = String(raw).match(/\d+(?:\.\d+)?/g) || [];
+          if (nums[1] != null) state.widthIn = Number(nums[1]); // "6 ft × 24 in"
+        },
+      },
+      {
+        key: 'frameHeightIn', labels: ['height', 'altura'],
+        // "42 in overall · 40 in frame" — the FRAME number is what we build to,
+        // not the leading overall figure firstNumber would grab.
+        parse: (raw) => {
+          const n = norm(raw);
+          const m = /(\d+(?:\.\d+)?)\s*in\s*frame/.exec(n) || /base de\s*(\d+(?:\.\d+)?)/.exec(n);
+          return m ? Number(m[1]) : firstNumber(raw);
+        },
+        also: (raw, state) => {
+          // overall − frame = the top thickness the customer is planning on
+          const nums = (String(raw).match(/\d+(?:\.\d+)?/g) || []).map(Number);
+          if (nums.length >= 2) {
+            const thick = Math.max(...nums) - Number(state.frameHeightIn);
+            if (thick > 0 && thick <= 6) state.topThicknessIn = thick;
+          }
+        },
+      },
+      { key: 'color', labels: ['finish', 'acabado'], parse: COLOR },
+    ],
+  },
+
   railing: {
     // Railing specs are always English ("Custom design — Custom Railing").
     head: () => ({}),
@@ -195,6 +247,7 @@ const SERVICE_TO_TOOL = oneOf({
   carport: ['carport', 'cochera'],
   railing: ['railing', 'barandal'],
   pergola: ['pergola'], // norm() strips the accent, so 'Pérgola' matches too
+  table: ['table', 'mesa'],
 });
 
 /** Which configurator a lead belongs to — from source, then ref, then service. */

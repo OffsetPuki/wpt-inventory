@@ -39,8 +39,10 @@ export const DEFAULT_PRICE_BOOK = {
     tube_6x6:     { name: '6×6 steel tubing',       unit: 'ft',   cost: 21,   wastePct: 10 },
     tube_1x1:     { name: '1×1 square tubing',      unit: 'ft',   cost: 2.5,  wastePct: 10 },
     tube_2x2:     { name: '2×2 square tubing',      unit: 'ft',   cost: 4.5,  wastePct: 10 },
+    tube_2x3:     { name: '2×3 rectangular tubing', unit: 'ft',   cost: 5.25, wastePct: 10 },
     tube_4x1:     { name: '4×1 rectangular tubing', unit: 'ft',   cost: 5,    wastePct: 10 },
     tube_4x2:     { name: '4×2 rectangular tubing', unit: 'ft',   cost: 6.5,  wastePct: 10 },
+    plate_1_2:    { name: '1/2 in steel plate',     unit: 'sqft', cost: 28,   wastePct: 12 },
     wood_4x1:     { name: '4×1 wood board',         unit: 'ft',   cost: 1.75, wastePct: 10 },
     mesh:         { name: 'Metal mesh',             unit: 'sqft', cost: 2.5,  wastePct: 5 },
     corrugated_panel: { name: 'Corrugated metal panel', unit: 'sqft', cost: 3.5, wastePct: 8 },
@@ -169,6 +171,19 @@ export const DEFAULT_PRICE_BOOK = {
     laborHoursPerFt: 0.3,        // shop fabrication
     installHoursPerFt: 0.2,      // on-site install
   },
+
+  table: {
+    // Tabs, clips and fasteners that fix the CUSTOMER'S top to our base.
+    topFasteningPerTable: 25,
+    // Welded base fabrication: a fixed setup cost per table (cut, jig, weld,
+    // grind) plus time that scales with how long the piece is. Steel — 2×3
+    // legs and rails, 2×2 foot rest and cross members, 1/2 in foot plates —
+    // all prices from the material library.
+    fabHoursPerTable: 6,
+    fabHoursPerFt: 0.5,
+    // Furniture "install" is delivery + set in place, not a site build.
+    deliveryHoursPerTable: 1,
+  },
 };
 
 // Editor layout: groups of editable scalar fields. `path` is a dot-path into the
@@ -275,6 +290,16 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'railing.fasciaMountPerPost', label: 'Fascia mount', prefix: '$', suffix: '/ post', step: 1 },
       { path: 'railing.laborHoursPerFt', label: 'Shop labor', suffix: 'hrs / ft', step: 0.05 },
       { path: 'railing.installHoursPerFt', label: 'Install labor', suffix: 'hrs / ft', step: 0.05 },
+    ],
+  },
+  {
+    title: 'Table',
+    note: 'Steel base only — the customer supplies the top. Legs, rails, foot rest and foot plates all price from the material library.',
+    fields: [
+      { path: 'table.topFasteningPerTable', label: 'Top fastening (tabs + hardware)', prefix: '$', suffix: '/ table', step: 5 },
+      { path: 'table.fabHoursPerTable', label: 'Shop labor — per table', suffix: 'hrs', step: 0.5 },
+      { path: 'table.fabHoursPerFt', label: 'Shop labor — per ft of length', suffix: 'hrs / ft', step: 0.05 },
+      { path: 'table.deliveryHoursPerTable', label: 'Delivery / set in place', suffix: 'hrs / table', step: 0.25 },
     ],
   },
 ];

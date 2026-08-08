@@ -26,6 +26,7 @@ const LABOR_FIELDS = {
   carport: ['carport.laborHoursPer100SqFt', 'carport.installHoursPer100SqFt'],
   pergola: ['pergola.laborHoursPer100SqFt', 'pergola.installHoursPer100SqFt'],
   railing: ['railing.laborHoursPerFt', 'railing.installHoursPerFt'],
+  table: ['table.fabHoursPerTable', 'table.fabHoursPerFt', 'table.deliveryHoursPerTable'],
 };
 
 function median(nums) {
