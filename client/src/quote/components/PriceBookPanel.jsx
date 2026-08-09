@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { DEFAULT_PRICE_BOOK, PRICE_BOOK_SCHEMA, MATERIAL_UNITS } from '../data/priceBook.js';
 import { materialLibrary } from '../lib/estimate.js';
-import { getPath } from '../lib/store.js';
+import { DEFAULT_SHOP, getPath } from '../lib/store.js';
 
 function Field({ field, value, onChange }) {
   return (
@@ -218,6 +218,21 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
                 />
               </div>
             ))}
+
+            <div style={{ marginTop: 18 }}>
+              <span className="pb-label">Quote terms</span>
+              <p className="note" style={{ margin: '4px 0 8px' }}>
+                The small print at the foot of every quote — one term per line. Shows on
+                the PDF and on the customer&rsquo;s online quote.
+              </p>
+              <textarea
+                className="pb-input"
+                style={{ width: '100%', textAlign: 'left', minHeight: '5.5rem', lineHeight: 1.5, resize: 'vertical' }}
+                value={shop.terms ?? ''}
+                placeholder={DEFAULT_SHOP.terms}
+                onChange={(e) => onChangeShop('terms', e.target.value)}
+              />
+            </div>
           </div>
         </div>
 

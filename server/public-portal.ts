@@ -22,7 +22,7 @@ import { distributeToTotal } from "../client/src/quote/lib/calc.js";
 // The same three helpers PrintQuote.jsx uses to describe the design, so the
 // customer's web page and their PDF word the project identically.
 import { specRows, summaryLine, typeLabel } from "../client/src/quote/data/configurators.js";
-import { deepMerge, DEFAULT_SHOP } from "../client/src/quote/lib/store.js";
+import { deepMerge, DEFAULT_SHOP, termLines } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 
 // ─── Public portal: the website's customer-facing endpoints ─────────────────
@@ -49,12 +49,22 @@ function currentPriceBook(): Record<string, any> {
   return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
 }
 
-function currentShop(): { name: string; location: string; phone: string; email: string } {
+function currentShop(): {
+  name: string; location: string; phone: string; email: string; terms: string[];
+} {
   const row = sqlite.prepare(
     "SELECT shop FROM quote_settings WHERE id = 1",
   ).get() as { shop?: string } | undefined;
   const shop = deepMerge(DEFAULT_SHOP, parseJson<Record<string, unknown>>(row?.shop, {}));
-  return { name: shop.name, location: shop.location, phone: shop.phone, email: shop.email };
+  return {
+    name: shop.name,
+    location: shop.location,
+    phone: shop.phone,
+    email: shop.email,
+    // The owner's own small print (Price Book → Shop details), one term per
+    // line, so the online quote reads exactly like the PDF.
+    terms: termLines(shop).slice(0, 8).map((t: string) => t.slice(0, 300)),
+  };
 }
 
 const iso = (ms: number | null | undefined): string | null =>

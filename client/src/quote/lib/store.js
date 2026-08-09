@@ -48,7 +48,19 @@ export const DEFAULT_SHOP = {
   location: 'Arlington, Texas',
   phone: '(214) 603-9142',
   email: 'support@cjmmetals.com',
+  // The small print at the foot of every quote — one term per line, edited in
+  // the Price Book. Printed on the PDF and on the customer's web page.
+  terms: 'Quote valid for 30 days. Final price confirmed after an on-site measure.\n'
+    + 'Permit, engineering and HOA approval by others unless itemized above.',
 };
+
+/** The shop's quote terms as printable lines (blank lines dropped). */
+export function termLines(shop) {
+  return String((shop && shop.terms) ?? '')
+    .split('\n')
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
 
 // --- dot-path helpers (used by the price-book editor) ------------------------
 

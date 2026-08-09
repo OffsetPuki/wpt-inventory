@@ -2,6 +2,7 @@ import { fmtMoney, round2 } from '../lib/format.js';
 import { distributeToTotal } from '../lib/calc.js';
 import { lineCost } from '../lib/estimate.js';
 import { specRows, summaryLine, typeLabel } from '../data/configurators.js';
+import { termLines } from '../lib/store.js';
 
 /**
  * Customer-facing quote — print / save as PDF. Shows only what the customer pays:
@@ -27,6 +28,7 @@ export default function PrintQuote({ shop, type, state, designRef, customer, not
   if (totals.lines.delivery.total > 0) serviceRows.push({ name: 'Delivery', price: totals.lines.delivery.total });
 
   const specs = specRows(type, state);
+  const terms = termLines(shop);
   const dateStr = new Date(createdAt || Date.now()).toLocaleDateString();
   const pct = Number(depositPct) || 0;
   const depositAmt = pct > 0 ? round2((totals.total * pct) / 100) : 0;
@@ -131,8 +133,7 @@ export default function PrintQuote({ shop, type, state, designRef, customer, not
 
       <div className="pq-footer">
         <div className="pq-terms">
-          <div>Quote valid for 30 days. Final price confirmed after an on-site measure.</div>
-          <div>Permit, engineering and HOA approval by others unless itemized above.</div>
+          {terms.map((line, i) => <div key={i}>{line}</div>)}
         </div>
         <div className="pq-thanks">Thank you for the opportunity to quote your project.</div>
       </div>
