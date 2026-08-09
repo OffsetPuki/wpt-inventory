@@ -7,7 +7,6 @@ import { seedDefaults } from "./seed";
 import { registerRoutes } from "./routes";
 import { registerLegalRoutes } from "./legal";
 import { startSessionReaper } from "./auth";
-import { startMarketingAutomations } from "./marketing";
 import { startBusinessAutomations, registerAttentionRoute } from "./automations";
 import { serveStatic } from "./static";
 import { setupVite } from "./vite";
@@ -127,9 +126,8 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // ── Seed defaults & start session reaper ──
 seedDefaults();
 startSessionReaper();
-// Hourly marketing sweep: stale-lead flagging, auto follow-up / quote-reminder
-// tasks. Safe to start here: every module's DDL already ran at import time.
-startMarketingAutomations();
+// THE hourly sweep (Package C folded the marketing sweep into it). Safe to
+// start here: every module's DDL already ran at import time.
 startBusinessAutomations();
 
 // ── Register routes ──

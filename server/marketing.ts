@@ -1,22 +1,22 @@
 import type { Express } from "express";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
-import { requireAuth, requireElevated } from "./auth";
+import { requireElevated } from "./auth";
 import { audit } from "./audit";
 import { sendOwnerMail } from "./mailer";
 import {
-  campaigns, reviews, mkTasks, marketingSettings, portfolioItems,
-  insertCampaignSchema, insertReviewSchema, insertMkTaskSchema,
+  campaigns, reviews, marketingSettings, portfolioItems,
+  insertReviewSchema,
   insertPortfolioItemSchema, updateMarketingSettingsSchema,
-  CAMPAIGN_CHANNELS, CAMPAIGN_STATUSES, REVIEW_SOURCES,
-  MK_TASK_KINDS, MK_TASK_STATUSES,
+  REVIEW_SOURCES,
   type MarketingSettings,
 } from "../shared/marketing-schema";
-// Cross-module READ: the CRM module owns crm_leads / crm_estimates (tables +
-// endpoints). Marketing only reads them for funnel/source/campaign reporting,
-// plus one narrow write: the automation sweep flips crm_leads.stale.
-import { leads, clients, LEAD_STAGES } from "../shared/crm-schema";
-import { pid, qstr, registerSoftDelete } from "./http-util";
+// Package C: the follow-up list lives on the pm board now.
+import { pmTasks, type TaskKind } from "../shared/pm-schema";
+// Cross-module READ: the CRM module owns crm_leads (tables + endpoints).
+// Marketing only reads them for source/attribution reporting.
+import { leads, clients } from "../shared/crm-schema";
+import { pid, qstr } from "./http-util";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -24,6 +24,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // mk_tasks.lead_id is a soft reference to crm_leads — deliberately NO
 // REFERENCES clause, so this module's DDL doesn't depend on the CRM module's
 // tables existing first (avoids boot-order coupling between module files).
+//
+// Package C notes:
+//  - mk_campaigns is retained for the crm_leads.campaign_id FK only — the
+//    campaigns CRUD endpoints are gone.
+//  - mk_tasks is retained for migration source only (server/pm.ts copies it
+//    into pm_tasks at boot); all writers moved to pm_tasks.
 
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS mk_campaigns (
@@ -182,28 +188,32 @@ function getSettingsRow(): MarketingSettings {
   return db.select().from(marketingSettings).where(eq(marketingSettings.id, 1)).get()!;
 }
 
-// Whole dollars when clean, cents otherwise — alert sentences read better as
-// "$150" than "$150.00".
-function fmtUsd(cents: number): string {
-  const dollars = cents / 100;
-  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+// pm_tasks.due_date is a local-calendar "YYYY-MM-DD".
+function todayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Fire-and-forget task creation for on-event hooks (used here, by hr.ts and
+// Fire-and-forget task creation for on-event hooks (used here and by
 // routes.ts): defers the insert via setImmediate like audit(), and dedupes on
 // an open task with the same title so repeated events don't pile up copies.
+// Package C: writes the pm board (pm_tasks).
 export function queueTaskOnce(
   title: string,
-  kind: (typeof MK_TASK_KINDS)[number] = "other",
+  kind: TaskKind = "other",
   projectId: number | null = null, // Phase D #20: surfaces the task on the job hub
 ): void {
   setImmediate(() => {
     try {
-      const dupe = db.select({ id: mkTasks.id }).from(mkTasks)
-        .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
+      const dupe = db.select({ id: pmTasks.id }).from(pmTasks)
+        .where(and(
+          eq(pmTasks.title, title),
+          sql`${pmTasks.status} != 'done'`,
+          isNull(pmTasks.deletedAt),
+        ))
         .get();
       if (!dupe) {
-        db.insert(mkTasks).values({ title, kind, projectId, status: "open", autoCreated: true }).run();
+        db.insert(pmTasks).values({ title, kind, projectId, autoCreated: true }).run();
       }
     } catch (e) {
       console.error("[marketing] queueTaskOnce failed", e);
@@ -212,61 +222,24 @@ export function queueTaskOnce(
 }
 
 // ─── Alerts (computed on demand, never stored) ───────────────────────────────
-// (a) active campaign with ≥1 lead whose all-time cost-per-lead exceeds the
-//     configured threshold; (b) active campaign burning spend with zero leads
-//     in the last 14 days; (c) overdue open tasks.
+// Overdue open follow-ups on the board (Package C: the campaign-based alerts
+// — CPL threshold, zero-lead campaign — went with the campaigns UI).
 
-function computeAlerts(now: number): string[] {
+function computeAlerts(): string[] {
   const alerts: string[] = [];
-  const cfg = getSettingsRow();
-
-  const active = db.select().from(campaigns)
-    .where(and(eq(campaigns.status, "active"), isNull(campaigns.deletedAt)))
-    .all();
-
-  if (active.length > 0) {
-    // One grouped pass over leads: all-time count + last-14d count per campaign.
-    // leads.createdAt is stored as unix ms, so a plain numeric bind compares fine.
-    const rows = db.select({
-      campaignId: leads.campaignId,
-      total: sql<number>`count(*)`,
-      recent: sql<number>`sum(case when ${leads.createdAt} >= ${now - 14 * DAY_MS} then 1 else 0 end)`,
-    })
-      .from(leads)
-      .where(and(isNull(leads.deletedAt), isNotNull(leads.campaignId)))
-      .groupBy(leads.campaignId)
-      .all();
-    const byCampaign = new Map(rows.map((r) => [r.campaignId, r]));
-
-    for (const c of active) {
-      const counts = byCampaign.get(c.id);
-      const total = counts?.total ?? 0;
-      if (total > 0) {
-        const cpl = Math.round(c.spendCents / total);
-        if (cpl > cfg.cplAlertCents) {
-          alerts.push(
-            `Cost per lead on ${c.name} is ${fmtUsd(cpl)} — above your ${fmtUsd(cfg.cplAlertCents)} alert threshold.`
-          );
-        }
-      }
-      if (c.spendCents > 0 && (counts?.recent ?? 0) === 0) {
-        alerts.push(`${c.name} has spend but produced no leads in 14 days.`);
-      }
-    }
-  }
-
-  const overdue = db.select({ n: sql<number>`count(*)` }).from(mkTasks)
+  const overdue = db.select({ n: sql<number>`count(*)` }).from(pmTasks)
     .where(and(
-      eq(mkTasks.status, "open"),
-      isNotNull(mkTasks.dueAt),
-      sql`${mkTasks.dueAt} < ${now}`,
+      isNull(pmTasks.deletedAt),
+      sql`${pmTasks.status} != 'done'`,
+      sql`${pmTasks.kind} != 'task'`,
+      isNotNull(pmTasks.dueDate),
+      sql`${pmTasks.dueDate} < ${todayYmd()}`,
     )).get()?.n ?? 0;
   if (overdue > 0) {
     alerts.push(overdue === 1
-      ? "1 marketing task is overdue."
-      : `${overdue} marketing tasks are overdue.`);
+      ? "1 follow-up task is overdue."
+      : `${overdue} follow-up tasks are overdue.`);
   }
-
   return alerts;
 }
 
@@ -308,17 +281,20 @@ export function registerMarketingRoutes(app: Express): void {
       ? Math.round(campaignSpendCents / attributedLeads)
       : null;
 
-    const activeCampaigns = db.select({ n: sql<number>`count(*)` }).from(campaigns)
-      .where(and(eq(campaigns.status, "active"), isNull(campaigns.deletedAt)))
-      .get()?.n ?? 0;
-
-    const openTasks = db.select({ n: sql<number>`count(*)` }).from(mkTasks)
-      .where(eq(mkTasks.status, "open")).get()?.n ?? 0;
-    const overdueTasks = db.select({ n: sql<number>`count(*)` }).from(mkTasks)
+    // Package C: task counts mean follow-ups (board rows with kind != 'task');
+    // the board's own stats cover everything.
+    const followUpConds = and(
+      isNull(pmTasks.deletedAt),
+      sql`${pmTasks.status} != 'done'`,
+      sql`${pmTasks.kind} != 'task'`,
+    );
+    const openTasks = db.select({ n: sql<number>`count(*)` }).from(pmTasks)
+      .where(followUpConds).get()?.n ?? 0;
+    const overdueTasks = db.select({ n: sql<number>`count(*)` }).from(pmTasks)
       .where(and(
-        eq(mkTasks.status, "open"),
-        isNotNull(mkTasks.dueAt),
-        sql`${mkTasks.dueAt} < ${now}`,
+        followUpConds,
+        isNotNull(pmTasks.dueDate),
+        sql`${pmTasks.dueDate} < ${todayYmd()}`,
       )).get()?.n ?? 0;
 
     // Reviews are often logged after the fact, so prefer the review's own
@@ -337,18 +313,17 @@ export function registerMarketingRoutes(app: Express): void {
     res.json({
       leadsThisWeek,
       cplCents,
-      activeCampaigns,
       openTasks,
       overdueTasks,
       avgRating30d,
       unrespondedReviews,
-      alerts: computeAlerts(now),
+      alerts: computeAlerts(),
     });
   });
 
   // ─── Overview (control-center payload) ────────────────────────────────────
-  // Small-business data volumes: pull the lead/estimate/campaign working sets
-  // once and aggregate in JS rather than issuing a dozen GROUP BY queries.
+  // Package C: slimmed to the this-week cards. Funnel / by-source / campaign
+  // performance went with the campaigns UI; attribution has its own endpoint.
 
   app.get("/api/marketing/overview", requireElevated, (_req, res) => {
     const now = Date.now();
@@ -357,41 +332,28 @@ export function registerMarketingRoutes(app: Express): void {
     const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
 
     const allLeads = db.select({
-      id: leads.id,
       source: leads.source,
       stage: leads.stage,
-      campaignId: leads.campaignId,
-      revenueClosedCents: leads.revenueClosedCents,
       createdAt: leads.createdAt,
       lastContactAt: leads.lastContactAt,
     }).from(leads).where(isNull(leads.deletedAt)).all();
 
-    // Builder quotes are the quoting system. They carry no lead FK, so the
-    // per-lead rollups below (quoteSent by source, campaign estimate counts)
-    // stay empty — their consumers are gone with the estimates module. Raw
-    // sqlite + try/catch: the quote module owns the table.
-    let allEstimates: {
-      leadId: number | null; status: string;
-      sentAt: number | null; decidedAt: number | null; totalCents: number;
-    }[] = [];
+    // Builder quotes are the quoting system — the quote module owns the
+    // table, so raw sqlite + try/catch.
+    let quotesSent = 0;
+    let revenueCents = 0;
     try {
-      allEstimates = (sqlite.prepare(`
-        SELECT NULL AS leadId, status, sent_at AS sentAt,
-               accepted_at AS decidedAt, coalesce(total_cents, 0) AS totalCents
-        FROM quotes WHERE deleted_at IS NULL
-      `).all() as typeof allEstimates);
+      quotesSent = (sqlite.prepare(
+        "SELECT count(*) AS n FROM quotes WHERE deleted_at IS NULL AND sent_at >= ?",
+      ).get(weekAgo) as { n: number }).n;
+      revenueCents = (sqlite.prepare(
+        "SELECT coalesce(sum(total_cents), 0) AS v FROM quotes WHERE deleted_at IS NULL AND status = 'accepted' AND accepted_at >= ?",
+      ).get(monthStart) as { v: number }).v;
     } catch {
       /* quotes table not created */
     }
 
-    const allCampaigns = db.select().from(campaigns)
-      .where(isNull(campaigns.deletedAt))
-      .orderBy(desc(campaigns.createdAt))
-      .all();
-
-    // ── This week ──
     const leadsWk = allLeads.filter((l) => l.createdAt.getTime() >= weekAgo);
-    const quotesSent = allEstimates.filter((e) => e.sentAt != null && e.sentAt >= weekAgo).length;
 
     // Close rate among leads decided this month. Leads don't carry a
     // decided_at, so approximate "decided this month" with the last contact
@@ -404,17 +366,6 @@ export function registerMarketingRoutes(app: Express): void {
     const wonThisMonth = decided.filter((l) => l.stage === "won").length;
     const closeRate = decided.length > 0 ? wonThisMonth / decided.length : null;
 
-    // Cumulative lifetime spend across currently-active campaigns. This is NOT
-    // a this-week figure — campaigns.spend_cents has no time dimension — so it
-    // is surfaced as its own clearly-named lifetime field, never inside thisWeek.
-    const activeCampaignSpendCents = allCampaigns
-      .filter((c) => c.status === "active")
-      .reduce((sum, c) => sum + c.spendCents, 0);
-
-    const revenueCents = allEstimates
-      .filter((e) => e.status === "accepted" && e.decidedAt != null && e.decidedAt >= monthStart)
-      .reduce((sum, e) => sum + e.totalCents, 0);
-
     let bestSource: { source: string; leads: number } | null = null;
     {
       const bySrc = new Map<string, number>();
@@ -424,62 +375,6 @@ export function registerMarketingRoutes(app: Express): void {
       }
     }
 
-    // ── Funnel ── every stage, zero-filled, in pipeline order.
-    const funnel = LEAD_STAGES.map((stage) => ({
-      stage,
-      count: allLeads.filter((l) => l.stage === stage).length,
-    }));
-
-    // ── By source ── "quoteSent" = leads with at least one sent estimate
-    // (estimate linkage, not current stage — a won lead still had a quote).
-    const leadsWithSentQuote = new Set<number>();
-    for (const e of allEstimates) {
-      if (e.leadId != null && e.sentAt != null) leadsWithSentQuote.add(e.leadId);
-    }
-    const srcMap = new Map<string, { source: string; leads: number; quoteSent: number; won: number; revenueCents: number }>();
-    for (const l of allLeads) {
-      let row = srcMap.get(l.source);
-      if (!row) {
-        row = { source: l.source, leads: 0, quoteSent: 0, won: 0, revenueCents: 0 };
-        srcMap.set(l.source, row);
-      }
-      row.leads++;
-      if (leadsWithSentQuote.has(l.id)) row.quoteSent++;
-      if (l.stage === "won") {
-        row.won++;
-        row.revenueCents += l.revenueClosedCents;
-      }
-    }
-    const bySource = [...srcMap.values()].sort((a, b) => b.leads - a.leads);
-
-    // ── Campaign performance ──
-    const estimateCountByLead = new Map<number, number>();
-    for (const e of allEstimates) {
-      if (e.leadId != null) {
-        estimateCountByLead.set(e.leadId, (estimateCountByLead.get(e.leadId) ?? 0) + 1);
-      }
-    }
-    const campaignPerf = allCampaigns.map((c) => {
-      const campLeads = allLeads.filter((l) => l.campaignId === c.id);
-      const estimateCount = campLeads.reduce(
-        (sum, l) => sum + (estimateCountByLead.get(l.id) ?? 0), 0
-      );
-      return {
-        id: c.id,
-        name: c.name,
-        channel: c.channel,
-        status: c.status,
-        spendCents: c.spendCents,
-        impressions: c.impressions,
-        clicks: c.clicks,
-        ctr: c.impressions > 0 ? c.clicks / c.impressions : null,
-        leads: campLeads.length,
-        cplCents: campLeads.length > 0 ? Math.round(c.spendCents / campLeads.length) : null,
-        estimates: estimateCount,
-        won: campLeads.filter((l) => l.stage === "won").length,
-      };
-    });
-
     res.json({
       thisWeek: {
         leads: leadsWk.length,
@@ -488,11 +383,8 @@ export function registerMarketingRoutes(app: Express): void {
         revenueCents,
         bestSource,
       },
-      activeCampaignSpendCents,
-      funnel,
-      bySource,
-      campaignPerf,
-      alerts: computeAlerts(now),
+      // Kept for the Overview tab's warning banner.
+      alerts: computeAlerts(),
     });
   });
 
@@ -602,106 +494,6 @@ export function registerMarketingRoutes(app: Express): void {
     res.json(row);
   });
 
-  // ─── Campaigns ────────────────────────────────────────────────────────────
-
-  app.get("/api/marketing/campaigns", requireElevated, (req, res) => {
-    const status = qstr(req.query.status);
-    const channel = qstr(req.query.channel);
-    if (status && !(CAMPAIGN_STATUSES as readonly string[]).includes(status)) {
-      return res.status(400).json({ message: `status must be one of: ${CAMPAIGN_STATUSES.join(", ")}` });
-    }
-    if (channel && !(CAMPAIGN_CHANNELS as readonly string[]).includes(channel)) {
-      return res.status(400).json({ message: `channel must be one of: ${CAMPAIGN_CHANNELS.join(", ")}` });
-    }
-    const conds = [isNull(campaigns.deletedAt)];
-    if (status) conds.push(eq(campaigns.status, status as (typeof CAMPAIGN_STATUSES)[number]));
-    if (channel) conds.push(eq(campaigns.channel, channel as (typeof CAMPAIGN_CHANNELS)[number]));
-    const rows = db.select().from(campaigns)
-      .where(and(...conds))
-      .orderBy(desc(campaigns.createdAt))
-      .all();
-    res.json(rows);
-  });
-
-  app.post("/api/marketing/campaigns", requireElevated, (req, res) => {
-    let body;
-    try {
-      body = insertCampaignSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    const row = db.insert(campaigns).values(body).returning().get();
-    audit(req, "marketing.campaign_create", {
-      targetType: "campaign", targetId: row.id, targetName: row.name,
-      details: { channel: row.channel, budgetCents: row.budgetCents },
-    });
-    // Phase D #24d: UTM late-binding — leads that arrived tagged with this
-    // campaign's name before the campaign existed get linked now, so CPL /
-    // ROI reporting sees them. Deferred + try/catch'd like the other on-event
-    // hooks; actor snapshotted synchronously (req may be recycled).
-    const actor = {
-      userId: req.user?.userId ?? null,
-      userName: req.user?.name ?? null,
-      role: req.user?.role ?? null,
-      ip: req.ip ?? null,
-    };
-    setImmediate(() => {
-      try {
-        const r = db.update(leads).set({ campaignId: row.id })
-          .where(and(
-            isNull(leads.deletedAt),
-            isNull(leads.campaignId),
-            sql`lower(${leads.utmCampaign}) = ${row.name.toLowerCase()}`,
-          )).run();
-        if (r.changes > 0) {
-          storage.appendAudit({
-            ...actor,
-            action: "marketing.campaign_lead_backfill",
-            targetType: "campaign", targetId: row.id, targetName: row.name,
-            details: { leads: r.changes },
-          });
-        }
-      } catch (e) {
-        console.error("[marketing] utm campaign backfill failed", e);
-      }
-    });
-    res.status(201).json(row);
-  });
-
-  app.patch("/api/marketing/campaigns/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const before = db.select().from(campaigns)
-      .where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt)))
-      .get();
-    if (!before) return res.status(404).json({ message: "Campaign not found" });
-    let updates;
-    try {
-      updates = insertCampaignSchema.partial().parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ message: "No fields to update" });
-    }
-    const row = db.update(campaigns).set(updates)
-      .where(eq(campaigns.id, id))
-      .returning().get();
-    // Status flips (pause/resume/end) are the interesting transitions.
-    if (updates.status && updates.status !== before.status) {
-      audit(req, "marketing.campaign_status", {
-        targetType: "campaign", targetId: id, targetName: before.name,
-        details: { from: before.status, to: updates.status },
-      });
-    }
-    res.json(row);
-  });
-
-  registerSoftDelete(app, "/api/marketing/campaigns/:id", requireElevated, {
-    table: campaigns, notFound: "Campaign not found",
-    action: "marketing.campaign_delete", targetType: "campaign",
-    name: (c) => c.name, audit,
-  });
-
   // ─── Reviews ──────────────────────────────────────────────────────────────
   // No deleted_at column → hard delete is fine (a review is an external fact,
   // deleting the local copy loses nothing irreplaceable).
@@ -800,103 +592,6 @@ export function registerMarketingRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
-  // ─── Tasks ────────────────────────────────────────────────────────────────
-  // requireAuth (not elevated): the whole crew works the follow-up list.
-
-  app.get("/api/marketing/tasks", requireAuth, (req, res) => {
-    const conds = [];
-    const status = qstr(req.query.status);
-    if (status) {
-      if (!(MK_TASK_STATUSES as readonly string[]).includes(status)) {
-        return res.status(400).json({ message: `status must be one of: ${MK_TASK_STATUSES.join(", ")}` });
-      }
-      conds.push(eq(mkTasks.status, status as (typeof MK_TASK_STATUSES)[number]));
-    }
-    const kind = qstr(req.query.kind);
-    if (kind) {
-      if (!(MK_TASK_KINDS as readonly string[]).includes(kind)) {
-        return res.status(400).json({ message: `kind must be one of: ${MK_TASK_KINDS.join(", ")}` });
-      }
-      conds.push(eq(mkTasks.kind, kind as (typeof MK_TASK_KINDS)[number]));
-    }
-    const assignedTo = qstr(req.query.assignedTo);
-    if (assignedTo !== undefined) conds.push(eq(mkTasks.assignedTo, parseInt(assignedTo, 10)));
-    // Phase D #20: the job hub lists the chase tasks stamped with its project.
-    const projectId = qstr(req.query.projectId);
-    if (projectId !== undefined) conds.push(eq(mkTasks.projectId, parseInt(projectId, 10)));
-
-    const due = qstr(req.query.due);
-    if (due) {
-      const now = Date.now();
-      const startOfToday = new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
-      if (due === "today") {
-        conds.push(isNotNull(mkTasks.dueAt));
-        conds.push(sql`${mkTasks.dueAt} >= ${startOfToday} AND ${mkTasks.dueAt} < ${startOfToday + DAY_MS}`);
-      } else if (due === "overdue") {
-        // Overdue only makes sense for tasks that can still be done.
-        conds.push(eq(mkTasks.status, "open"));
-        conds.push(isNotNull(mkTasks.dueAt));
-        conds.push(sql`${mkTasks.dueAt} < ${now}`);
-      } else if (due === "week") {
-        conds.push(isNotNull(mkTasks.dueAt));
-        conds.push(sql`${mkTasks.dueAt} >= ${startOfToday} AND ${mkTasks.dueAt} < ${startOfToday + 7 * DAY_MS}`);
-      } else {
-        return res.status(400).json({ message: "due must be one of: today, overdue, week" });
-      }
-    }
-
-    // Dated tasks first (soonest due), undated ones after, newest last.
-    const rows = db.select().from(mkTasks)
-      .where(conds.length ? and(...conds) : undefined)
-      .orderBy(sql`${mkTasks.dueAt} IS NULL`, asc(mkTasks.dueAt), desc(mkTasks.createdAt))
-      .all();
-    res.json(rows);
-  });
-
-  app.post("/api/marketing/tasks", requireAuth, (req, res) => {
-    let body;
-    try {
-      body = insertMkTaskSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    const row = db.insert(mkTasks)
-      .values({ ...body, completedAt: body.status === "done" ? Date.now() : null })
-      .returning().get();
-    res.status(201).json(row);
-  });
-
-  app.patch("/api/marketing/tasks/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const before = db.select().from(mkTasks).where(eq(mkTasks.id, id)).get();
-    if (!before) return res.status(404).json({ message: "Task not found" });
-    let body;
-    try {
-      body = insertMkTaskSchema.partial().parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    const updates: Record<string, unknown> = { ...body };
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ message: "No fields to update" });
-    }
-    // Completing stamps completed_at; reopening (or dismissing) clears it.
-    if (body.status === "done" && before.status !== "done") updates.completedAt = Date.now();
-    if (body.status && body.status !== "done") updates.completedAt = null;
-    const row = db.update(mkTasks).set(updates)
-      .where(eq(mkTasks.id, id))
-      .returning().get();
-    res.json(row);
-  });
-
-  app.delete("/api/marketing/tasks/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const target = db.select().from(mkTasks).where(eq(mkTasks.id, id)).get();
-    if (!target) return res.status(404).json({ message: "Task not found" });
-    db.delete(mkTasks).where(eq(mkTasks.id, id)).run();
-    res.json({ ok: true });
-  });
-
   // ─── Portfolio ("recent work" gallery published to the website) ───────────
 
   app.get("/api/marketing/portfolio", requireElevated, (_req, res) => {
@@ -980,104 +675,5 @@ export function registerMarketingRoutes(app: Express): void {
   });
 }
 
-// ─── Automations ─────────────────────────────────────────────────────────────
-// Hourly sweep (plus one on boot) that (1) flags stale leads and queues
-// re-engagement tasks, (2) queues quote-follow-up reminders. Alerts are
-// intentionally NOT produced here — they're computed on demand in /stats and
-// /overview so they always reflect the current thresholds.
-
-function hasOpenTask(leadId: number, kinds: ("follow_up" | "quote_reminder")[]): boolean {
-  const row = db.select({ id: mkTasks.id }).from(mkTasks)
-    .where(and(
-      eq(mkTasks.leadId, leadId),
-      eq(mkTasks.status, "open"),
-      inArray(mkTasks.kind, kinds),
-    ))
-    .get();
-  return !!row;
-}
-
-function runMarketingSweep(): void {
-  const now = Date.now();
-  const cfg = getSettingsRow();
-  let staleMarked = 0;
-  let tasksCreated = 0;
-
-  // 1. Stale leads: no touch (last contact, else creation) in staleLeadDays.
-  // Won/lost leads are settled — nothing to re-engage.
-  const staleCutoff = now - cfg.staleLeadDays * DAY_MS;
-  const candidates = db.select({ id: leads.id, name: leads.name, stale: leads.stale })
-    .from(leads)
-    .where(and(
-      isNull(leads.deletedAt),
-      sql`${leads.stage} NOT IN ('won', 'lost')`,
-      sql`COALESCE(${leads.lastContactAt}, ${leads.createdAt}) < ${staleCutoff}`,
-    ))
-    .all();
-
-  const newlyStale = candidates.filter((l) => !l.stale);
-  if (newlyStale.length > 0) {
-    db.update(leads).set({ stale: true })
-      .where(inArray(leads.id, newlyStale.map((l) => l.id)))
-      .run();
-    staleMarked = newlyStale.length;
-  }
-  // Only queue a re-engagement task the moment a lead turns stale, and only
-  // if no open follow-up/quote-reminder already points at it — otherwise the
-  // hourly sweep would pile up duplicates.
-  for (const l of newlyStale) {
-    if (hasOpenTask(l.id, ["follow_up", "quote_reminder"])) continue;
-    db.insert(mkTasks).values({
-      title: `Re-engage ${l.name} — no contact in ${cfg.staleLeadDays} days`,
-      kind: "follow_up",
-      leadId: l.id,
-      status: "open",
-      autoCreated: true,
-      dueAt: now,
-    }).run();
-    tasksCreated++;
-  }
-
-  // 2. Quote reminders: quote sent, then silence for quoteFollowUpDays.
-  const quoteCutoff = now - cfg.quoteFollowUpDays * DAY_MS;
-  const quoteLeads = db.select({ id: leads.id, name: leads.name })
-    .from(leads)
-    .where(and(
-      isNull(leads.deletedAt),
-      eq(leads.stage, "quote_sent"),
-      sql`COALESCE(${leads.lastContactAt}, ${leads.createdAt}) < ${quoteCutoff}`,
-    ))
-    .all();
-  for (const l of quoteLeads) {
-    if (hasOpenTask(l.id, ["quote_reminder"])) continue;
-    db.insert(mkTasks).values({
-      title: `Follow up on quote for ${l.name} — no response in ${cfg.quoteFollowUpDays} days`,
-      kind: "quote_reminder",
-      leadId: l.id,
-      status: "open",
-      autoCreated: true,
-      dueAt: now,
-    }).run();
-    tasksCreated++;
-  }
-
-  if (staleMarked > 0 || tasksCreated > 0) {
-    console.log(`[marketing] Sweep: marked ${staleMarked} lead(s) stale, created ${tasksCreated} task(s)`);
-  }
-}
-
-// Same shape as startSessionReaper in auth.ts: run once on boot, then hourly;
-// unref() so the timer never keeps a shutting-down process alive.
-export function startMarketingAutomations(): void {
-  const tick = () => {
-    try {
-      runMarketingSweep();
-    } catch (e) {
-      // The sweep reads crm_leads (owned by the CRM module) — never let a
-      // cross-module hiccup crash the app from a timer callback.
-      console.error("[marketing] sweep failed", e);
-    }
-  };
-  tick();
-  setInterval(tick, 60 * 60 * 1000).unref();
-}
+// Package C: the marketing sweep (stale-lead flagging + quote chase) moved
+// into the ONE hourly business sweep — see server/automations.ts steps 8b/8c.

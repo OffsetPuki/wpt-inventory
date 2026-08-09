@@ -163,15 +163,57 @@ try {
 // Phase D #21/#22: quote_ref (soft ref to quotes.number — the quote this
 // contract was drawn from) and warranty_months (warranty window from the
 // linked job's completion; consumed by the automations warranty sweep).
+// Package C: pm_tasks absorbs the marketing follow-up list (mk_tasks) —
+// kind/lead_id/auto_created/auto_key arrive additively the same way.
 for (const ddl of [
   "ALTER TABLE pm_contracts ADD COLUMN quote_ref TEXT",
   "ALTER TABLE pm_contracts ADD COLUMN warranty_months INTEGER",
+  "ALTER TABLE pm_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'",
+  "ALTER TABLE pm_tasks ADD COLUMN lead_id INTEGER",
+  "ALTER TABLE pm_tasks ADD COLUMN auto_created INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE pm_tasks ADD COLUMN auto_key TEXT",
 ]) {
   try {
     sqlite.exec(ddl);
   } catch {
     /* column already exists */
   }
+}
+
+// One-shot boot migration (Package C): copy the old marketing follow-up list
+// (mk_tasks) onto the board. Idempotent — runs only while pm_tasks has no
+// non-'task' rows yet. mk_tasks stays in the DB untouched afterward (dead
+// table, harmless); its DDL still lives in marketing.ts for existing installs.
+try {
+  const migrated = sqlite.prepare(
+    "SELECT 1 FROM pm_tasks WHERE kind != 'task' LIMIT 1",
+  ).get();
+  const mkExists = sqlite.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mk_tasks'",
+  ).get();
+  if (!migrated && mkExists) {
+    // Mapping: notes carried the automations' dedupe key → auto_key; due_at
+    // (unix ms) → due_date "YYYY-MM-DD" (server-local, matching ymdLocal);
+    // status open → todo, done/dismissed → done; kinds outside the new enum
+    // (callback, campaign_deadline) → 'other'.
+    sqlite.exec(`
+      INSERT INTO pm_tasks
+        (title, kind, lead_id, project_id, status, auto_created, auto_key,
+         due_date, completed_at, created_at)
+      SELECT title,
+             CASE WHEN kind IN ('follow_up', 'quote_reminder', 'review_request')
+                  THEN kind ELSE 'other' END,
+             lead_id, project_id,
+             CASE WHEN status = 'open' THEN 'todo' ELSE 'done' END,
+             auto_created, notes,
+             CASE WHEN due_at IS NOT NULL
+                  THEN strftime('%Y-%m-%d', due_at / 1000, 'unixepoch', 'localtime') END,
+             completed_at, created_at
+      FROM mk_tasks
+    `);
+  }
+} catch (e) {
+  console.error("[pm] mk_tasks → pm_tasks migration failed", e);
 }
 
 // ─── Document uploads (Phase G #4) ───────────────────────────────────────────

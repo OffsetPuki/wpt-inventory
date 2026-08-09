@@ -1,12 +1,12 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { users } from "./schema";
 
 // NOTE: leads live in crm-schema.ts (crm_leads) — the Marketing control
-// center reads them for its funnel/source reporting rather than keeping a
-// duplicate list. This file owns campaigns, reviews, tasks, and the
-// automation settings.
+// center reads them for its source/attribution reporting rather than keeping
+// a duplicate list. This file owns campaigns (FK-retained), reviews, the
+// portfolio, and the automation settings. Tasks moved to pm_tasks
+// (shared/pm-schema.ts) in Package C.
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -31,21 +31,10 @@ export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 export const REVIEW_SOURCES = ["google", "yelp", "facebook", "website", "other"] as const;
 export type ReviewSource = (typeof REVIEW_SOURCES)[number];
 
-export const MK_TASK_KINDS = [
-  "follow_up",
-  "callback",
-  "quote_reminder",
-  "campaign_deadline",
-  "review_request",
-  "other",
-] as const;
-export type MkTaskKind = (typeof MK_TASK_KINDS)[number];
-
-export const MK_TASK_STATUSES = ["open", "done", "dismissed"] as const;
-export type MkTaskStatus = (typeof MK_TASK_STATUSES)[number];
-
 // ─── Tables ──────────────────────────────────────────────────────────────────
 
+// Retained for the crm_leads.campaign_id FK only — the campaigns CRUD
+// endpoints and UI are gone (Package C).
 export const campaigns = sqliteTable("mk_campaigns", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -87,30 +76,9 @@ export const reviews = sqliteTable("mk_reviews", {
     .$defaultFn(() => new Date()),
 });
 
-// Action items surfaced by the Marketing control center — follow-ups,
-// overdue callbacks, quote reminders, campaign deadlines. Rows with
-// autoCreated=true come from the automation sweep, the rest are manual.
-export const mkTasks = sqliteTable("mk_tasks", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  kind: text("kind", { enum: MK_TASK_KINDS }).notNull().default("other"),
-  leadId: integer("lead_id"), // soft ref to crm_leads (no FK: avoids cross-file cycle)
-  projectId: integer("project_id"), // Phase D #20: soft ref to projects (no FK: same reason)
-  campaignId: integer("campaign_id").references(() => campaigns.id, {
-    onDelete: "set null",
-  }),
-  assignedTo: integer("assigned_to").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  dueAt: integer("due_at"), // unix ms
-  status: text("status", { enum: MK_TASK_STATUSES }).notNull().default("open"),
-  autoCreated: integer("auto_created", { mode: "boolean" }).notNull().default(false),
-  notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  completedAt: integer("completed_at"), // unix ms
-});
+// mk_tasks: the drizzle export is gone (Package C) — tasks live in pm_tasks.
+// The table's DDL stays in server/marketing.ts (existing installs; migration
+// source for the one-shot copy in server/pm.ts, which reads it via raw SQL).
 
 // "Recent work" gallery published to www.cjmmetals.com — photos uploaded via
 // the normal /api/upload flow, curated and ordered here.
@@ -146,23 +114,10 @@ export const marketingSettings = sqliteTable("mk_settings", {
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
-export const insertCampaignSchema = createInsertSchema(campaigns).omit({
-  id: true,
-  createdAt: true,
-  deletedAt: true,
-});
-
 export const insertReviewSchema = createInsertSchema(reviews).omit({
   id: true,
   createdAt: true,
   respondedAt: true,
-});
-
-export const insertMkTaskSchema = createInsertSchema(mkTasks).omit({
-  id: true,
-  createdAt: true,
-  completedAt: true,
-  autoCreated: true,
 });
 
 export const insertPortfolioItemSchema = createInsertSchema(portfolioItems).omit({
@@ -180,52 +135,19 @@ export const updateMarketingSettingsSchema = z.object({
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type Campaign = typeof campaigns.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
-export type MkTask = typeof mkTasks.$inferSelect;
 export type MarketingSettings = typeof marketingSettings.$inferSelect;
 export type PortfolioItem = typeof portfolioItems.$inferSelect;
 export type InsertPortfolioItem = z.infer<typeof insertPortfolioItemSchema>;
 
-export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
 export type InsertReview = z.infer<typeof insertReviewSchema>;
-export type InsertMkTask = z.infer<typeof insertMkTaskSchema>;
 
 // ─── Label maps ──────────────────────────────────────────────────────────────
-
-export const CHANNEL_LABELS: Record<CampaignChannel, string> = {
-  facebook: "Facebook",
-  instagram: "Instagram",
-  google_ads: "Google Ads",
-  google_business: "Google Business",
-  marketplace: "Marketplace",
-  email: "Email",
-  sms: "SMS",
-  yard_signs: "Yard Signs",
-  print: "Print",
-  referral_program: "Referral Program",
-  other: "Other",
-};
-
-export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
-  active: "Active",
-  paused: "Paused",
-  ended: "Ended",
-};
 
 export const REVIEW_SOURCE_LABELS: Record<ReviewSource, string> = {
   google: "Google",
   yelp: "Yelp",
   facebook: "Facebook",
   website: "Website",
-  other: "Other",
-};
-
-export const MK_TASK_KIND_LABELS: Record<MkTaskKind, string> = {
-  follow_up: "Follow-up",
-  callback: "Callback",
-  quote_reminder: "Quote Reminder",
-  campaign_deadline: "Campaign Deadline",
-  review_request: "Review Request",
   other: "Other",
 };

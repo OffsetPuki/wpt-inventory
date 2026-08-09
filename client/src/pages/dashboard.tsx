@@ -230,7 +230,7 @@ export default function DashboardPage() {
           {alerts.map((a, i) => (
             <Link
               key={i}
-              href="/marketing"
+              href="/pm/board"
               className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 transition-colors hover:border-amber-500/60 dark:text-amber-300"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -280,7 +280,7 @@ export default function DashboardPage() {
               {att.data.tasks.slice(0, 10).map((t) => (
                 <li key={`${t.source}-${t.id}`}>
                   <Link
-                    href={t.source === "pm" ? "/pm/board" : "/marketing"}
+                    href="/pm/board"
                     className="flex items-center justify-between gap-3 py-2 hover:bg-accent/40"
                   >
                     <span className="min-w-0 truncate text-sm text-foreground">{t.title}</span>
@@ -456,10 +456,10 @@ export default function DashboardPage() {
           href="/marketing"
         />
         <StatCard
-          label="Marketing tasks due"
+          label="Follow-ups due"
           value={mk.data?.overdueTasks}
           tone={mk.data && mk.data.overdueTasks > 0 ? "warn" : "default"}
-          href="/marketing"
+          href="/pm/board"
         />
       </Section>
 

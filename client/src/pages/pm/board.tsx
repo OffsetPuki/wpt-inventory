@@ -11,9 +11,11 @@ import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   TASK_PRIORITY_LABELS,
+  TASK_KIND_LABELS,
   type TaskStatus,
   type TaskPriority,
 } from "@shared/pm-schema";
+import { Chip } from "@/components/ui/Chip";
 import { Plus, Loader2, Search, SquareKanban } from "lucide-react";
 import { TaskDialog, inputCls, fmtH, type TaskRow } from "./task-dialog";
 
@@ -227,6 +229,12 @@ export default function PmBoardPage() {
                         {t.title}
                       </p>
                     </div>
+                    {/* Package C: merged follow-ups carry their kind as a chip. */}
+                    {(t.kind ?? "task") !== "task" && (
+                      <span className="mt-2 mr-1 inline-block">
+                        <Chip tone="amber">{TASK_KIND_LABELS[t.kind] ?? "Other"}</Chip>
+                      </span>
+                    )}
                     {t.projectName && (
                       <span className="mt-2 inline-block rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
                         {t.projectName}

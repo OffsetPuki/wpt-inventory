@@ -21,13 +21,14 @@ import { projects } from "../shared/schema";
 // is deferred + try/catch'd internally — safe to call from any mail hook.
 import { logEmailActivity } from "./crm";
 // Contract-vs-invoiced reconciliation (Phase A #3) + approved change orders
-// (Phase G #1). Table objects only — the pm module owns the DDL, so the reads
+// (Phase G #1) + review-request tasks (Package C: tasks live on the pm
+// board). Table objects only — the pm module owns the DDL, so the touches
 // below are try/catch'd.
-import { contracts, changeOrders } from "../shared/pm-schema";
+import { contracts, changeOrders, pmTasks } from "../shared/pm-schema";
 // Cross-module automation hook: a freshly paid invoice queues a review request.
-// The mk_ tables are owned by the marketing module's DDL; every touch below is
+// mk_settings is owned by the marketing module's DDL; every touch below is
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
-import { marketingSettings, mkTasks } from "../shared/marketing-schema";
+import { marketingSettings } from "../shared/marketing-schema";
 import { parseLineItems, computeDocTotals } from "../shared/biz-common";
 import { pid, qstr, todayLocal, usd, registerSoftDelete } from "./http-util";
 
@@ -361,13 +362,13 @@ function queueReviewRequest(inv: Invoice): void {
 
       // Always surface the ask in-app too — with no email on file (or no
       // mailer) the task is the only prompt the owner gets.
-      db.insert(mkTasks).values({
+      db.insert(pmTasks).values({
         title: `Ask ${name ?? `the customer on ${inv.number}`} for a review`,
         kind: "review_request",
-        status: "open",
+        leadId,
         autoCreated: true,
-        dueAt: Date.now(),
-        notes: `Invoice ${inv.number} paid.`,
+        dueDate: todayLocal(),
+        description: `Invoice ${inv.number} paid.`,
       }).run();
     } catch (e) {
       console.error("[finance] review-request hook failed", e);
@@ -594,8 +595,8 @@ function queuePaidCloseLoop(req: Request, inv: Invoice): void {
       }
       if (quoteNumber) {
         sqlite.prepare(`
-          UPDATE mk_tasks SET status = 'done', completed_at = ?
-          WHERE status = 'open' AND auto_created = 1 AND title LIKE ?
+          UPDATE pm_tasks SET status = 'done', completed_at = ?
+          WHERE deleted_at IS NULL AND status != 'done' AND auto_created = 1 AND title LIKE ?
         `).run(Date.now(), `Schedule the job — quote ${quoteNumber} accepted%`);
       }
       audit(req, "finance.invoice_paid_sync", {

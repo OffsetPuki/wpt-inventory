@@ -26,7 +26,6 @@ import {
   type WinLossReason,
   type CrmActivity,
 } from "@shared/crm-schema";
-import type { Campaign } from "@shared/marketing-schema";
 import type { PublicUser } from "@shared/schema";
 import {
   Loader2,
@@ -82,25 +81,10 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [source, setSource] = useState<LeadSource>("website");
-  const [campaignId, setCampaignId] = useState("");
   const [serviceRequested, setServiceRequested] = useState("");
   const [serviceArea, setServiceArea] = useState("");
   const [estimatedValue, setEstimatedValue] = useState("");
   const [notes, setNotes] = useState("");
-
-  // Campaign list needs the marketing module + elevated role — if the fetch
-  // fails for any reason, just hide the field.
-  const { data: campaignList } = useQuery<Campaign[] | null>({
-    queryKey: ["marketing-campaigns"],
-    queryFn: async () => {
-      try {
-        return await (await apiRequest("GET", "/api/marketing/campaigns")).json();
-      } catch {
-        return null;
-      }
-    },
-    enabled: open,
-  });
 
   const create = useApiMutation({
     request: () => ({
@@ -111,7 +95,6 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
         source,
-        campaignId: campaignId ? parseInt(campaignId, 10) : undefined,
         serviceRequested: serviceRequested.trim() || undefined,
         serviceArea: serviceArea.trim() || undefined,
         estimatedValueCents: estimatedValue ? parseMoney(estimatedValue) : undefined,
@@ -122,7 +105,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
     successTitle: "Lead created",
     errorTitle: "Could not create lead",
     onSuccess: () => {
-      setName(""); setPhone(""); setEmail(""); setSource("website"); setCampaignId("");
+      setName(""); setPhone(""); setEmail(""); setSource("website");
       setServiceRequested(""); setServiceArea(""); setEstimatedValue(""); setNotes("");
       onClose();
     },
@@ -164,17 +147,6 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
               ))}
             </select>
           </label>
-          {campaignList && campaignList.length > 0 && (
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Campaign (optional)</span>
-              <select className={inputCls} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
-                <option value="">None</option>
-                {campaignList.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">

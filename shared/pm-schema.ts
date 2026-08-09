@@ -13,6 +13,11 @@ import { clients } from "./crm-schema";
 export const TASK_STATUSES = ["todo", "in_progress", "review", "done"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+// One task list: marketing follow-ups (formerly mk_tasks) live on the board
+// too, tagged by kind. 'task' = a normal board card.
+export const TASK_KINDS = ["task", "follow_up", "quote_reminder", "review_request", "other"] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
 export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
@@ -54,6 +59,13 @@ export const pmTasks = sqliteTable("pm_tasks", {
   dueDate: text("due_date"), // "YYYY-MM-DD"
   estimateHours: real("estimate_hours"),
   orderIndex: integer("order_index").notNull().default(0), // position within kanban column
+  // Marketing-merge columns (Package C): follow-ups carry their kind, the
+  // lead they chase, and — for automation-created rows — the sweep's dedupe
+  // key (auto_key, formerly riding in mk_tasks.notes).
+  kind: text("kind", { enum: TASK_KINDS }).notNull().default("task"),
+  leadId: integer("lead_id"), // soft ref to crm_leads (no FK: avoids cross-module cycle)
+  autoCreated: integer("auto_created", { mode: "boolean" }).notNull().default(false),
+  autoKey: text("auto_key"), // server-managed; never client-writable
   completedAt: integer("completed_at"), // unix ms
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
@@ -187,6 +199,8 @@ export const insertPmTaskSchema = createInsertSchema(pmTasks).omit({
   createdAt: true,
   deletedAt: true,
   completedAt: true,
+  autoCreated: true, // server-stamped by automations only
+  autoKey: true,
 });
 
 export const insertTimeEntrySchema = z.object({
@@ -245,6 +259,14 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: "In Progress",
   review: "Review",
   done: "Done",
+};
+
+export const TASK_KIND_LABELS: Record<TaskKind, string> = {
+  task: "Task",
+  follow_up: "Follow-up",
+  quote_reminder: "Quote",
+  review_request: "Review",
+  other: "Other",
 };
 
 export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {

@@ -209,27 +209,16 @@ interface ProjectTaskRow {
   status: string;
   priority: string;
   dueDate: string | null;
-}
-
-interface ProjectMkTaskRow {
-  id: number;
-  title: string;
-  dueAt: number | null;
+  kind?: string; // Package C: follow-ups live on the board too
 }
 
 function OpenTasksCard({ projectId }: { projectId: number }) {
+  // One task list (Package C): board cards AND the automation sink's chase
+  // tasks (unbilled nags, "schedule the job", warranty callbacks…) all come
+  // from pm_tasks now — follow-ups are labeled by their kind chip.
   const { data: tasks = [] } = useQuery<ProjectTaskRow[]>({
     queryKey: ["project-tasks", projectId],
     queryFn: async () => (await apiRequest("GET", `/api/pm/tasks?projectId=${projectId}`)).json(),
-    retry: false,
-  });
-  // Phase D #20: the automation sink's chase tasks stamped with this job
-  // (unbilled nags, "schedule the job", warranty callbacks…) — listed under
-  // the board tasks, labeled so the two inboxes stay distinguishable.
-  const { data: mkTasks = [] } = useQuery<ProjectMkTaskRow[]>({
-    queryKey: ["project-mk-tasks", projectId],
-    queryFn: async () =>
-      (await apiRequest("GET", `/api/marketing/tasks?status=open&projectId=${projectId}`)).json(),
     retry: false,
   });
   const open = tasks.filter((t) => t.status !== "done");
@@ -237,9 +226,9 @@ function OpenTasksCard({ projectId }: { projectId: number }) {
     <div className="rounded-xl border border-border bg-card p-5">
       <h2 className="mb-3 text-base font-semibold text-foreground">
         Open tasks{" "}
-        <span className="font-normal text-muted-foreground">— {open.length + mkTasks.length}</span>
+        <span className="font-normal text-muted-foreground">— {open.length}</span>
       </h2>
-      {open.length === 0 && mkTasks.length === 0 ? (
+      {open.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Nothing open. Plan the job in{" "}
           <Link href="/pm/board" className="underline hover:text-foreground">Projects → Board</Link>.
@@ -248,7 +237,14 @@ function OpenTasksCard({ projectId }: { projectId: number }) {
         <ul className="divide-y divide-border">
           {open.slice(0, 5).map((t) => (
             <li key={t.id} className="flex items-center justify-between gap-3 py-2">
-              <span className="min-w-0 truncate text-sm text-foreground">{t.title}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 truncate text-sm text-foreground">{t.title}</span>
+                {t.kind && t.kind !== "task" && (
+                  <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                    Follow-up
+                  </span>
+                )}
+              </span>
               <span className="shrink-0 text-xs text-muted-foreground">
                 {t.priority === "urgent" || t.priority === "high" ? "⚠ " : ""}
                 {t.dueDate ? formatDate(t.dueDate) : t.status.replace("_", " ")}
@@ -261,16 +257,6 @@ function OpenTasksCard({ projectId }: { projectId: number }) {
               <Link href="/pm/board" className="underline hover:text-foreground">board</Link>
             </li>
           )}
-          {mkTasks.map((t) => (
-            <li key={`mk-${t.id}`} className="flex items-center justify-between gap-3 py-2">
-              <Link href="/marketing" className="min-w-0 truncate text-sm text-foreground hover:underline">
-                {t.title}
-              </Link>
-              <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-                Follow-up
-              </span>
-            </li>
-          ))}
         </ul>
       )}
     </div>

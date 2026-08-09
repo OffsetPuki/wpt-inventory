@@ -9,7 +9,9 @@ import { renderTemplate } from "./email-templates";
 import { renderPublicPage } from "./legal";
 import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
-import { reviews, marketingSettings, mkTasks } from "../shared/marketing-schema";
+import { reviews, marketingSettings } from "../shared/marketing-schema";
+import { pmTasks } from "../shared/pm-schema"; // Package C: tasks live on the pm board
+import { todayLocal } from "./http-util";
 import { invoices } from "../shared/finance-schema";
 import { projects } from "../shared/schema";
 import { onQuoteEvent, findOrCreateClientByContact, logEmailActivity } from "./crm";
@@ -666,25 +668,28 @@ export function registerPublicPortalRoutes(app: Express): void {
       }
     });
 
-    // The in-app ping: an open task due right now — shows in Marketing →
-    // Tasks and trips the dashboard's overdue-tasks banner, so the acceptance
-    // is visible in the suite even with email off. Deduped by open title.
+    // The in-app ping: an open task due today on the pm board, so the
+    // acceptance is visible in the suite even with email off. Deduped by
+    // open title.
     setImmediate(() => {
       try {
         const title = `Schedule the job — quote ${quote.number} accepted`
           + (quote.customerName ? ` by ${quote.customerName}` : "");
-        const open = db.select({ id: mkTasks.id }).from(mkTasks)
-          .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
+        const open = db.select({ id: pmTasks.id }).from(pmTasks)
+          .where(and(
+            eq(pmTasks.title, title),
+            sql`${pmTasks.status} != 'done'`,
+            isNull(pmTasks.deletedAt),
+          ))
           .get();
         if (open) return;
-        db.insert(mkTasks).values({
+        db.insert(pmTasks).values({
           title,
-          kind: "follow_up",
+          kind: "other",
           projectId, // Phase D #20: set by the project hook that ran just before
-          status: "open",
           autoCreated: true,
-          dueAt: Date.now(),
-          notes: `$${(quote.totalCents / 100).toFixed(2)} — job ${quote.number} is in Projects, draft invoice in Finance.`
+          dueDate: todayLocal(),
+          description: `$${(quote.totalCents / 100).toFixed(2)} — job ${quote.number} is in Projects, draft invoice in Finance.`
             + (depositCents ? ` Deposit due: $${(depositCents / 100).toFixed(2)}.` : ""),
         }).run();
       } catch (e) {
@@ -711,7 +716,7 @@ export function registerPublicPortalRoutes(app: Express): void {
         `Total:     $${(quote.totalCents / 100).toFixed(2)}\n` +
         (note ? `\nCustomer note:\n${note}\n` : "") +
         `\nIn the suite: job ${quote.number} in Projects, a draft invoice in ` +
-        `Finance, and a follow-up task in Marketing → Tasks.`;
+        `Finance, and a follow-up task on the task board.`;
       setImmediate(() => {
         void sendOwnerMail({
           subject: `[CJM Suite] Quote accepted — ${quote.number}`,
@@ -827,24 +832,27 @@ export function registerPublicPortalRoutes(app: Express): void {
       "UPDATE review_requests SET submitted_at = ?, review_id = ? WHERE id = ?",
     ).run(Date.now(), row.id, rr.id);
 
-    // Negative-review fast lane: 1–3 stars lands an open task so the owner
-    // responds quickly. Deferred + try/catch'd — submitting must never 500
-    // over a marketing nicety. Deduped by open task title.
+    // Negative-review fast lane: 1–3 stars lands an open board task so the
+    // owner responds quickly. Deferred + try/catch'd — submitting must never
+    // 500 over a task nicety. Deduped by open task title.
     if (body.rating <= 3) {
       const title = `Respond to ${author || "a customer"}'s ${body.rating}-star review`;
       setImmediate(() => {
         try {
-          const open = db.select({ id: mkTasks.id }).from(mkTasks)
-            .where(and(eq(mkTasks.title, title), eq(mkTasks.status, "open")))
+          const open = db.select({ id: pmTasks.id }).from(pmTasks)
+            .where(and(
+              eq(pmTasks.title, title),
+              sql`${pmTasks.status} != 'done'`,
+              isNull(pmTasks.deletedAt),
+            ))
             .get();
           if (open) return;
-          db.insert(mkTasks).values({
+          db.insert(pmTasks).values({
             title,
             kind: "follow_up",
-            status: "open",
             autoCreated: true,
-            dueAt: Date.now(),
-            notes: `Review #${row.id} via cjmmetals.com.`,
+            dueDate: todayLocal(),
+            description: `Review #${row.id} via cjmmetals.com.`,
           }).run();
         } catch (e) {
           console.error("[public-portal] review-task hook failed", e);

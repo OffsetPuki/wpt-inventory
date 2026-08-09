@@ -12,10 +12,12 @@ import {
   type Lead, type LeadStage, type LeadSource, type ClientStatus,
 } from "../shared/crm-schema";
 // Cross-module automation hooks. These TABLE OBJECTS are safe to import (pure
-// schema definitions); the underlying mk_ tables are created by the marketing
+// schema definitions); the underlying tables are created by the owning
 // module's DDL, not ours — so every read/write against them below is wrapped
 // in try/catch and degrades to a no-op / defaults if that module isn't loaded.
-import { mkTasks, marketingSettings } from "../shared/marketing-schema";
+// Package C: follow-up tasks live on the pm board (pm_tasks) now.
+import { marketingSettings } from "../shared/marketing-schema";
+import { pmTasks } from "../shared/pm-schema";
 // Wiring plan, Fix 2 — projects carry a soft clientId ref; the client detail
 // view lists the jobs behind it. Core table, always present.
 import { projects } from "../shared/schema";
@@ -122,29 +124,35 @@ function getAutomationSettings(): { quoteFollowUpDays: number; autoReviewRequest
   return { quoteFollowUpDays: 3, autoReviewRequest: true };
 }
 
-// Quote-sent side effect: schedule a follow-up task in the marketing task
-// list unless the lead already has an open quote reminder (dedupe, so
-// re-sending an estimate doesn't stack reminders).
+// pm_tasks.due_date is a local-calendar "YYYY-MM-DD".
+function ymdLocal(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Quote-sent side effect: schedule a follow-up task on the pm board unless
+// the lead already has an open quote reminder (dedupe, so re-sending an
+// estimate doesn't stack reminders).
 function ensureQuoteReminder(lead: Lead, now: number): void {
   try {
-    const open = db.select({ id: mkTasks.id }).from(mkTasks)
+    const open = db.select({ id: pmTasks.id }).from(pmTasks)
       .where(and(
-        eq(mkTasks.leadId, lead.id),
-        eq(mkTasks.kind, "quote_reminder"),
-        eq(mkTasks.status, "open"),
+        eq(pmTasks.leadId, lead.id),
+        eq(pmTasks.kind, "quote_reminder"),
+        sql`${pmTasks.status} != 'done'`,
+        isNull(pmTasks.deletedAt),
       ))
       .get();
     if (open) return;
-    db.insert(mkTasks).values({
+    db.insert(pmTasks).values({
       title: `Follow up on quote — ${lead.name}`,
       kind: "quote_reminder",
       leadId: lead.id,
       autoCreated: true,
-      dueAt: now + getAutomationSettings().quoteFollowUpDays * DAY_MS,
-      status: "open",
+      dueDate: ymdLocal(now + getAutomationSettings().quoteFollowUpDays * DAY_MS),
     }).run();
   } catch {
-    // mk_tasks not created yet — automation is best-effort, never block CRM.
+    // pm_tasks not created yet — automation is best-effort, never block CRM.
   }
 }
 
@@ -155,24 +163,24 @@ function maybeCreateReviewTask(lead: Lead, now: number): void {
     if (!getAutomationSettings().autoReviewRequest) return;
     // Dedupe like ensureQuoteReminder: re-winning a corrected lead must not
     // stack a second "ask for a review" task on top of an open one.
-    const open = db.select({ id: mkTasks.id }).from(mkTasks)
+    const open = db.select({ id: pmTasks.id }).from(pmTasks)
       .where(and(
-        eq(mkTasks.leadId, lead.id),
-        eq(mkTasks.kind, "review_request"),
-        eq(mkTasks.status, "open"),
+        eq(pmTasks.leadId, lead.id),
+        eq(pmTasks.kind, "review_request"),
+        sql`${pmTasks.status} != 'done'`,
+        isNull(pmTasks.deletedAt),
       ))
       .get();
     if (open) return;
-    db.insert(mkTasks).values({
+    db.insert(pmTasks).values({
       title: `Ask ${lead.name} for a review`,
       kind: "review_request",
       leadId: lead.id,
       autoCreated: true,
-      dueAt: now + 3 * DAY_MS,
-      status: "open",
+      dueDate: ymdLocal(now + 3 * DAY_MS),
     }).run();
   } catch {
-    // mk_tasks not created yet — see ensureQuoteReminder.
+    // pm_tasks not created yet — see ensureQuoteReminder.
   }
 }
 

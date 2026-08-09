@@ -15,12 +15,11 @@ import { maybeNightlyBackup, latestSnapshot } from "./backup";
 import { logEmailActivity } from "./crm";
 
 // ─── Business automations ────────────────────────────────────────────────────
-// Hourly cross-module sweep (plus one on boot), same shape as
-// startMarketingAutomations in marketing.ts: chases money, nudges customers,
-// expires stale paperwork, and sends the daily owner digest. Raw sqlite on
-// purpose — this module reads a dozen other modules' tables and shouldn't
-// import any of them. Every step runs in its own try/catch so one broken
-// table never kills the rest of the sweep.
+// THE hourly cross-module sweep (plus one on boot): chases money, nudges
+// customers, flags stale leads, expires stale paperwork, and sends the daily
+// owner digest. Raw sqlite on purpose — this module reads a dozen other
+// modules' tables and shouldn't import any of them. Every step runs in its
+// own try/catch so one broken table never kills the rest of the sweep.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -76,11 +75,10 @@ function fmtUsd(cents: number): string {
   return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
 }
 
-// hasOpenTask-style dedupe, mirroring marketing.ts. Its sweep keys open tasks
-// by lead_id; these subjects span invoices/POs/items/contracts, so the stable
-// key rides in notes instead. Returns true when a task was actually created.
-// ponytail: open-only check like marketing's — a done/dismissed task whose
-// condition persists gets re-created next sweep; check all statuses if it nags.
+// Dedupe on auto_key (Package C: automation tasks live on the pm board now).
+// Returns true when a task was actually created.
+// ponytail: open-only check — a done task whose condition persists gets
+// re-created next sweep; check all statuses if it nags.
 function ensureTask(
   key: string,
   title: string,
@@ -89,14 +87,24 @@ function ensureTask(
   projectId: number | null = null, // Phase D #20: surfaces the task on the job hub
 ): boolean {
   const open = sqlite.prepare(
-    "SELECT id FROM mk_tasks WHERE status = 'open' AND notes = ?",
+    "SELECT id FROM pm_tasks WHERE deleted_at IS NULL AND status != 'done' AND auto_key = ?",
   ).get(key);
   if (open) return false;
   sqlite.prepare(`
-    INSERT INTO mk_tasks (title, kind, lead_id, project_id, status, auto_created, due_at, notes)
-    VALUES (?, ?, ?, ?, 'open', 1, ?, ?)
-  `).run(title, kind, leadId, projectId, Date.now(), key);
+    INSERT INTO pm_tasks (title, kind, lead_id, project_id, status, auto_created, due_date, auto_key)
+    VALUES (?, ?, ?, ?, 'todo', 1, ?, ?)
+  `).run(title, kind, leadId, projectId, localDate(Date.now()), key);
   return true;
+}
+
+// "One open follow-up per lead" — mirrors the old marketing sweep's
+// hasOpenTask: any non-terminal board row chasing this lead blocks another.
+function hasOpenLeadFollowUp(leadId: number): boolean {
+  return !!sqlite.prepare(`
+    SELECT 1 FROM pm_tasks
+    WHERE deleted_at IS NULL AND status != 'done'
+      AND lead_id = ? AND kind IN ('follow_up', 'quote_reminder')
+  `).get(leadId);
 }
 
 // One failing step must never kill the rest of the sweep.
@@ -109,6 +117,7 @@ function step(name: string, fn: () => void): void {
 }
 
 interface SweepSettings {
+  stale_lead_days: number;
   quote_follow_up_days: number;
   lead_time_weeks: number | null;
   lead_time_updated_at: number | null;
@@ -119,14 +128,14 @@ interface SweepSettings {
 function getSettings(): SweepSettings {
   try {
     const row = sqlite.prepare(`
-      SELECT quote_follow_up_days, lead_time_weeks, lead_time_updated_at, last_digest_date, last_backup_week
+      SELECT stale_lead_days, quote_follow_up_days, lead_time_weeks, lead_time_updated_at, last_digest_date, last_backup_week
       FROM mk_settings WHERE id = 1
     `).get() as SweepSettings | undefined;
     if (row) return row;
   } catch {
     /* mk_settings not migrated yet — fall through to defaults */
   }
-  return { quote_follow_up_days: 3, lead_time_weeks: null, lead_time_updated_at: null, last_digest_date: null, last_backup_week: null };
+  return { stale_lead_days: 7, quote_follow_up_days: 3, lead_time_weeks: null, lead_time_updated_at: null, last_digest_date: null, last_backup_week: null };
 }
 
 // ─── The sweep ───────────────────────────────────────────────────────────────
@@ -357,6 +366,45 @@ function runBusinessSweep(): void {
     for (const l of rows) {
       ensureTask(`auto:lead-follow-up:${l.id}`, `Follow up with ${l.name}`, "follow_up", l.id);
       clear.run(l.id);
+    }
+  });
+
+  // 8b. Stale leads (moved from marketing.ts, Package C) — no touch (last
+  // contact, else creation) in stale_lead_days. Won/lost leads are settled.
+  // Flags crm_leads.stale, and queues a re-engagement task the moment a lead
+  // turns stale — one open follow-up per lead, monthly re-nag via the key.
+  step("stale leads", () => {
+    const candidates = sqlite.prepare(`
+      SELECT id, name, stale FROM crm_leads
+      WHERE deleted_at IS NULL AND stage NOT IN ('won', 'lost')
+        AND COALESCE(last_contact_at, created_at) < ?
+    `).all(now - cfg.stale_lead_days * DAY_MS) as any[];
+    const newlyStale = candidates.filter((l) => !l.stale);
+    if (newlyStale.length === 0) return;
+    const mark = sqlite.prepare("UPDATE crm_leads SET stale = 1 WHERE id = ?");
+    const month = today.slice(0, 7); // "YYYY-MM"
+    for (const l of newlyStale) {
+      mark.run(l.id);
+      if (hasOpenLeadFollowUp(l.id)) continue;
+      ensureTask(`auto:stale-lead:${l.id}:${month}`,
+        `Re-engage ${l.name} — no contact in ${cfg.stale_lead_days} days`,
+        "follow_up", l.id);
+    }
+  });
+
+  // 8c. Lead quote chase (moved from marketing.ts, Package C) — quote sent,
+  // then silence past the configured window. Same one-open-follow-up rule.
+  step("lead quote chase", () => {
+    const rows = sqlite.prepare(`
+      SELECT id, name FROM crm_leads
+      WHERE deleted_at IS NULL AND stage = 'quote_sent'
+        AND COALESCE(last_contact_at, created_at) < ?
+    `).all(now - cfg.quote_follow_up_days * DAY_MS) as any[];
+    for (const l of rows) {
+      if (hasOpenLeadFollowUp(l.id)) continue;
+      ensureTask(`auto:lead-quote-chase:${l.id}`,
+        `Follow up on quote for ${l.name} — no response in ${cfg.quote_follow_up_days} days`,
+        "quote_reminder", l.id);
     }
   });
 
@@ -679,12 +727,14 @@ function buildDigest(now: number, today: string): string {
   const todayMs = Date.parse(today);
   const parts: string[] = [];
 
+  // One task list (Package C): the digest covers every open board task —
+  // follow-ups and plain cards alike — due today or overdue.
   const dueToday = sqlite.prepare(
-    "SELECT title FROM mk_tasks WHERE status = 'open' AND due_at >= ? AND due_at < ? ORDER BY due_at",
-  ).all(startOfToday, startOfToday + DAY_MS) as any[];
+    "SELECT title FROM pm_tasks WHERE deleted_at IS NULL AND status != 'done' AND due_date = ? ORDER BY created_at",
+  ).all(today) as any[];
   const overdueTasks = (sqlite.prepare(
-    "SELECT COUNT(*) AS n FROM mk_tasks WHERE status = 'open' AND due_at IS NOT NULL AND due_at < ?",
-  ).get(startOfToday) as any).n;
+    "SELECT COUNT(*) AS n FROM pm_tasks WHERE deleted_at IS NULL AND status != 'done' AND due_date IS NOT NULL AND due_date < ?",
+  ).get(today) as any).n;
   if (dueToday.length > 0 || overdueTasks > 0) {
     parts.push([
       `TASKS TODAY (${dueToday.length} due, ${overdueTasks} overdue)`,
@@ -790,7 +840,7 @@ function buildDigest(now: number, today: string): string {
 // ─── Dashboard "Needs attention" feed (Phase D #20c) ─────────────────────────
 // Lives here because the money-signal queries are the same ones the owner
 // digest and sweep already run (overdue invoices, contracts ending ≤30d, low
-// stock); the task list is the mk_tasks automation sink + overdue pm_tasks.
+// stock); the task list is pm_tasks — open follow-ups + overdue board cards.
 // Registered from index.ts right after registerRoutes. Each block try/catch'd
 // so a missing module table degrades to zeros, same stance as the sweep.
 
@@ -807,24 +857,28 @@ export function registerAttentionRoute(app: Express): void {
       projectId: number | null;
     };
     const tasks: AttentionTask[] = [];
+    // One task list (Package C): both feeds read pm_tasks now — open
+    // follow-ups (any due date) keep the "marketing" source so the dashboard
+    // chip still reads Follow-up; overdue plain cards stay source "pm".
     try {
       const mk = sqlite.prepare(`
-        SELECT id, title, due_at, project_id FROM mk_tasks WHERE status = 'open'
-        ORDER BY due_at IS NULL, due_at, created_at DESC LIMIT 8
+        SELECT id, title, due_date, project_id FROM pm_tasks
+        WHERE deleted_at IS NULL AND status != 'done' AND kind != 'task'
+        ORDER BY due_date IS NULL, due_date, created_at DESC LIMIT 8
       `).all() as any[];
       for (const t of mk) {
         tasks.push({
           source: "marketing", id: t.id, title: t.title,
-          dueAt: t.due_at ?? null,
-          overdue: t.due_at != null && t.due_at < now,
+          dueAt: t.due_date ? Date.parse(t.due_date) || null : null,
+          overdue: t.due_date != null && t.due_date < today,
           projectId: t.project_id ?? null,
         });
       }
-    } catch { /* marketing module absent */ }
+    } catch { /* pm module absent */ }
     try {
       const pm = sqlite.prepare(`
         SELECT id, title, due_date, project_id FROM pm_tasks
-        WHERE deleted_at IS NULL AND status != 'done'
+        WHERE deleted_at IS NULL AND status != 'done' AND kind = 'task'
           AND due_date IS NOT NULL AND due_date < ?
         ORDER BY due_date LIMIT 8
       `).all(today) as any[];
@@ -867,7 +921,7 @@ export function registerAttentionRoute(app: Express): void {
   });
 }
 
-// Same shape as startMarketingAutomations: run once on boot, then hourly;
+// Same shape as startSessionReaper in auth.ts: run once on boot, then hourly;
 // unref() so the timer never keeps a shutting-down process alive.
 export function startBusinessAutomations(): void {
   const tick = () => {
