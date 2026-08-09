@@ -225,7 +225,7 @@ export default function HrLeavePage() {
               <Info className="h-5 w-5 shrink-0" />
               <p>
                 No employee profile is linked to your account, so you can't file time off yet.
-                Ask a manager to link your login on the Employees page.
+                Ask the owner to link your login on the Employees page.
               </p>
             </div>
           )}

@@ -110,7 +110,7 @@ function privacyBody(): string {
   <h2 id="info">1. Information we collect</h2>
 
   <h3>Account &amp; authentication</h3>
-  <p>When an administrator creates your account, we store your display name, assigned role (e.g. worker, manager, technician), and a one-way <strong>bcrypt hash</strong> of your numeric PIN. We never store your PIN in plain text and cannot recover it. We create a session token when you sign in to keep you logged in.</p>
+  <p>When an administrator creates your account, we store your display name, assigned role (e.g. owner, worker), and a one-way <strong>bcrypt hash</strong> of your numeric PIN. We never store your PIN in plain text and cannot recover it. We create a session token when you sign in to keep you logged in.</p>
 
   <h3>Inventory &amp; operational data</h3>
   <p>The Service stores the business records you enter: items and their quantities, locations, part numbers, notes and photos; projects, job numbers and checklists; and the check-out, check-in, and stock-adjustment transactions you record.</p>

@@ -4,7 +4,8 @@ import path from "path";
 import { sqlite, storage } from "./storage";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
-import { renderTemplate, runCustomEmailSweep } from "./email-templates";
+import { renderTemplate, runCustomEmailSweep, firstNameOf } from "./email-templates";
+import { ymdLocal as localDate, fmtUsd } from "./http-util";
 // Leaf module like mailer — snapshot/rotation mechanics live there, the
 // scheduling (nightly + weekly offsite, steps 21/21b) lives here.
 import { maybeNightlyBackup, latestSnapshot } from "./backup";
@@ -51,13 +52,7 @@ for (const ddl of [
 }
 
 // ─── Small helpers ───────────────────────────────────────────────────────────
-
-// Local calendar date — same reasoning as finance.ts: "overdue" flips at the
-// shop's midnight, not UTC's.
-function localDate(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// `localDate` (ymdLocal) and `fmtUsd` live in ./http-util.
 
 // ISO week key ("2026-29") for the weekly offsite-backup dedupe.
 function isoWeek(ms: number): string {
@@ -67,12 +62,6 @@ function isoWeek(ms: number): string {
   const jan4 = new Date(d.getFullYear(), 0, 4);
   const week = 1 + Math.round(((d.getTime() - jan4.getTime()) / DAY_MS - 3 + ((jan4.getDay() + 6) % 7)) / 7);
   return `${d.getFullYear()}-${String(week).padStart(2, "0")}`;
-}
-
-// Whole dollars when clean, cents otherwise (same as marketing.ts).
-function fmtUsd(cents: number): string {
-  const dollars = cents / 100;
-  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
 }
 
 // Dedupe on auto_key (Package C: automation tasks live on the pm board now).
@@ -163,7 +152,7 @@ function runBusinessSweep(): void {
       if (inv.email && mailEnabled() && !isOptedOut(inv.email)) {
         if (inv.reminded_at != null && inv.reminded_at > now - 7 * DAY_MS) continue;
         setImmediate(async () => {
-          const first = String(inv.client_name ?? "").trim().split(/\s+/)[0] || "there";
+          const first = firstNameOf(inv.client_name);
           // Wording lives in the Emails section; null = the owner switched
           // this reminder off.
           const msg = renderTemplate("invoice.overdue", {
@@ -240,7 +229,7 @@ function runBusinessSweep(): void {
       }
       if (!email || isOptedOut(email)) continue;
       const url = `${PUBLIC_SITE_URL}/quote/${q.share_token}`;
-      const first = String(q.customer_name ?? "").trim().split(/\s+/)[0] || "there";
+      const first = firstNameOf(q.customer_name);
       // Both rungs of the ladder are owner-editable in the Emails section; the
       // unsubscribe link is re-attached there if it was deleted.
       const msg = renderTemplate(stage === 1 ? "quote.followup1" : "quote.followup2", {
@@ -451,7 +440,7 @@ function runBusinessSweep(): void {
     for (const rr of rows) {
       if (isOptedOut(rr.email)) continue;
       setImmediate(async () => {
-        const first = String(rr.name ?? "").trim().split(/\s+/)[0] || "there";
+        const first = firstNameOf(rr.name);
         const ok = await sendMail({
           to: rr.email,
           subject: "How did we do? — CJM Metals",

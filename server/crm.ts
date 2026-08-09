@@ -21,7 +21,10 @@ import { pmTasks } from "../shared/pm-schema";
 // Wiring plan, Fix 2 — projects carry a soft clientId ref; the client detail
 // view lists the jobs behind it. Core table, always present.
 import { projects } from "../shared/schema";
-import { pid, qstr, todayLocal, registerSoftDelete, registerGetById } from "./http-util";
+import {
+  pid, qstr, todayLocal, ymdLocal, isElevated,
+  registerSoftDelete, registerGetById, registerCreate,
+} from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/crm-schema.ts exactly. crm_leads.campaign_id is a soft
@@ -124,10 +127,18 @@ function getAutomationSettings(): { quoteFollowUpDays: number; autoReviewRequest
   return { quoteFollowUpDays: 3, autoReviewRequest: true };
 }
 
-// pm_tasks.due_date is a local-calendar "YYYY-MM-DD".
-function ymdLocal(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Canonical client-name lookup (this module owns crm_clients). finance.ts
+// uses it to snapshot names onto invoices — no deleted_at filter on purpose,
+// matching the copy it replaced: the snapshot is display text, not a live
+// link, so a soft-deleted client still resolves. try/catch → null keeps the
+// cross-module stance (a broken table degrades to "no name").
+export function clientNameById(id: number): string | null {
+  try {
+    return db.select({ name: clients.name }).from(clients)
+      .where(eq(clients.id, id)).get()?.name ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Quote-sent side effect: schedule a follow-up task on the pm board unless
@@ -671,18 +682,10 @@ export function registerCrmRoutes(app: Express): void {
     );
   });
 
-  app.post("/api/crm/leads", requireAuth, (req, res) => {
-    try {
-      const data = insertLeadSchema.parse(req.body);
-      const row = db.insert(leads).values(data).returning().get();
-      audit(req, "crm.lead_create", {
-        targetType: "lead", targetId: row.id, targetName: row.name,
-        details: { source: row.source },
-      });
-      res.status(201).json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
+  registerCreate(app, "/api/crm/leads", requireAuth, {
+    table: leads, schema: insertLeadSchema,
+    action: "crm.lead_create", targetType: "lead",
+    name: (r) => r.name, details: (r) => ({ source: r.source }), audit,
   });
 
   // Convert a lead into a client record. Idempotent: if the lead was already
@@ -867,7 +870,7 @@ export function registerCrmRoutes(app: Express): void {
     // exactly like finance's presentInvoice; voided rows excluded from balance
     // by carrying balanceCents only on receivable statuses' math (UI sums
     // non-void, non-paid balances).
-    const isElev = req.user?.role === "manager" || req.user?.role === "technician";
+    const isElev = isElevated(req);
     let invoiceRows: {
       id: number; number: string; status: string;
       totalCents: number; balanceCents: number; dueDate: string | null;
@@ -924,17 +927,10 @@ export function registerCrmRoutes(app: Express): void {
 
   registerGetById(app, "/api/crm/clients/:id", requireAuth, clients, "Client not found");
 
-  app.post("/api/crm/clients", requireAuth, (req, res) => {
-    try {
-      const data = insertClientSchema.parse(req.body);
-      const row = db.insert(clients).values(data).returning().get();
-      audit(req, "crm.client_create", {
-        targetType: "client", targetId: row.id, targetName: row.name,
-      });
-      res.status(201).json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
+  registerCreate(app, "/api/crm/clients", requireAuth, {
+    table: clients, schema: insertClientSchema,
+    action: "crm.client_create", targetType: "client",
+    name: (r) => r.name, audit,
   });
 
   app.patch("/api/crm/clients/:id", requireAuth, (req, res) => {

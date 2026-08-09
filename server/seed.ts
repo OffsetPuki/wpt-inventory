@@ -1,10 +1,6 @@
 import bcrypt from "bcryptjs";
-import { sql } from "drizzle-orm";
-import { storage, db } from "./storage";
-import {
-  DEFAULT_CJM_EQUIPMENT_PRESETS,
-  DEFAULT_CJM_JOB_TEMPLATES,
-} from "../shared/cjm-presets";
+import { storage, sqlite } from "./storage";
+import { DEFAULT_CJM_EQUIPMENT_PRESETS } from "../shared/cjm-presets";
 
 const BCRYPT_ROUNDS = 10;
 const BCRYPT_PREFIX = /^\$2[aby]\$/;
@@ -35,38 +31,35 @@ function migratePlaintextPins(): void {
  * Only inserts if the corresponding table is empty, so manager edits are never clobbered.
  */
 export function seedDefaults(): void {
+  // ── Role collapse (Package E) ──────────────────────────────────────────
+  // manager/technician → owner. The 3-role split only hid screens from the
+  // solo owner. Idempotent; outstanding sessions keep their old role string
+  // until expiry (requireElevated tolerates the legacy names).
+  try {
+    const r = sqlite.prepare(
+      "UPDATE users SET role = 'owner' WHERE role IN ('manager', 'technician')",
+    ).run();
+    if (r.changes > 0) console.log(`[seed] Collapsed ${r.changes} manager/technician user(s) to owner`);
+  } catch (e) {
+    console.error("[seed] role collapse failed", e);
+  }
+
   // ── Users ──────────────────────────────────────────────────────────────
   if (storage.getUserCount() === 0) {
-    // In production, seed with random PINs and log them ONCE so the operator
-    // can sign in — never bake the publicly-known dev defaults into prod.
+    // In production, seed with a random PIN and log it ONCE so the operator
+    // can sign in — never bake the publicly-known dev default into prod.
     const isProd = process.env.NODE_ENV === "production";
-    const managerPin = isProd ? randomPin() : "5678";
-    const techPin = isProd ? randomPin() : "1234";
-    const workerPin = isProd ? randomPin() : "0000";
-    console.log("[seed] Creating default Manager user");
+    const ownerPin = isProd ? randomPin() : "1234";
+    console.log("[seed] Creating default Owner user");
     storage.createUser({
-      name: "Manager",
-      pin: bcrypt.hashSync(managerPin, BCRYPT_ROUNDS),
-      role: "manager",
-    });
-    console.log("[seed] Creating default Technician user");
-    storage.createUser({
-      name: "Technician",
-      pin: bcrypt.hashSync(techPin, BCRYPT_ROUNDS),
-      role: "technician",
-    });
-    console.log("[seed] Creating default Worker user");
-    storage.createUser({
-      name: "Worker",
-      pin: bcrypt.hashSync(workerPin, BCRYPT_ROUNDS),
-      role: "worker",
+      name: "Owner",
+      pin: bcrypt.hashSync(ownerPin, BCRYPT_ROUNDS),
+      role: "owner",
     });
     if (isProd) {
       console.log("[seed] ────────────────────────────────────────────────");
       console.log("[seed]  First-run credentials — SAVE THESE NOW:");
-      console.log(`[seed]    Manager    / ${managerPin}`);
-      console.log(`[seed]    Technician / ${techPin}`);
-      console.log(`[seed]    Worker     / ${workerPin}`);
+      console.log(`[seed]    Owner / ${ownerPin}`);
       console.log("[seed] ────────────────────────────────────────────────");
     }
   } else {
@@ -79,27 +72,18 @@ export function seedDefaults(): void {
   storage.getSettings(); // creates singleton row if missing
 
   // ── Map Layouts ────────────────────────────────────────────────────────
-  // Idempotent: ensure a layout exists for each area, creating only the missing
-  // ones so new areas appear on restart without clobbering manager edits.
-  const desiredLayouts: { key: string; label: string; area: string }[] = [
-    { key: "main_shop", label: "Main Shop", area: "main_shop" },
-    { key: "machine_shop", label: "Machine Shop", area: "machine_shop" },
-    { key: "panel_shop", label: "Panel Shop", area: "panel_shop" },
-    { key: "concrete_pad", label: "Concrete Pad", area: "concrete_pad" },
-    { key: "shipping_container_1", label: "Electrical Container", area: "shipping_container_1" },
-    { key: "shipping_container_2", label: "Plumbing Container", area: "shipping_container_2" },
-  ];
-  desiredLayouts.forEach((l, idx) => {
-    if (!storage.getMapLayoutByKey(l.key)) {
-      console.log(`[seed] Creating map layout: ${l.key}`);
-      storage.createMapLayout({ key: l.key, label: l.label, area: l.area, orderIndex: idx, nodes: [] });
-    }
-  });
+  // One default floor for fresh installs; more are added from the Map page.
+  // Key-idempotent, so existing DBs (whatever floors they carry) are never
+  // touched. (The old six-layout seed was the PREVIOUS business's floor plan.)
+  if (!storage.getMapLayoutByKey("main_shop")) {
+    console.log("[seed] Creating map layout: main_shop");
+    storage.createMapLayout({ key: "main_shop", label: "Main Shop", area: "main_shop", orderIndex: 0, nodes: [] });
+  }
 
   // ── CJM Metals seeds ───────────────────────────────────────────────────
-  // Key-idempotent (not count-gated): existing installs that already carry
-  // the WPT presets still gain the metalwork ones on upgrade, and owner edits
-  // are never overwritten.
+  // Key-idempotent (not count-gated): existing installs still gain the
+  // metalwork presets on upgrade, and owner edits are never overwritten.
+  // (Job templates are owned by server/template-catalog.ts, synced at boot.)
   let cjmAdded = 0;
   DEFAULT_CJM_EQUIPMENT_PRESETS.forEach((preset, idx) => {
     if (storage.getPresetByKey(preset.key)) return;
@@ -116,21 +100,7 @@ export function seedDefaults(): void {
     });
     cjmAdded++;
   });
-  DEFAULT_CJM_JOB_TEMPLATES.forEach((tpl, idx) => {
-    if (storage.getTemplateByKey(tpl.key)) return;
-    storage.createTemplate({
-      key: tpl.key,
-      label: tpl.label,
-      blurb: tpl.blurb,
-      icon: tpl.icon,
-      params: tpl.params,
-      parts: tpl.parts,
-      orderIndex: 100 + idx,
-      enabled: true,
-    });
-    cjmAdded++;
-  });
-  if (cjmAdded > 0) console.log(`[seed] Added ${cjmAdded} CJM metalwork preset(s)/template(s)`);
+  if (cjmAdded > 0) console.log(`[seed] Added ${cjmAdded} CJM metalwork preset(s)`);
 
   console.log("[seed] Defaults verified");
 }

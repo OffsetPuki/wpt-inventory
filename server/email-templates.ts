@@ -321,7 +321,8 @@ export interface Anchor {
   vars: TemplateVar[];
 }
 
-const firstNameOf = (full: string | null | undefined): string =>
+// Exported: every module that greets a customer by first name uses this one.
+export const firstNameOf = (full: string | null | undefined): string =>
   String(full ?? "").trim().split(/\s+/)[0] || "there";
 
 const usd = (cents: number): string =>

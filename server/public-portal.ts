@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { hasLeadKey } from "./public-api";
 import { mailEnabled, sendMail, sendOwnerMail, optOutEmail } from "./mailer";
-import { renderTemplate } from "./email-templates";
+import { renderTemplate, firstNameOf } from "./email-templates";
 import { renderPublicPage } from "./legal";
 import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
@@ -739,7 +739,7 @@ export function registerPublicPortalRoutes(app: Express): void {
           // Wording is owner-editable in the Emails section.
           const msg = renderTemplate("quote.accepted", {
             customerName: quote.customerName || "there",
-            firstName: String(quote.customerName || "there").trim().split(/\s+/)[0] || "there",
+            firstName: firstNameOf(quote.customerName),
             quoteNumber: quote.number,
           });
           if (!msg) return;
@@ -804,8 +804,7 @@ export function registerPublicPortalRoutes(app: Express): void {
 
     // Unpublished by default — the owner curates what the testimonials feed
     // shows, exactly like manually logged reviews.
-    const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const today = todayLocal();
     const author = body.author || rr.name || null;
     // Phase B #12: stamp who reviewed us. client_id comes off the invitation
     // (stamped at creation since Phase B); older requests fall back to the

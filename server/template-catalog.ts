@@ -9,22 +9,13 @@ import type { TemplateParam, TemplatePart } from "../shared/schema";
 // settings.template_catalog_version — so the owner's later edits in
 // Admin → Templates survive restarts until TEMPLATE_CATALOG_VERSION is
 // bumped deliberately in code. Owner-created templates (other keys) are
-// never touched; the pre-CJM industrial templates get disabled, not deleted.
+// never touched.
 //
 // Part quantities are expr.ts formulas over the params (+ - * /, ceil, floor,
 // round, min, max, abs, sqrt). There are NO conditionals, so quantities scale
 // linearly and the notes say when to skip or adjust a line.
 
 export const TEMPLATE_CATALOG_VERSION = 2;
-
-// The app's pre-CJM industrial templates — hidden from the picker, kept in
-// the table (and restorable from Admin → Templates) in case they're wanted.
-export const LEGACY_TEMPLATE_KEYS = [
-  "new_oven_build",
-  "new_autoclave_build",
-  "annual_door_safety_check",
-  "field_dispatch",
-];
 
 export interface CatalogTemplate {
   key: string;

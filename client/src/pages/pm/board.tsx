@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/format";
+import { formatDate, todayYmd } from "@/lib/format";
 import type { Project, PublicUser } from "@shared/schema";
 import {
   TASK_STATUSES,
@@ -25,13 +25,6 @@ const PRIORITY_DOT: Record<TaskPriority, string> = {
   high: "bg-amber-500",
   urgent: "bg-red-500",
 };
-
-function todayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-}
 
 function initials(name: string): string {
   return name

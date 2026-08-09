@@ -15,9 +15,8 @@ interface AuthContextValue {
   user: PublicUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  isTechnician: boolean;
-  // Convenience: anything above worker. Use this for "managerial OR technical
-  // power" gates — most editing/decision controls fall here.
+  // Anything above worker: the owner (plus the legacy manager/technician
+  // roles a not-yet-refreshed session may still carry).
   isElevated: boolean;
   login: (name: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -96,9 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isAuthenticated = !!user;
-  const isManager = user?.role === "manager";
-  const isTechnician = user?.role === "technician";
-  const isElevated = isManager || isTechnician;
+  // Owner or a legacy elevated role (manager/technician) — everything but worker.
+  const isElevated = !!user && user.role !== "worker";
 
   return (
     <AuthContext.Provider
@@ -106,7 +104,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isLoading,
         isAuthenticated,
-        isTechnician,
         isElevated,
         login,
         logout,

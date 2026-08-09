@@ -5,7 +5,7 @@ import { sqlite, db } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, isOptedOut } from "./mailer";
-import { renderTemplate } from "./email-templates";
+import { renderTemplate, firstNameOf } from "./email-templates";
 import {
   invoices, invoicePayments, expenses, purchaseOrders,
   finSettings,
@@ -19,7 +19,8 @@ import { clients } from "../shared/crm-schema";
 import { projects } from "../shared/schema";
 // Phase B #9: automated customer emails land on the CRM timeline. The helper
 // is deferred + try/catch'd internally — safe to call from any mail hook.
-import { logEmailActivity } from "./crm";
+// clientNameById: crm owns crm_clients; try/catch'd internally too.
+import { logEmailActivity, clientNameById } from "./crm";
 // Contract-vs-invoiced reconciliation (Phase A #3) + approved change orders
 // (Phase G #1) + review-request tasks (Package C: tasks live on the pm
 // board). Table objects only — the pm module owns the DDL, so the touches
@@ -30,7 +31,7 @@ import { contracts, changeOrders, pmTasks } from "../shared/pm-schema";
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
 import { marketingSettings } from "../shared/marketing-schema";
 import { parseLineItems, computeDocTotals } from "../shared/biz-common";
-import { pid, qstr, todayLocal, usd, registerSoftDelete } from "./http-util";
+import { pid, qstr, todayLocal, usd, registerSoftDelete, registerCreate } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/finance-schema.ts exactly. client_id / estimate_id are soft
@@ -213,19 +214,24 @@ function presentInvoice(inv: Invoice, today: string) {
   };
 }
 
-// Document numbers: PREFIX-<year>-<4-digit seq>. Seq is derived from max id,
-// which only ever grows, so numbers never reuse after a delete. The UNIQUE
-// constraint on `number` is the arbiter under concurrency — on conflict we
-// bump the seq and retry (bounded, so a pathological table can't spin forever).
+// Document numbers: PREFIX-<year>-<4-digit seq>. Seq defaults to max(id)+1,
+// which only ever grows, so numbers never reuse after a delete; callers whose
+// row ids and issued numbers came apart (quotes.ts) pass their own `seed`.
+// The UNIQUE constraint on `number` is the arbiter under concurrency — on
+// conflict we bump the seq and retry (bounded, so a pathological table can't
+// spin forever).
 export function insertNumbered<T>(
-  table: "fin_invoices" | "fin_purchase_orders",
-  prefix: "INV" | "PO",
-  doInsert: (num: string) => T
+  table: string,
+  prefix: string,
+  doInsert: (num: string) => T,
+  opts: { seed?: () => number; attempts?: number } = {},
 ): T {
-  const base =
-    (sqlite.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM ${table}`).get() as { m: number }).m + 1;
+  const base = opts.seed
+    ? opts.seed()
+    : (sqlite.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM ${table}`).get() as { m: number }).m + 1;
   const year = new Date().getFullYear();
-  for (let i = 0; i < 25; i++) {
+  const attempts = opts.attempts ?? 25;
+  for (let i = 0; i < attempts; i++) {
     const num = `${prefix}-${year}-${String(base + i).padStart(4, "0")}`;
     try {
       return doInsert(num);
@@ -237,17 +243,9 @@ export function insertNumbered<T>(
   throw new Error(`Could not allocate a unique ${prefix} number`);
 }
 
-// Cross-module reads into CRM. The tables belong to crm.ts; if that module
-// isn't wired yet these queries would throw "no such table", so they degrade
-// to "not found" instead of 500ing the whole finance page.
-function clientNameById(id: number): string | null {
-  try {
-    return db.select({ name: clients.name }).from(clients).where(eq(clients.id, id)).get()?.name ?? null;
-  } catch {
-    return null;
-  }
-}
-
+// Cross-module reads into CRM (`clientNameById` is imported from crm.ts —
+// same degrade-to-null stance). If that module isn't wired yet these queries
+// would throw "no such table", so they fall back instead of 500ing the page.
 function allClientNames(): Map<number, string> {
   try {
     return new Map(
@@ -326,7 +324,7 @@ function queueReviewRequest(inv: Invoice): void {
       `).run(token, name, email, inv.id, inv.clientId ?? null, leadId);
 
       if (mailEnabled() && email && !isOptedOut(email)) {
-        const first = (name ?? "").trim().split(/\s+/)[0] || "there";
+        const first = firstNameOf(name);
         // Wording is owner-editable in the Emails section.
         const msg = renderTemplate("review.request", {
           firstName: first,
@@ -374,7 +372,7 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
         .from(clients).where(eq(clients.id, inv.clientId)).get();
       if (!client?.email) return;
 
-      const first = (client.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
+      const first = firstNameOf(client.name ?? inv.clientName);
       const balanceCents = inv.totalCents - retainageOf(inv) - inv.paidCents;
       // Two templates rather than one with a conditional sentence: the owner
       // edits "still owes us" and "paid in full" as the different notes they
@@ -420,7 +418,7 @@ function queueInvoiceEmail(inv: Invoice): void {
         || (inv.notes ?? "").match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/)?.[0];
       if (!to) return;
 
-      const first = (client?.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
+      const first = firstNameOf(client?.name ?? inv.clientName);
       const lines = parseLineItems(inv.items).map((it) =>
         `  - ${it.description} — ${it.qty} × ${usd(it.unitPriceCents)} = ${usd(Math.round(it.qty * it.unitPriceCents))}`);
 
@@ -1418,19 +1416,11 @@ export function registerFinanceRoutes(app: Express): void {
     res.json({ rows, totalCents });
   });
 
-  app.post("/api/finance/expenses", requireElevated, (req, res) => {
-    let body;
-    try {
-      body = insertExpenseSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    const row = db.insert(expenses).values(body).returning().get();
-    audit(req, "finance.expense_create", {
-      targetType: "expense", targetId: row.id, targetName: row.vendor ?? row.category,
-      details: { amountCents: row.amountCents, category: row.category },
-    });
-    res.status(201).json(row);
+  registerCreate(app, "/api/finance/expenses", requireElevated, {
+    table: expenses, schema: insertExpenseSchema,
+    action: "finance.expense_create", targetType: "expense",
+    name: (r) => r.vendor ?? r.category,
+    details: (r) => ({ amountCents: r.amountCents, category: r.category }), audit,
   });
 
   app.patch("/api/finance/expenses/:id", requireElevated, (req, res) => {

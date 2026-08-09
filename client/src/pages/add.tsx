@@ -21,7 +21,7 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export default function AddItemPage() {
   const [, setLocation] = useLocation();
-  const { isTechnician } = useAuth();
+  const { isElevated } = useAuth();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [identifying, setIdentifying] = useState(false);
@@ -36,8 +36,8 @@ export default function AddItemPage() {
     onSuccess: (item) => {
       qc.invalidateQueries({ queryKey: ["items"] });
       toast({ variant: "success", title: "Item added" });
-      // Technicians land on the edit screen to fine-tune location/details right away.
-      setLocation(isTechnician ? `/item/${item.id}/edit` : `/item/${item.id}`);
+      // The owner lands on the edit screen to fine-tune location/details right away.
+      setLocation(isElevated ? `/item/${item.id}/edit` : `/item/${item.id}`);
     },
     onError: (e: any) =>
       toast({ variant: "destructive", title: "Could not add item", description: e?.message }),

@@ -11,9 +11,8 @@ import {
   type JobTemplate, type ProjectChecklistRow, type PublicUser,
   type ChecklistRowWithItem,
 } from "../shared/schema";
-import {
-  TEMPLATE_CATALOG, TEMPLATE_CATALOG_VERSION, LEGACY_TEMPLATE_KEYS,
-} from "./template-catalog";
+import { TEMPLATE_CATALOG, TEMPLATE_CATALOG_VERSION } from "./template-catalog";
+import { escapeLike } from "./http-util";
 
 // ─── Database initialization ─────────────────────────────────────────────────
 
@@ -26,7 +25,8 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const uploadsDir = path.resolve(dataDir, "uploads");
+// Exported so routes.ts / pm.ts / public-api.ts share the one uploads dir.
+export const uploadsDir = path.resolve(dataDir, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -305,15 +305,10 @@ addColumnIfMissing("settings", "template_catalog_version", "template_catalog_ver
       const r = up.run(t.label, t.blurb, t.icon, params, parts, i, now, t.key);
       if (r.changes === 0) ins.run(t.key, t.label, t.blurb, t.icon, params, parts, i, now);
     });
-    // Pre-CJM industrial templates: hidden from the picker, not deleted —
-    // restorable from Admin → Templates if ever wanted.
-    const ph = LEGACY_TEMPLATE_KEYS.map(() => "?").join(",");
-    sqlite.prepare(`UPDATE job_templates SET enabled = 0, updated_at = ? WHERE key IN (${ph})`)
-      .run(now, ...LEGACY_TEMPLATE_KEYS);
     sqlite.prepare("UPDATE settings SET template_catalog_version = ? WHERE id = 1")
       .run(TEMPLATE_CATALOG_VERSION);
     console.log(
-      `[templates] CJM catalog v${TEMPLATE_CATALOG_VERSION} synced — ${TEMPLATE_CATALOG.length} service templates, ${LEGACY_TEMPLATE_KEYS.length} legacy disabled`,
+      `[templates] CJM catalog v${TEMPLATE_CATALOG_VERSION} synced — ${TEMPLATE_CATALOG.length} service templates`,
     );
   }
 }
@@ -325,14 +320,8 @@ function toPublicUser(u: User): PublicUser {
   return pub;
 }
 
-// Escape LIKE metacharacters (\, %, _) in a user-supplied search term so they
-// match literally instead of acting as wildcards. Backslash must be escaped
-// first. Pair with `ESCAPE '\'` on every LIKE clause that uses the result.
-function escapeLike(term: string): string {
-  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
-
 // ─── Storage API ─────────────────────────────────────────────────────────────
+// (`escapeLike` — LIKE-metacharacter escaping — lives in ./http-util.)
 
 export const storage = {
   // ── Users ────────────────────────────────────────────────────────────────
@@ -940,23 +929,6 @@ export const storage = {
       orderIndex: data.orderIndex ?? 0,
       enabled: data.enabled !== false,
     }).returning().get();
-  },
-
-  updatePreset(key: string, data: any): EquipmentPreset | undefined {
-    const vals: any = { updatedAt: new Date() };
-    if (data.label !== undefined) vals.label = data.label;
-    if (data.blurb !== undefined) vals.blurb = data.blurb;
-    if (data.icon !== undefined) vals.icon = data.icon;
-    if (data.defaultCategory !== undefined) vals.defaultCategory = data.defaultCategory;
-    if (data.examples !== undefined) vals.examples = JSON.stringify(data.examples);
-    if (data.customFields !== undefined) vals.customFields = JSON.stringify(data.customFields);
-    if (data.orderIndex !== undefined) vals.orderIndex = data.orderIndex;
-    if (data.enabled !== undefined) vals.enabled = data.enabled;
-    return db.update(equipmentPresets).set(vals).where(eq(equipmentPresets.key, key)).returning().get();
-  },
-
-  deletePreset(key: string): void {
-    db.delete(equipmentPresets).where(eq(equipmentPresets.key, key)).run();
   },
 
   // ── Job Templates ────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { timingSafeEqual } from "crypto";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
-import { db, sqlite, storage } from "./storage";
+import { db, sqlite, storage, uploadsDir } from "./storage";
 import { mailEnabled, sendOwnerMail } from "./mailer";
 import { leads, type LeadSource } from "../shared/crm-schema";
 import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
@@ -14,17 +14,14 @@ import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
 // ─── Public API: how the outside world talks to the suite ────────────────────
 // No session auth on any of these:
 //   POST /api/public/leads      — quote-form intake (shared-secret header)
-//   GET  /api/public/designs    — Quote App "Find design" lookup (shared key)
 //   GET  /api/public/reviews    — published testimonials feed
 //   GET  /api/public/portfolio  — published "recent work" gallery feed
-// The website's server calls the intake; the owner's Quote App (Electron)
-// calls the design lookup; the two read-only feeds are CORS-open.
+// The website's server calls the intake; the two read-only feeds are CORS-open.
 
 // ─── Website designs (configurator submissions) ──────────────────────────────
-// One row per design code (CJM-XXXX) that came through the quote form —
-// the structured record behind the Quote App's "Find design" screen, which
-// previously read the Google Sheet via Apps Script. Speaks that endpoint's
-// exact protocol so the app only needed its lookup URL changed.
+// One row per design code (CJM-XXXX) that came through the quote form — the
+// structured record behind the embedded quote builder's "Find design" screen
+// (the authed GET /api/quotes/designs in quotes.ts).
 
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS web_designs (
@@ -61,12 +58,6 @@ try {
 // Same uploads dir + filename style as the multer photo flow in routes.ts, so
 // the /uploads static handler serves these with no extra wiring.
 
-const dataDir = process.env.DATA_DIR
-  ? path.resolve(process.env.DATA_DIR)
-  : path.resolve(process.cwd(), "data");
-const uploadDir = path.resolve(dataDir, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
 // Bounds match the website's own guard (~2M chars of base64 ≈ 1.5 MB of PNG).
 const MAX_DESIGN_PNG_CHARS = 2_000_000;
 
@@ -82,7 +73,7 @@ function saveDesignPng(designPng: unknown): string | null {
     const buf = Buffer.from(m[1], "base64");
     if (buf.length === 0) return null;
     const name = `${Date.now()}-${crypto.randomBytes(16).toString("hex")}.png`;
-    fs.writeFileSync(path.join(uploadDir, name), buf);
+    fs.writeFileSync(path.join(uploadsDir, name), buf);
     return `/uploads/${name}`;
   } catch {
     return null;
@@ -189,8 +180,8 @@ function appendLeadPhoto(leadId: number, url: string): void {
   db.update(leads).set({ photos: JSON.stringify(arr) }).where(eq(leads.id, leadId)).run();
 }
 
-// A web_designs row in the lead envelope the Quote App's fetchLeads expects —
-// shared with the authenticated lookup in quotes.ts (the embedded builder).
+// A web_designs row in the lead envelope the embedded builder's "Find design"
+// screen expects — served by the authenticated lookup in quotes.ts.
 export function webDesignRowToLead(d: any) {
   return {
     time: new Date(d.created_at).toISOString(),
@@ -415,47 +406,6 @@ export function registerPublicRoutes(app: Express): void {
     res.status(201).json(
       dupe ? { ok: true, id: row.id, deduped: true } : { ok: true, id: row.id },
     );
-  });
-
-  // ─── Quote App design lookup ──────────────────────────────────────────────
-  // Drop-in replacement for the Apps Script doGet the Electron Quote App was
-  // built against — same query params (?key=…&ref=… / &recent=N), same
-  // response envelope ({ ok, leads: [...] } / { ok: false, error: 'bad key' }),
-  // so migrating the app is just changing its lookup URL in Settings.
-
-  const designLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 120, // the owner clicking around the Find design screen, not a feed
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: hasLeadKey,
-    message: { ok: false, error: "rate limited" },
-  });
-
-  app.get("/api/public/designs", designLimiter, (req, res) => {
-    // CORS-open like the Apps Script before it — the Electron app's renderer
-    // runs off file:// and can't read the response otherwise. The shared key
-    // still gates the data; the header only lets the reply through.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    const configured = process.env.LEAD_INTAKE_KEY;
-    // Key rides a query param because that's the protocol the app (and the
-    // Apps Script before it) already speaks. Query strings land in proxy and
-    // access logs, though, so an X-Lead-Key header is accepted too — callers
-    // can move off the query param without a protocol break.
-    // TODO: drop req.query.key fallback once the website sends X-Lead-Key (avoids secret in access logs)
-    const provided = req.headers["x-lead-key"] ?? req.query.key;
-    if (!safeKeyEqual(provided as string | undefined, configured)) {
-      return res.json({ ok: false, error: "bad key" });
-    }
-
-    const ref = typeof req.query.ref === "string" ? req.query.ref.trim().toUpperCase() : "";
-    if (ref) {
-      const rows = sqlite.prepare("SELECT * FROM web_designs WHERE upper(ref) = ?").all(ref);
-      return res.json({ ok: true, leads: rows.map(webDesignRowToLead) });
-    }
-    const recent = Math.min(Math.max(parseInt(String(req.query.recent ?? "25"), 10) || 25, 1), 100);
-    const rows = sqlite.prepare("SELECT * FROM web_designs ORDER BY created_at DESC, id DESC LIMIT ?").all(recent);
-    res.json({ ok: true, leads: rows.map(webDesignRowToLead) });
   });
 
   // ─── Read-only public feeds ───────────────────────────────────────────────

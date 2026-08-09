@@ -18,15 +18,15 @@ function daysLeft(deletedAt: number): number {
 }
 
 export default function TrashPage() {
-  // Restore items needs technician; restore projects needs elevated. The
-  // server enforces both — the UI just hides the section the user can't act on.
-  const { isTechnician, isElevated } = useAuth();
+  // Restoring (items or projects) is owner-only; the server enforces it and
+  // the UI just hides what the user can't act on.
+  const { isElevated } = useAuth();
   const qc = useQueryClient();
 
   const items = useQuery<DeletedItem[]>({
     queryKey: ["trash", "items"],
     queryFn: async () => (await apiRequest("GET", "/api/items/deleted")).json(),
-    enabled: isTechnician,
+    enabled: isElevated,
   });
   const projects = useQuery<DeletedProject[]>({
     queryKey: ["trash", "projects"],
@@ -61,7 +61,7 @@ export default function TrashPage() {
         description={`Deleted items and projects, recoverable for ${RETENTION_DAYS} days. After that they're purged for good.`}
       />
 
-      {isTechnician && (
+      {isElevated && (
         <section className="mb-8">
           <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-foreground">
             <Package className="h-5 w-5" /> Items
@@ -137,10 +137,10 @@ export default function TrashPage() {
         </section>
       )}
 
-      {!isElevated && !isTechnician && (
+      {!isElevated && (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-12 text-muted-foreground">
           <Trash2 className="h-10 w-10" />
-          <p className="text-base">Only managers and technicians can view the trash.</p>
+          <p className="text-base">Only the owner can view the trash.</p>
         </div>
       )}
     </div>

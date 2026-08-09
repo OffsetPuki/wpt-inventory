@@ -69,7 +69,7 @@ export default function HrPayrollPage() {
         <Header title="Payroll" description="Hours × rate over tracked time" />
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
           <Info className="h-5 w-5 shrink-0" />
-          <p>Payroll is manager-only. Your hours live in Projects → Time Tracking.</p>
+          <p>Payroll is owner-only. Your hours live in Projects → Time Tracking.</p>
         </div>
       </div>
     );

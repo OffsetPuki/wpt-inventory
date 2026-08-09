@@ -3,8 +3,9 @@ import fs from "fs";
 import path from "path";
 import zlib from "zlib";
 import { sqlite, dataDir } from "./storage";
-import { requireTechnician } from "./auth";
+import { requireElevated } from "./auth";
 import { audit } from "./audit";
+import { ymdLocal } from "./http-util";
 
 // ─── Database backup (Phase E) ───────────────────────────────────────────────
 // One SQLite file on one volume holds the whole business, so: a nightly
@@ -21,13 +22,6 @@ const dbPath = path.join(dataDir, "inventory.db");
 const HOUR_MS = 60 * 60 * 1000;
 const SNAP_RE = /^cjm-\d{4}-\d{2}-\d{2}\.db\.gz$/;
 const KEEP = 7;
-
-// Local calendar date, same as automations.ts (copied, not imported — this
-// module stays a leaf so automations.ts can import it without a cycle).
-function localDate(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 // Consistent snapshot → gzip bytes. Shared by the nightly job and the
 // download endpoint (which always serves a fresh copy, never the nightly).
@@ -69,7 +63,7 @@ export function latestSnapshot(): { file: string; mtimeMs: number; bytes: number
 export function maybeNightlyBackup(now = Date.now()): boolean {
   const latest = latestSnapshot();
   if (latest && now - latest.mtimeMs < 20 * HOUR_MS) return false;
-  const file = path.join(backupsDir, `cjm-${localDate(now)}.db.gz`);
+  const file = path.join(backupsDir, `cjm-${ymdLocal(now)}.db.gz`);
   fs.writeFileSync(file, snapshotGz());
   const names = fs.readdirSync(backupsDir).filter((f) => SNAP_RE.test(f)).sort();
   for (const old of names.slice(0, -KEEP)) {
@@ -80,13 +74,13 @@ export function maybeNightlyBackup(now = Date.now()): boolean {
 }
 
 // ─── Admin endpoints ─────────────────────────────────────────────────────────
-// Technician-only, like PUT /api/settings — the highest role in the suite.
+// Owner-only, like PUT /api/settings.
 // The client must fetch with the x-auth header and trigger a blob download
 // (settings.tsx); a plain browser navigation can't authenticate.
 
 export function registerBackupRoutes(app: Express): void {
   // Fresh gzipped snapshot, made on demand — the real offsite path.
-  app.get("/api/admin/backup", requireTechnician, (req, res) => {
+  app.get("/api/admin/backup", requireElevated, (req, res) => {
     let gz: Buffer;
     try {
       gz = snapshotGz();
@@ -99,14 +93,14 @@ export function registerBackupRoutes(app: Express): void {
     res.setHeader("Content-Type", "application/gzip");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="cjm-${localDate(Date.now())}.db.gz"`,
+      `attachment; filename="cjm-${ymdLocal(Date.now())}.db.gz"`,
     );
     res.send(gz);
   });
 
   // DB size + last nightly snapshot time, for the settings card. Size counts
   // the -wal file too — under WAL, recent writes live there until checkpoint.
-  app.get("/api/admin/backup/status", requireTechnician, (_req, res) => {
+  app.get("/api/admin/backup/status", requireElevated, (_req, res) => {
     let dbBytes = 0;
     for (const f of [dbPath, `${dbPath}-wal`]) {
       try {

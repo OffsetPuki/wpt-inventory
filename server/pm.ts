@@ -5,7 +5,7 @@ import crypto from "crypto";
 import multer from "multer";
 import { z } from "zod";
 import { eq, and, or, desc, asc, isNull, like, gte, lt, sql, getTableColumns } from "drizzle-orm";
-import { sqlite, db } from "./storage";
+import { sqlite, db, uploadsDir } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { users, projects } from "../shared/schema";
@@ -16,7 +16,7 @@ import {
   TASK_STATUSES, DOCUMENT_KINDS,
 } from "../shared/pm-schema";
 import { clients } from "../shared/crm-schema";
-import { pid, qstr, isElevated, registerSoftDelete } from "./http-util";
+import { pid, qstr, ymdLocal, isElevated, registerSoftDelete, registerCreate } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/pm-schema.ts exactly. pm_contracts.client_id is a soft
@@ -223,11 +223,7 @@ try {
 // only serves image extensions), so document files are only reachable through
 // the authed GET /api/pm/documents/:id/file below — a W-9 carries an EIN/SSN
 // and must not sit behind an unauthenticated URL.
-const dataDir = process.env.DATA_DIR
-  ? path.resolve(process.env.DATA_DIR)
-  : path.resolve(process.cwd(), "data");
-const docUploadDir = path.resolve(dataDir, "uploads");
-if (!fs.existsSync(docUploadDir)) fs.mkdirSync(docUploadDir, { recursive: true });
+// (`uploadsDir` — DATA_DIR/uploads, created at boot — lives in ./storage.)
 
 // Extension → safe Content-Type, doubling as the accept allowlist (same
 // stance as routes.ts EXT_TO_MIME: never let the browser sniff HTML/JS).
@@ -244,7 +240,7 @@ const DOC_ALLOWED_MIME = new Set(Object.values(DOC_EXT_TO_MIME));
 
 const docUpload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, docUploadDir),
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
     filename: (_req, file, cb) => {
       const rawExt = path.extname(file.originalname).toLowerCase();
       const ext = DOC_EXT_TO_MIME[rawExt] ? rawExt : ".pdf";
@@ -261,12 +257,7 @@ const docUpload = multer({
 // ─── Local date helpers ──────────────────────────────────────────────────────
 // Calendar dates are TEXT "YYYY-MM-DD" in the shop's local timezone; instants
 // are unix ms. Weeks run Monday→Sunday to match the timesheet cycle.
-
-function ymdLocal(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
+// (`ymdLocal` — unix ms → local "YYYY-MM-DD" — lives in ./http-util.)
 
 /** Local midnight of a "YYYY-MM-DD" string, as unix ms. */
 function ymdToLocalMs(ymd: string): number {
@@ -276,14 +267,14 @@ function ymdToLocalMs(ymd: string): number {
 
 function addDaysYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split("-").map(Number);
-  return ymdLocal(new Date(y, m - 1, d + days));
+  return ymdLocal(new Date(y, m - 1, d + days).getTime());
 }
 
 /** Monday of the week containing `d`, as "YYYY-MM-DD". */
 function mondayOf(d: Date): string {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // getDay(): Sun=0 … Sat=6
-  return ymdLocal(x);
+  return ymdLocal(x.getTime());
 }
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -322,7 +313,7 @@ export function registerPmRoutes(app: Express): void {
   // ── Stats ──────────────────────────────────────────────────────────────────
 
   app.get("/api/pm/stats", requireAuth, (_req, res) => {
-    const today = ymdLocal(new Date());
+    const today = ymdLocal(Date.now());
     const weekStart = mondayOf(new Date());
     const weekStartMs = ymdToLocalMs(weekStart);
     const weekEndMs = ymdToLocalMs(addDaysYmd(weekStart, 7));
@@ -685,16 +676,10 @@ export function registerPmRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.post("/api/pm/contracts", requireElevated, (req, res) => {
-    let body;
-    try {
-      body = insertContractSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message || "Invalid request" });
-    }
-    const row = db.insert(contracts).values(body).returning().get();
-    audit(req, "pm.contract_create", { targetType: "pm_contract", targetId: row.id, targetName: row.title });
-    res.status(201).json(row);
+  registerCreate(app, "/api/pm/contracts", requireElevated, {
+    table: contracts, schema: insertContractSchema,
+    action: "pm.contract_create", targetType: "pm_contract",
+    name: (c) => c.title, audit,
   });
 
   app.patch("/api/pm/contracts/:id", requireElevated, (req, res) => {
@@ -859,7 +844,7 @@ export function registerPmRoutes(app: Express): void {
     const safeName = path.basename(row.filePath); // strips any traversal
     const ext = path.extname(safeName).toLowerCase();
     const mime = DOC_EXT_TO_MIME[ext];
-    const filePath = path.join(docUploadDir, safeName);
+    const filePath = path.join(uploadsDir, safeName);
     if (!mime || !fs.existsSync(filePath)) {
       return res.status(404).json({ message: "File missing from storage" });
     }

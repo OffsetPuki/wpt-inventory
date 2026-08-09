@@ -6,9 +6,10 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
-import { storage } from "./storage";
+import { storage, uploadsDir } from "./storage";
 import { audit, clientIp } from "./audit";
-import { requireAuth, requireTechnician, requireElevated, createSession, destroySession } from "./auth";
+import { requireAuth, requireElevated, createSession, destroySession } from "./auth";
+import { isElevated } from "./http-util";
 // Business-suite modules. Import order matters for DDL: marketing owns the
 // mk_* tables that CRM's automation hooks insert into, so it loads first.
 import { registerMarketingRoutes, queueTaskOnce } from "./marketing";
@@ -24,7 +25,7 @@ import { registerPublicPortalRoutes } from "./public-portal";
 // Quote builder (ported CJM Quote app). Imports public-api's web_designs row
 // mapper, so it loads after public-api's DDL has created that table.
 import { registerQuoteRoutes } from "./quotes";
-// DB snapshot download + status (Phase E) — technician-only.
+// DB snapshot download + status (Phase E) — owner-only.
 import { registerBackupRoutes } from "./backup";
 import { registerEmailTemplateRoutes } from "./email-templates-routes";
 import { evalQty } from "./expr";
@@ -36,12 +37,7 @@ import {
 const BCRYPT_ROUNDS = 10;
 
 // ── Photo upload via multer ──────────────────────────────────────────────────
-
-const dataDir = process.env.DATA_DIR
-  ? path.resolve(process.env.DATA_DIR)
-  : path.resolve(process.cwd(), "data");
-const uploadDir = path.resolve(dataDir, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// (`uploadsDir` — DATA_DIR/uploads, created at boot — lives in ./storage.)
 
 // Allowlist of image extensions + mime types we'll accept, all derived from one
 // source of truth (EXT_TO_MIME). JPEG covers the downscaled output from the
@@ -69,7 +65,7 @@ const ALLOWED_IMAGE_MIME = new Set(Object.values(EXT_TO_MIME));
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadDir),
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
     filename: (_req, file, cb) => {
       const rawExt = path.extname(file.originalname).toLowerCase();
       const ext = ALLOWED_IMAGE_EXT.has(rawExt) ? rawExt : ".jpg";
@@ -109,16 +105,6 @@ const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
 // supplied username doesn't exist, so an attacker can't tell from response
 // timing whether a username is real.
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
-
-// Static keyword → category rules for the /api/categorize heuristic. Hoisted to
-// module scope so they're built once, not re-allocated on every request.
-const CATEGORIZE_RULES: [string[], string][] = [
-  [["wire", "cable", "motor", "relay", "contactor", "vfd", "transformer", "breaker", "fuse"], "electric"],
-  [["welder", "welding", "mig", "tig", "stick", "electrode", "wire feed"], "welder"],
-  [["plc", "hmi", "sensor", "network", "switch", "ethernet", "computer", "monitor", "software"], "it"],
-  [["steel", "plate", "tube", "tubing", "pipe", "sheet", "gasket", "seal", "bolt", "nut", "stud", "flange", "fitting"], "raw_materials"],
-  [["wrench", "drill", "saw", "hammer", "screwdriver", "pliers", "tool", "tape", "level", "clamp"], "tools"],
-];
 
 export function registerRoutes(app: Express): void {
   // ─── Auth ────────────────────────────────────────────────────────────────
@@ -203,7 +189,7 @@ export function registerRoutes(app: Express): void {
   // credential pair, so it's been removed; the login form now just lets the
   // user type their name freely.
 
-  // ─── Users (manager-only) ───────────────────────────────────────────────
+  // ─── Users (owner-only) ─────────────────────────────────────────────────
 
   app.get("/api/users", requireElevated, (_req, res) => {
     res.json(storage.getUsers());
@@ -265,7 +251,7 @@ export function registerRoutes(app: Express): void {
 
   // Trash listing has to live ABOVE /api/items/:id so the literal "deleted"
   // segment isn't captured as a numeric id parameter.
-  app.get("/api/items/deleted", requireTechnician, (_req, res) => {
+  app.get("/api/items/deleted", requireElevated, (_req, res) => {
     res.json(storage.getDeletedItems());
   });
 
@@ -291,8 +277,8 @@ export function registerRoutes(app: Express): void {
   app.post("/api/items", requireAuth, (req, res) => {
     try {
       const body = { ...req.body };
-      // Only technicians may set the low-stock threshold and reserved quantity.
-      if (req.user?.role !== "technician") {
+      // Only the owner may set the low-stock threshold and reserved quantity.
+      if (!isElevated(req)) {
         delete body.lowStockThreshold;
         delete body.quantityReserved;
       }
@@ -308,10 +294,10 @@ export function registerRoutes(app: Express): void {
 
   app.patch("/api/items/:id", requireAuth, (req, res) => {
     const body = { ...req.body };
-    // Only technicians may set stock levels, the low-stock threshold and the
+    // Only the owner may set stock levels, the low-stock threshold and the
     // reserved quantity — mirror the create handler so a worker can't quietly
     // overwrite these with no audit trail.
-    if (req.user?.role !== "technician") {
+    if (!isElevated(req)) {
       delete body.quantity;
       delete body.lowStockThreshold;
       delete body.quantityReserved;
@@ -324,7 +310,7 @@ export function registerRoutes(app: Express): void {
     res.json(item);
   });
 
-  app.delete("/api/items/:id", requireTechnician, (req, res) => {
+  app.delete("/api/items/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = storage.getItemById(id);
     storage.deleteItem(id);
@@ -337,7 +323,7 @@ export function registerRoutes(app: Express): void {
   // Restore endpoint for items soft-deleted in the last 30 days. The
   // listing endpoint is registered higher up so /deleted isn't captured
   // as :id by /api/items/:id.
-  app.post("/api/items/:id/restore", requireTechnician, (req, res) => {
+  app.post("/api/items/:id/restore", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = storage.getItemByIdIncludingDeleted(id);
     if (!target) return res.status(404).json({ message: "Item not found" });
@@ -350,7 +336,7 @@ export function registerRoutes(app: Express): void {
 
   // ─── Adjustments ────────────────────────────────────────────────────────
 
-  app.post("/api/items/:id/adjust", requireTechnician, (req, res) => {
+  app.post("/api/items/:id/adjust", requireElevated, (req, res) => {
     try {
       const data = insertAdjustmentSchema.parse(req.body);
       const id = pid(req.params.id);
@@ -364,10 +350,6 @@ export function registerRoutes(app: Express): void {
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
-  });
-
-  app.get("/api/items/:id/adjustments", requireAuth, (req, res) => {
-    res.json(storage.getAdjustments(pid(req.params.id)));
   });
 
   // ─── Check out / Check in ──────────────────────────────────────────────
@@ -514,29 +496,10 @@ export function registerRoutes(app: Express): void {
   });
 
   // ─── Equipment Presets ──────────────────────────────────────────────────
+  // Read-only: presets are seeded (server/seed.ts) — no UI manages them.
 
   app.get("/api/equipment-presets", requireAuth, (_req, res) => {
     res.json(storage.getPresets());
-  });
-
-  app.post("/api/equipment-presets", requireTechnician, (req, res) => {
-    try {
-      const preset = storage.createPreset(req.body);
-      res.status(201).json(preset);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
-  });
-
-  app.put("/api/equipment-presets/:key", requireTechnician, (req, res) => {
-    const preset = storage.updatePreset(pkey(req.params.key), req.body);
-    if (!preset) return res.status(404).json({ message: "Preset not found" });
-    res.json(preset);
-  });
-
-  app.delete("/api/equipment-presets/:key", requireTechnician, (req, res) => {
-    storage.deletePreset(pkey(req.params.key));
-    res.json({ ok: true });
   });
 
   // ─── Job Templates ─────────────────────────────────────────────────────
@@ -545,7 +508,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getTemplates());
   });
 
-  app.post("/api/job-templates", requireTechnician, (req, res) => {
+  app.post("/api/job-templates", requireElevated, (req, res) => {
     try {
       const tpl = storage.createTemplate(req.body);
       res.status(201).json(tpl);
@@ -554,18 +517,18 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.put("/api/job-templates/:key", requireTechnician, (req, res) => {
+  app.put("/api/job-templates/:key", requireElevated, (req, res) => {
     const tpl = storage.updateTemplate(pkey(req.params.key), req.body);
     if (!tpl) return res.status(404).json({ message: "Template not found" });
     res.json(tpl);
   });
 
-  app.delete("/api/job-templates/:key", requireTechnician, (req, res) => {
+  app.delete("/api/job-templates/:key", requireElevated, (req, res) => {
     storage.deleteTemplate(pkey(req.params.key));
     res.json({ ok: true });
   });
 
-  app.post("/api/job-templates/:key/preview", requireTechnician, (req, res) => {
+  app.post("/api/job-templates/:key/preview", requireElevated, (req, res) => {
     const tpl = storage.getTemplateByKey(pkey(req.params.key));
     if (!tpl) return res.status(404).json({ message: "Template not found" });
 
@@ -639,10 +602,8 @@ export function registerRoutes(app: Express): void {
   });
 
   app.patch("/api/checklist/:id", requireAuth, (req, res) => {
-    // Workers may check items off (status only); manager + technician may edit everything.
-    const role = req.user?.role;
-    const elevated = role === "manager" || role === "technician";
-    const patch = elevated ? req.body : { status: req.body?.status };
+    // Workers may check items off (status only); the owner may edit everything.
+    const patch = isElevated(req) ? req.body : { status: req.body?.status };
     // Actor id lets the status transition write its stock adjustment (#19).
     const row = storage.updateChecklistRow(pid(req.params.id), patch, req.user?.userId);
     if (!row) return res.status(404).json({ message: "Checklist row not found" });
@@ -660,7 +621,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getSettings());
   });
 
-  app.put("/api/settings", requireTechnician, (req, res) => {
+  app.put("/api/settings", requireElevated, (req, res) => {
     const s = storage.updateSettings(req.body);
     audit(req, "settings.update", {
       details: { fields: Object.keys(req.body || {}) },
@@ -683,13 +644,7 @@ export function registerRoutes(app: Express): void {
     res.json(storage.getMapLayouts());
   });
 
-  app.get("/api/map-layouts/:key", requireAuth, (_req, res) => {
-    const layout = storage.getMapLayoutByKey(_req.params.key as string);
-    if (!layout) return res.status(404).json({ message: "Layout not found" });
-    res.json(layout);
-  });
-
-  app.post("/api/map-layouts", requireTechnician, (req, res) => {
+  app.post("/api/map-layouts", requireElevated, (req, res) => {
     try {
       const layout = storage.createMapLayout(req.body);
       res.status(201).json(layout);
@@ -698,13 +653,13 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.put("/api/map-layouts/:key", requireTechnician, (req, res) => {
+  app.put("/api/map-layouts/:key", requireElevated, (req, res) => {
     const layout = storage.updateMapLayout(pkey(req.params.key), req.body);
     if (!layout) return res.status(404).json({ message: "Layout not found" });
     res.json(layout);
   });
 
-  app.delete("/api/map-layouts/:key", requireTechnician, (req, res) => {
+  app.delete("/api/map-layouts/:key", requireElevated, (req, res) => {
     storage.deleteMapLayout(pkey(req.params.key));
     res.json({ ok: true });
   });
@@ -800,20 +755,6 @@ export function registerRoutes(app: Express): void {
     child.stdin?.end();
   });
 
-  // ─── Categorize (heuristic) ────────────────────────────────────────────
-
-  app.post("/api/categorize", requireAuth, (req, res) => {
-    const name = (req.body.name || "").toLowerCase();
-
-    for (const [keywords, category] of CATEGORIZE_RULES) {
-      if (keywords.some((kw) => name.includes(kw))) {
-        return res.json({ category });
-      }
-    }
-
-    res.json({ category: "tools" });
-  });
-
   // ─── Business suite modules ────────────────────────────────────────────
 
   registerMarketingRoutes(app);
@@ -839,7 +780,7 @@ export function registerRoutes(app: Express): void {
     // (b) it's not ours — either way, refuse to serve it.
     const mime = EXT_TO_MIME[ext];
     if (!mime) return next();
-    const filePath = path.join(uploadDir, safeName);
+    const filePath = path.join(uploadsDir, safeName);
     if (!fs.existsSync(filePath)) return next();
 
     // Force a safe Content-Type and forbid the browser from sniffing the

@@ -8,7 +8,8 @@ import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-
 import { webDesignRowToLead } from "./public-api";
 import { onQuoteEvent, logEmailActivity } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
-import { renderTemplate } from "./email-templates";
+import { renderTemplate, firstNameOf } from "./email-templates";
+import { insertNumbered } from "./finance";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the costing
 // report and buy list price with EXACTLY the math the builder uses. Same
@@ -23,8 +24,8 @@ import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 //                        session payload per row, server-assigned "Q-…" number
 //   · quote_settings   — singleton: the shared price book + shop identity that
 //                        used to live in the .exe's localStorage
-//   · /api/quotes/designs — authenticated twin of GET /api/public/designs, so
-//                        the embedded "Find design" screen needs no shared key
+//   · /api/quotes/designs — authenticated web_designs lookup backing the
+//                        embedded "Find design" screen (no shared key needed)
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/quote-schema.ts exactly.
@@ -128,7 +129,7 @@ function effectiveBook(sess: { priceBookSnapshot?: unknown } | null): Record<str
 // quoted before see the sequence they expect. Inert once numbering passes it.
 const NUMBER_START = 631;
 
-// "Q-<year>-<0000>" — bounded retry on UNIQUE collision.
+// "Q-<year>-<0000>" — finance's insertNumbered with a quote-specific seed.
 //
 // The sequence is seeded from the highest number already ISSUED, not from
 // max(id): row ids and quote numbers came apart the moment numbering started
@@ -138,21 +139,19 @@ const NUMBER_START = 631;
 function insertQuoteWithNumber(
   values: Omit<typeof quotes.$inferInsert, "number">,
 ): typeof quotes.$inferSelect {
-  const year = new Date().getFullYear();
-  const issued = db.select({
-    m: sql<number>`coalesce(max(cast(substr(${quotes.number}, 8) as integer)), 0)`,
-  }).from(quotes).get()?.m ?? 0;
-  let seq = Math.max(issued + 1, NUMBER_START);
-  for (let attempt = 0; attempt < 50; attempt++, seq++) {
-    const number = `Q-${year}-${String(seq).padStart(4, "0")}`;
-    try {
-      return db.insert(quotes).values({ ...values, number }).returning().get();
-    } catch (e: any) {
-      if (String(e?.message ?? e).includes("UNIQUE")) continue;
-      throw e;
-    }
-  }
-  throw new Error("Could not allocate a quote number — too many collisions");
+  return insertNumbered(
+    "quotes", "Q",
+    (number) => db.insert(quotes).values({ ...values, number }).returning().get(),
+    {
+      seed: () => {
+        const issued = db.select({
+          m: sql<number>`coalesce(max(cast(substr(${quotes.number}, 8) as integer)), 0)`,
+        }).from(quotes).get()?.m ?? 0;
+        return Math.max(issued + 1, NUMBER_START);
+      },
+      attempts: 50,
+    },
+  );
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -224,9 +223,8 @@ export function registerQuoteRoutes(app: Express): void {
   });
 
   // ─── Design lookup (literal path — registered before /:id) ────────────────
-  // Same rows and envelope as GET /api/public/designs, but behind the session
-  // instead of the shared LEAD_INTAKE_KEY — the embedded Find design screen
-  // has no URL/key settings anymore.
+  // web_designs rows in the lead envelope the Find design screen expects,
+  // behind the session — the embedded builder has no URL/key settings.
 
   app.get("/api/quotes/designs", requireAuth, (req, res) => {
     const ref = typeof req.query.ref === "string" ? req.query.ref.trim().toUpperCase() : "";
@@ -518,7 +516,7 @@ export function registerQuoteRoutes(app: Express): void {
     if (req.body?.sendEmail && to && mailEnabled()) {
       // Wording is owner-editable in the Emails section.
       const msg = renderTemplate("quote.share", {
-        firstName: String(quote.customerName || "there").trim().split(/\s+/)[0] || "there",
+        firstName: firstNameOf(quote.customerName),
         customerName: quote.customerName || "there",
         quoteNumber: quote.number,
         quoteUrl: url,

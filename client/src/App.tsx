@@ -58,19 +58,11 @@ function LoadingSpinner() {
 
 // ─── Route guards ───────────────────────────────────────────────────────────
 
-// Dashboard, users, projects (and other oversight screens) — visible to both
-// the new Manager role and Technicians.
+// Oversight / operational screens (dashboard, users, settings, templates…) —
+// owner-only; workers are redirected to the floor tools.
 function ElevatedRoute({ children }: { children: ReactNode }) {
   const { isElevated } = useAuth();
   if (!isElevated) return <Redirect to="/home" />;
-  return <>{children}</>;
-}
-
-// Settings, job templates (and other low-level operational screens) — kept
-// out of the manager's nav to avoid overwhelming them with technical knobs.
-function TechnicianRoute({ children }: { children: ReactNode }) {
-  const { isTechnician } = useAuth();
-  if (!isTechnician) return <Redirect to="/home" />;
   return <>{children}</>;
 }
 
@@ -146,8 +138,6 @@ export default function App() {
             <MapPage />
           </Route>
 
-          {/* Add item — available to workers and technicians; nav hides it
-              for managers (kept reachable by direct URL for now). */}
           <Route path="/add">
             <AddItemPage />
           </Route>
@@ -229,7 +219,7 @@ export default function App() {
             </ElevatedRoute>
           </Route>
 
-          {/* Manager + Technician routes */}
+          {/* Owner routes */}
           <Route path="/dashboard">
             <ElevatedRoute>
               <DashboardPage />
@@ -259,17 +249,16 @@ export default function App() {
             </ElevatedRoute>
           </Route>
 
-          {/* Technician-only routes */}
           <Route path="/settings">
-            <TechnicianRoute>
+            <ElevatedRoute>
               <SettingsPage />
-            </TechnicianRoute>
+            </ElevatedRoute>
           </Route>
 
           <Route path="/admin/templates">
-            <TechnicianRoute>
+            <ElevatedRoute>
               <AdminTemplatesPage />
-            </TechnicianRoute>
+            </ElevatedRoute>
           </Route>
 
           {/* 404 fallback */}

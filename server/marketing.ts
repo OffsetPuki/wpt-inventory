@@ -16,7 +16,7 @@ import { pmTasks, type TaskKind } from "../shared/pm-schema";
 // Cross-module READ: the CRM module owns crm_leads (tables + endpoints).
 // Marketing only reads them for source/attribution reporting.
 import { leads, clients } from "../shared/crm-schema";
-import { pid, qstr } from "./http-util";
+import { pid, qstr, todayLocal, registerCreate } from "./http-util";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -188,12 +188,6 @@ function getSettingsRow(): MarketingSettings {
   return db.select().from(marketingSettings).where(eq(marketingSettings.id, 1)).get()!;
 }
 
-// pm_tasks.due_date is a local-calendar "YYYY-MM-DD".
-function todayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 // Fire-and-forget task creation for on-event hooks (used here and by
 // routes.ts): defers the insert via setImmediate like audit(), and dedupes on
 // an open task with the same title so repeated events don't pile up copies.
@@ -233,7 +227,7 @@ function computeAlerts(): string[] {
       sql`${pmTasks.status} != 'done'`,
       sql`${pmTasks.kind} != 'task'`,
       isNotNull(pmTasks.dueDate),
-      sql`${pmTasks.dueDate} < ${todayYmd()}`,
+      sql`${pmTasks.dueDate} < ${todayLocal()}`,
     )).get()?.n ?? 0;
   if (overdue > 0) {
     alerts.push(overdue === 1
@@ -294,7 +288,7 @@ export function registerMarketingRoutes(app: Express): void {
       .where(and(
         followUpConds,
         isNotNull(pmTasks.dueDate),
-        sql`${pmTasks.dueDate} < ${todayYmd()}`,
+        sql`${pmTasks.dueDate} < ${todayLocal()}`,
       )).get()?.n ?? 0;
 
     // Reviews are often logged after the fact, so prefer the review's own
@@ -602,18 +596,10 @@ export function registerMarketingRoutes(app: Express): void {
     );
   });
 
-  app.post("/api/marketing/portfolio", requireElevated, (req, res) => {
-    let body;
-    try {
-      body = insertPortfolioItemSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    const row = db.insert(portfolioItems).values(body).returning().get();
-    audit(req, "marketing.portfolio_create", {
-      targetType: "portfolio", targetId: row.id, targetName: row.title,
-    });
-    res.status(201).json(row);
+  registerCreate(app, "/api/marketing/portfolio", requireElevated, {
+    table: portfolioItems, schema: insertPortfolioItemSchema,
+    action: "marketing.portfolio_create", targetType: "portfolio",
+    name: (r) => r.title, audit,
   });
 
   app.patch("/api/marketing/portfolio/:id", requireElevated, (req, res) => {

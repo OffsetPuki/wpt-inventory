@@ -90,25 +90,14 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-// Technical/operational endpoints — only technicians get through.
-// (Item edit/delete, stock adjustments, map layouts, settings, templates.)
-export function requireTechnician(req: Request, res: Response, next: NextFunction): void {
-  requireAuth(req, res, () => {
-    if (req.user?.role !== "technician") {
-      res.status(403).json({ message: "Technician access required" });
-      return;
-    }
-    next();
-  });
-}
-
-// Managerial endpoints — manager OR technician. Used for things both should
-// be able to do (dashboard stats, user CRUD, project CRUD, AI identify).
+// Elevated endpoints — the owner. Legacy 'manager'/'technician' roles are
+// still accepted: sessions persist in SQLite, so outstanding rows carry the
+// old role strings until they expire (30-day sliding TTL).
 export function requireElevated(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     const role = req.user?.role;
-    if (role !== "manager" && role !== "technician") {
-      res.status(403).json({ message: "Manager or technician access required" });
+    if (role !== "owner" && role !== "manager" && role !== "technician") {
+      res.status(403).json({ message: "Owner access required" });
       return;
     }
     next();

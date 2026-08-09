@@ -7,27 +7,25 @@ import type { PublicUser, Role } from "@shared/schema";
 import { formatDate } from "@/lib/format";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
-import { UserPlus, Trash2, Loader2, ShieldCheck, Wrench, HardHat } from "lucide-react";
+import { UserPlus, Trash2, Loader2, ShieldCheck, HardHat } from "lucide-react";
 
 // One source of truth for how each role is labelled and badged in the UI.
+// Legacy manager/technician rows (pre-collapse) display as Owner.
+const asRole = (r: string): Role => (r === "worker" ? "worker" : "owner");
 const ROLE_LABELS: Record<Role, string> = {
-  manager: "Manager",
-  technician: "Technician",
+  owner: "Owner",
   worker: "Worker",
 };
 const ROLE_ICON: Record<Role, typeof ShieldCheck> = {
-  manager: ShieldCheck,
-  technician: Wrench,
+  owner: ShieldCheck,
   worker: HardHat,
 };
 const ROLE_BADGE: Record<Role, string> = {
-  manager: "bg-primary/15 text-primary",
-  technician: "bg-amber-500/15 text-amber-500",
+  owner: "bg-primary/15 text-primary",
   worker: "bg-secondary text-secondary-foreground",
 };
 const ROLE_HELP: Record<Role, string> = {
-  manager: "Oversight — dashboard, projects, users. Simpler UI.",
-  technician: "Full operational control — items, stock, map, settings.",
+  owner: "Everything — dashboard, finance, users, settings.",
   worker: "Floor user — find / add items, check in/out, view projects.",
 };
 
@@ -104,8 +102,7 @@ export default function UsersPage() {
           <span className="text-sm font-medium text-foreground">Role</span>
           <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="worker">Worker</option>
-            <option value="technician">Technician</option>
-            <option value="manager">Manager</option>
+            <option value="owner">Owner</option>
           </select>
           <span className="text-xs text-muted-foreground">{ROLE_HELP[role]}</span>
         </label>
@@ -134,18 +131,18 @@ export default function UsersPage() {
                 <span
                   className={cn(
                     "flex h-10 w-10 items-center justify-center rounded-full",
-                    ROLE_BADGE[u.role as Role] ?? ROLE_BADGE.worker
+                    ROLE_BADGE[asRole(u.role)]
                   )}
                 >
                   {(() => {
-                    const Icon = ROLE_ICON[u.role as Role] ?? HardHat;
+                    const Icon = ROLE_ICON[asRole(u.role)];
                     return <Icon className="h-5 w-5" />;
                   })()}
                 </span>
                 <div>
                   <p className="font-semibold text-foreground">{u.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {ROLE_LABELS[u.role as Role] ?? u.role} · added {formatDate(u.createdAt as unknown as string)}
+                    {ROLE_LABELS[asRole(u.role)]} · added {formatDate(u.createdAt as unknown as string)}
                   </p>
                 </div>
               </div>

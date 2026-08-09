@@ -61,22 +61,20 @@ interface NavEntry {
   to: string;
   label: string;
   icon: typeof Search;
-  // "elevated" = manager + technician. "technician" = tech only.
-  // Undefined = visible to everyone signed in.
-  needs?: "elevated" | "technician";
+  // "elevated" = owner only. Undefined = visible to everyone signed in.
+  needs?: "elevated";
 }
 
 interface NavGroup {
   key: string;
   label: string;
-  needs?: "elevated" | "technician";
+  needs?: "elevated";
   entries: NavEntry[];
 }
 
 // The suite is organized by business function. Entry-level visibility mirrors
 // the API: workers get the floor tools (sales, projects, inventory, their own
-// HR self-service); managers add oversight (dashboard, marketing, finance);
-// technicians add the operational knobs (settings, templates).
+// HR self-service); the owner gets everything.
 const NAV_GROUPS: NavGroup[] = [
   {
     key: "crm",
@@ -112,7 +110,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Inventory",
     entries: [
       { to: "/home", label: "Find Items", icon: Search },
-      { to: "/add", label: "Add Item", icon: Plus, needs: "technician" },
+      { to: "/add", label: "Add Item", icon: Plus, needs: "elevated" },
       { to: "/activity", label: "Activity", icon: Activity },
       { to: "/map", label: "Shop Map", icon: Map },
     ],
@@ -146,8 +144,8 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/emails", label: "Emails", icon: Mail, needs: "elevated" },
       { to: "/audit", label: "Audit Log", icon: ShieldCheck, needs: "elevated" },
       { to: "/trash", label: "Trash", icon: Trash2, needs: "elevated" },
-      { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "technician" },
-      { to: "/settings", label: "Settings", icon: Settings, needs: "technician" },
+      { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "elevated" },
+      { to: "/settings", label: "Settings", icon: Settings, needs: "elevated" },
     ],
   },
 ];
@@ -162,7 +160,7 @@ function groupForLocation(location: string): string | null {
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
-  const { isElevated, isTechnician } = useAuth();
+  const { isElevated } = useAuth();
   const [location] = useLocation();
   // Only the group for the screen you're on starts open — keeps the sidebar
   // short and scannable. Manual toggles stick for the session.
@@ -177,11 +175,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     if (active) setOpen((o) => (o[active] ? o : { ...o, [active]: true }));
   }, [location]);
 
-  const canSee = (needs?: "elevated" | "technician") => {
-    if (needs === "technician") return isTechnician;
-    if (needs === "elevated") return isElevated;
-    return true;
-  };
+  const canSee = (needs?: "elevated") => (needs === "elevated" ? isElevated : true);
 
   const linkCls = (active: boolean) =>
     cn(

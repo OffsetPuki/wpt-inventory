@@ -9,6 +9,7 @@ import { invoices, purchaseOrders, expenses } from "../shared/finance-schema";
 import { quotes } from "../shared/quote-schema";
 import { employees } from "../shared/hr-schema";
 import { campaigns } from "../shared/marketing-schema";
+import { escapeLike, isElevated } from "./http-util";
 
 // ─── Global search (top bar) ─────────────────────────────────────────────────
 // One LIKE sweep per source, 5 hits each, ~20 total. Sources the caller's role
@@ -25,21 +26,11 @@ export interface SearchHit {
 const PER_SOURCE = 5;
 const TOTAL_CAP = 20;
 
-// Escape LIKE metacharacters (\, %, _) in a user term so they match literally
-// instead of acting as wildcards. Backslash is escaped first.
-function escapeLike(term: string): string {
-  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
-
-// LIKE condition that treats the (already-escaped) pattern's metacharacters as
-// literals via `ESCAPE '\'`. Drop-in for drizzle's `like`, which has no
-// ESCAPE support. `col` may be a column or a raw sql expression.
+// LIKE condition that treats the (already-escaped, see http-util's escapeLike)
+// pattern's metacharacters as literals via `ESCAPE '\'`. Drop-in for drizzle's
+// `like`, which has no ESCAPE support. `col` may be a column or a raw sql
+// expression.
 const likeEsc = (col: any, pattern: string) => sql`${col} LIKE ${pattern} ESCAPE '\\'`;
-
-function elevated(req: Request): boolean {
-  const role = req.user?.role;
-  return role === "manager" || role === "technician";
-}
 
 export function registerSearchRoutes(app: Express): void {
   app.get("/api/search", requireAuth, (req, res) => {
@@ -47,7 +38,7 @@ export function registerSearchRoutes(app: Express): void {
     if (q.length < 2) return res.json({ results: [] });
     const p = `%${escapeLike(q)}%`;
     const hits: SearchHit[] = [];
-    const isElev = elevated(req);
+    const isElev = isElevated(req);
 
     // Each source is independent — a failure in one (e.g. a table missing on
     // a partial install) must not blank the whole dropdown.

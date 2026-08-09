@@ -11,7 +11,7 @@ import {
   type Employee,
 } from "../shared/hr-schema";
 import {
-  pid, todayLocal, elevatedRole, registerSoftDelete,
+  pid, todayLocal, elevatedRole, registerSoftDelete, registerCreate,
 } from "./http-util";
 
 // ─── HR module ───────────────────────────────────────────────────────────────
@@ -191,18 +191,11 @@ export function registerHrRoutes(app: Express): void {
     );
   });
 
-  app.post("/api/hr/employees", requireElevated, (req, res) => {
-    try {
-      const data = insertEmployeeSchema.parse(req.body);
-      const row = db.insert(employees).values(data).returning().get();
-      audit(req, "hr.employee_create", {
-        targetType: "employee", targetId: row.id, targetName: fullName(row),
-        details: { department: row.department, payType: row.payType },
-      });
-      res.status(201).json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
+  registerCreate(app, "/api/hr/employees", requireElevated, {
+    table: employees, schema: insertEmployeeSchema,
+    action: "hr.employee_create", targetType: "employee",
+    name: (r) => fullName(r),
+    details: (r) => ({ department: r.department, payType: r.payType }), audit,
   });
 
   // Combined detail payload: one round-trip for the employee page instead of

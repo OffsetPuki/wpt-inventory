@@ -23,10 +23,11 @@ export const AREAS = [
 ] as const;
 export type Area = (typeof AREAS)[number];
 
-// "manager"   = high-level oversight (projects, users, dashboard) — simpler UI
-// "technician" = full operational control (edit items, adjust stock, map, settings)
-// "worker"    = floor user (find/add items, check in/out, view projects)
-export const ROLES = ["manager", "technician", "worker"] as const;
+// "owner"  = everything (dashboard, finance, users, settings)
+// "worker" = floor user (find/add items, check in/out, view projects)
+// Legacy 'manager'/'technician' rows are collapsed to 'owner' at boot
+// (server/seed.ts); the server still tolerates the old strings in sessions.
+export const ROLES = ["owner", "worker"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const TRANSACTION_TYPES = ["check_out", "check_in"] as const;
