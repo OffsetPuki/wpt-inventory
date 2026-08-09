@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { formatDateTime } from "@/lib/format";
 import Header from "@/components/Header";
 import { toast } from "@/components/ui/toaster";
 import { Loader2, Mail, Plus, RotateCcw, Trash2 } from "lucide-react";
@@ -36,6 +37,19 @@ interface Template {
 
 interface Anchor { key: string; label: string; vars: TemplateVar[] }
 
+interface Send {
+  id: number;
+  to: string | null;
+  subject: string;
+  template: string | null;
+  templateName: string | null;
+  via: string | null;
+  archivedTo: string | null;
+  error: string | null;
+  ok: boolean;
+  at: number;
+}
+
 const AUDIENCE_LABEL: Record<string, string> = {
   customer: "To the customer",
   employee: "To the employee",
@@ -43,6 +57,8 @@ const AUDIENCE_LABEL: Record<string, string> = {
 
 export default function EmailsPage() {
   const qc = useQueryClient();
+  const [tab, setTab] = useState<"templates" | "history">("templates");
+  const [historyFilter, setHistoryFilter] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ subject: string; body: string }>({ subject: "", body: "" });
   const [preview, setPreview] = useState<{ subject: string; text: string } | null>(null);
@@ -51,6 +67,15 @@ export default function EmailsPage() {
   const { data, isLoading } = useQuery<{ templates: Template[]; anchors: Anchor[]; lockedNote: string }>({
     queryKey: ["email-templates"],
     queryFn: async () => (await apiRequest("GET", "/api/email-templates")).json(),
+  });
+
+  const { data: history, isLoading: historyLoading } = useQuery<{ sends: Send[] }>({
+    queryKey: ["email-history", historyFilter],
+    enabled: tab === "history",
+    queryFn: async () => (await apiRequest(
+      "GET",
+      `/api/email-templates/history?limit=200${historyFilter ? `&template=${encodeURIComponent(historyFilter)}` : ""}`,
+    )).json(),
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["email-templates"] });
@@ -113,17 +138,45 @@ export default function EmailsPage() {
         title="Emails"
         description="Everything the suite sends out under your name. Change the wording, switch one off, or add your own."
       >
-        <button
-          onClick={() => { setCreating(true); setOpenId(null); }}
-          className="inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" /> New email
-        </button>
+        {tab === "templates" && (
+          <button
+            onClick={() => { setCreating(true); setOpenId(null); }}
+            className="inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground"
+          >
+            <Plus className="h-4 w-4" /> New email
+          </button>
+        )}
       </Header>
 
-      {creating && <NewEmailForm anchors={anchors} onCancel={() => setCreating(false)} onCreate={(v) => create.mutate(v)} busy={create.isPending} />}
+      <div className="mt-2 flex gap-2">
+        {(["templates", "history"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setTab(v)}
+            className={`rounded-lg px-4 py-2 text-sm ${
+              tab === v ? "bg-primary text-primary-foreground" : "border border-input text-foreground"
+            }`}
+          >
+            {v === "templates" ? "The emails" : "Sent history"}
+          </button>
+        ))}
+      </div>
 
-      <ul className="mt-4 flex flex-col gap-3">
+      {tab === "history" && (
+        <SentHistory
+          sends={history?.sends ?? []}
+          loading={historyLoading}
+          templates={templates}
+          filter={historyFilter}
+          onFilter={setHistoryFilter}
+        />
+      )}
+
+      {tab === "templates" && creating && (
+        <NewEmailForm anchors={anchors} onCancel={() => setCreating(false)} onCreate={(v) => create.mutate(v)} busy={create.isPending} />
+      )}
+
+      <ul className={`mt-4 flex flex-col gap-3 ${tab === "templates" ? "" : "hidden"}`}>
         {templates.map((t) => (
           <li key={t.id} className="rounded-xl border border-border bg-card">
             <div className="flex flex-wrap items-center gap-3 p-4">
@@ -250,6 +303,72 @@ export default function EmailsPage() {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function SentHistory({
+  sends, loading, templates, filter, onFilter,
+}: {
+  sends: Send[];
+  loading: boolean;
+  templates: Template[];
+  filter: string;
+  onFilter: (v: string) => void;
+}) {
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={filter}
+          onChange={(e) => onFilter(e.target.value)}
+          className="h-11 rounded-xl border border-input bg-background px-3 text-base text-foreground"
+        >
+          <option value="">Every email</option>
+          {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <p className="text-sm text-muted-foreground">
+          Newest first. Failures are shown too — the useful question is usually whether it actually went.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      ) : sends.length === 0 ? (
+        <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-12 text-muted-foreground">
+          <Mail className="h-10 w-10" />
+          <p className="text-base">Nothing sent yet under this filter.</p>
+        </div>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-2">
+          {sends.map((s) => (
+            <li
+              key={s.id}
+              className="flex flex-col gap-1 rounded-xl border border-border bg-card p-3 sm:flex-row sm:items-center sm:gap-3"
+            >
+              <span
+                className={`inline-flex w-fit shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                  s.ok ? "bg-primary/15 text-primary" : "bg-destructive/15 text-destructive"
+                }`}
+              >
+                {s.ok ? "Sent" : "Failed"}
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium text-foreground">{s.subject}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {s.to}
+                  {s.templateName && <> · {s.templateName}</>}
+                  {!s.templateName && <> · one of the suite's own alerts</>}
+                  {s.error && <span className="text-destructive"> · {s.error}</span>}
+                </span>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground">{formatDateTime(s.at)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

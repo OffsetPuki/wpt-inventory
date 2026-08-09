@@ -164,6 +164,17 @@ console.log("\nScheduled emails send once, and only once:");
   same("variables filled from the quote", mine?.subject, "How is it holding up, Amy?");
   same("body filled too", mine?.text, "Hi Amy, about Q-TPLCHECK.");
 
+  // The sent history reads these rows back, and can only say WHICH email each
+  // one was because renderTemplate stamps its id onto the message.
+  const logged = sqlite.prepare(`
+    SELECT action, target_name, details FROM audit_log
+    WHERE action IN ('email.sent','email.failed') AND details LIKE ?
+  `).all('%"template":"custom.tplcheck"%');
+  check("the send lands in the history, tagged with its template", logged.length === 1, `${logged.length} rows`);
+  check("history row names the recipient", logged[0]?.target_name === "customer@example.com");
+  same("history row carries the subject", JSON.parse(logged[0]?.details ?? "{}").subject,
+    "How is it holding up, Amy?");
+
   sent = [];
   await runCustomEmailSweep();
   check("a second sweep does not send it again", sent.length === 0, `sent ${sent.length}`);

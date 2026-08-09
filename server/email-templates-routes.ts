@@ -102,6 +102,53 @@ export function registerEmailTemplateRoutes(app: Express): void {
     });
   });
 
+  // ─── Sent history ─────────────────────────────────────────────────────────
+  // Every send attempt, newest first. The mailer already writes one audit row
+  // per attempt — this reads them back rather than keeping a second ledger
+  // that could disagree with the first. Failures are included on purpose: the
+  // interesting question is usually "did that actually go?".
+  app.get("/api/email-templates/history", requireAuth, (req, res) => {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    const template = typeof req.query.template === "string" ? req.query.template : "";
+    const rows = sqlite.prepare(`
+      SELECT id, action, target_name, details, created_at
+      FROM audit_log
+      WHERE action IN ('email.sent', 'email.failed')
+        ${template ? "AND details LIKE @like" : ""}
+      ORDER BY id DESC
+      LIMIT @limit
+    `).all({ limit, like: `%"template":"${template}"%` }) as {
+      id: number; action: string; target_name: string | null;
+      details: string | null; created_at: number;
+    }[];
+
+    const nameOf = new Map<string, string>(BUILT_INS.map((t) => [t.id, t.name]));
+    for (const r of sqlite.prepare("SELECT id, name FROM email_templates WHERE custom = 1").all() as any[]) {
+      nameOf.set(r.id, r.name ?? r.id);
+    }
+
+    res.json({
+      sends: rows.map((r) => {
+        let d: any = {};
+        try { d = r.details ? JSON.parse(r.details) : {}; } catch { /* row predates the field */ }
+        return {
+          id: r.id,
+          to: r.target_name,
+          subject: d.subject ?? "",
+          template: d.template ?? null,
+          // An email sent before this section existed, or one of the owner
+          // alerts, has no template — say so rather than showing a blank.
+          templateName: d.template ? (nameOf.get(d.template) ?? d.template) : null,
+          via: d.via ?? null,
+          archivedTo: d.archivedTo ?? null,
+          error: d.error ?? null,
+          ok: r.action === "email.sent",
+          at: r.created_at,
+        };
+      }),
+    });
+  });
+
   // ─── Preview ──────────────────────────────────────────────────────────────
   // Renders whatever is in the editor right now against sample values, so the
   // owner sees the email a customer would get before saving it.

@@ -73,6 +73,12 @@ export interface MailMessage {
   replyTo?: string;
   /** File attachments (Phase E: the weekly backup email). Buffer content only. */
   attachments?: { filename: string; content: Buffer }[];
+  /**
+   * Which template this came from. renderTemplate() puts it here, so a caller
+   * spreading `...msg` carries it without knowing about it — that's what makes
+   * the sent history able to say WHICH email each row was.
+   */
+  template?: string;
 }
 
 function mailFrom(): string | null {
@@ -125,6 +131,7 @@ function recordSend(
       details: {
         subject: msg.subject,
         via: outcome.via,
+        ...(msg.template ? { template: msg.template } : {}),
         ...(outcome.bcc ? { archivedTo: outcome.bcc } : {}),
         ...(msg.attachments?.length ? { attachments: msg.attachments.map((a) => a.filename) } : {}),
         ...(outcome.error ? { error: outcome.error.slice(0, 300) } : {}),

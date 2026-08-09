@@ -303,7 +303,7 @@ export function isEnabled(id: string): boolean {
 export function renderTemplate(
   id: string,
   vars: Record<string, string>,
-): { subject: string; text: string } | null {
+): { subject: string; text: string; template: string } | null {
   const def = BUILT_INS.find((t) => t.id === id);
   const row = storedRow(id);
   if (row && row.enabled !== 1) return null;
@@ -320,6 +320,8 @@ export function renderTemplate(
   return {
     subject: render(subjectSrc, vars, optional).trim(),
     text: render(bodySrc, vars, optional),
+    // Rides along into sendMail so the sent history knows which email this was.
+    template: id,
   };
 }
 
@@ -500,7 +502,7 @@ export async function runCustomEmailSweep(): Promise<number> {
       const subject = render(tpl.subject ?? "", row.vars);
       const text = render(tpl.body ?? "", row.vars);
       if (!subject.trim() || !text.trim()) continue;
-      await sendMail({ to: row.email, subject, text });
+      await sendMail({ to: row.email, subject, text, template: tpl.id });
       sent++;
     }
   }
