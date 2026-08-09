@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
-import { sqlite } from "./storage";
+import { sqlite, storage } from "./storage";
 
 // ─── Outbound mail ───────────────────────────────────────────────────────────
 // One tiny facade the whole suite sends through. Two transports, tried in
@@ -21,6 +21,13 @@ import { sqlite } from "./storage";
 //                 defaults to the SMTP user for SMTP
 //   OWNER_EMAIL — where sendOwnerMail delivers (falls back to TO_EMAIL, the
 //                 website's owner-notification address, then SMTP_USER)
+//   MAIL_ARCHIVE — blind copy of every outbound email, so the shop has its own
+//                 record of what went out under its name. Defaults to the owner
+//                 address; set MAIL_ARCHIVE=off to disable.
+//
+// ⚠ Mail sent over the Resend API never passes through Gmail, so it CANNOT
+// appear in Gmail's Sent folder — the archive copy below is what makes a send
+// visible in the mailbox, and every send is also written to the audit log.
 
 // ─── Email opt-outs (Phase F) ────────────────────────────────────────────────
 // Per-ADDRESS unsubscribe list for automated customer emails (quote follow-up
@@ -78,6 +85,56 @@ function ownerAddress(): string | null {
   return process.env.OWNER_EMAIL || process.env.TO_EMAIL || process.env.SMTP_USER || null;
 }
 
+/**
+ * Who gets a blind copy of every outbound email. The suite sends over an HTTP
+ * API, so the shop's mailbox has no other record that a customer was written
+ * to — this copy IS the sent-mail folder. Defaults to the owner; MAIL_ARCHIVE
+ * redirects it, MAIL_ARCHIVE=off turns it off.
+ */
+function archiveAddress(): string | null {
+  const set = (process.env.MAIL_ARCHIVE || "").trim();
+  if (set.toLowerCase() === "off") return null;
+  return set || ownerAddress();
+}
+
+/** Archive copy for this message — skipped when it's already the recipient. */
+function archiveFor(to: string): string | null {
+  const archive = archiveAddress();
+  if (!archive) return null;
+  // sendOwnerMail already delivers to the owner; a blind copy of that is just
+  // the same email twice.
+  return normalizeEmail(archive) === normalizeEmail(to) ? null : archive;
+}
+
+/**
+ * Durable record of every send attempt, success or failure, in the suite's own
+ * audit log — the one place that answers "what has this system emailed out?"
+ * even for messages that never left (no transport, provider rejection).
+ * Best-effort: a logging failure must never sink the email.
+ */
+function recordSend(
+  msg: MailMessage,
+  outcome: { ok: boolean; via: string; bcc: string | null; error?: string },
+): void {
+  try {
+    storage.appendAudit({
+      userName: "mailer",
+      action: outcome.ok ? "email.sent" : "email.failed",
+      targetType: "email",
+      targetName: msg.to,
+      details: {
+        subject: msg.subject,
+        via: outcome.via,
+        ...(outcome.bcc ? { archivedTo: outcome.bcc } : {}),
+        ...(msg.attachments?.length ? { attachments: msg.attachments.map((a) => a.filename) } : {}),
+        ...(outcome.error ? { error: outcome.error.slice(0, 300) } : {}),
+      },
+    });
+  } catch {
+    /* the audit row is a nicety; the email is the job */
+  }
+}
+
 const resendConfigured = (): boolean => !!(process.env.RESEND_API_KEY && mailFrom());
 const smtpConfigured = (): boolean => !!(process.env.SMTP_USER && process.env.SMTP_PASS);
 
@@ -105,7 +162,7 @@ function getTransporter(): Transporter {
   return transporter;
 }
 
-async function sendViaResend(msg: MailMessage): Promise<boolean> {
+async function sendViaResend(msg: MailMessage, bcc: string | null): Promise<boolean> {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -117,6 +174,7 @@ async function sendViaResend(msg: MailMessage): Promise<boolean> {
       to: msg.to,
       subject: msg.subject,
       text: msg.text,
+      ...(bcc ? { bcc } : {}),
       ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
       ...(msg.attachments
         ? {
@@ -134,10 +192,11 @@ async function sendViaResend(msg: MailMessage): Promise<boolean> {
   return true;
 }
 
-async function sendViaSmtp(msg: MailMessage): Promise<boolean> {
+async function sendViaSmtp(msg: MailMessage, bcc: string | null): Promise<boolean> {
   await getTransporter().sendMail({
     from: mailFrom() ?? undefined,
     to: msg.to,
+    ...(bcc ? { bcc } : {}),
     subject: msg.subject,
     text: msg.text,
     replyTo: msg.replyTo,
@@ -151,14 +210,28 @@ async function sendViaSmtp(msg: MailMessage): Promise<boolean> {
  * so callers can fire-and-forget from anywhere (including setImmediate hooks
  * on financially critical paths) without their own try/catch.
  */
-export async function sendMail(msg: MailMessage): Promise<boolean> {
+export async function sendMail(
+  msg: MailMessage,
+  opts?: { archive?: boolean },
+): Promise<boolean> {
+  const bcc = opts?.archive === false ? null : archiveFor(msg.to);
+  const via = resendConfigured() ? "resend" : smtpConfigured() ? "smtp" : "none";
   try {
-    if (resendConfigured()) return await sendViaResend(msg);
-    if (smtpConfigured()) return await sendViaSmtp(msg);
-    console.warn(`[mailer] no transport configured — "${msg.subject}" to ${msg.to} not sent`);
-    return false;
+    if (via === "resend") {
+      await sendViaResend(msg, bcc);
+    } else if (via === "smtp") {
+      await sendViaSmtp(msg, bcc);
+    } else {
+      console.warn(`[mailer] no transport configured — "${msg.subject}" to ${msg.to} not sent`);
+      recordSend(msg, { ok: false, via, bcc: null, error: "no transport configured" });
+      return false;
+    }
+    recordSend(msg, { ok: true, via, bcc });
+    return true;
   } catch (err) {
-    console.error("[mailer] send FAILED:", err instanceof Error ? err.message : err);
+    const error = err instanceof Error ? err.message : String(err);
+    console.error("[mailer] send FAILED:", error);
+    recordSend(msg, { ok: false, via, bcc, error });
     return false;
   }
 }
@@ -170,5 +243,8 @@ export async function sendOwnerMail(msg: Omit<MailMessage, "to">): Promise<boole
     console.warn(`[mailer] no owner address configured — "${msg.subject}" not sent`);
     return false;
   }
-  return sendMail({ ...msg, to });
+  // Never archived: the owner is already the recipient, and one of these
+  // carries the weekly database snapshot — a redirected MAIL_ARCHIVE must not
+  // become a second copy of the whole business.
+  return sendMail({ ...msg, to }, { archive: false });
 }

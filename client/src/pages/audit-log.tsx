@@ -36,11 +36,16 @@ const ACTION_LABEL: Record<string, string> = {
   "project.restore": "Restored project",
   "project.status_change": "Changed project status",
   "settings.update": "Updated settings",
+  // Outbound mail goes out over an HTTP API, so it never appears in the shop's
+  // Gmail "Sent" folder — this log is the record of what went out.
+  "email.sent": "Email sent",
+  "email.failed": "Email FAILED",
 };
 
 // Tag colors hint at the action category without overwhelming the grid.
 function tagClass(action: string): string {
   if (action.startsWith("auth.login_fail")) return "bg-destructive/15 text-destructive";
+  if (action === "email.failed") return "bg-destructive/15 text-destructive";
   if (action.endsWith(".delete")) return "bg-destructive/15 text-destructive";
   if (action.endsWith(".restore")) return "bg-emerald-500/15 text-emerald-500";
   if (action.startsWith("auth.")) return "bg-secondary text-secondary-foreground";
@@ -49,6 +54,8 @@ function tagClass(action: string): string {
 
 const ACTION_FILTERS: { value: string; label: string }[] = [
   { value: "", label: "All actions" },
+  { value: "email.sent", label: "Emails sent" },
+  { value: "email.failed", label: "Emails that failed" },
   { value: "auth.login_fail", label: "Failed sign-ins" },
   { value: "auth.login_success", label: "Sign-ins" },
   { value: "item.delete", label: "Item deletes" },
