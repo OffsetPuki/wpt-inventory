@@ -37,7 +37,15 @@ function ItemRow({ item, onEdit, onRemove }) {
   return (
     <div className={`line${flags ? ' ' + flags : ''}`}>
       <div className="line-name">
-        <span className="dot" />{item.name}
+        <span className="dot" />
+        {/* The description is what the CUSTOMER reads on their quote, so it's
+            editable on every line — not just the ones you typed yourself. */}
+        <input
+          className="line-name-input"
+          value={item.name}
+          title="Rename this line — this is the wording the customer sees"
+          onChange={(e) => onEdit(item.key, 'name', e.target.value)}
+        />
         {item.unpriced && <span className="line-warn" title="A rate driving this line isn't set in the Price Book — open it and fill in the missing rate.">⚠ unset rate</span>}
         {onRemove && (
           <button

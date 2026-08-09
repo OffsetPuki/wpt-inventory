@@ -223,6 +223,29 @@ console.log('\nCustom lines:');
   check('added material lands in the buy list', bought && approx(bought.qty, 14) && bought.name === '3×2 angle iron', JSON.stringify(bought));
 }
 
+// ── 11b. Renaming a derived line ──────────────────────────────────────────────
+console.log('\nRenamed lines:');
+{
+  const s = defaultState('table');
+  const ov = { items: { legs: { name: '4x Legs For the Table (3×2 Rectangular Tubing)' } } };
+  const ls = buildLineState('table', s, pb, ov);
+  const legs = item(ls.items, 'legs');
+  const plain = item(buildLineState('table', s, pb, {}).items, 'legs');
+  check('the customer sees the new wording', legs.name === ov.items.legs.name, legs && legs.name);
+  check('renaming does not move the price', approx(lineCost(legs), lineCost(plain)));
+  check('the line is flagged as edited', legs.edited === true);
+  // The rename is keyed by role, so changing the design keeps it.
+  const resized = buildLineState('table', { ...s, lengthFt: 10 }, pb, ov);
+  check('rename survives an option change', item(resized.items, 'legs').name === ov.items.legs.name);
+  // Blank falls back to the formula's own name — never an unlabelled row.
+  const blank = buildLineState('table', s, pb, { items: { legs: { name: '   ' } } });
+  check('blank falls back to the formula name', item(blank.items, 'legs').name === plain.name);
+  check('and is not counted as an edit', item(blank.items, 'legs').edited !== true);
+  // The buy list stays canonical — it names materials, not line descriptions.
+  const bought = materialTotals(ls.items, pb).find((m) => m.id === 'tube_2x3');
+  check('buy list keeps the material name', bought && bought.name === pb.materials.tube_2x3.name, JSON.stringify(bought));
+}
+
 // ── 12. Deleted materials ─────────────────────────────────────────────────────
 console.log('\nDeleted materials:');
 {

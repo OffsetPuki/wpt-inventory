@@ -812,11 +812,16 @@ export function buildLineState(type, state, priceBook, overrides) {
     const o = ovItems[it.key];
     if (!o) return it;
     const nextRate = o.rate != null ? Number(o.rate) : it.rate;
+    // A renamed line keeps its role key, so the new wording survives option
+    // changes exactly like an edited qty or rate does. Blank falls back to the
+    // formula's own name rather than printing an unlabelled row.
+    const renamed = typeof o.name === 'string' && o.name.trim() !== '';
     return {
       ...it,
+      name: renamed ? o.name : it.name,
       qty: o.qty != null ? o.qty : it.qty,
       rate: nextRate,
-      edited: o.qty != null || o.rate != null,
+      edited: o.qty != null || o.rate != null || renamed,
       // An override that fills in a real rate clears the placeholder flag.
       unpriced: it.unpriced && !(Number(nextRate) > 0),
     };
