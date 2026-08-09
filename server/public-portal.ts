@@ -726,7 +726,8 @@ export function registerPublicPortalRoutes(app: Express): void {
             text:
               `Hi ${quote.customerName || "there"},\n\n` +
               `Got it — your quote ${quote.number} is locked in. We'll call you ` +
-              `to schedule the work.\n\n` +
+              `to go over the contract and get it out to you, so we can get ` +
+              `started on the work.\n\n` +
               `— CJM Metals · Arlington, TX`,
           });
           // Phase B #9: the confirmation on the lead's timeline (matched by
