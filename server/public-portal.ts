@@ -19,6 +19,9 @@ import { insertNumbered } from "./finance";
 import { deriveItems, lineCost, buildLineState, materialTotals } from "../client/src/quote/lib/estimate.js";
 import { computeTotals } from "../client/src/quote/lib/quote.js";
 import { distributeToTotal } from "../client/src/quote/lib/calc.js";
+// The same three helpers PrintQuote.jsx uses to describe the design, so the
+// customer's web page and their PDF word the project identically.
+import { specRows, summaryLine, typeLabel } from "../client/src/quote/data/configurators.js";
 import { deepMerge, DEFAULT_SHOP } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 
@@ -86,17 +89,49 @@ interface CalcTotals {
   minAdjustment: number;
 }
 
-// ─── Best-effort quote lines ─────────────────────────────────────────────────
-// Rebuild the printed document's rows (material items with markup blended in,
-// then labor / install / delivery / tax) from the stored builder session.
+// ─── The customer's quote document ───────────────────────────────────────────
+// Rebuild what PrintQuote.jsx puts on the customer's PDF — the design spec, the
+// itemized rows (material items with markup blended in, then labor / install /
+// delivery) and the totals ladder — from the stored builder session, so the web
+// page at /quote/<token> and the PDF are the same document.
+//
 // Quotes saved by the material-library builder carry a SNAPSHOT of the price
 // book they were priced with (rate versioning) — rebuild against that, so the
 // page stays itemized even after rates move. Older quotes without a snapshot
 // fall back to the current book; if the rebuild doesn't reconcile to the cent
 // with the stored total (what the customer was told) we return null and the
-// page shows the total only. Never the cost basis, markup %, or labor rate.
+// page shows the total only.
+//
+// ⚠ Customer-visible. Send ONLY what the printed quote shows: never the cost
+// basis, markup %, labor hours, material unit costs or the shop's buy list.
 
-function bestEffortLines(quote: Quote): { name: string; amountCents: number }[] | null {
+interface QuoteDoc {
+  designRef: string | null;
+  customer: { name: string; company: string; location: string; phone: string; email: string };
+  project: { label: string; summary: string };
+  specs: { label: string; value: string }[];
+  notes: string;
+  materials: { name: string; amountCents: number }[];
+  services: { name: string; amountCents: number }[];
+  totals: {
+    subtotalCents: number;
+    discountPct: number;
+    discountCents: number;
+    taxPct: number;
+    taxCents: number;
+    minAdjustmentCents: number;
+    totalCents: number;
+    depositPct: number;
+    depositCents: number;
+    balanceCents: number;
+  };
+}
+
+const cents = (n: number): number => Math.round((Number(n) || 0) * 100);
+const str = (v: unknown, max = 200): string =>
+  typeof v === "string" ? v.slice(0, max) : "";
+
+function quoteDocument(quote: Quote): QuoteDoc | null {
   try {
     const sess = parseJson<any>(quote.payload, null);
     if (!sess || typeof sess !== "object" || !sess.state) return null;
@@ -120,31 +155,76 @@ function bestEffortLines(quote: Quote): { name: string; amountCents: number }[] 
     // total across the items so the parts sum exactly to the material line.
     const items: any[] = lineState.items || [];
     const prices = distributeToTotal(items.map((it) => lineCost(it)), totals.lines.material.total);
-    const lines = items
-      .map((it, i) => ({ name: String(it.name), amountCents: Math.round(prices[i] * 100) }))
+    const materials = items
+      .map((it, i) => ({ name: str(String(it.name)), amountCents: cents(prices[i]) }))
       .filter((l) => l.amountCents > 0);
+
+    const services: { name: string; amountCents: number }[] = [];
     if (totals.lines.labor.total > 0) {
-      lines.push({ name: "Labor & fabrication", amountCents: Math.round(totals.lines.labor.total * 100) });
+      services.push({ name: "Labor & fabrication", amountCents: cents(totals.lines.labor.total) });
     }
     if (totals.lines.finishing.total > 0) {
-      lines.push({ name: "Installation", amountCents: Math.round(totals.lines.finishing.total * 100) });
+      services.push({ name: "Installation", amountCents: cents(totals.lines.finishing.total) });
     }
     if (totals.lines.delivery.total > 0) {
-      lines.push({ name: "Delivery", amountCents: Math.round(totals.lines.delivery.total * 100) });
+      services.push({ name: "Delivery", amountCents: cents(totals.lines.delivery.total) });
     }
-    if (totals.discountAmt > 0) {
-      lines.push({ name: `Discount (${totals.discountPct}%)`, amountCents: -Math.round(totals.discountAmt * 100) });
-    }
-    if (totals.tax > 0) {
-      lines.push({ name: `Sales tax (${totals.taxPct}%)`, amountCents: Math.round(totals.tax * 100) });
-    }
-    if (totals.minAdjustment > 0) {
-      lines.push({ name: "Minimum job charge", amountCents: Math.round(totals.minAdjustment * 100) });
-    }
-    return lines.length > 0 ? lines : null;
+    if (materials.length === 0 && services.length === 0) return null;
+
+    const depositPct = Math.min(100, Math.max(0, Number(sess.depositPct) || 0));
+    const depositCents = depositPct > 0 ? Math.round((quote.totalCents * depositPct) / 100) : 0;
+    const c = sess.customer ?? {};
+
+    return {
+      designRef: quote.designRef || null,
+      // The customer's own contact card, back to the customer, behind a private
+      // token — the same block their PDF carries.
+      customer: {
+        name: str(c.name, 120),
+        company: str(c.company, 120),
+        location: str(c.location, 160),
+        phone: str(c.phone, 40),
+        email: str(c.email, 160),
+      },
+      project: {
+        label: typeLabel(quote.type),
+        summary: str(summaryLine(quote.type, sess.state), 300),
+      },
+      specs: (specRows(quote.type, sess.state) as { label: string; value: string }[])
+        .slice(0, 30)
+        .map((sp) => ({ label: str(sp.label, 60), value: str(sp.value, 160) })),
+      notes: str(sess.notes, 2000),
+      materials,
+      services,
+      totals: {
+        subtotalCents: cents(totals.subtotal),
+        discountPct: Number(totals.discountPct) || 0,
+        discountCents: cents(totals.discountAmt),
+        taxPct: Number(totals.taxPct) || 0,
+        taxCents: cents(totals.tax),
+        minAdjustmentCents: cents(totals.minAdjustment),
+        totalCents: quote.totalCents,
+        depositPct,
+        depositCents,
+        balanceCents: quote.totalCents - depositCents,
+      },
+    };
   } catch {
     return null;
   }
+}
+
+// The flat row list the website rendered before it carried the whole document.
+// Kept so a website deploy that lags this one keeps showing an itemized quote
+// instead of falling back to a bare total.
+function bestEffortLines(doc: QuoteDoc | null): { name: string; amountCents: number }[] | null {
+  if (!doc) return null;
+  const lines = [...doc.materials, ...doc.services];
+  const t = doc.totals;
+  if (t.discountCents > 0) lines.push({ name: `Discount (${t.discountPct}%)`, amountCents: -t.discountCents });
+  if (t.taxCents > 0) lines.push({ name: `Sales tax (${t.taxPct}%)`, amountCents: t.taxCents });
+  if (t.minAdjustmentCents > 0) lines.push({ name: "Minimum job charge", amountCents: t.minAdjustmentCents });
+  return lines.length > 0 ? lines : null;
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -257,6 +337,7 @@ export function registerPublicPortalRoutes(app: Express): void {
 
     const sess = parseJson<any>(quote.payload, {});
     const taxPct = Number(sess?.taxPct);
+    const doc = quoteDocument(quote);
     res.json({
       ok: true,
       quote: {
@@ -270,7 +351,10 @@ export function registerPublicPortalRoutes(app: Express): void {
         sentAt: iso(quote.sentAt),
         acceptedAt: iso(quote.acceptedAt),
         shop: currentShop(),
-        lines: bestEffortLines(quote),
+        lines: bestEffortLines(doc),
+        // The whole printed document — spec, grouped rows, totals ladder — so
+        // the customer's web page renders exactly what their PDF shows.
+        doc,
         // "What's built into it" — one design feature per line in the payload.
         features: String(sess?.features ?? "")
           .split("\n")
