@@ -8,6 +8,7 @@ import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-
 import { webDesignRowToLead } from "./public-api";
 import { onQuoteEvent, logEmailActivity } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
+import { renderTemplate } from "./email-templates";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the costing
 // report and buy list price with EXACTLY the math the builder uses. Same
@@ -515,16 +516,14 @@ export function registerQuoteRoutes(app: Express): void {
       designRef: quote.designRef,
     });
     if (req.body?.sendEmail && to && mailEnabled()) {
-      emailed = await sendMail({
-        to,
-        subject: `Your quote from CJM Metals — ${quote.number}`,
-        text:
-          `Hi ${quote.customerName || "there"},\n\n` +
-          `Your quote ${quote.number} from CJM Metals is ready. View it (and accept it online) here:\n\n` +
-          `${url}\n\n` +
-          `Questions? Just reply to this email or give us a call.\n\n` +
-          `— CJM Metals · Arlington, TX`,
+      // Wording is owner-editable in the Emails section.
+      const msg = renderTemplate("quote.share", {
+        firstName: String(quote.customerName || "there").trim().split(/\s+/)[0] || "there",
+        customerName: quote.customerName || "there",
+        quoteNumber: quote.number,
+        quoteUrl: url,
       });
+      emailed = msg ? await sendMail({ to, ...msg }) : false;
       // Phase B #9: the share email on the lead's timeline (matched by
       // address — onQuoteEvent above creates the lead if it's new to CRM).
       if (emailed) {

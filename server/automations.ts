@@ -4,6 +4,7 @@ import path from "path";
 import { sqlite, storage } from "./storage";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
+import { renderTemplate, runCustomEmailSweep } from "./email-templates";
 // Leaf module like mailer — snapshot/rotation mechanics live there, the
 // scheduling (nightly + weekly offsite, steps 21/21b) lives here.
 import { maybeNightlyBackup, latestSnapshot } from "./backup";
@@ -155,17 +156,16 @@ function runBusinessSweep(): void {
         if (inv.reminded_at != null && inv.reminded_at > now - 7 * DAY_MS) continue;
         setImmediate(async () => {
           const first = String(inv.client_name ?? "").trim().split(/\s+/)[0] || "there";
-          const ok = await sendMail({
-            to: inv.email,
-            subject: `Friendly reminder — invoice ${inv.number} — CJM Metals`,
-            text:
-              `Hi ${first},\n\n` +
-              `Just a friendly reminder that invoice ${inv.number} has an outstanding ` +
-              `balance of ${fmtUsd(inv.balance)} (it was due ${inv.due_date}). If you've ` +
-              `already sent payment, please disregard this note.\n\n` +
-              `Questions? Just reply to this email or give us a call.\n\n` +
-              `— CJM Metals · Arlington, TX`,
+          // Wording lives in the Emails section; null = the owner switched
+          // this reminder off.
+          const msg = renderTemplate("invoice.overdue", {
+            firstName: first,
+            invoiceNumber: String(inv.number),
+            balance: fmtUsd(inv.balance),
+            dueDate: String(inv.due_date ?? ""),
           });
+          if (!msg) return;
+          const ok = await sendMail({ to: inv.email, ...msg });
           if (ok) {
             sqlite.prepare("UPDATE fin_invoices SET reminded_at = ? WHERE id = ?")
               .run(Date.now(), inv.id);
@@ -233,30 +233,17 @@ function runBusinessSweep(): void {
       if (!email || isOptedOut(email)) continue;
       const url = `${PUBLIC_SITE_URL}/quote/${q.share_token}`;
       const first = String(q.customer_name ?? "").trim().split(/\s+/)[0] || "there";
-      const unsubscribe =
-        `\n\nNo more emails about this quote: ${APP_URL}/q/optout?token=${q.share_token}`;
-      const msg = stage === 1
-        ? {
-            subject: `Any questions about your quote? — ${q.number}`,
-            text:
-              `Hi ${first},\n\n` +
-              `Just checking in — any questions about your quote ${q.number} ` +
-              `(${fmtUsd(q.total_cents)})? You can view it, and accept it ` +
-              `online, here:\n\n` +
-              `${url}\n\n` +
-              `Happy to walk through any part of it — just reply to this ` +
-              `email or give us a call.\n\n` +
-              `— CJM Metals · Arlington, TX` + unsubscribe,
-          }
-        : {
-            subject: `Last note on quote ${q.number} — CJM Metals`,
-            text:
-              `Hi ${first},\n\n` +
-              `Last note from us — happy to adjust the design or the price ` +
-              `if the quote isn't quite right. It's still open here:\n\n` +
-              `${url}\n\n` +
-              `— CJM Metals · Arlington, TX` + unsubscribe,
-          };
+      // Both rungs of the ladder are owner-editable in the Emails section; the
+      // unsubscribe link is re-attached there if it was deleted.
+      const msg = renderTemplate(stage === 1 ? "quote.followup1" : "quote.followup2", {
+        firstName: first,
+        customerName: String(q.customer_name ?? "there"),
+        quoteNumber: String(q.number),
+        quoteTotal: fmtUsd(q.total_cents),
+        quoteUrl: url,
+        unsubscribeUrl: `${APP_URL}/q/optout?token=${q.share_token}`,
+      });
+      if (!msg) continue; // switched off by the owner
       setImmediate(async () => {
         const ok = await sendMail({ to: email!, ...msg });
         if (!ok) return;
@@ -997,6 +984,11 @@ export function startBusinessAutomations(): void {
     } catch (e) {
       console.error("[automations] sweep failed", e);
     }
+    // The owner's own event-timed emails ("30 days after a job is finished").
+    // Separate try/catch: a template with a bad anchor must not take the rest
+    // of the sweep down with it.
+    void runCustomEmailSweep().catch((e) =>
+      console.error("[automations] custom email sweep failed", e));
   };
   tick();
   setInterval(tick, 60 * 60 * 1000).unref();

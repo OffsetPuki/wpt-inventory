@@ -16,6 +16,7 @@ import {
   Users,
   Sparkles,
   Settings,
+  Mail,
   ShieldCheck,
   Trash2,
   LogOut,
@@ -158,6 +159,7 @@ const NAV_GROUPS: NavGroup[] = [
     needs: "elevated",
     entries: [
       { to: "/users", label: "Users", icon: Users, needs: "elevated" },
+      { to: "/emails", label: "Emails", icon: Mail, needs: "elevated" },
       { to: "/audit", label: "Audit Log", icon: ShieldCheck, needs: "elevated" },
       { to: "/trash", label: "Trash", icon: Trash2, needs: "elevated" },
       { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "technician" },

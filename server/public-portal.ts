@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { hasLeadKey } from "./public-api";
 import { mailEnabled, sendMail, sendOwnerMail, optOutEmail } from "./mailer";
+import { renderTemplate } from "./email-templates";
 import { renderPublicPage } from "./legal";
 import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
@@ -730,16 +731,14 @@ export function registerPublicPortalRoutes(app: Express): void {
         || "";
       if (to) {
         setImmediate(async () => {
-          const ok = await sendMail({
-            to,
-            subject: `Quote ${quote.number} accepted — CJM Metals`,
-            text:
-              `Hi ${quote.customerName || "there"},\n\n` +
-              `Got it — your quote ${quote.number} is locked in. We'll call you ` +
-              `to go over the contract and get it out to you, so we can get ` +
-              `started on the work.\n\n` +
-              `— CJM Metals · Arlington, TX`,
+          // Wording is owner-editable in the Emails section.
+          const msg = renderTemplate("quote.accepted", {
+            customerName: quote.customerName || "there",
+            firstName: String(quote.customerName || "there").trim().split(/\s+/)[0] || "there",
+            quoteNumber: quote.number,
           });
+          if (!msg) return;
+          const ok = await sendMail({ to, ...msg });
           // Phase B #9: the confirmation on the lead's timeline (matched by
           // address — onQuoteEvent above wins/creates the lead).
           if (ok) {

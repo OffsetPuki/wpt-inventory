@@ -5,6 +5,7 @@ import { sqlite, db } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, isOptedOut } from "./mailer";
+import { renderTemplate } from "./email-templates";
 import {
   invoices, invoicePayments, expenses, paymentGateways, purchaseOrders,
   finSettings,
@@ -352,18 +353,12 @@ function queueReviewRequest(inv: Invoice): void {
 
       if (mailEnabled() && email && !isOptedOut(email)) {
         const first = (name ?? "").trim().split(/\s+/)[0] || "there";
-        const ok = await sendMail({
-          to: email,
-          subject: "How did we do? — CJM Metals",
-          text:
-            `Hi ${first},\n\n` +
-            `Thanks for choosing CJM Metals for your project. If you have a ` +
-            `minute, we'd really appreciate a quick review — it takes about ` +
-            `30 seconds:\n\n` +
-            `${PUBLIC_SITE_URL}/review/${token}\n\n` +
-            `Thank you!\n\n` +
-            `— CJM Metals · Arlington, TX`,
+        // Wording is owner-editable in the Emails section.
+        const msg = renderTemplate("review.request", {
+          firstName: first,
+          reviewUrl: `${PUBLIC_SITE_URL}/review/${token}`,
         });
+        const ok = msg ? await sendMail({ to: email, ...msg }) : false;
         if (ok) {
           sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
             .run(Date.now(), inserted.lastInsertRowid);
@@ -407,17 +402,19 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
 
       const first = (client.name ?? inv.clientName ?? "").trim().split(/\s+/)[0] || "there";
       const balanceCents = inv.totalCents - retainageOf(inv) - inv.paidCents;
-      const ok = await sendMail({
-        to: client.email,
-        subject: `Received ${usd(amountCents)} on ${inv.number} — CJM Metals`,
-        text:
-          `Hi ${first},\n\n` +
-          `We received your payment of ${usd(amountCents)} on invoice ${inv.number}. ` +
-          (balanceCents > 0
-            ? `Remaining balance: ${usd(balanceCents)}.\n\n`
-            : `Your invoice is paid in full — thank you!\n\n`) +
-          `— CJM Metals · Arlington, TX`,
-      });
+      // Two templates rather than one with a conditional sentence: the owner
+      // edits "still owes us" and "paid in full" as the different notes they
+      // are. Wording lives in the Emails section.
+      const msg = renderTemplate(
+        balanceCents > 0 ? "payment.receipt.partial" : "payment.receipt.final",
+        {
+          firstName: first,
+          amount: usd(amountCents),
+          invoiceNumber: inv.number,
+          balance: usd(balanceCents),
+        },
+      );
+      const ok = msg ? await sendMail({ to: client.email, ...msg }) : false;
       // Phase B #9: receipt on the timeline.
       if (ok) {
         logEmailActivity({

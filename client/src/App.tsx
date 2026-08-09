@@ -22,6 +22,7 @@ const UsersPage = lazy(() => import("./pages/users"));
 const SettingsPage = lazy(() => import("./pages/settings"));
 const AdminTemplatesPage = lazy(() => import("./pages/admin-templates"));
 const AuditLogPage = lazy(() => import("./pages/audit-log"));
+const EmailsPage = lazy(() => import("./pages/emails"));
 const TrashPage = lazy(() => import("./pages/trash"));
 const NotFoundPage = lazy(() => import("./pages/not-found"));
 
@@ -285,6 +286,11 @@ export default function App() {
             </ElevatedRoute>
           </Route>
 
+          <Route path="/emails">
+            <ElevatedRoute>
+              <EmailsPage />
+            </ElevatedRoute>
+          </Route>
           <Route path="/audit">
             <ElevatedRoute>
               <AuditLogPage />

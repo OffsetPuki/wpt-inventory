@@ -26,6 +26,7 @@ import { registerPublicPortalRoutes } from "./public-portal";
 import { registerQuoteRoutes } from "./quotes";
 // DB snapshot download + status (Phase E) — technician-only.
 import { registerBackupRoutes } from "./backup";
+import { registerEmailTemplateRoutes } from "./email-templates-routes";
 import { evalQty } from "./expr";
 import {
   loginSchema, insertAdjustmentSchema, insertTransactionSchema,
@@ -825,6 +826,7 @@ export function registerRoutes(app: Express): void {
   registerQuoteRoutes(app);
   registerPublicPortalRoutes(app);
   registerBackupRoutes(app);
+  registerEmailTemplateRoutes(app);
 
   // ─── Serve uploaded files ──────────────────────────────────────────────
 

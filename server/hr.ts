@@ -7,6 +7,7 @@ import { sqlite, db } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { sendMail, sendOwnerMail } from "./mailer";
+import { renderTemplate } from "./email-templates";
 import { queueTaskOnce } from "./marketing";
 import { expenses } from "../shared/finance-schema";
 import {
@@ -647,11 +648,14 @@ export function registerHrRoutes(app: Express): void {
       if (emp?.email) {
         const { email, firstName } = emp;
         setImmediate(() => {
-          void sendMail({
-            to: email,
-            subject: `Your leave request was ${status} — CJM Metals`,
-            text: `Hi ${firstName},\n\nYour ${existing.type} leave request for ${existing.startDate}–${existing.endDate} was ${status}.`,
+          // Wording is owner-editable in the Emails section.
+          const msg = renderTemplate("hr.leave.decision", {
+            firstName,
+            status,
+            leaveType: String(existing.type ?? ""),
+            dates: `${existing.startDate}–${existing.endDate}`,
           });
+          if (msg) void sendMail({ to: email, ...msg });
         });
       }
       res.json(row);
