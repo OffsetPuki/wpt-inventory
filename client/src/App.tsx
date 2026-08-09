@@ -32,18 +32,13 @@ const CrmLeadsPage = lazy(() => import("./pages/crm/leads"));
 const CrmClientsPage = lazy(() => import("./pages/crm/clients"));
 const CrmQuoteBuilderPage = lazy(() => import("./pages/crm/quotes"));
 const MarketingPage = lazy(() => import("./pages/marketing/index"));
-const HrOverviewPage = lazy(() => import("./pages/hr/index"));
 const HrEmployeesPage = lazy(() => import("./pages/hr/employees"));
-const HrAttendancePage = lazy(() => import("./pages/hr/attendance"));
 const HrPayrollPage = lazy(() => import("./pages/hr/payroll"));
 const HrLeavePage = lazy(() => import("./pages/hr/leave"));
-const HrRecruitmentPage = lazy(() => import("./pages/hr/recruitment"));
-const HrReviewsPage = lazy(() => import("./pages/hr/reviews"));
 const PmBoardPage = lazy(() => import("./pages/pm/board"));
 const PmGanttPage = lazy(() => import("./pages/pm/gantt"));
 const PmSchedulePage = lazy(() => import("./pages/pm/schedule"));
 const PmTimePage = lazy(() => import("./pages/pm/time"));
-const PmTimesheetsPage = lazy(() => import("./pages/pm/timesheets"));
 const PmContractsPage = lazy(() => import("./pages/pm/contracts"));
 const PmKbPage = lazy(() => import("./pages/pm/kb"));
 const FinanceOverviewPage = lazy(() => import("./pages/finance/index"));
@@ -192,9 +187,6 @@ export default function App() {
           <Route path="/pm/time">
             <PmTimePage />
           </Route>
-          <Route path="/pm/timesheets">
-            <PmTimesheetsPage />
-          </Route>
           <Route path="/pm/contracts">
             <PmContractsPage />
           </Route>
@@ -202,36 +194,18 @@ export default function App() {
             <PmKbPage />
           </Route>
 
-          {/* HR & Payroll — self-service pages open to everyone; the
-              oversight pages are elevated */}
-          <Route path="/hr">
-            <ElevatedRoute>
-              <HrOverviewPage />
-            </ElevatedRoute>
-          </Route>
+          {/* HR — self-service pages open to everyone; the oversight pages
+              are elevated */}
           <Route path="/hr/employees">
             <ElevatedRoute>
               <HrEmployeesPage />
             </ElevatedRoute>
-          </Route>
-          <Route path="/hr/attendance">
-            <HrAttendancePage />
           </Route>
           <Route path="/hr/payroll">
             <HrPayrollPage />
           </Route>
           <Route path="/hr/leave">
             <HrLeavePage />
-          </Route>
-          <Route path="/hr/recruitment">
-            <ElevatedRoute>
-              <HrRecruitmentPage />
-            </ElevatedRoute>
-          </Route>
-          <Route path="/hr/reviews">
-            <ElevatedRoute>
-              <HrReviewsPage />
-            </ElevatedRoute>
           </Route>
 
           {/* Finance — management only */}

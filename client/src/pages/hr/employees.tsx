@@ -8,8 +8,7 @@ import Modal from "@/components/Modal";
 import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import { Chip, type ChipTone } from "@/components/ui/Chip";
 import { inputCls } from "@/lib/ui-styles";
-import { cn } from "@/lib/utils";
-import { formatDate, formatDateTime, formatMoney, parseMoney, formatHours } from "@/lib/format";
+import { formatDate, formatMoney, parseMoney } from "@/lib/format";
 import type { PublicUser } from "@shared/schema";
 import {
   EMPLOYMENT_TYPES,
@@ -19,20 +18,13 @@ import {
   EMPLOYEE_STATUS_LABELS,
   PAY_TYPE_LABELS,
   LEAVE_TYPE_LABELS,
-  LEAVE_STATUS_LABELS,
-  PAYROLL_STATUS_LABELS,
   type Employee,
-  type AttendanceRow,
   type LeaveRequest,
-  type Payslip,
-  type PerformanceReview,
   type EmployeeStatus,
   type EmploymentType,
   type PayType,
-  type PayrollStatus,
-  type LeaveStatus,
 } from "@shared/hr-schema";
-import { Loader2, Plus, Search, Users, Pencil, Trash2, Star } from "lucide-react";
+import { Loader2, Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
 
 const STATUS_CHIP: Record<EmployeeStatus, ChipTone> = {
   active: "emerald",
@@ -43,16 +35,6 @@ const TYPE_CHIP: Record<EmploymentType, string> = {
   full_time: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   part_time: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400",
   contractor: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-};
-const LEAVE_CHIP: Record<LeaveStatus, ChipTone> = {
-  pending: "amber",
-  approved: "emerald",
-  denied: "red",
-};
-const RUN_CHIP: Record<PayrollStatus, string> = {
-  draft: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400",
-  approved: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  paid: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
 };
 
 function payLabel(e: Pick<Employee, "payType" | "payRateCents">): string {
@@ -265,15 +247,7 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
 
 interface EmployeeDetail {
   employee: Employee;
-  attendance: AttendanceRow[];
   leave: LeaveRequest[];
-  payslips: (Payslip & {
-    periodStart: string;
-    periodEnd: string;
-    payDate: string | null;
-    runStatus: PayrollStatus;
-  })[];
-  reviews: PerformanceReview[];
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -291,11 +265,6 @@ function SectionTitle({ children }: { children: string }) {
       {children}
     </h3>
   );
-}
-
-function shiftDuration(a: AttendanceRow): string {
-  if (!a.clockOut) return "Open";
-  return formatHours(Math.max(0, Math.round((a.clockOut - a.clockIn) / 60_000)));
 }
 
 function DetailModal({
@@ -378,26 +347,9 @@ function DetailModal({
             <Field label="Notes" value={emp.notes ?? ""} />
           </div>
 
-          <SectionTitle>Recent attendance</SectionTitle>
-          {data.attendance.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No shifts recorded.</p>
-          ) : (
-            <ul className="divide-y divide-border text-sm">
-              {data.attendance.slice(0, 8).map((a) => (
-                <li key={a.id} className="flex items-center justify-between py-2">
-                  <span className="text-foreground">{formatDateTime(a.clockIn)}</span>
-                  <span className="text-muted-foreground">
-                    {a.clockOut ? `→ ${formatDateTime(a.clockOut)}` : "in progress"}
-                  </span>
-                  <span className="tabular-nums text-foreground">{shiftDuration(a)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <SectionTitle>Leave history</SectionTitle>
+          <SectionTitle>Time off</SectionTitle>
           {data.leave.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No leave requests.</p>
+            <p className="text-sm text-muted-foreground">No time off filed.</p>
           ) : (
             <ul className="divide-y divide-border text-sm">
               {data.leave.slice(0, 8).map((l) => (
@@ -405,59 +357,6 @@ function DetailModal({
                   <span className="text-foreground">{LEAVE_TYPE_LABELS[l.type]}</span>
                   <span className="text-muted-foreground">
                     {formatDate(l.startDate)} – {formatDate(l.endDate)} · {l.days}d
-                  </span>
-                  <Chip tone={LEAVE_CHIP[l.status]}>
-                    {LEAVE_STATUS_LABELS[l.status]}
-                  </Chip>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <SectionTitle>Payslips</SectionTitle>
-          {data.payslips.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No payslips yet.</p>
-          ) : (
-            <ul className="divide-y divide-border text-sm">
-              {data.payslips.slice(0, 8).map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2 py-2">
-                  <span className="text-foreground">
-                    {formatDate(p.periodStart)} – {formatDate(p.periodEnd)}
-                  </span>
-                  <Chip className={RUN_CHIP[p.runStatus]}>
-                    {PAYROLL_STATUS_LABELS[p.runStatus]}
-                  </Chip>
-                  <span className="tabular-nums font-medium text-foreground">
-                    {formatMoney(p.netCents)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <SectionTitle>Performance reviews</SectionTitle>
-          {data.reviews.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No reviews yet.</p>
-          ) : (
-            <ul className="divide-y divide-border text-sm">
-              {data.reviews.slice(0, 8).map((r) => (
-                <li key={r.id} className="flex items-center justify-between gap-2 py-2">
-                  <span className="text-foreground">{r.periodLabel}</span>
-                  <span className="flex items-center gap-0.5">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <Star
-                        key={i}
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          r.overallRating && i <= r.overallRating
-                            ? "fill-amber-400 text-amber-400"
-                            : "text-muted-foreground/30"
-                        )}
-                      />
-                    ))}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {r.reviewDate ? formatDate(r.reviewDate) : "—"}
                   </span>
                 </li>
               ))}

@@ -10,7 +10,7 @@ import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { users, projects } from "../shared/schema";
 import {
-  pmTasks, timeEntries, timesheets, contracts, changeOrders, pmDocuments, kbArticles,
+  pmTasks, timeEntries, contracts, changeOrders, pmDocuments, kbArticles,
   insertPmTaskSchema, insertTimeEntrySchema, insertContractSchema,
   insertChangeOrderSchema, insertKbArticleSchema,
   TASK_STATUSES, DOCUMENT_KINDS,
@@ -69,21 +69,6 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_pm_time_task ON pm_time_entries(task_id);
   CREATE INDEX IF NOT EXISTS idx_pm_time_ended ON pm_time_entries(ended_at);
   CREATE INDEX IF NOT EXISTS idx_pm_time_created ON pm_time_entries(created_at);
-
-  CREATE TABLE IF NOT EXISTS pm_timesheets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    week_start TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open',
-    submitted_at INTEGER,
-    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    approved_at INTEGER,
-    notes TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE INDEX IF NOT EXISTS idx_pm_timesheets_user_week ON pm_timesheets(user_id, week_start);
-  CREATE INDEX IF NOT EXISTS idx_pm_timesheets_week ON pm_timesheets(week_start);
-  CREATE INDEX IF NOT EXISTS idx_pm_timesheets_status ON pm_timesheets(status);
 
   CREATE TABLE IF NOT EXISTS pm_contracts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -285,10 +270,6 @@ const timerStartSchema = z.object({
   projectId: z.number().int().optional(),
   taskId: z.number().int().optional(),
   description: z.string().optional(),
-});
-
-const timesheetSubmitSchema = z.object({
-  weekStart: z.string().regex(YMD_RE),
 });
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -612,128 +593,6 @@ export function registerPmRoutes(app: Express): void {
     // No deleted_at column on time entries — hard delete.
     db.delete(timeEntries).where(eq(timeEntries.id, id)).run();
     res.json({ ok: true });
-  });
-
-  // ── Timesheets ─────────────────────────────────────────────────────────────
-  // Hours are always computed from pm_time_entries; the pm_timesheets row is
-  // only the weekly sign-off wrapper (open → submitted → approved).
-
-  app.get("/api/pm/timesheets", requireAuth, (req, res) => {
-    const wsQ = qstr(req.query.weekStart);
-    // Normalize any supplied date to its Monday so off-by-a-day clients still
-    // land on the right week.
-    const weekStart = wsQ && YMD_RE.test(wsQ)
-      ? mondayOf(new Date(ymdToLocalMs(wsQ)))
-      : mondayOf(new Date());
-    const startMs = ymdToLocalMs(weekStart);
-    const endMs = ymdToLocalMs(addDaysYmd(weekStart, 7));
-    const elevated = isElevated(req);
-
-    const entryConds: any[] = [gte(timeEntries.startedAt, startMs), lt(timeEntries.startedAt, endMs)];
-    const sheetConds: any[] = [eq(timesheets.weekStart, weekStart)];
-    if (!elevated) {
-      entryConds.push(eq(timeEntries.userId, req.user!.userId));
-      sheetConds.push(eq(timesheets.userId, req.user!.userId));
-    }
-
-    const entries = db.select({
-      userId: timeEntries.userId,
-      userName: users.name,
-      startedAt: timeEntries.startedAt,
-      durationMin: timeEntries.durationMin,
-      billable: timeEntries.billable,
-    })
-      .from(timeEntries)
-      .innerJoin(users, eq(timeEntries.userId, users.id))
-      .where(and(...entryConds))
-      .all();
-
-    const sheets = db.select({
-      id: timesheets.id,
-      userId: timesheets.userId,
-      userName: users.name,
-      status: timesheets.status,
-    })
-      .from(timesheets)
-      .innerJoin(users, eq(timesheets.userId, users.id))
-      .where(and(...sheetConds))
-      .all();
-
-    interface SheetRow {
-      userId: number;
-      userName: string;
-      days: number[]; // 7 buckets, Mon..Sun, minutes
-      totalMin: number;
-      billableMin: number;
-      status: string;
-      timesheetId: number | null;
-    }
-    const byUser = new Map<number, SheetRow>();
-    const rowFor = (userId: number, userName: string): SheetRow => {
-      let row = byUser.get(userId);
-      if (!row) {
-        row = { userId, userName, days: [0, 0, 0, 0, 0, 0, 0], totalMin: 0, billableMin: 0, status: "open", timesheetId: null };
-        byUser.set(userId, row);
-      }
-      return row;
-    };
-    for (const e of entries) {
-      const row = rowFor(e.userId, e.userName);
-      // Clamp so a DST hour shift can't push an entry outside the 7 buckets.
-      const day = Math.min(6, Math.max(0, Math.floor((e.startedAt - startMs) / 86400000)));
-      row.days[day] += e.durationMin;
-      row.totalMin += e.durationMin;
-      if (e.billable) row.billableMin += e.durationMin;
-    }
-    for (const s of sheets) {
-      const row = rowFor(s.userId, s.userName);
-      row.status = s.status;
-      row.timesheetId = s.id;
-    }
-    const rows = Array.from(byUser.values()).sort((a, b) => a.userName.localeCompare(b.userName));
-    res.json(rows);
-  });
-
-  app.post("/api/pm/timesheets/submit", requireAuth, (req, res) => {
-    let body;
-    try {
-      body = timesheetSubmitSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message || "Invalid request" });
-    }
-    const weekStart = mondayOf(new Date(ymdToLocalMs(body.weekStart)));
-    const now = Date.now();
-    const existing = db.select().from(timesheets)
-      .where(and(eq(timesheets.userId, req.user!.userId), eq(timesheets.weekStart, weekStart)))
-      .get();
-    // Re-submitting resets the approval — the approver re-reviews the change.
-    const row = existing
-      ? db.update(timesheets)
-        .set({ status: "submitted", submittedAt: now, approvedBy: null, approvedAt: null })
-        .where(eq(timesheets.id, existing.id)).returning().get()
-      : db.insert(timesheets).values({
-        userId: req.user!.userId,
-        weekStart,
-        status: "submitted",
-        submittedAt: now,
-      }).returning().get();
-    audit(req, "pm.timesheet_submit", { targetType: "pm_timesheet", targetId: row.id, targetName: weekStart });
-    res.json(row);
-  });
-
-  app.post("/api/pm/timesheets/:id/approve", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(timesheets).where(eq(timesheets.id, id)).get();
-    if (!existing) return res.status(404).json({ message: "Timesheet not found" });
-    const updated = db.update(timesheets)
-      .set({ status: "approved", approvedBy: req.user!.userId, approvedAt: Date.now() })
-      .where(eq(timesheets.id, id))
-      .returning().get();
-    audit(req, "pm.timesheet_approve", {
-      targetType: "pm_timesheet", targetId: id, targetName: existing.weekStart,
-      details: { userId: existing.userId },
-    });
-    res.json(updated);
   });
 
   // ── Contracts ──────────────────────────────────────────────────────────────

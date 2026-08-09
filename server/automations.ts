@@ -40,7 +40,6 @@ for (const ddl of [
   "ALTER TABLE fin_invoices ADD COLUMN reminded_at INTEGER", // last chase email, unix ms
   "ALTER TABLE quotes ADD COLUMN nudge_sent_at INTEGER", // follow-up #1 (pre-Phase-F: one-shot nudge), unix ms
   "ALTER TABLE quotes ADD COLUMN fu2_sent_at INTEGER", // follow-up #2 ("last note"), unix ms
-  "ALTER TABLE hr_attendance ADD COLUMN overdue_notified_at INTEGER", // clock-out nag, unix ms
   "ALTER TABLE mk_settings ADD COLUMN lead_time_updated_at INTEGER", // stamped on settings save
   "ALTER TABLE mk_settings ADD COLUMN last_digest_date TEXT", // 'YYYY-MM-DD' of last owner digest
   "ALTER TABLE mk_settings ADD COLUMN last_backup_week TEXT", // 'YYYY-WW' of last weekly offsite email/reminder
@@ -538,31 +537,6 @@ function runBusinessSweep(): void {
     }
   });
 
-  // 16. Clock-out nag — one owner mail per batch, each shift nagged once.
-  step("clock-out nag", () => {
-    if (!mailEnabled()) return;
-    const rows = sqlite.prepare(`
-      SELECT a.id, a.clock_in, e.first_name || ' ' || e.last_name AS who
-      FROM hr_attendance a JOIN hr_employees e ON e.id = a.employee_id
-      WHERE a.clock_out IS NULL AND a.overdue_notified_at IS NULL AND a.clock_in < ?
-    `).all(now - 14 * HOUR_MS) as any[];
-    if (rows.length === 0) return;
-    const text =
-      `These shifts were never clocked out:\n\n` +
-      rows.map((r) => `  - ${r.who} — clocked in ${new Date(r.clock_in).toLocaleString()}`).join("\n") +
-      `\n\nFix them in HR → Attendance.`;
-    setImmediate(async () => {
-      const ok = await sendOwnerMail({
-        subject: `[CJM Suite] ${rows.length} shift${rows.length === 1 ? "" : "s"} never clocked out`,
-        text,
-      });
-      if (ok) {
-        const stamp = sqlite.prepare("UPDATE hr_attendance SET overdue_notified_at = ? WHERE id = ?");
-        for (const r of rows) stamp.run(Date.now(), r.id);
-      }
-    });
-  });
-
   // 17. Runaway timer auto-stop — same math as POST /api/pm/time/stop, then
   // one owner mail listing everything stopped this tick.
   step("runaway timers", () => {
@@ -643,18 +617,6 @@ function runBusinessSweep(): void {
       ensureTask(`auto:doc-expiring:${d.id}`,
         `${kindLabel[d.kind] ?? "Document"} '${d.title}' expires ${d.expires_at} — renew it`,
         "other", null, d.project_id ?? null);
-    }
-  });
-
-  // 19. Payroll reminder — anything payable within 2 days and not yet paid.
-  step("payroll reminder", () => {
-    const runs = sqlite.prepare(`
-      SELECT id, period_start, period_end, pay_date, status FROM hr_payroll_runs
-      WHERE status != 'paid' AND pay_date IS NOT NULL AND pay_date <= ?
-    `).all(localDate(now + 2 * DAY_MS)) as any[];
-    for (const r of runs) {
-      ensureTask(`auto:payroll-due:${r.id}`,
-        `Payroll run for ${r.period_start} – ${r.period_end} is due ${r.pay_date} and still ${r.status}`);
     }
   });
 
@@ -794,23 +756,6 @@ function buildDigest(now: number, today: string): string {
     ];
     const unpub = n("SELECT COUNT(*) AS n FROM mk_reviews WHERE source = 'website' AND published = 0");
     if (unpub > 0) lines.push(`  Unpublished website reviews: ${unpub}`);
-    // Today IS Monday here, so startOfToday is this week's start. Walk back a
-    // calendar week from noon so a DST shift can't land us on Sunday 23:00.
-    const lm = new Date(startOfToday + 12 * 60 * 60 * 1000);
-    lm.setDate(lm.getDate() - 7);
-    lm.setHours(0, 0, 0, 0);
-    const lastMonday = lm.getTime();
-    const laggards = sqlite.prepare(`
-      SELECT DISTINCT u.name FROM pm_time_entries te JOIN users u ON u.id = te.user_id
-      WHERE te.started_at >= ? AND te.started_at < ?
-        AND NOT EXISTS (
-          SELECT 1 FROM pm_timesheets ts
-          WHERE ts.user_id = te.user_id AND ts.week_start = ? AND ts.status IN ('submitted','approved')
-        )
-    `).all(lastMonday, startOfToday, localDate(lastMonday)) as any[];
-    if (laggards.length > 0) {
-      lines.push(`  Timesheets missing for last week: ${laggards.map((l) => l.name).join(", ")}`);
-    }
     parts.push(lines.join("\n"));
   }
 

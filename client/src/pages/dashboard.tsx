@@ -35,11 +35,7 @@ interface MarketingStats {
 
 interface HrStats {
   activeEmployees: number;
-  clockedInNow: number;
-  pendingLeave: number;
-  openPositions: number;
-  candidatesInPipeline: number;
-  nextPayDate: string | null;
+  clockedInNow: number; // running PM timers — pm_time_entries is the one clock
 }
 
 interface PmStats {
@@ -500,22 +496,9 @@ export default function DashboardPage() {
         <StatCard label="KB articles" value={pm.data?.kbCount} href="/pm/kb" />
       </Section>
 
-      <Section title="Team" href="/hr" isLoading={hr.isLoading}>
+      <Section title="Team" href="/hr/employees" isLoading={hr.isLoading} cols={4}>
         <StatCard label="Active employees" value={hr.data?.activeEmployees} href="/hr/employees" />
-        <StatCard label="Clocked in now" value={hr.data?.clockedInNow} tone="good" href="/hr/attendance" />
-        <StatCard
-          label="Pending leave"
-          value={hr.data?.pendingLeave}
-          tone={hr.data && hr.data.pendingLeave > 0 ? "warn" : "default"}
-          href="/hr/leave"
-        />
-        <StatCard label="Open positions" value={hr.data?.openPositions} href="/hr/recruitment" />
-        <StatCard label="Candidates" value={hr.data?.candidatesInPipeline} href="/hr/recruitment" />
-        <StatCard
-          label="Next pay date"
-          value={hr.data && (hr.data.nextPayDate ? formatDate(hr.data.nextPayDate) : "—")}
-          href="/hr/payroll"
-        />
+        <StatCard label="Clocked in now" value={hr.data?.clockedInNow} tone="good" href="/pm/time" />
       </Section>
 
       <Section title="Inventory" href="/home" isLoading={inv.isLoading} cols={4}>

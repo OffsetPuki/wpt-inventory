@@ -29,9 +29,6 @@ export const CONTRACT_STATUSES = [
 ] as const;
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
-export const TIMESHEET_STATUSES = ["open", "submitted", "approved"] as const;
-export type TimesheetStatus = (typeof TIMESHEET_STATUSES)[number];
-
 // Phase G: commercial-work toolkit.
 export const CHANGE_ORDER_STATUSES = ["draft", "approved", "void"] as const;
 export type ChangeOrderStatus = (typeof CHANGE_ORDER_STATUSES)[number];
@@ -84,26 +81,6 @@ export const timeEntries = sqliteTable("pm_time_entries", {
   // when the entry is pulled onto a draft invoice, cleared on void/delete.
   // Server-managed only; insertTimeEntrySchema deliberately excludes it.
   invoiceId: integer("invoice_id"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-
-// Weekly approval wrapper over time entries. Hours themselves are computed
-// from pm_time_entries for the week; this row just tracks the sign-off state.
-export const timesheets = sqliteTable("pm_timesheets", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  weekStart: text("week_start").notNull(), // Monday, "YYYY-MM-DD"
-  status: text("status", { enum: TIMESHEET_STATUSES }).notNull().default("open"),
-  submittedAt: integer("submitted_at"), // unix ms
-  approvedBy: integer("approved_by").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  approvedAt: integer("approved_at"), // unix ms
-  notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -251,7 +228,6 @@ export const insertKbArticleSchema = createInsertSchema(kbArticles).omit({
 
 export type PmTask = typeof pmTasks.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
-export type Timesheet = typeof timesheets.$inferSelect;
 export type Contract = typeof contracts.$inferSelect;
 export type ChangeOrder = typeof changeOrders.$inferSelect;
 export type PmDocument = typeof pmDocuments.$inferSelect;
@@ -293,12 +269,6 @@ export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
   active: "Active",
   expired: "Expired",
   terminated: "Terminated",
-};
-
-export const TIMESHEET_STATUS_LABELS: Record<TimesheetStatus, string> = {
-  open: "Open",
-  submitted: "Submitted",
-  approved: "Approved",
 };
 
 export const CHANGE_ORDER_STATUS_LABELS: Record<ChangeOrderStatus, string> = {

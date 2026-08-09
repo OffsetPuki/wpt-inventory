@@ -234,23 +234,6 @@ export const BUILT_INS: BuiltIn[] = [
     ],
     canDisable: true,
   },
-  {
-    id: "hr.leave.decision",
-    name: "Leave request decided",
-    audience: "employee",
-    trigger: "When you approve or deny an employee's leave request.",
-    subject: "Your leave request was {{status}} — CJM Metals",
-    body:
-      `Hi {{firstName}},\n\n` +
-      `Your {{leaveType}} leave request for {{dates}} was {{status}}.`,
-    vars: [
-      { token: "firstName", meaning: "Employee's first name" },
-      { token: "status", meaning: "approved or denied" },
-      { token: "leaveType", meaning: "e.g. vacation, sick" },
-      { token: "dates", meaning: "The dates requested, e.g. 2026-09-01–2026-09-05" },
-    ],
-    canDisable: false,
-  },
 ];
 
 /** Listed in the UI so the owner can see it exists, but not editable. */

@@ -83,8 +83,9 @@ app.use(
 app.use((_req, res, next) => {
   res.setHeader(
     "Permissions-Policy",
-    // geolocation=(self): HR attendance captures clock-in/out GPS coordinates.
-    "camera=(), microphone=(), geolocation=(self), payment=(), usb=(), midi=(), interest-cohort=()"
+    // geolocation=(): nothing asks for it — the GPS-stamped attendance clock
+    // is gone (pm_time_entries is the one clock, no location capture).
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=(), interest-cohort=()"
   );
   next();
 });

@@ -123,7 +123,7 @@ function EntryDialog({
       entry
         ? { method: "PATCH", url: `/api/pm/time/${entry.id}`, body: payload }
         : { method: "POST", url: "/api/pm/time", body: payload },
-    invalidate: [["pm-time"], ["pm-timesheets"]],
+    invalidate: [["pm-time"]],
     successTitle: entry ? "Entry updated" : "Entry added",
     errorTitle: "Could not save entry",
     onSuccess: onClose,
@@ -377,14 +377,14 @@ export default function PmTimePage() {
 
   const stop = useApiMutation({
     request: () => ({ method: "POST", url: "/api/pm/time/stop" }),
-    invalidate: [["pm-time-running"], ["pm-time"], ["pm-timesheets"]],
+    invalidate: [["pm-time-running"], ["pm-time"]],
     successTitle: "Timer stopped",
     errorTitle: "Could not stop timer",
   });
 
   const del = useApiMutation<any, number>({
     request: (id) => ({ method: "DELETE", url: `/api/pm/time/${id}` }),
-    invalidate: [["pm-time"], ["pm-timesheets"]],
+    invalidate: [["pm-time"]],
     successTitle: "Entry deleted",
     errorTitle: "Could not delete",
   });

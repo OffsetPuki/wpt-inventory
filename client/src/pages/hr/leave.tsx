@@ -7,28 +7,20 @@ import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { LoadingBlock } from "@/components/ui/Feedback";
-import { Chip, type ChipTone } from "@/components/ui/Chip";
+import { Chip } from "@/components/ui/Chip";
 import { inputCls } from "@/lib/ui-styles";
 import { formatDate } from "@/lib/format";
 import {
   LEAVE_TYPES,
   LEAVE_TYPE_LABELS,
-  LEAVE_STATUS_LABELS,
   type Employee,
   type LeaveRequest,
   type LeaveType,
-  type LeaveStatus,
 } from "@shared/hr-schema";
-import { Loader2, Plus, CalendarDays, Check, X, Trash2, Info } from "lucide-react";
+import { Loader2, Plus, CalendarDays, Trash2, Info } from "lucide-react";
 
 const textareaCls =
   "min-h-[80px] w-full rounded-lg border border-input bg-background px-3 py-2 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-const STATUS_CHIP: Record<LeaveStatus, ChipTone> = {
-  pending: "amber",
-  approved: "emerald",
-  denied: "red",
-};
 
 type LeaveRow = LeaveRequest & { employeeName?: string };
 
@@ -36,9 +28,9 @@ function daysLabel(days: number): string {
   return `${days} day${days === 1 ? "" : "s"}`;
 }
 
-// ─── Request dialog ───────────────────────────────────────────────────────────
+// ─── Add dialog ───────────────────────────────────────────────────────────────
 
-function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => void }) {
+function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }) {
   const { isElevated } = useAuth();
   const [employeeId, setEmployeeId] = useState(me ? String(me.id) : "");
   const [type, setType] = useState<LeaveType>("vacation");
@@ -67,13 +59,13 @@ function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => vo
       },
     }),
     invalidate: [["hr-leave"]],
-    successTitle: "Leave requested",
-    errorTitle: "Could not file request",
+    successTitle: "Time off added",
+    errorTitle: "Could not add time off",
     onSuccess: onClose,
   });
 
   return (
-    <Modal open onClose={onClose} title="Request leave">
+    <Modal open onClose={onClose} title="Add time off">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -172,7 +164,7 @@ function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => vo
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Submit request
+          Add time off
         </button>
       </form>
     </Modal>
@@ -180,6 +172,7 @@ function RequestDialog({ me, onClose }: { me: Employee | null; onClose: () => vo
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
+// A plain list — time off filed is fact, no approval ceremony.
 
 export default function HrLeavePage() {
   const { isElevated } = useAuth();
@@ -195,28 +188,15 @@ export default function HrLeavePage() {
     queryFn: async () => (await apiRequest("GET", "/api/hr/leave")).json(),
   });
 
-  const decide = useApiMutation<any, { id: number; status: "approved" | "denied" }>({
-    request: ({ id, status }) => ({
-      method: "PATCH",
-      url: `/api/hr/leave/${id}/decide`,
-      body: { status },
-    }),
-    invalidate: [["hr-leave"]],
-    successTitle: (_d, vars) => (vars.status === "approved" ? "Leave approved" : "Leave denied"),
-    errorTitle: "Could not decide request",
-  });
-
-  const withdraw = useApiMutation<any, number>({
+  const del = useApiMutation<any, number>({
     request: (id) => ({ method: "DELETE", url: `/api/hr/leave/${id}` }),
     invalidate: [["hr-leave"]],
-    successTitle: "Request withdrawn",
-    errorTitle: "Could not withdraw",
+    successTitle: "Time off removed",
+    errorTitle: "Could not remove",
   });
 
-  const myRequests = isElevated ? rows.filter((r) => me && r.employeeId === me.id) : rows;
-  const pending = rows.filter((r) => r.status === "pending");
-  const decided = rows.filter((r) => r.status !== "pending");
-  const canRequest = isElevated || !!me;
+  const canAdd = isElevated || !!me;
+  const canDelete = (r: LeaveRow) => isElevated || (me != null && r.employeeId === me.id);
 
   const typeSummary = LEAVE_TYPES.map((t) => {
     const ofType = rows.filter((r) => r.type === t);
@@ -225,14 +205,14 @@ export default function HrLeavePage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Leave" description="Time-off requests and approvals">
+      <Header title="Time off" description="Who's out, when, and for how long">
         <button
           onClick={() => setDialogOpen(true)}
-          disabled={!canRequest || meLoading}
+          disabled={!canAdd || meLoading}
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           <Plus className="h-5 w-5" />
-          Request leave
+          Add time off
         </button>
       </Header>
 
@@ -244,181 +224,82 @@ export default function HrLeavePage() {
             <div className="mb-6 flex items-center gap-3 rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
               <Info className="h-5 w-5 shrink-0" />
               <p>
-                No employee profile is linked to your account, so you can't file leave requests
-                yet. Ask a manager to link your login on the Employees page.
+                No employee profile is linked to your account, so you can't file time off yet.
+                Ask a manager to link your login on the Employees page.
               </p>
             </div>
           )}
 
-          <section className="mb-10">
-            <h2 className="mb-3 text-lg font-semibold text-foreground">My requests</h2>
-            {myRequests.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
-                <CalendarDays className="h-12 w-12" />
-                <p className="text-lg">No leave requests yet</p>
-              </div>
-            ) : (
-              <ul className="divide-y divide-border rounded-xl border border-border bg-card">
-                {myRequests.map((r) => (
-                  <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                    <span className="w-20 font-medium text-foreground">
-                      {LEAVE_TYPE_LABELS[r.type]}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {formatDate(r.startDate)} – {formatDate(r.endDate)}
-                    </span>
-                    <span className="tabular-nums text-foreground">{daysLabel(r.days)}</span>
-                    {r.reason && (
-                      <span className="max-w-[18rem] truncate text-muted-foreground">
-                        {r.reason}
-                      </span>
-                    )}
-                    <Chip tone={STATUS_CHIP[r.status]} className="ml-auto">
-                      {LEAVE_STATUS_LABELS[r.status]}
-                    </Chip>
-                    {r.status === "pending" && me && r.employeeId === me.id && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm("Withdraw this leave request?")) withdraw.mutate(r.id);
-                        }}
-                        disabled={withdraw.isPending}
-                        className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-                        aria-label="Withdraw request"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {typeSummary.length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {typeSummary.map((s) => (
+                <Chip key={s.type} className="bg-zinc-500/10 text-zinc-700 dark:text-zinc-400">
+                  {LEAVE_TYPE_LABELS[s.type]} · {s.days}d
+                </Chip>
+              ))}
+            </div>
+          )}
 
-          {isElevated && (
-            <section>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-semibold text-foreground">Team queue</h2>
-                <div className="ml-auto flex flex-wrap gap-2">
-                  {typeSummary.map((s) => (
-                    <Chip
-                      key={s.type}
-                      className="bg-zinc-500/10 text-zinc-700 dark:text-zinc-400"
-                    >
-                      {LEAVE_TYPE_LABELS[s.type]} · {s.days}d
-                    </Chip>
+          {rows.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
+              <CalendarDays className="h-12 w-12" />
+              <p className="text-lg">No time off filed yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border bg-card">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase text-muted-foreground">
+                    {isElevated && <th className="px-4 py-3 font-medium">Employee</th>}
+                    <th className="px-4 py-3 font-medium">Type</th>
+                    <th className="px-4 py-3 font-medium">Dates</th>
+                    <th className="px-4 py-3 text-right font-medium">Days</th>
+                    <th className="px-4 py-3 font-medium">Note</th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rows.map((r) => (
+                    <tr key={r.id}>
+                      {isElevated && (
+                        <td className="px-4 py-3 font-medium text-foreground">
+                          {r.employeeName ?? "—"}
+                        </td>
+                      )}
+                      <td className="px-4 py-3 text-foreground">{LEAVE_TYPE_LABELS[r.type]}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(r.startDate)} – {formatDate(r.endDate)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-foreground">
+                        {daysLabel(r.days)}
+                      </td>
+                      <td className="max-w-[16rem] truncate px-4 py-3 text-muted-foreground">
+                        {r.reason ?? ""}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {canDelete(r) && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm("Remove this time off entry?")) del.mutate(r.id);
+                            }}
+                            disabled={del.isPending}
+                            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-red-600 disabled:opacity-60 dark:hover:text-red-400"
+                            aria-label="Remove entry"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              </div>
-
-              {pending.length === 0 ? (
-                <p className="mb-6 rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-                  No pending requests — all caught up.
-                </p>
-              ) : (
-                <div className="mb-6 overflow-x-auto rounded-xl border border-border bg-card">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase text-muted-foreground">
-                        <th className="px-4 py-3 font-medium">Employee</th>
-                        <th className="px-4 py-3 font-medium">Type</th>
-                        <th className="px-4 py-3 font-medium">Dates</th>
-                        <th className="px-4 py-3 text-right font-medium">Days</th>
-                        <th className="px-4 py-3 font-medium">Reason</th>
-                        <th className="px-4 py-3" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {pending.map((r) => (
-                        <tr key={r.id}>
-                          <td className="px-4 py-3 font-medium text-foreground">
-                            {r.employeeName ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 text-foreground">{LEAVE_TYPE_LABELS[r.type]}</td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {formatDate(r.startDate)} – {formatDate(r.endDate)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                            {r.days}
-                          </td>
-                          <td className="max-w-[14rem] truncate px-4 py-3 text-muted-foreground">
-                            {r.reason ?? ""}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => decide.mutate({ id: r.id, status: "approved" })}
-                                disabled={decide.isPending}
-                                className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
-                              >
-                                <Check className="h-4 w-4" /> Approve
-                              </button>
-                              <button
-                                onClick={() => decide.mutate({ id: r.id, status: "denied" })}
-                                disabled={decide.isPending}
-                                className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-red-600 hover:border-red-500 disabled:opacity-60 dark:text-red-400"
-                              >
-                                <X className="h-4 w-4" /> Deny
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Decided
-              </h3>
-              {decided.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No decided requests yet.</p>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-border bg-card">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase text-muted-foreground">
-                        <th className="px-4 py-3 font-medium">Employee</th>
-                        <th className="px-4 py-3 font-medium">Type</th>
-                        <th className="px-4 py-3 font-medium">Dates</th>
-                        <th className="px-4 py-3 text-right font-medium">Days</th>
-                        <th className="px-4 py-3 font-medium">Status</th>
-                        <th className="px-4 py-3 font-medium">Decided</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {decided.map((r) => (
-                        <tr key={r.id}>
-                          <td className="px-4 py-3 font-medium text-foreground">
-                            {r.employeeName ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 text-foreground">{LEAVE_TYPE_LABELS[r.type]}</td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {formatDate(r.startDate)} – {formatDate(r.endDate)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                            {r.days}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Chip tone={STATUS_CHIP[r.status]}>
-                              {LEAVE_STATUS_LABELS[r.status]}
-                            </Chip>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {r.decidedAt ? formatDate(r.decidedAt) : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}
 
-      {dialogOpen && <RequestDialog me={me} onClose={() => setDialogOpen(false)} />}
+      {dialogOpen && <AddDialog me={me} onClose={() => setDialogOpen(false)} />}
     </div>
   );
 }

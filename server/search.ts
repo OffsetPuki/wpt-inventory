@@ -7,7 +7,7 @@ import { clients, leads } from "../shared/crm-schema";
 import { pmTasks, kbArticles, contracts } from "../shared/pm-schema";
 import { invoices, purchaseOrders, expenses } from "../shared/finance-schema";
 import { quotes } from "../shared/quote-schema";
-import { employees, candidates } from "../shared/hr-schema";
+import { employees } from "../shared/hr-schema";
 import { campaigns } from "../shared/marketing-schema";
 
 // ─── Global search (top bar) ─────────────────────────────────────────────────
@@ -165,15 +165,6 @@ export function registerSearchRoutes(app: Express): void {
           ))
           .limit(PER_SOURCE).all()) {
           hits.push({ type: "Employees", label: r.name, sublabel: r.title, href: "/hr/employees" });
-        }
-      });
-
-      source(() => {
-        for (const r of db.select({ id: candidates.id, name: candidates.name })
-          .from(candidates)
-          .where(likeEsc(candidates.name, p))
-          .limit(PER_SOURCE).all()) {
-          hits.push({ type: "Candidates", label: r.name, href: "/hr/recruitment" });
         }
       });
 

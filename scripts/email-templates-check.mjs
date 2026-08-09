@@ -96,12 +96,6 @@ console.log("\nWording is unchanged from what the code used to send:");
     `We received your payment of $700.00 on invoice INV-2026-0042. Your invoice is paid in full — thank you!\n\n` +
     SIGNOFF);
 
-  const leave = renderTemplate("hr.leave.decision", {
-    firstName: "Sam", status: "approved", leaveType: "vacation", dates: "2026-09-01–2026-09-05",
-  });
-  same("leave decision", leave.text,
-    `Hi Sam,\n\nYour vacation leave request for 2026-09-01–2026-09-05 was approved.`);
-
   const fu1 = renderTemplate("quote.followup1", {
     firstName: "Amy", quoteNumber: "Q-2026-0631", quoteTotal: "$3,655.67",
     quoteUrl: "https://x/q/abc", unsubscribeUrl: "https://x/q/optout?token=abc",
