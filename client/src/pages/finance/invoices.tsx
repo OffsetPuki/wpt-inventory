@@ -20,7 +20,7 @@ import {
   type PaymentGateway,
   type PaymentMethod,
 } from "@shared/finance-schema";
-import type { Client, Estimate } from "@shared/crm-schema";
+import type { Client } from "@shared/crm-schema";
 import type { Project } from "@shared/schema";
 import { parseLineItems, type LineItem } from "@shared/biz-common";
 import {
@@ -521,73 +521,6 @@ function InvoiceFormModal({
   );
 }
 
-// ─── From-estimate picker ─────────────────────────────────────────────────────
-
-function FromEstimateModal({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: (id: number) => void;
-}) {
-  const { data: estimates = [], isLoading } = useQuery<Estimate[]>({
-    queryKey: ["crm-estimates", "accepted"],
-    queryFn: async () =>
-      (await apiRequest("GET", "/api/crm/estimates?status=accepted")).json(),
-    enabled: open,
-  });
-
-  const create = useApiMutation<InvoiceRow, number>({
-    request: (estimateId) => ({
-      method: "POST",
-      url: `/api/finance/invoices/from-estimate/${estimateId}`,
-    }),
-    invalidate: INVOICE_KEYS,
-    successTitle: (inv) => `Invoice ${inv.number} created`,
-    errorTitle: "Could not create invoice",
-    onSuccess: (inv) => {
-      onClose();
-      onCreated(inv.id);
-    },
-  });
-
-  return (
-    <Modal open={open} onClose={onClose} title="Invoice from estimate" maxWidth="max-w-lg">
-      {isLoading ? (
-        <div className="flex justify-center py-10 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
-      ) : estimates.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
-          <FileText className="h-10 w-10" />
-          <p>No accepted estimates</p>
-        </div>
-      ) : (
-        <div className="flex max-h-[60vh] flex-col divide-y divide-border overflow-y-auto">
-          {estimates.map((est) => (
-            <button
-              key={est.id}
-              disabled={create.isPending}
-              onClick={() => create.mutate(est.id)}
-              className="flex items-center gap-3 py-3 text-left hover:bg-accent/50 disabled:opacity-60"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-foreground">{est.title}</p>
-                <p className="font-mono text-xs text-muted-foreground">{est.number}</p>
-              </div>
-              <span className="tabular-nums text-foreground">
-                {formatMoney(est.totalCents)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
 // ─── Record payment ───────────────────────────────────────────────────────────
 
 function RecordPaymentForm({
@@ -1035,7 +968,6 @@ export default function InvoicesPage() {
   const [tab, setTab] = useState("");
   const [q, setQ] = useState("");
   const [newOpen, setNewOpen] = useState(false);
-  const [fromEstOpen, setFromEstOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
 
@@ -1055,10 +987,6 @@ export default function InvoicesPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <Header title="Invoices" description="Billing and accounts receivable">
-        <button onClick={() => setFromEstOpen(true)} className={secondaryBtn}>
-          <FileText className="h-5 w-5" />
-          From estimate
-        </button>
         <button onClick={() => setNewOpen(true)} className={primaryBtn}>
           <Plus className="h-5 w-5" />
           New invoice
@@ -1162,11 +1090,6 @@ export default function InvoicesPage() {
           setEditInvoice(null);
         }}
         invoice={editInvoice}
-      />
-      <FromEstimateModal
-        open={fromEstOpen}
-        onClose={() => setFromEstOpen(false)}
-        onCreated={(id) => setDetailId(id)}
       />
       {detailId !== null && (
         <InvoiceDetailModal

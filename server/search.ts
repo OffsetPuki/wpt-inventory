@@ -3,7 +3,7 @@ import { and, isNull, or, sql } from "drizzle-orm";
 import { db } from "./storage";
 import { requireAuth } from "./auth";
 import { items, projects } from "../shared/schema";
-import { clients, leads, deals, products, estimates } from "../shared/crm-schema";
+import { clients, leads } from "../shared/crm-schema";
 import { pmTasks, kbArticles, contracts } from "../shared/pm-schema";
 import { invoices, purchaseOrders, expenses } from "../shared/finance-schema";
 import { quotes } from "../shared/quote-schema";
@@ -92,33 +92,6 @@ export function registerSearchRoutes(app: Express): void {
         .where(and(isNull(leads.deletedAt), or(likeEsc(leads.name, p), likeEsc(leads.serviceRequested, p))))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Leads", label: r.name, sublabel: r.service, href: "/crm/leads" });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: deals.id, title: deals.title })
-        .from(deals)
-        .where(and(isNull(deals.deletedAt), likeEsc(deals.title, p)))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Deals", label: r.title, href: "/crm/deals" });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: products.id, name: products.name, sku: products.sku })
-        .from(products)
-        .where(and(isNull(products.deletedAt), or(likeEsc(products.name, p), likeEsc(products.sku, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Products", label: r.name, sublabel: r.sku, href: "/crm/products" });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: estimates.id, number: estimates.number, title: estimates.title })
-        .from(estimates)
-        .where(and(isNull(estimates.deletedAt), or(likeEsc(estimates.number, p), likeEsc(estimates.title, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Estimates", label: r.number, sublabel: r.title, href: "/crm/estimates" });
       }
     });
 

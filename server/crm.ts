@@ -6,12 +6,10 @@ import { sqlite, db } from "./storage";
 import { audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import {
-  clients, leads, deals, products, estimates, crmActivities,
-  insertClientSchema, insertLeadSchema, insertDealSchema,
-  insertProductSchema, insertEstimateSchema, insertCrmActivitySchema,
-  LEAD_SOURCES, LEAD_STAGES, DEAL_STAGES, ESTIMATE_STATUSES, CLIENT_STATUSES,
-  type Lead, type LeadStage, type LeadSource, type DealStage,
-  type EstimateStatus, type ClientStatus,
+  clients, leads, crmActivities,
+  insertClientSchema, insertLeadSchema, insertCrmActivitySchema,
+  LEAD_SOURCES, LEAD_STAGES, CLIENT_STATUSES,
+  type Lead, type LeadStage, type LeadSource, type ClientStatus,
 } from "../shared/crm-schema";
 // Cross-module automation hooks. These TABLE OBJECTS are safe to import (pure
 // schema definitions); the underlying mk_ tables are created by the marketing
@@ -21,7 +19,6 @@ import { mkTasks, marketingSettings } from "../shared/marketing-schema";
 // Wiring plan, Fix 2 — projects carry a soft clientId ref; the client detail
 // view lists the jobs behind it. Core table, always present.
 import { projects } from "../shared/schema";
-import { computeDocTotals } from "../shared/biz-common";
 import { pid, qstr, todayLocal, registerSoftDelete, registerGetById } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
@@ -82,70 +79,6 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_crm_leads_created ON crm_leads(created_at);
   CREATE INDEX IF NOT EXISTS idx_crm_leads_last_contact ON crm_leads(last_contact_at);
 
-  CREATE TABLE IF NOT EXISTS crm_deals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    client_id INTEGER REFERENCES crm_clients(id) ON DELETE SET NULL,
-    lead_id INTEGER REFERENCES crm_leads(id) ON DELETE SET NULL,
-    value_cents INTEGER NOT NULL DEFAULT 0,
-    stage TEXT NOT NULL DEFAULT 'qualified',
-    owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    expected_close_date TEXT,
-    win_loss_reason TEXT,
-    closed_at INTEGER,
-    notes TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    deleted_at INTEGER
-  );
-  CREATE INDEX IF NOT EXISTS idx_crm_deals_stage ON crm_deals(stage);
-  CREATE INDEX IF NOT EXISTS idx_crm_deals_owner ON crm_deals(owner_id);
-  CREATE INDEX IF NOT EXISTS idx_crm_deals_client ON crm_deals(client_id);
-  CREATE INDEX IF NOT EXISTS idx_crm_deals_lead ON crm_deals(lead_id);
-  CREATE INDEX IF NOT EXISTS idx_crm_deals_created ON crm_deals(created_at);
-
-  CREATE TABLE IF NOT EXISTS crm_products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sku TEXT,
-    name TEXT NOT NULL,
-    description TEXT,
-    category TEXT,
-    unit TEXT,
-    unit_price_cents INTEGER NOT NULL DEFAULT 0,
-    cost_cents INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    deleted_at INTEGER
-  );
-  CREATE INDEX IF NOT EXISTS idx_crm_products_active ON crm_products(active);
-  CREATE INDEX IF NOT EXISTS idx_crm_products_created ON crm_products(created_at);
-
-  CREATE TABLE IF NOT EXISTS crm_estimates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    number TEXT NOT NULL UNIQUE,
-    title TEXT NOT NULL,
-    client_id INTEGER REFERENCES crm_clients(id) ON DELETE SET NULL,
-    lead_id INTEGER REFERENCES crm_leads(id) ON DELETE SET NULL,
-    deal_id INTEGER REFERENCES crm_deals(id) ON DELETE SET NULL,
-    status TEXT NOT NULL DEFAULT 'draft',
-    items TEXT NOT NULL DEFAULT '[]',
-    subtotal_cents INTEGER NOT NULL DEFAULT 0,
-    tax_rate_bp INTEGER NOT NULL DEFAULT 0,
-    tax_cents INTEGER NOT NULL DEFAULT 0,
-    total_cents INTEGER NOT NULL DEFAULT 0,
-    valid_until TEXT,
-    sent_at INTEGER,
-    decided_at INTEGER,
-    notes TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    deleted_at INTEGER
-  );
-  CREATE INDEX IF NOT EXISTS idx_crm_estimates_status ON crm_estimates(status);
-  CREATE INDEX IF NOT EXISTS idx_crm_estimates_client ON crm_estimates(client_id);
-  CREATE INDEX IF NOT EXISTS idx_crm_estimates_lead ON crm_estimates(lead_id);
-  CREATE INDEX IF NOT EXISTS idx_crm_estimates_deal ON crm_estimates(deal_id);
-  CREATE INDEX IF NOT EXISTS idx_crm_estimates_sent ON crm_estimates(sent_at);
-  CREATE INDEX IF NOT EXISTS idx_crm_estimates_created ON crm_estimates(created_at);
-
   CREATE TABLE IF NOT EXISTS crm_activities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL,
@@ -168,14 +101,6 @@ for (const col of ["utm_source", "utm_medium", "utm_campaign"]) {
   } catch {
     /* column already exists */
   }
-}
-
-// Phase B #11: deal last-touch stamp (PATCH sets it; the stale-deal sweep in
-// automations.ts reads COALESCE(updated_at, created_at)).
-try {
-  sqlite.exec("ALTER TABLE crm_deals ADD COLUMN updated_at INTEGER");
-} catch {
-  /* column already exists */
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -543,39 +468,6 @@ export function onQuoteEvent(
   });
 }
 
-// Server-side totals (shared/biz-common) — never trust client-supplied
-// subtotal/tax/total. Throws (zod) on malformed line items so callers surface a
-// 400. No tax clamp here: estimates preserve their prior behaviour (unlike
-// Finance invoices, which floor a negative rate at zero).
-function computeEstimateTotals(itemsJson: string, taxRateBp: number): {
-  subtotalCents: number;
-  taxCents: number;
-  totalCents: number;
-} {
-  return computeDocTotals(itemsJson, taxRateBp);
-}
-
-// "EST-<year>-<0000>" — seq seeded from max(id)+1 so numbers are roughly
-// monotonic, with a bounded retry on UNIQUE collision (two concurrent posts,
-// or ids that outran the numbers after a year rollover).
-function insertEstimateWithNumber(
-  values: Omit<typeof estimates.$inferInsert, "number">,
-): typeof estimates.$inferSelect {
-  const year = new Date().getFullYear();
-  let seq = (db.select({ m: sql<number>`coalesce(max(${estimates.id}), 0)` })
-    .from(estimates).get()?.m ?? 0) + 1;
-  for (let attempt = 0; attempt < 50; attempt++, seq++) {
-    const number = `EST-${year}-${String(seq).padStart(4, "0")}`;
-    try {
-      return db.insert(estimates).values({ ...values, number }).returning().get();
-    } catch (e: any) {
-      if (String(e?.message ?? e).includes("UNIQUE")) continue;
-      throw e;
-    }
-  }
-  throw new Error("Could not allocate an estimate number — too many collisions");
-}
-
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerCrmRoutes(app: Express): void {
@@ -597,31 +489,22 @@ export function registerCrmRoutes(app: Express): void {
       .where(and(isNull(leads.deletedAt), gte(leads.createdAt, weekAgo)))
       .get()?.n ?? 0;
 
-    // Pipeline = everything still in play: open leads' estimated value plus
-    // open deals' value.
+    // Pipeline = everything still in play: open leads' estimated value.
     const leadPipeline = db.select({ v: sql<number>`coalesce(sum(${leads.estimatedValueCents}), 0)` })
       .from(leads)
       .where(and(isNull(leads.deletedAt), notInArray(leads.stage, ["won", "lost"])))
       .get()?.v ?? 0;
-    const dealPipeline = db.select({ v: sql<number>`coalesce(sum(${deals.valueCents}), 0)` })
-      .from(deals)
-      .where(and(isNull(deals.deletedAt), notInArray(deals.stage, ["won", "lost"])))
-      .get()?.v ?? 0;
 
-    // Estimates + builder quotes — the funnel shouldn't hide half the sends.
-    // Raw sqlite for the quotes table (quote module owns it; automations.ts
-    // reads it the same way), try/catch'd in case that module isn't loaded.
-    let builderQuotesSent = 0;
+    // Builder quotes are THE quoting system. Raw sqlite for the quotes table
+    // (quote module owns it), try/catch'd in case that module isn't loaded.
+    let quotesSentLast30 = 0;
     try {
-      builderQuotesSent = (sqlite.prepare(
+      quotesSentLast30 = (sqlite.prepare(
         "SELECT count(*) AS n FROM quotes WHERE deleted_at IS NULL AND sent_at >= ?",
       ).get(monthAgoMs) as { n: number }).n;
     } catch {
       /* quotes table not created */
     }
-    const quotesSentLast30 = (db.select({ n: sql<number>`count(*)` }).from(estimates)
-      .where(and(isNull(estimates.deletedAt), gte(estimates.sentAt, monthAgoMs)))
-      .get()?.n ?? 0) + builderQuotesSent;
 
     const closed = db.select({
       won: sql<number>`coalesce(sum(case when ${leads.stage} = 'won' then 1 else 0 end), 0)`,
@@ -631,20 +514,17 @@ export function registerCrmRoutes(app: Express): void {
       ? closed.won / (closed.won + closed.lost)
       : null;
 
-    // APPROXIMATION: the schema has no closedAt/wonAt on leads, and
-    // lastContactAt is reset by any later touch — so a lead touched again
-    // months after winning would wrongly re-enter a lastContactAt window.
-    // Proxy "won in the last 30 days" by the lead having an ACCEPTED estimate
-    // whose decidedAt falls in the window — the same honest money-date the
-    // monthly-revenue report groups by. Good enough for a dashboard tile.
-    const revenueClosed30dCents = db.select({ v: sql<number>`coalesce(sum(${leads.revenueClosedCents}), 0)` })
-      .from(leads)
-      .where(and(
-        isNull(leads.deletedAt),
-        eq(leads.stage, "won"),
-        sql`EXISTS (SELECT 1 FROM crm_estimates e WHERE e.lead_id = ${leads.id} AND e.status = 'accepted' AND e.deleted_at IS NULL AND e.decided_at >= ${monthAgoMs})`,
-      ))
-      .get()?.v ?? 0;
+    // "Revenue closed in the last 30 days" = accepted builder quotes bucketed
+    // by accepted_at — the one money-date the schema actually records (leads
+    // have no close timestamp). Same honest-date rule as the monthly report.
+    let revenueClosed30dCents = 0;
+    try {
+      revenueClosed30dCents = (sqlite.prepare(
+        "SELECT coalesce(sum(total_cents), 0) AS v FROM quotes WHERE deleted_at IS NULL AND status = 'accepted' AND accepted_at >= ?",
+      ).get(monthAgoMs) as { v: number }).v;
+    } catch {
+      /* quotes table not created */
+    }
 
     const topSourceRow = db.select({
       source: leads.source,
@@ -659,7 +539,7 @@ export function registerCrmRoutes(app: Express): void {
     res.json({
       openLeads,
       leadsThisWeek,
-      pipelineValueCents: leadPipeline + dealPipeline,
+      pipelineValueCents: leadPipeline,
       quotesSentLast30,
       closeRate,
       revenueClosed30dCents,
@@ -677,47 +557,19 @@ export function registerCrmRoutes(app: Express): void {
     const cutoffMs = new Date(nowDate.getFullYear(), nowDate.getMonth() - 11, 1).getTime();
     const cutoffDate = new Date(cutoffMs);
 
-    // REVENUE PROXY DECISION: monthly revenue comes from ACCEPTED estimates
-    // bucketed by the month they were accepted (decidedAt). Lead
-    // revenueClosedCents has no close timestamp in the schema, so estimates
-    // are the one source with an honest date attached to the money.
-    const revMonth = sql<string>`strftime('%Y-%m', ${estimates.decidedAt} / 1000, 'unixepoch')`;
-    const monthlyRevenue = db.select({
-      month: revMonth,
-      revenueCents: sql<number>`coalesce(sum(${estimates.totalCents}), 0)`,
-    }).from(estimates)
-      .where(and(
-        isNull(estimates.deletedAt),
-        eq(estimates.status, "accepted"),
-        gte(estimates.decidedAt, cutoffMs),
-      ))
-      .groupBy(revMonth)
-      .orderBy(revMonth)
-      .all();
-
-    // Accepted builder quotes join the same buckets — same "honest date" rule
-    // (accepted_at is when the money became real). Raw sqlite + try/catch for
-    // the quote module's table, like the stats endpoint above.
-    // ponytail: assumes a job lives in exactly ONE system — a job tracked as
-    // both an accepted estimate and an accepted builder quote double-counts
-    // here (nothing links the two tables; add a link column if that happens).
+    // Monthly revenue = ACCEPTED builder quotes bucketed by the month they
+    // were accepted (accepted_at is when the money became real). The quote
+    // module owns the table → raw sqlite + try/catch, like the stats endpoint.
+    let monthlyRevenue: { month: string; revenueCents: number }[] = [];
     try {
-      const quoteRows = sqlite.prepare(`
+      monthlyRevenue = (sqlite.prepare(`
         SELECT strftime('%Y-%m', accepted_at / 1000, 'unixepoch') AS month,
-               coalesce(sum(total_cents), 0) AS v
+               coalesce(sum(total_cents), 0) AS revenueCents
         FROM quotes
         WHERE deleted_at IS NULL AND status = 'accepted' AND accepted_at >= ?
         GROUP BY month
-      `).all(cutoffMs) as { month: string; v: number }[];
-      if (quoteRows.length > 0) {
-        const byMonth = new Map(monthlyRevenue.map((r) => [r.month, r]));
-        for (const q of quoteRows) {
-          const hit = byMonth.get(q.month);
-          if (hit) hit.revenueCents += q.v;
-          else monthlyRevenue.push({ month: q.month, revenueCents: q.v });
-        }
-        monthlyRevenue.sort((a, b) => a.month.localeCompare(b.month));
-      }
+        ORDER BY month
+      `).all(cutoffMs) as { month: string; revenueCents: number }[]);
     } catch {
       /* quotes table not created */
     }
@@ -877,9 +729,9 @@ export function registerCrmRoutes(app: Express): void {
 
   // Extras for the lead detail modal beyond the list row it already has:
   // the website design the lead configured (Phase B #13 — web_designs.lead_id
-  // is written on intake but was never read back) and the lead's deals
-  // (Phase B #11). web_designs belongs to the website module → raw SQL +
-  // try/catch; the design PNG is already in the lead's photo strip.
+  // is written on intake but was never read back). web_designs belongs to the
+  // website module → raw SQL + try/catch; the design PNG is already in the
+  // lead's photo strip.
   app.get("/api/crm/leads/:id/detail", requireAuth, (req, res) => {
     const id = pid(req.params.id);
     const lead = db.select({ id: leads.id }).from(leads)
@@ -896,13 +748,7 @@ export function registerCrmRoutes(app: Express): void {
         ORDER BY created_at DESC, id DESC LIMIT 1
       `).get(id) ?? null;
     } catch { /* website module absent */ }
-    res.json({
-      design,
-      deals: db.select().from(deals)
-        .where(and(eq(deals.leadId, id), isNull(deals.deletedAt)))
-        .orderBy(desc(deals.createdAt))
-        .all(),
-    });
+    res.json({ design });
   });
 
   app.patch("/api/crm/leads/:id", requireAuth, (req, res) => {
@@ -996,7 +842,7 @@ export function registerCrmRoutes(app: Express): void {
     );
   });
 
-  // Combined detail payload (client + their leads/estimates/activity feed) in
+  // Combined detail payload (client + their leads/activity feed) in
   // one round-trip. Registered ABOVE /clients/:id so "detail" isn't eaten as
   // a second path segment... it's a sub-path of :id, but keep the literal-
   // before-param convention for anything that could collide.
@@ -1051,18 +897,9 @@ export function registerCrmRoutes(app: Express): void {
       client,
       invoices: invoiceRows,
       reviewCount,
-      // Phase B #11: the client's deals, visible from the customer record.
-      deals: db.select().from(deals)
-        .where(and(eq(deals.clientId, id), isNull(deals.deletedAt)))
-        .orderBy(desc(deals.createdAt))
-        .all(),
       leads: db.select().from(leads)
         .where(and(eq(leads.clientId, id), isNull(leads.deletedAt)))
         .orderBy(desc(leads.createdAt))
-        .all(),
-      estimates: db.select().from(estimates)
-        .where(and(eq(estimates.clientId, id), isNull(estimates.deletedAt)))
-        .orderBy(desc(estimates.createdAt))
         .all(),
       activities: db.select().from(crmActivities)
         .where(and(eq(crmActivities.entityType, "client"), eq(crmActivities.entityId, id)))
@@ -1112,274 +949,6 @@ export function registerCrmRoutes(app: Express): void {
     action: "crm.client_delete", targetType: "client", name: (r) => r.name, audit,
   });
 
-  // ─── Deals ───────────────────────────────────────────────────────────────
-
-  app.get("/api/crm/deals", requireAuth, (req, res) => {
-    const conds: (SQL | undefined)[] = [isNull(deals.deletedAt)];
-    const stage = qstr(req.query.stage);
-    if (stage && (DEAL_STAGES as readonly string[]).includes(stage)) {
-      conds.push(eq(deals.stage, stage as DealStage));
-    }
-    const ownerId = qstr(req.query.ownerId);
-    if (ownerId) conds.push(eq(deals.ownerId, parseInt(ownerId, 10)));
-    // Phase B #11: deals from the person's record.
-    const clientId = qstr(req.query.clientId);
-    if (clientId) conds.push(eq(deals.clientId, parseInt(clientId, 10)));
-    const leadId = qstr(req.query.leadId);
-    if (leadId) conds.push(eq(deals.leadId, parseInt(leadId, 10)));
-    res.json(
-      db.select().from(deals)
-        .where(and(...conds))
-        .orderBy(desc(deals.createdAt), desc(deals.id))
-        .all(),
-    );
-  });
-
-  registerGetById(app, "/api/crm/deals/:id", requireAuth, deals, "Deal not found");
-
-  app.post("/api/crm/deals", requireAuth, (req, res) => {
-    try {
-      const data = insertDealSchema.parse(req.body);
-      const row = db.insert(deals).values(data).returning().get();
-      audit(req, "crm.deal_create", {
-        targetType: "deal", targetId: row.id, targetName: row.title,
-        details: { valueCents: row.valueCents },
-      });
-      res.status(201).json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
-  });
-
-  app.patch("/api/crm/deals/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(deals)
-      .where(and(eq(deals.id, id), isNull(deals.deletedAt)))
-      .get();
-    if (!existing) return res.status(404).json({ message: "Deal not found" });
-
-    let parsed;
-    try {
-      parsed = insertDealSchema.partial().parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-
-    // Phase B #11: any edit counts as a touch — the stale-deal sweep keys off it.
-    const update: Partial<typeof deals.$inferInsert> = { ...parsed, updatedAt: Date.now() };
-    const stageChanged = parsed.stage !== undefined && parsed.stage !== existing.stage;
-    if (stageChanged) {
-      // closedAt tracks the win/lose moment; reopening a closed deal clears it.
-      update.closedAt =
-        parsed.stage === "won" || parsed.stage === "lost" ? Date.now() : null;
-    }
-
-    const row = db.update(deals).set(update).where(eq(deals.id, id)).returning().get();
-    if (!row) return res.status(404).json({ message: "Deal not found" });
-
-    if (stageChanged) {
-      audit(req, "crm.deal_stage", {
-        targetType: "deal", targetId: row.id, targetName: row.title,
-        details: { from: existing.stage, to: row.stage, valueCents: row.valueCents },
-      });
-    }
-    res.json(row);
-  });
-
-  registerSoftDelete(app, "/api/crm/deals/:id", requireElevated, {
-    table: deals, notFound: "Deal not found",
-    action: "crm.deal_delete", targetType: "deal", name: (r) => r.title, audit,
-  });
-
-  // ─── Products / services catalog ─────────────────────────────────────────
-
-  app.get("/api/crm/products", requireAuth, (req, res) => {
-    const conds: (SQL | undefined)[] = [isNull(products.deletedAt)];
-    const q = qstr(req.query.q);
-    if (q) {
-      const p = `%${q}%`;
-      conds.push(or(
-        like(products.name, p),
-        like(products.sku, p),
-        like(products.description, p),
-      ));
-    }
-    // active=1 / active=0 — anything else means "no filter".
-    if (req.query.active === "1") conds.push(eq(products.active, true));
-    else if (req.query.active === "0") conds.push(eq(products.active, false));
-
-    res.json(
-      db.select().from(products)
-        .where(and(...conds))
-        .orderBy(desc(products.createdAt), desc(products.id))
-        .all(),
-    );
-  });
-
-  registerGetById(app, "/api/crm/products/:id", requireAuth, products, "Product not found");
-
-  app.post("/api/crm/products", requireAuth, (req, res) => {
-    try {
-      const data = insertProductSchema.parse(req.body);
-      const row = db.insert(products).values(data).returning().get();
-      audit(req, "crm.product_create", {
-        targetType: "product", targetId: row.id, targetName: row.name,
-      });
-      res.status(201).json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
-  });
-
-  app.patch("/api/crm/products/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(products)
-      .where(and(eq(products.id, id), isNull(products.deletedAt)))
-      .get();
-    if (!existing) return res.status(404).json({ message: "Product not found" });
-    try {
-      const parsed = insertProductSchema.partial().parse(req.body);
-      const row = db.update(products).set(parsed).where(eq(products.id, id)).returning().get();
-      res.json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
-  });
-
-  registerSoftDelete(app, "/api/crm/products/:id", requireElevated, {
-    table: products, notFound: "Product not found",
-    action: "crm.product_delete", targetType: "product", name: (r) => r.name, audit,
-  });
-
-  // ─── Estimates ───────────────────────────────────────────────────────────
-
-  app.get("/api/crm/estimates", requireAuth, (req, res) => {
-    const conds: (SQL | undefined)[] = [isNull(estimates.deletedAt)];
-    const status = qstr(req.query.status);
-    if (status && (ESTIMATE_STATUSES as readonly string[]).includes(status)) {
-      conds.push(eq(estimates.status, status as EstimateStatus));
-    }
-    const clientId = qstr(req.query.clientId);
-    if (clientId) conds.push(eq(estimates.clientId, parseInt(clientId, 10)));
-    const leadId = qstr(req.query.leadId);
-    if (leadId) conds.push(eq(estimates.leadId, parseInt(leadId, 10)));
-    const q = qstr(req.query.q);
-    if (q) {
-      const p = `%${q}%`;
-      conds.push(or(like(estimates.number, p), like(estimates.title, p)));
-    }
-    res.json(
-      db.select().from(estimates)
-        .where(and(...conds))
-        .orderBy(desc(estimates.createdAt), desc(estimates.id))
-        .all(),
-    );
-  });
-
-  registerGetById(app, "/api/crm/estimates/:id", requireAuth, estimates, "Estimate not found");
-
-  app.post("/api/crm/estimates", requireAuth, (req, res) => {
-    try {
-      // Accept items as either a JSON string (the column shape) or a raw
-      // array — clients usually build the line items as an array.
-      const body = { ...req.body };
-      if (Array.isArray(body.items)) body.items = JSON.stringify(body.items);
-      const data = insertEstimateSchema.parse(body);
-
-      // Totals are always recomputed server-side from the line items —
-      // client-supplied subtotal/tax/total are ignored.
-      const totals = computeEstimateTotals(data.items ?? "[]", data.taxRateBp ?? 0);
-
-      const now = Date.now();
-      const status = data.status ?? "draft";
-      const row = insertEstimateWithNumber({
-        ...data,
-        ...totals,
-        sentAt: status === "sent" ? now : null,
-        // Recording an after-the-fact verbal accept/decline directly on create
-        // still needs decidedAt — the monthly-revenue report groups by it.
-        decidedAt: status === "accepted" || status === "declined" ? now : null,
-      });
-      // Creating an estimate directly in "sent" behaves like a draft→sent
-      // transition: stamp the linked lead and schedule the follow-up.
-      if (status === "sent" && row.leadId != null) bumpLeadForQuote(row.leadId, now);
-
-      audit(req, "crm.estimate_create", {
-        targetType: "estimate", targetId: row.id, targetName: row.number,
-        details: { totalCents: row.totalCents, status: row.status },
-      });
-      res.status(201).json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
-  });
-
-  app.patch("/api/crm/estimates/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(estimates)
-      .where(and(eq(estimates.id, id), isNull(estimates.deletedAt)))
-      .get();
-    if (!existing) return res.status(404).json({ message: "Estimate not found" });
-
-    try {
-      const body = { ...req.body };
-      if (Array.isArray(body.items)) body.items = JSON.stringify(body.items);
-      const parsed = insertEstimateSchema.partial().parse(body);
-
-      const update: Partial<typeof estimates.$inferInsert> = { ...parsed };
-      // Any change to line items or the tax rate invalidates the stored
-      // totals — recompute from whichever side (new or existing) applies.
-      if (parsed.items !== undefined || parsed.taxRateBp !== undefined) {
-        Object.assign(update, computeEstimateTotals(
-          parsed.items ?? existing.items,
-          parsed.taxRateBp ?? existing.taxRateBp,
-        ));
-      }
-
-      const now = Date.now();
-      const statusChanged = parsed.status !== undefined && parsed.status !== existing.status;
-      if (statusChanged) {
-        if (parsed.status === "sent") update.sentAt = now;
-        if (parsed.status === "accepted" || parsed.status === "declined") {
-          update.decidedAt = now;
-        }
-      }
-
-      // A patch whose keys were all schema-stripped (e.g. only server-derived
-      // totals) is a no-op — drizzle's set({}) would throw.
-      if (Object.keys(update).length === 0) return res.json(existing);
-
-      const row = db.update(estimates).set(update).where(eq(estimates.id, id)).returning().get();
-      if (!row) return res.status(404).json({ message: "Estimate not found" });
-
-      if (statusChanged) {
-        if (row.status === "sent" && row.leadId != null) bumpLeadForQuote(row.leadId, now);
-        // Fix 4: accepting an estimate wins its linked lead and records the
-        // revenue — the same side effect as onQuoteEvent("accepted"), and
-        // idempotent per estimate number so a re-accept can't double-count.
-        // decidedAt is already stamped above.
-        if (row.status === "accepted" && row.leadId != null) {
-          const lead = db.select().from(leads)
-            .where(and(eq(leads.id, row.leadId), isNull(leads.deletedAt)))
-            .get();
-          if (lead) winLeadForAcceptedQuote(lead, row.number, row.totalCents || 0, now);
-        }
-        audit(req, "crm.estimate_status", {
-          targetType: "estimate", targetId: row.id, targetName: row.number,
-          details: { from: existing.status, to: row.status, totalCents: row.totalCents },
-        });
-      }
-      res.json(row);
-    } catch (e: any) {
-      res.status(400).json({ message: e.message });
-    }
-  });
-
-  registerSoftDelete(app, "/api/crm/estimates/:id", requireElevated, {
-    table: estimates, notFound: "Estimate not found",
-    action: "crm.estimate_delete", targetType: "estimate", name: (r) => r.number, audit,
-  });
-
   // ─── Activities (touch log) ──────────────────────────────────────────────
 
   app.get("/api/crm/activities", requireAuth, (req, res) => {
@@ -1387,7 +956,7 @@ export function registerCrmRoutes(app: Express): void {
     const entityId = req.query.entityId ? parseInt(req.query.entityId as string, 10) : NaN;
     if (
       !entityType ||
-      !["lead", "client", "deal"].includes(entityType) ||
+      !["lead", "client"].includes(entityType) ||
       Number.isNaN(entityId)
     ) {
       return res.status(400).json({ message: "entityType and entityId are required" });
@@ -1395,7 +964,7 @@ export function registerCrmRoutes(app: Express): void {
     res.json(
       db.select().from(crmActivities)
         .where(and(
-          eq(crmActivities.entityType, entityType as "lead" | "client" | "deal"),
+          eq(crmActivities.entityType, entityType as "lead" | "client"),
           eq(crmActivities.entityId, entityId),
         ))
         .orderBy(desc(crmActivities.createdAt), desc(crmActivities.id))

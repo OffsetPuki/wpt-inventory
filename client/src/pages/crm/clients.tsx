@@ -12,17 +12,11 @@ import { inputCls } from "@/lib/ui-styles";
 import { formatDate, formatDateTime, formatMoney, parseJsonArray } from "@/lib/format";
 import {
   LEAD_STAGE_LABELS,
-  ESTIMATE_STATUS_LABELS,
   ACTIVITY_KIND_LABELS,
-  DEAL_STAGE_LABELS,
   type Client,
   type Lead,
   type LeadStage,
-  type Estimate,
-  type EstimateStatus,
   type CrmActivity,
-  type Deal,
-  type DealStage,
 } from "@shared/crm-schema";
 import { type Project, type ProjectStatus } from "@shared/schema";
 import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote, Trash2 } from "lucide-react";
@@ -36,14 +30,6 @@ const LEAD_STAGE_TONE: Record<LeadStage, ChipTone> = {
   lost: "red",
 };
 
-const ESTIMATE_STATUS_TONE: Record<EstimateStatus, ChipTone> = {
-  draft: "zinc",
-  sent: "blue",
-  accepted: "emerald",
-  declined: "red",
-  expired: "amber",
-};
-
 const PROJECT_STATUS_TONE: Record<ProjectStatus, ChipTone> = {
   active: "blue",
   done: "emerald",
@@ -54,14 +40,6 @@ const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
   active: "Active",
   done: "Done",
   on_hold: "On Hold",
-};
-
-const DEAL_STAGE_TONE: Record<DealStage, ChipTone> = {
-  qualified: "zinc",
-  proposal: "blue",
-  negotiation: "amber",
-  won: "emerald",
-  lost: "red",
 };
 
 // Derived server-side (crm client detail) — matches Finance's status set.
@@ -201,11 +179,9 @@ interface ClientInvoice {
 interface ClientDetail {
   client: Client;
   leads: Lead[];
-  estimates: Estimate[];
   activities: CrmActivity[];
   projects: Project[];
   invoices: ClientInvoice[]; // empty for non-elevated roles
-  deals: Deal[];
   reviewCount: number;
 }
 
@@ -374,25 +350,6 @@ function ClientDetailModal({
             </div>
           )}
 
-          {data.deals.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-medium text-muted-foreground">Deals</h3>
-              <ul className="divide-y divide-border">
-                {data.deals.map((d) => (
-                  <li key={d.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <span className="min-w-0 truncate text-sm font-medium text-foreground">{d.title}</span>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <Chip tone={DEAL_STAGE_TONE[d.stage]}>{DEAL_STAGE_LABELS[d.stage]}</Chip>
-                      <span className="text-sm tabular-nums text-muted-foreground">
-                        {formatMoney(d.valueCents)}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           <div>
             <h3 className="mb-2 text-sm font-medium text-muted-foreground">Leads</h3>
             {data.leads.length === 0 ? (
@@ -408,32 +365,6 @@ function ClientDetailModal({
                       </Chip>
                       <span className="text-sm tabular-nums text-muted-foreground">
                         {formatMoney(l.stage === "won" ? l.revenueClosedCents : l.estimatedValueCents)}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div>
-            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Estimates</h3>
-            {data.estimates.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">No estimates for this client</p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {data.estimates.map((est) => (
-                  <li key={est.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <span className="min-w-0 truncate text-sm text-foreground">
-                      <span className="font-mono text-xs text-muted-foreground">{est.number}</span>{" "}
-                      {est.title}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <Chip tone={ESTIMATE_STATUS_TONE[est.status]}>
-                        {ESTIMATE_STATUS_LABELS[est.status]}
-                      </Chip>
-                      <span className="text-sm tabular-nums text-foreground">
-                        {formatMoney(est.totalCents)}
                       </span>
                     </div>
                   </li>

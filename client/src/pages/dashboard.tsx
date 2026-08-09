@@ -447,7 +447,7 @@ export default function DashboardPage() {
         <StatCard
           label="Pipeline value"
           value={crm.data && formatMoney(crm.data.pipelineValueCents)}
-          href="/crm/deals"
+          href="/crm/leads"
         />
         <StatCard
           label="Close rate"

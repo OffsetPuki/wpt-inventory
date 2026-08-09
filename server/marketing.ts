@@ -15,7 +15,7 @@ import {
 // Cross-module READ: the CRM module owns crm_leads / crm_estimates (tables +
 // endpoints). Marketing only reads them for funnel/source/campaign reporting,
 // plus one narrow write: the automation sweep flips crm_leads.stale.
-import { leads, estimates, clients, LEAD_STAGES } from "../shared/crm-schema";
+import { leads, clients, LEAD_STAGES } from "../shared/crm-schema";
 import { pid, qstr, registerSoftDelete } from "./http-util";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -366,13 +366,23 @@ export function registerMarketingRoutes(app: Express): void {
       lastContactAt: leads.lastContactAt,
     }).from(leads).where(isNull(leads.deletedAt)).all();
 
-    const allEstimates = db.select({
-      leadId: estimates.leadId,
-      status: estimates.status,
-      sentAt: estimates.sentAt,
-      decidedAt: estimates.decidedAt,
-      totalCents: estimates.totalCents,
-    }).from(estimates).where(isNull(estimates.deletedAt)).all();
+    // Builder quotes are the quoting system. They carry no lead FK, so the
+    // per-lead rollups below (quoteSent by source, campaign estimate counts)
+    // stay empty — their consumers are gone with the estimates module. Raw
+    // sqlite + try/catch: the quote module owns the table.
+    let allEstimates: {
+      leadId: number | null; status: string;
+      sentAt: number | null; decidedAt: number | null; totalCents: number;
+    }[] = [];
+    try {
+      allEstimates = (sqlite.prepare(`
+        SELECT NULL AS leadId, status, sent_at AS sentAt,
+               accepted_at AS decidedAt, coalesce(total_cents, 0) AS totalCents
+        FROM quotes WHERE deleted_at IS NULL
+      `).all() as typeof allEstimates);
+    } catch {
+      /* quotes table not created */
+    }
 
     const allCampaigns = db.select().from(campaigns)
       .where(isNull(campaigns.deletedAt))

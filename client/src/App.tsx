@@ -29,11 +29,8 @@ const NotFoundPage = lazy(() => import("./pages/not-found"));
 // Business-suite modules
 const CrmOverviewPage = lazy(() => import("./pages/crm/index"));
 const CrmLeadsPage = lazy(() => import("./pages/crm/leads"));
-const CrmDealsPage = lazy(() => import("./pages/crm/deals"));
 const CrmClientsPage = lazy(() => import("./pages/crm/clients"));
-const CrmEstimatesPage = lazy(() => import("./pages/crm/estimates"));
 const CrmQuoteBuilderPage = lazy(() => import("./pages/crm/quotes"));
-const CrmProductsPage = lazy(() => import("./pages/crm/products"));
 const MarketingPage = lazy(() => import("./pages/marketing/index"));
 const HrOverviewPage = lazy(() => import("./pages/hr/index"));
 const HrEmployeesPage = lazy(() => import("./pages/hr/employees"));
@@ -161,27 +158,18 @@ export default function App() {
             <AddItemPage />
           </Route>
 
-          {/* CRM & Sales — the whole team works leads and estimates */}
+          {/* CRM & Sales — the whole team works leads and quotes */}
           <Route path="/crm">
             <CrmOverviewPage />
           </Route>
           <Route path="/crm/leads">
             <CrmLeadsPage />
           </Route>
-          <Route path="/crm/deals">
-            <CrmDealsPage />
-          </Route>
           <Route path="/crm/clients">
             <CrmClientsPage />
           </Route>
-          <Route path="/crm/estimates">
-            <CrmEstimatesPage />
-          </Route>
           <Route path="/crm/quotes">
             <CrmQuoteBuilderPage />
-          </Route>
-          <Route path="/crm/products">
-            <CrmProductsPage />
           </Route>
 
           {/* Marketing control center — management view */}

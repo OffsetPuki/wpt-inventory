@@ -45,24 +45,6 @@ export const WIN_LOSS_REASONS = [
 ] as const;
 export type WinLossReason = (typeof WIN_LOSS_REASONS)[number];
 
-export const DEAL_STAGES = [
-  "qualified",
-  "proposal",
-  "negotiation",
-  "won",
-  "lost",
-] as const;
-export type DealStage = (typeof DEAL_STAGES)[number];
-
-export const ESTIMATE_STATUSES = [
-  "draft",
-  "sent",
-  "accepted",
-  "declined",
-  "expired",
-] as const;
-export type EstimateStatus = (typeof ESTIMATE_STATUSES)[number];
-
 export const CLIENT_STATUSES = ["active", "archived"] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 
@@ -128,83 +110,11 @@ export const leads = sqliteTable("crm_leads", {
   deletedAt: integer("deleted_at"),
 });
 
-export const deals = sqliteTable("crm_deals", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  clientId: integer("client_id").references(() => clients.id, {
-    onDelete: "set null",
-  }),
-  leadId: integer("lead_id").references(() => leads.id, {
-    onDelete: "set null",
-  }),
-  valueCents: integer("value_cents").notNull().default(0),
-  stage: text("stage", { enum: DEAL_STAGES }).notNull().default("qualified"),
-  ownerId: integer("owner_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  expectedCloseDate: text("expected_close_date"), // "YYYY-MM-DD"
-  winLossReason: text("win_loss_reason", { enum: WIN_LOSS_REASONS }),
-  closedAt: integer("closed_at"), // unix ms, set when stage becomes won/lost
-  notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  // Phase B #11: last touch (stamped on PATCH) — the stale-deal sweep reads
-  // COALESCE(updated_at, created_at). ALTER'd column, NULL on old rows.
-  updatedAt: integer("updated_at"), // unix ms
-  deletedAt: integer("deleted_at"),
-});
-
-export const products = sqliteTable("crm_products", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  sku: text("sku"),
-  name: text("name").notNull(),
-  description: text("description"),
-  category: text("category"),
-  unit: text("unit"), // "each", "hour", "ft", …
-  unitPriceCents: integer("unit_price_cents").notNull().default(0),
-  costCents: integer("cost_cents").notNull().default(0),
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  deletedAt: integer("deleted_at"),
-});
-
-export const estimates = sqliteTable("crm_estimates", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  number: text("number").notNull().unique(), // "EST-2026-0001"
-  title: text("title").notNull(),
-  clientId: integer("client_id").references(() => clients.id, {
-    onDelete: "set null",
-  }),
-  leadId: integer("lead_id").references(() => leads.id, {
-    onDelete: "set null",
-  }),
-  dealId: integer("deal_id").references(() => deals.id, {
-    onDelete: "set null",
-  }),
-  status: text("status", { enum: ESTIMATE_STATUSES }).notNull().default("draft"),
-  items: text("items").notNull().default("[]"), // JSON LineItem[]
-  subtotalCents: integer("subtotal_cents").notNull().default(0),
-  taxRateBp: integer("tax_rate_bp").notNull().default(0), // basis points (825 = 8.25%)
-  taxCents: integer("tax_cents").notNull().default(0),
-  totalCents: integer("total_cents").notNull().default(0),
-  validUntil: text("valid_until"), // "YYYY-MM-DD"
-  sentAt: integer("sent_at"), // unix ms
-  decidedAt: integer("decided_at"), // unix ms — accepted or declined
-  notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  deletedAt: integer("deleted_at"),
-});
-
-// Touch log for leads / clients / deals — powers "last contact" and the
+// Touch log for leads / clients — powers "last contact" and the
 // activity feed on detail views.
 export const crmActivities = sqliteTable("crm_activities", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  entityType: text("entity_type", { enum: ["lead", "client", "deal"] }).notNull(),
+  entityType: text("entity_type", { enum: ["lead", "client"] }).notNull(),
   entityId: integer("entity_id").notNull(),
   userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
   kind: text("kind", { enum: ACTIVITY_KINDS }).notNull().default("note"),
@@ -229,36 +139,8 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   stale: true,
 });
 
-export const insertDealSchema = createInsertSchema(deals).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true, // server-stamped on PATCH
-  deletedAt: true,
-  closedAt: true,
-});
-
-export const insertProductSchema = createInsertSchema(products).omit({
-  id: true,
-  createdAt: true,
-  deletedAt: true,
-});
-
-export const insertEstimateSchema = createInsertSchema(estimates).omit({
-  id: true,
-  number: true, // server-assigned
-  createdAt: true,
-  deletedAt: true,
-  sentAt: true,
-  decidedAt: true,
-  // Server-derived from items + taxRateBp — accepting them would let a stale
-  // or malicious client desync the stored totals from the line items.
-  subtotalCents: true,
-  taxCents: true,
-  totalCents: true,
-});
-
 export const insertCrmActivitySchema = z.object({
-  entityType: z.enum(["lead", "client", "deal"]),
+  entityType: z.enum(["lead", "client"]),
   entityId: z.number().int(),
   kind: z.enum(ACTIVITY_KINDS),
   notes: z.string().optional(),
@@ -268,9 +150,6 @@ export const insertCrmActivitySchema = z.object({
 
 export type Client = typeof clients.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
-export type Deal = typeof deals.$inferSelect;
-export type Product = typeof products.$inferSelect;
-export type Estimate = typeof estimates.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 
 // ─── Label maps (client display) ─────────────────────────────────────────────
@@ -296,22 +175,6 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
   phone: "Phone",
   walk_in: "Walk-in",
   other: "Other",
-};
-
-export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
-  qualified: "Qualified",
-  proposal: "Proposal",
-  negotiation: "Negotiation",
-  won: "Won",
-  lost: "Lost",
-};
-
-export const ESTIMATE_STATUS_LABELS: Record<EstimateStatus, string> = {
-  draft: "Draft",
-  sent: "Sent",
-  accepted: "Accepted",
-  declined: "Declined",
-  expired: "Expired",
 };
 
 export const WIN_LOSS_REASON_LABELS: Record<WinLossReason, string> = {

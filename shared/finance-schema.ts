@@ -2,7 +2,7 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { projects } from "./schema";
-import { clients, estimates } from "./crm-schema";
+import { clients } from "./crm-schema";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -72,9 +72,8 @@ export const invoices = sqliteTable("fin_invoices", {
     onDelete: "set null",
   }),
   clientName: text("client_name"), // denormalized for display + unlinked clients
-  estimateId: integer("estimate_id").references(() => estimates.id, {
-    onDelete: "set null",
-  }),
+  // Kept for existing rows; the crm_estimates table (and its FK) is gone.
+  estimateId: integer("estimate_id"),
   projectId: integer("project_id").references(() => projects.id, {
     onDelete: "set null",
   }),

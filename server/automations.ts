@@ -347,41 +347,6 @@ function runBusinessSweep(): void {
     }
   });
 
-  // 7. Estimate auto-expire — the status flip is the natural dedupe.
-  step("estimate auto-expire", () => {
-    const rows = sqlite.prepare(`
-      SELECT id, number FROM crm_estimates
-      WHERE deleted_at IS NULL AND status = 'sent'
-        AND valid_until IS NOT NULL AND valid_until < ?
-    `).all(today) as any[];
-    const flip = sqlite.prepare("UPDATE crm_estimates SET status = 'expired' WHERE id = ?");
-    for (const e of rows) {
-      flip.run(e.id);
-      ensureTask(`auto:estimate-expired:${e.number}`,
-        `${e.number} expired — re-quote or chase?`, "quote_reminder");
-    }
-  });
-
-  // 7b. Estimate pre-expiry nudge (Phase D #24a) — still 'sent' (step 7 flips
-  // lapsed ones to 'expired' after the date) and valid_until inside 3 days:
-  // chase the customer BEFORE the price lapses, not after.
-  step("estimate pre-expiry nudge", () => {
-    const rows = sqlite.prepare(`
-      SELECT e.id, e.number, e.valid_until,
-             COALESCE(c.name, l.name, e.title) AS who
-      FROM crm_estimates e
-      LEFT JOIN crm_clients c ON c.id = e.client_id
-      LEFT JOIN crm_leads l ON l.id = e.lead_id
-      WHERE e.deleted_at IS NULL AND e.status = 'sent'
-        AND e.valid_until IS NOT NULL AND e.valid_until >= ? AND e.valid_until <= ?
-    `).all(today, localDate(now + 3 * DAY_MS)) as any[];
-    for (const e of rows) {
-      ensureTask(`auto:estimate-expiring:${e.id}`,
-        `Estimate ${e.number} for ${e.who} expires ${e.valid_until} — follow up before it lapses`,
-        "quote_reminder");
-    }
-  });
-
   // 8. Lead follow-up dates — NULLing the column makes each date fire once.
   step("lead follow-up dates", () => {
     const rows = sqlite.prepare(`
@@ -393,24 +358,6 @@ function runBusinessSweep(): void {
     for (const l of rows) {
       ensureTask(`auto:lead-follow-up:${l.id}`, `Follow up with ${l.name}`, "follow_up", l.id);
       clear.run(l.id);
-    }
-  });
-
-  // 8b. Stale deals (Phase B #11) — open pipeline money untouched for 14+
-  // days. updated_at is stamped by the deal PATCH; older rows fall back to
-  // created_at. The month in the dedupe key re-nags monthly until it moves.
-  step("stale deals", () => {
-    const month = today.slice(0, 7); // "YYYY-MM"
-    const rows = sqlite.prepare(`
-      SELECT id, title, COALESCE(updated_at, created_at) AS touched
-      FROM crm_deals
-      WHERE deleted_at IS NULL AND stage NOT IN ('won','lost')
-        AND COALESCE(updated_at, created_at) < ?
-    `).all(now - 14 * DAY_MS) as any[];
-    for (const d of rows) {
-      const days = Math.floor((now - d.touched) / DAY_MS);
-      ensureTask(`auto:stale-deal:${d.id}:${month}`,
-        `Deal '${d.title}' has sat untouched for ${days} days`, "follow_up");
     }
   });
 

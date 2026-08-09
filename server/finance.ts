@@ -15,7 +15,7 @@ import {
   PAYMENT_GATEWAY_CATALOG, EXPENSE_CATEGORY_LABELS,
   type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder,
 } from "../shared/finance-schema";
-import { clients, estimates, type Estimate } from "../shared/crm-schema";
+import { clients } from "../shared/crm-schema";
 import { projects } from "../shared/schema";
 // Phase B #9: automated customer emails land on the CRM timeline. The helper
 // is deferred + try/catch'd internally — safe to call from any mail hook.
@@ -261,16 +261,6 @@ function clientNameById(id: number): string | null {
     return db.select({ name: clients.name }).from(clients).where(eq(clients.id, id)).get()?.name ?? null;
   } catch {
     return null;
-  }
-}
-
-function estimateById(id: number): Estimate | undefined {
-  try {
-    return db.select().from(estimates)
-      .where(and(eq(estimates.id, id), isNull(estimates.deletedAt)))
-      .get();
-  } catch {
-    return undefined;
   }
 }
 
@@ -941,35 +931,6 @@ export function registerFinanceRoutes(app: Express): void {
     audit(req, "finance.invoice_create", {
       targetType: "invoice", targetId: row.id, targetName: row.number,
       details: { totalCents: row.totalCents, clientId: row.clientId },
-    });
-    res.status(201).json(presentInvoice(row, todayLocal()));
-  });
-
-  // Literal segment — must be registered before any /invoices/:id sibling.
-  app.post("/api/finance/invoices/from-estimate/:estimateId", requireElevated, (req, res) => {
-    const est = estimateById(pid(req.params.estimateId));
-    if (!est) return res.status(404).json({ message: "Estimate not found" });
-
-    const totals = computeTotals(est.items, est.taxRateBp);
-    const clientName = est.clientId != null ? clientNameById(est.clientId) : null;
-    const row = insertNumbered("fin_invoices", "INV", (num) =>
-      db.insert(invoices).values({
-        number: num,
-        clientId: est.clientId,
-        clientName,
-        estimateId: est.id,
-        status: "draft",
-        issueDate: todayLocal(),
-        items: est.items,
-        taxRateBp: est.taxRateBp,
-        ...totals,
-        // The estimate's title lives in notes — invoices have no title column.
-        notes: `From estimate ${est.number} — ${est.title}`,
-      }).returning().get()
-    );
-    audit(req, "finance.invoice_create", {
-      targetType: "invoice", targetId: row.id, targetName: row.number,
-      details: { fromEstimate: est.number, totalCents: row.totalCents },
     });
     res.status(201).json(presentInvoice(row, todayLocal()));
   });

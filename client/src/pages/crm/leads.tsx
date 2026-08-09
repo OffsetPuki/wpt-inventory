@@ -20,13 +20,11 @@ import {
   LEAD_SOURCE_LABELS,
   WIN_LOSS_REASON_LABELS,
   ACTIVITY_KIND_LABELS,
-  DEAL_STAGE_LABELS,
   type Lead,
   type LeadStage,
   type LeadSource,
   type WinLossReason,
   type CrmActivity,
-  type Deal,
 } from "@shared/crm-schema";
 import type { Campaign } from "@shared/marketing-schema";
 import type { PublicUser } from "@shared/schema";
@@ -318,7 +316,7 @@ function LeadDetailModal({
       (await apiRequest("GET", `/api/crm/activities?entityType=lead&entityId=${lead.id}`)).json(),
   });
 
-  // Phase B #11/#13: the lead's deals + the website design they configured.
+  // Phase B #13: the website design they configured.
   const { data: extras } = useQuery<{
     design: {
       ref: string;
@@ -329,7 +327,6 @@ function LeadDetailModal({
       location: string | null;
       designSpec: string | null;
     } | null;
-    deals: Deal[];
   }>({
     queryKey: ["crm-lead-detail", lead.id],
     queryFn: async () => (await apiRequest("GET", `/api/crm/leads/${lead.id}/detail`)).json(),
@@ -585,25 +582,6 @@ function LeadDetailModal({
                 The design preview image is saved in this lead's photos.
               </p>
             </div>
-          </div>
-        )}
-
-        {(extras?.deals.length ?? 0) > 0 && (
-          <div>
-            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Deals</h3>
-            <ul className="divide-y divide-border">
-              {extras!.deals.map((d) => (
-                <li key={d.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <span className="min-w-0 truncate text-sm font-medium text-foreground">{d.title}</span>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <Chip className="bg-muted text-muted-foreground">{DEAL_STAGE_LABELS[d.stage]}</Chip>
-                    <span className="text-sm tabular-nums text-muted-foreground">
-                      {formatMoney(d.valueCents)}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
         )}
 

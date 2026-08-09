@@ -4,9 +4,7 @@ import { storage, db } from "./storage";
 import {
   DEFAULT_CJM_EQUIPMENT_PRESETS,
   DEFAULT_CJM_JOB_TEMPLATES,
-  CJM_SERVICE_CATALOG,
 } from "../shared/cjm-presets";
-import { products } from "../shared/crm-schema";
 
 const BCRYPT_ROUNDS = 10;
 const BCRYPT_PREFIX = /^\$2[aby]\$/;
@@ -133,24 +131,6 @@ export function seedDefaults(): void {
     cjmAdded++;
   });
   if (cjmAdded > 0) console.log(`[seed] Added ${cjmAdded} CJM metalwork preset(s)/template(s)`);
-
-  // Service catalog → CRM products, only on an empty catalog so the picker on
-  // estimates starts populated. Prices start at $0 for the owner to fill in.
-  const productCount = db.select({ n: sql<number>`count(*)` }).from(products).get()?.n ?? 0;
-  if (productCount === 0) {
-    for (const svc of CJM_SERVICE_CATALOG) {
-      db.insert(products).values({
-        name: svc.name,
-        category: svc.category,
-        unit: svc.unit,
-        description: svc.description,
-        unitPriceCents: 0,
-        costCents: 0,
-        active: true,
-      }).run();
-    }
-    console.log(`[seed] Seeded ${CJM_SERVICE_CATALOG.length} CJM services into the product catalog`);
-  }
 
   console.log("[seed] Defaults verified");
 }

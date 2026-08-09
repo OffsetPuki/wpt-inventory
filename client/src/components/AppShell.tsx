@@ -27,10 +27,7 @@ import {
   ChevronDown,
   BarChart3,
   UserPlus,
-  Handshake,
   Contact,
-  FileText,
-  Package,
   Megaphone,
   Kanban,
   GanttChart,
@@ -91,11 +88,8 @@ const NAV_GROUPS: NavGroup[] = [
     entries: [
       { to: "/crm", label: "Sales Overview", icon: BarChart3 },
       { to: "/crm/leads", label: "Leads", icon: UserPlus },
-      { to: "/crm/deals", label: "Deals", icon: Handshake },
       { to: "/crm/clients", label: "Clients", icon: Contact },
-      { to: "/crm/estimates", label: "Estimates", icon: FileText },
       { to: "/crm/quotes", label: "Quote Builder", icon: PencilRuler },
-      { to: "/crm/products", label: "Products", icon: Package },
     ],
   },
   {
