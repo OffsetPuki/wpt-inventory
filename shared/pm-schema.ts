@@ -21,6 +21,8 @@ export type TaskKind = (typeof TASK_KINDS)[number];
 export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
+// nda/msa are legacy-only: retired from the UI picker/templates (Package D)
+// but kept here so existing rows still pass the column type + zod on edit.
 export const CONTRACT_KINDS = ["contract", "sow", "nda", "msa", "other"] as const;
 export type ContractKind = (typeof CONTRACT_KINDS)[number];
 

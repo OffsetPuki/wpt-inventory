@@ -17,7 +17,6 @@ import {
   type Invoice,
   type InvoicePayment,
   type InvoiceStatus,
-  type PaymentGateway,
   type PaymentMethod,
 } from "@shared/finance-schema";
 import type { Client } from "@shared/crm-schema";
@@ -532,16 +531,8 @@ function RecordPaymentForm({
 }) {
   const [amount, setAmount] = useState((invoice.balanceCents / 100).toFixed(2));
   const [method, setMethod] = useState<PaymentMethod>("check");
-  const [gatewayKey, setGatewayKey] = useState("");
   const [reference, setReference] = useState("");
   const [paidAt, setPaidAt] = useState(todayYmd());
-
-  const { data: gateways = [] } = useQuery<PaymentGateway[]>({
-    queryKey: ["finance-gateways"],
-    queryFn: async () => (await apiRequest("GET", "/api/finance/gateways")).json(),
-    enabled: method === "gateway",
-  });
-  const enabledGateways = gateways.filter((g) => g.enabled);
 
   const record = useApiMutation({
     request: () => ({
@@ -550,7 +541,6 @@ function RecordPaymentForm({
       body: {
         amountCents: parseMoney(amount),
         method,
-        gatewayKey: method === "gateway" && gatewayKey ? gatewayKey : undefined,
         reference: reference.trim() || undefined,
         paidAt: paidAt || undefined,
       },
@@ -598,23 +588,6 @@ function RecordPaymentForm({
             ))}
           </select>
         </label>
-        {method === "gateway" && (
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Gateway</span>
-            <select
-              className={inputCls}
-              value={gatewayKey}
-              onChange={(e) => setGatewayKey(e.target.value)}
-            >
-              <option value="">— Select —</option>
-              {enabledGateways.map((g) => (
-                <option key={g.key} value={g.key}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Reference</span>
           <input

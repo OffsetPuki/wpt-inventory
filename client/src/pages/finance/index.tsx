@@ -29,7 +29,6 @@ interface FinanceStats {
   expensesThisMonthCents: number;
   netThisMonthCents: number;
   draftInvoices: number;
-  enabledGateways: number;
 }
 
 interface MonthlyRow {

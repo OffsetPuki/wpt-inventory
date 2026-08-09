@@ -44,7 +44,6 @@ const PmKbPage = lazy(() => import("./pages/pm/kb"));
 const FinanceOverviewPage = lazy(() => import("./pages/finance/index"));
 const FinanceInvoicesPage = lazy(() => import("./pages/finance/invoices"));
 const FinanceExpensesPage = lazy(() => import("./pages/finance/expenses"));
-const FinancePaymentsPage = lazy(() => import("./pages/finance/payments"));
 const FinancePurchaseOrdersPage = lazy(() => import("./pages/finance/purchase-orders"));
 
 // ─── Loading spinner ────────────────────────────────────────────────────────
@@ -222,11 +221,6 @@ export default function App() {
           <Route path="/finance/expenses">
             <ElevatedRoute>
               <FinanceExpensesPage />
-            </ElevatedRoute>
-          </Route>
-          <Route path="/finance/payments">
-            <ElevatedRoute>
-              <FinancePaymentsPage />
             </ElevatedRoute>
           </Route>
           <Route path="/finance/purchase-orders">

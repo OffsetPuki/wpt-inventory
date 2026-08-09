@@ -14,7 +14,6 @@ import { formatMoney, parseMoney, formatDate, ymdToDate, parseJsonObject } from 
 import type { Project } from "@shared/schema";
 import type { Client } from "@shared/crm-schema";
 import {
-  CONTRACT_KINDS,
   CONTRACT_STATUSES,
   CONTRACT_KIND_LABELS,
   CONTRACT_STATUS_LABELS,
@@ -26,12 +25,15 @@ import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download, Eye } 
 
 type ContractRow = Contract & { projectName: string | null };
 
+// A fence shop papers job contracts and SOWs, not NDAs/MSAs — those kinds are
+// retired from the UI but kept in CONTRACT_KINDS (column type + zod) so
+// existing rows still load, render, and save. Indexing below falls back for them.
+const UI_KINDS: ContractKind[] = ["contract", "sow", "other"];
+
 // Per-kind / per-status pill hues — each is an exact match to a shared Chip tone.
-const KIND_TONE: Record<ContractKind, ChipTone> = {
+const KIND_TONE: Partial<Record<ContractKind, ChipTone>> = {
   contract: "blue",
   sow: "emerald",
-  nda: "amber",
-  msa: "zinc",
   other: "zinc",
 };
 
@@ -70,7 +72,7 @@ interface KindField {
   pdfFormat?: (v: string) => string; // raw value → sentence for the PDF
 }
 
-const KIND_FIELDS: Record<ContractKind, KindField[]> = {
+const KIND_FIELDS: Partial<Record<ContractKind, KindField[]>> = {
   contract: [
     { key: "scopeOfWork", label: "Scope of work", input: "textarea", required: true, section: "Scope of Work",
       placeholder: "What will be built, fabricated, and installed — dimensions, location, site details…" },
@@ -90,34 +92,6 @@ const KIND_FIELDS: Record<ContractKind, KindField[]> = {
       placeholder: "e.g. Billed per milestone; Net 15" },
     { key: "exclusions", label: "Exclusions", input: "textarea", section: "Exclusions",
       placeholder: "What this scope does NOT include" },
-  ],
-  nda: [
-    { key: "purpose", label: "Purpose of disclosure", input: "textarea", required: true, section: "Purpose",
-      placeholder: "Why confidential information is being shared…" },
-    { key: "direction", label: "Type", input: "select", section: "Type of Agreement",
-      options: [
-        { value: "mutual", label: "Mutual — both sides share" },
-        { value: "provider", label: "One-way — we disclose" },
-        { value: "client", label: "One-way — client discloses" },
-      ],
-      pdfFormat: (v) =>
-        ({
-          mutual: "Mutual — both parties may disclose confidential information under this Agreement.",
-          provider: "One-way — the Provider discloses confidential information to the Client.",
-          client: "One-way — the Client discloses confidential information to the Provider.",
-        })[v] ?? v },
-    { key: "termYears", label: "Confidentiality term (years)", input: "number", section: "Term",
-      placeholder: "2",
-      pdfFormat: (v) =>
-        `The confidentiality obligations remain in effect for ${v} year${v === "1" ? "" : "s"} from the effective date.` },
-  ],
-  msa: [
-    { key: "services", label: "Description of services", input: "textarea", required: true, section: "Services",
-      placeholder: "The ongoing services this master agreement covers…" },
-    { key: "paymentTerms", label: "Payment terms", input: "text", section: "Payment Terms",
-      placeholder: "e.g. Net 15 from invoice date" },
-    { key: "term", label: "Initial term & renewal", input: "text", section: "Term & Renewal",
-      placeholder: "e.g. 12 months; renews annually unless cancelled in writing" },
   ],
   other: [],
 };
@@ -375,7 +349,7 @@ function ContractDialog({
       // Persist only the current kind's keys — selects fall back to their
       // first option so the PDF never renders an empty select section.
       const picked: Record<string, string> = {};
-      for (const f of KIND_FIELDS[kind]) {
+      for (const f of KIND_FIELDS[kind] ?? []) {
         const v = (fieldVals[f.key] ?? (f.input === "select" ? f.options?.[0]?.value ?? "" : "")).trim();
         if (v) picked[f.key] = v;
       }
@@ -436,7 +410,7 @@ function ContractDialog({
           }
           // Per-kind required fields — a job contract without a scope or
           // payment terms isn't a document worth sending.
-          const missing = KIND_FIELDS[kind].filter(
+          const missing = (KIND_FIELDS[kind] ?? []).filter(
             (f) => f.required && !(fieldVals[f.key] ?? "").trim(),
           );
           if (missing.length > 0) {
@@ -462,7 +436,9 @@ function ContractDialog({
               value={kind}
               onChange={(e) => setKind(e.target.value as ContractKind)}
             >
-              {CONTRACT_KINDS.map((k) => (
+              {/* Editing a legacy nda/msa row keeps its kind selectable so
+                  opening + saving doesn't silently rewrite it. */}
+              {(UI_KINDS.includes(kind) ? UI_KINDS : [...UI_KINDS, kind]).map((k) => (
                 <option key={k} value={k}>
                   {CONTRACT_KIND_LABELS[k]}
                 </option>
@@ -563,12 +539,12 @@ function ContractDialog({
             />
           </label>
         </div>
-        {KIND_FIELDS[kind].length > 0 && (
+        {(KIND_FIELDS[kind] ?? []).length > 0 && (
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-muted/20 p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {CONTRACT_KIND_LABELS[kind]} details — these become the document’s numbered sections
             </p>
-            {KIND_FIELDS[kind].map((f) => (
+            {(KIND_FIELDS[kind] ?? []).map((f) => (
               <label key={f.key} className="flex flex-col gap-1.5">
                 <span className="text-sm font-medium text-foreground">
                   {f.label}
@@ -703,7 +679,7 @@ function ContractViewModal({
     }
   };
   const fieldSections = contract
-    ? KIND_FIELDS[contract.kind]
+    ? (KIND_FIELDS[contract.kind] ?? [])
         .map((f) => ({ f, v: (parseJsonObject<Record<string, string>>(contract.fields)[f.key] ?? "").trim() }))
         .filter(({ v }) => v)
     : [];
@@ -718,7 +694,7 @@ function ContractViewModal({
       {contract && (
         <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Chip tone={KIND_TONE[contract.kind]}>{CONTRACT_KIND_LABELS[contract.kind]}</Chip>
+            <Chip tone={KIND_TONE[contract.kind] ?? "zinc"}>{CONTRACT_KIND_LABELS[contract.kind]}</Chip>
             <Chip tone={STATUS_TONE[contract.status]}>{CONTRACT_STATUS_LABELS[contract.status]}</Chip>
           </div>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
@@ -932,12 +908,12 @@ export default function PmContractsPage() {
 
   const tabs: { value: "" | ContractKind; label: string }[] = [
     { value: "", label: "All" },
-    ...CONTRACT_KINDS.map((k) => ({ value: k, label: CONTRACT_KIND_LABELS[k] })),
+    ...UI_KINDS.map((k) => ({ value: k, label: CONTRACT_KIND_LABELS[k] })),
   ];
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Contracts & SOWs" description="Agreements, scopes of work, and NDAs">
+      <Header title="Contracts & SOWs" description="Job contracts and scopes of work">
         {isElevated && (
           <button
             onClick={() => {
@@ -1023,7 +999,7 @@ export default function PmContractsPage() {
                 >
                   <td className="px-4 py-3 font-medium text-foreground">{c.title}</td>
                   <td className="px-4 py-3">
-                    <Chip tone={KIND_TONE[c.kind]}>{CONTRACT_KIND_LABELS[c.kind]}</Chip>
+                    <Chip tone={KIND_TONE[c.kind] ?? "zinc"}>{CONTRACT_KIND_LABELS[c.kind]}</Chip>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{c.clientName || "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.projectName || "—"}</td>

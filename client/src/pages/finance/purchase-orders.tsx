@@ -22,21 +22,17 @@ import {
   Ban,
   CheckCircle2,
   Loader2,
-  Lock,
   Package,
   Plus,
   Search,
-  Send,
   X,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
 const STATUS_TONE: Record<PoStatus, ChipTone> = {
-  draft: "zinc",
-  sent: "blue",
+  open: "blue",
   received: "emerald",
-  closed: "muted",
   cancelled: "red",
 };
 
@@ -221,7 +217,7 @@ function PoFormModal({
   });
 
   const totalCents = draftTotalCents(drafts);
-  const editable = !po || po.status === "draft" || po.status === "sent";
+  const editable = !po || po.status === "open";
 
   return (
     <Modal
@@ -319,53 +315,29 @@ function PoFormModal({
           )}
         </form>
 
-        {/* Status advance / cancel */}
-        {po && po.status !== "closed" && po.status !== "cancelled" && (
+        {/* Received books the expense + stocks materials in; both ends are terminal. */}
+        {po && po.status === "open" && (
           <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-            {po.status === "draft" && (
-              <button
-                onClick={() => setStatus.mutate("sent")}
-                disabled={setStatus.isPending}
-                className={secondaryBtn}
-              >
-                <Send className="h-4 w-4" />
-                Mark sent
-              </button>
-            )}
-            {po.status === "sent" && (
-              <button
-                onClick={() => setStatus.mutate("received")}
-                disabled={setStatus.isPending}
-                className={secondaryBtn}
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                Mark received
-              </button>
-            )}
-            {po.status === "received" && (
-              <button
-                onClick={() => setStatus.mutate("closed")}
-                disabled={setStatus.isPending}
-                className={secondaryBtn}
-              >
-                <Lock className="h-4 w-4" />
-                Close PO
-              </button>
-            )}
-            {(po.status === "draft" || po.status === "sent") && (
-              <button
-                onClick={() => {
-                  if (window.confirm(`Cancel ${po.number}? This cannot be undone.`)) {
-                    setStatus.mutate("cancelled");
-                  }
-                }}
-                disabled={setStatus.isPending}
-                className={cn(secondaryBtn, "text-red-600 dark:text-red-400")}
-              >
-                <Ban className="h-4 w-4" />
-                Cancel PO
-              </button>
-            )}
+            <button
+              onClick={() => setStatus.mutate("received")}
+              disabled={setStatus.isPending}
+              className={secondaryBtn}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Mark received
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm(`Cancel ${po.number}? This cannot be undone.`)) {
+                  setStatus.mutate("cancelled");
+                }
+              }}
+              disabled={setStatus.isPending}
+              className={cn(secondaryBtn, "text-red-600 dark:text-red-400")}
+            >
+              <Ban className="h-4 w-4" />
+              Cancel PO
+            </button>
           </div>
         )}
       </div>

@@ -1,18 +1,18 @@
 import type { Express, Request } from "express";
 import crypto from "crypto";
-import { eq, and, or, desc, asc, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, isOptedOut } from "./mailer";
 import { renderTemplate } from "./email-templates";
 import {
-  invoices, invoicePayments, expenses, paymentGateways, purchaseOrders,
+  invoices, invoicePayments, expenses, purchaseOrders,
   finSettings,
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
-  updateGatewaySchema, insertPurchaseOrderSchema,
+  insertPurchaseOrderSchema,
   updateFinSettingsSchema, pullUnbilledSchema, retainagePctSchema,
-  PAYMENT_GATEWAY_CATALOG, EXPENSE_CATEGORY_LABELS,
+  EXPENSE_CATEGORY_LABELS,
   type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder,
 } from "../shared/finance-schema";
 import { clients } from "../shared/crm-schema";
@@ -101,24 +101,11 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_fin_expenses_project ON fin_expenses(project_id);
   CREATE INDEX IF NOT EXISTS idx_fin_expenses_created ON fin_expenses(created_at);
 
-  CREATE TABLE IF NOT EXISTS fin_gateways (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'card',
-    enabled INTEGER NOT NULL DEFAULT 0,
-    config TEXT NOT NULL DEFAULT '{}',
-    fees_note TEXT,
-    order_index INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE INDEX IF NOT EXISTS idx_fin_gateways_order ON fin_gateways(order_index);
-
   CREATE TABLE IF NOT EXISTS fin_purchase_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT NOT NULL UNIQUE,
     vendor TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'draft',
+    status TEXT NOT NULL DEFAULT 'open',
     items TEXT NOT NULL DEFAULT '[]',
     total_cents INTEGER NOT NULL DEFAULT 0,
     expected_date TEXT,
@@ -163,20 +150,16 @@ sqlite.exec(`
 `);
 sqlite.exec("INSERT OR IGNORE INTO fin_settings (id) VALUES (1)");
 
-// Seed the gateway registry from the catalog on first boot only — an empty
-// table means "never seeded", so the owner's later edits (toggles, config,
-// deleting nothing since rows are permanent) are never clobbered by a restart.
-{
-  const count = (sqlite.prepare("SELECT COUNT(*) AS c FROM fin_gateways").get() as { c: number }).c;
-  if (count === 0) {
-    const ins = sqlite.prepare(
-      "INSERT INTO fin_gateways (key, name, kind, fees_note, order_index) VALUES (?, ?, ?, ?, ?)"
-    );
-    sqlite.transaction(() => {
-      PAYMENT_GATEWAY_CATALOG.forEach((g, i) => ins.run(g.key, g.name, g.kind, g.feesNote ?? null, i));
-    })();
-  }
-}
+// Package D: the 5-status PO lifecycle collapsed to open/received/cancelled,
+// and the payment-gateway registry is gone (method 'gateway' → 'other'; the
+// reference field still carries the transaction id). Idempotent remaps.
+try {
+  sqlite.exec(`
+    UPDATE fin_purchase_orders SET status = 'open' WHERE status IN ('draft', 'sent');
+    UPDATE fin_purchase_orders SET status = 'received' WHERE status = 'closed';
+    UPDATE fin_invoice_payments SET method = 'other' WHERE method = 'gateway';
+  `);
+} catch { /* nothing to migrate */ }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // `todayLocal` (local calendar date) lives in ./http-util — invoices/expenses
@@ -522,8 +505,8 @@ function queuePoExpense(req: Request, po: PurchaseOrder): void {
 // the matching inventory item's quantity via a proper 'purchased' adjustment,
 // so receiving a PO books the expense (above) AND puts the steel on the shelf.
 // Adjustments belong to the core inventory module → raw SQL, house style.
-// Deduped by the auto:po-stockin:<id> key in adjustment notes so a status
-// bounce (received → closed → received) can't double-add.
+// Deduped by the auto:po-stockin:<id> key in adjustment notes so a replayed
+// receive can't double-add.
 
 function queuePoStockIn(req: Request, po: PurchaseOrder): void {
   const actorUserId = req.user?.userId;
@@ -701,10 +684,6 @@ function unreleaseRetainage(inv: Invoice): void {
 }
 
 export function registerFinanceRoutes(app: Express): void {
-  // `pid`/`qstr` live in ./http-util; Express types `req.params.*` as
-  // `string | string[]`, so this key variant narrows to string.
-  const pkey = (v: string | string[]): string => v as string;
-
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 
   app.get("/api/finance/stats", requireElevated, (_req, res) => {
@@ -757,11 +736,6 @@ export function registerFinanceRoutes(app: Express): void {
       .where(and(isNull(invoices.deletedAt), eq(invoices.status, "draft")))
       .get()?.c ?? 0;
 
-    const enabledGateways = db.select({ c: sql<number>`COUNT(*)` })
-      .from(paymentGateways)
-      .where(eq(paymentGateways.enabled, true))
-      .get()?.c ?? 0;
-
     res.json({
       outstandingCents,
       overdueCents,
@@ -769,7 +743,6 @@ export function registerFinanceRoutes(app: Express): void {
       expensesThisMonthCents,
       netThisMonthCents: paidThisMonthCents - expensesThisMonthCents,
       draftInvoices,
-      enabledGateways,
     });
   });
 
@@ -1489,56 +1462,6 @@ export function registerFinanceRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
-  // ─── Payment gateways ────────────────────────────────────────────────────
-
-  app.get("/api/finance/gateways", requireElevated, (_req, res) => {
-    const catalogByKey = new Map(PAYMENT_GATEWAY_CATALOG.map((g) => [g.key, g]));
-    const rows = db.select().from(paymentGateways)
-      .orderBy(asc(paymentGateways.orderIndex), asc(paymentGateways.id))
-      .all();
-    // Fall back to the catalog's fees note so wiping the field in the UI
-    // restores the stock guidance instead of leaving it blank.
-    res.json(rows.map((r) => ({
-      ...r,
-      feesNote: r.feesNote ?? catalogByKey.get(r.key)?.feesNote ?? null,
-    })));
-  });
-
-  app.patch("/api/finance/gateways/:key", requireElevated, (req, res) => {
-    const gw = db.select().from(paymentGateways)
-      .where(eq(paymentGateways.key, pkey(req.params.key)))
-      .get();
-    if (!gw) return res.status(404).json({ message: "Gateway not found" });
-    let body;
-    try {
-      body = updateGatewaySchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    // config is persisted as-is and parsed by the client — reject garbage now
-    // rather than blowing up the settings page later.
-    if (body.config !== undefined) {
-      try {
-        JSON.parse(body.config);
-      } catch {
-        return res.status(400).json({ message: "config must be a valid JSON string" });
-      }
-    }
-
-    const row = db.update(paymentGateways)
-      .set({ ...body, updatedAt: new Date() })
-      .where(eq(paymentGateways.id, gw.id))
-      .returning()
-      .get();
-    if (body.enabled !== undefined && body.enabled !== gw.enabled) {
-      audit(req, "finance.gateway_toggle", {
-        targetType: "gateway", targetId: gw.id, targetName: gw.name,
-        details: { enabled: body.enabled },
-      });
-    }
-    res.json(row);
-  });
-
   // ─── Purchase orders ─────────────────────────────────────────────────────
 
   app.get("/api/finance/purchase-orders", requireElevated, (req, res) => {
@@ -1572,7 +1495,8 @@ export function registerFinanceRoutes(app: Express): void {
     }
     const row = insertNumbered("fin_purchase_orders", "PO", (num) =>
       db.insert(purchaseOrders)
-        .values({ ...body, number: num, items: itemsJson, totalCents })
+        // Every PO starts life open — received/cancelled only via PATCH.
+        .values({ ...body, number: num, status: "open", items: itemsJson, totalCents })
         .returning()
         .get()
     );
@@ -1597,6 +1521,14 @@ export function registerFinanceRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
 
+    // Only two transitions exist: open → received (books the expense and
+    // stocks materials in) and open → cancelled. Both ends are terminal.
+    if (body.status && body.status !== existing.status && existing.status !== "open") {
+      return res.status(400).json({
+        message: `A ${existing.status} purchase order can't change status`,
+      });
+    }
+
     const updates: Partial<typeof purchaseOrders.$inferInsert> = { ...body };
     if (body.items !== undefined) {
       try {
@@ -1614,7 +1546,7 @@ export function registerFinanceRoutes(app: Express): void {
         details: { from: existing.status, to: body.status },
       });
       // Phase A #4: materials landing at the shop are money spent — book the
-      // expense (deduped, so received→closed→received can't double-book).
+      // expense (deduped by the auto: notes key).
       // Phase C #18: and material lines put stock on the shelf (deduped too).
       if (body.status === "received") {
         queuePoExpense(req, row);

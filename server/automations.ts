@@ -334,7 +334,7 @@ function runBusinessSweep(): void {
   step("late vendor POs", () => {
     const rows = sqlite.prepare(`
       SELECT number, vendor FROM fin_purchase_orders
-      WHERE deleted_at IS NULL AND status = 'sent'
+      WHERE deleted_at IS NULL AND status = 'open'
         AND expected_date IS NOT NULL AND expected_date < ?
     `).all(today) as any[];
     for (const po of rows) {
