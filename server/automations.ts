@@ -841,7 +841,9 @@ export function registerAttentionRoute(app: Express): void {
       source: "marketing" | "pm";
       id: number;
       title: string;
-      dueAt: number | null;
+      // Local calendar date "YYYY-MM-DD" (pm_tasks.due_date) — the client
+      // formats it as a local day; an epoch would land a day early.
+      dueAt: string | null;
       overdue: boolean;
       projectId: number | null;
     };
@@ -857,8 +859,11 @@ export function registerAttentionRoute(app: Express): void {
       `).all() as any[];
       for (const t of mk) {
         tasks.push({
+          // Send the calendar date through as "YYYY-MM-DD" — the client's
+          // formatDate parses that in LOCAL time, where Date.parse of a bare
+          // date is UTC midnight and renders as the day before out here.
           source: "marketing", id: t.id, title: t.title,
-          dueAt: t.due_date ? Date.parse(t.due_date) || null : null,
+          dueAt: t.due_date ?? null,
           overdue: t.due_date != null && t.due_date < today,
           projectId: t.project_id ?? null,
         });
@@ -874,7 +879,7 @@ export function registerAttentionRoute(app: Express): void {
       for (const t of pm) {
         tasks.push({
           source: "pm", id: t.id, title: t.title,
-          dueAt: Date.parse(t.due_date) || null,
+          dueAt: t.due_date ?? null,
           overdue: true,
           projectId: t.project_id ?? null,
         });

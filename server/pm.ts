@@ -177,20 +177,31 @@ try {
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mk_tasks'",
   ).get();
   if (!migrated && mkExists) {
-    // Mapping: notes carried the automations' dedupe key → auto_key; due_at
-    // (unix ms) → due_date "YYYY-MM-DD" (server-local, matching ymdLocal);
-    // status open → todo, done/dismissed → done; kinds outside the new enum
-    // (callback, campaign_deadline) → 'other'.
+    // Mapping: an "auto:*" note was the automations' dedupe key → auto_key,
+    // anything else is the owner's own text → description; due_at (unix ms) →
+    // due_date "YYYY-MM-DD" (server-local, matching ymdLocal); status open →
+    // todo, done/dismissed → done; kinds outside the new enum (callback,
+    // campaign_deadline) → 'other'; assigned_to → assignee_id.
+    //
+    // project_id / lead_id / assigned_to are NULLed when they point at a row
+    // that no longer exists: pm_tasks.project_id is a real FK with
+    // foreign_keys=ON, and one dangling id would abort this whole INSERT
+    // (leaving the board empty and, since nothing was inserted, retrying the
+    // same failure every boot).
     sqlite.exec(`
       INSERT INTO pm_tasks
-        (title, kind, lead_id, project_id, status, auto_created, auto_key,
-         due_date, completed_at, created_at)
+        (title, description, kind, lead_id, project_id, assignee_id, status,
+         auto_created, auto_key, due_date, completed_at, created_at)
       SELECT title,
+             CASE WHEN notes LIKE 'auto:%' THEN NULL ELSE notes END,
              CASE WHEN kind IN ('follow_up', 'quote_reminder', 'review_request')
                   THEN kind ELSE 'other' END,
-             lead_id, project_id,
+             CASE WHEN lead_id IN (SELECT id FROM crm_leads) THEN lead_id END,
+             CASE WHEN project_id IN (SELECT id FROM projects) THEN project_id END,
+             CASE WHEN assigned_to IN (SELECT id FROM users) THEN assigned_to END,
              CASE WHEN status = 'open' THEN 'todo' ELSE 'done' END,
-             auto_created, notes,
+             auto_created,
+             CASE WHEN notes LIKE 'auto:%' THEN notes END,
              CASE WHEN due_at IS NOT NULL
                   THEN strftime('%Y-%m-%d', due_at / 1000, 'unixepoch', 'localtime') END,
              completed_at, created_at

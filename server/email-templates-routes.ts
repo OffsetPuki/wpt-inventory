@@ -4,7 +4,7 @@ import { sqlite } from "./storage";
 import { audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import {
-  ANCHORS, BUILT_INS, LOCKED_NOTE, anchorFor, render,
+  ANCHORS, BUILT_INS, LOCKED_NOTE, anchorFor, render, shopSignoff,
 } from "./email-templates";
 
 // ─── Emails section ──────────────────────────────────────────────────────────
@@ -58,16 +58,30 @@ const SAMPLE: Record<string, string> = {
   projectName: "Bar table — 2 off",
 };
 
+// {{signoff}} is injected at SEND time from the shop settings (renderTemplate);
+// the preview has to supply it too or every default template previews with a
+// blank line where the shop's name belongs.
+const previewVars = (): Record<string, string> => ({ ...SAMPLE, signoff: shopSignoff() });
+
 export function registerEmailTemplateRoutes(app: Express): void {
   // ─── List ─────────────────────────────────────────────────────────────────
   app.get("/api/email-templates", requireAuth, (_req, res) => {
     const rows = sqlite.prepare("SELECT * FROM email_templates").all() as Row[];
     const byId = new Map(rows.map((r) => [r.id, r]));
 
+    // Every built-in body ends with {{signoff}} (the shop's name + city, from
+    // the Price Book settings) — document it so the owner sees a chip for it
+    // instead of an unexplained token in the text they're editing.
+    const SIGNOFF_VAR = {
+      token: "signoff",
+      meaning: "Your shop name and city, from the Price Book settings",
+    };
+
     const builtIns = BUILT_INS.map((t) => {
       const row = byId.get(t.id);
       return {
         ...t,
+        vars: [...t.vars, SIGNOFF_VAR],
         custom: false,
         enabled: row ? row.enabled === 1 : true,
         subject: row?.subject ?? t.subject,
@@ -155,9 +169,10 @@ export function registerEmailTemplateRoutes(app: Express): void {
   app.post("/api/email-templates/preview", requireAuth, (req, res) => {
     const subject = String(req.body?.subject ?? "").slice(0, 300);
     const body = String(req.body?.body ?? "").slice(0, 20_000);
+    const vars = previewVars();
     res.json({
-      subject: render(subject, SAMPLE),
-      text: render(body, SAMPLE),
+      subject: render(subject, vars),
+      text: render(body, vars),
     });
   });
 

@@ -58,7 +58,7 @@ export default function HrPayrollPage() {
       url: "/api/hr/payroll/record-expense",
       body: { from, to, amountCents: totalCents },
     }),
-    invalidate: [["expenses"], ["finance-stats"]],
+    invalidate: [["finance-expenses"], ["finance-stats"]],
     successTitle: "Recorded as expense",
     errorTitle: "Could not record expense",
   });

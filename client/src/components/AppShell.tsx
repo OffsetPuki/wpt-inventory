@@ -121,7 +121,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Team",
     entries: [
       { to: "/hr/employees", label: "Employees", icon: Users2, needs: "elevated" },
-      { to: "/hr/payroll", label: "Payroll", icon: Banknote },
+      { to: "/hr/payroll", label: "Payroll", icon: Banknote, needs: "elevated" },
       { to: "/hr/leave", label: "Time off", icon: CalendarDays },
     ],
   },

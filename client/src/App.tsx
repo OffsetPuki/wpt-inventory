@@ -183,7 +183,9 @@ export default function App() {
             </ElevatedRoute>
           </Route>
           <Route path="/hr/payroll">
-            <HrPayrollPage />
+            <ElevatedRoute>
+              <HrPayrollPage />
+            </ElevatedRoute>
           </Route>
           <Route path="/hr/leave">
             <HrLeavePage />

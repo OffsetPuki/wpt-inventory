@@ -2,10 +2,10 @@
 // against a mix of the hot endpoints the app actually polls, and reports
 // throughput + p50 / p95 / p99 latency per level. Run with:
 //   node scripts/loadtest.mjs
-// Optional env: BASE=http://localhost:5000 USER=Manager PIN=1234
+// Optional env: BASE=http://localhost:5000 USER_NAME=Owner PIN=1234
 
 const BASE = process.env.BASE || "http://localhost:5000";
-const USER = process.env.USER_NAME || "Manager";
+const USER = process.env.USER_NAME || "Owner";
 const PIN = process.env.PIN || "1234";
 
 // Mix that mirrors what a logged-in worker page actually fires every 15s.

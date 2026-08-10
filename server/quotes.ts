@@ -10,6 +10,7 @@ import { onQuoteEvent, logEmailActivity } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
 import { renderTemplate, firstNameOf } from "./email-templates";
 import { insertNumbered } from "./finance";
+import { isElevated } from "./http-util";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the costing
 // report and buy list price with EXACTLY the math the builder uses. Same
@@ -178,16 +179,21 @@ export function registerQuoteRoutes(app: Express): void {
       const data = quoteSettingsSchema.parse(req.body);
       assertSafeKeys(data.priceBook, "priceBook");
       assertSafeKeys(data.shop, "shop");
+      // Shop identity (name, city, phone, email, quote terms) is what signs
+      // every outbound customer email and heads the quote — owner-only, even
+      // though the price book itself stays open to whoever quotes.
+      const shopWritable = isElevated(req);
       sqlite.prepare(`
         INSERT INTO quote_settings (id, price_book, shop, updated_at)
         VALUES (1, @priceBook, @shop, @now)
         ON CONFLICT(id) DO UPDATE SET
           price_book = excluded.price_book,
-          shop = excluded.shop,
+          shop = CASE WHEN @shopWritable = 1 THEN excluded.shop ELSE quote_settings.shop END,
           updated_at = excluded.updated_at
       `).run({
         priceBook: JSON.stringify(data.priceBook),
         shop: JSON.stringify(data.shop),
+        shopWritable: shopWritable ? 1 : 0,
         now: Date.now(),
       });
       // The shared price book is the most financially consequential write in

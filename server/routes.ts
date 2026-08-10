@@ -6,7 +6,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
-import { storage, uploadsDir } from "./storage";
+import { storage, uploadsDir, sqlite } from "./storage";
 import { audit, clientIp } from "./audit";
 import { requireAuth, requireElevated, createSession, destroySession } from "./auth";
 import { isElevated } from "./http-util";
@@ -227,6 +227,25 @@ export function registerRoutes(app: Express): void {
   app.delete("/api/users/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = storage.getUserById(id);
+    // Logged hours ARE the payroll record now (payroll reads pm_time_entries),
+    // and that table cascades on user delete — so removing a login would
+    // silently erase what someone was owed and what a job cost. Make it an
+    // explicit decision instead. pm module owns the table → raw SQL/try-catch.
+    try {
+      const logged = sqlite.prepare(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(duration_min), 0) AS mins FROM pm_time_entries WHERE user_id = ?",
+      ).get(id) as { n: number; mins: number };
+      if (logged.n > 0) {
+        const hours = Math.round((logged.mins / 60) * 10) / 10;
+        return res.status(409).json({
+          message: `${target?.name ?? "This user"} has ${hours} logged hour${hours === 1 ? "" : "s"} `
+            + "on the clock — deleting the login would erase them from payroll and job costing. "
+            + "Change the PIN to lock them out, or delete their time entries first.",
+        });
+      }
+    } catch {
+      /* pm module absent — nothing to protect */
+    }
     storage.deleteUser(id);
     audit(req, "user.delete", {
       targetType: "user", targetId: id, targetName: target?.name ?? null,

@@ -81,7 +81,7 @@ interface Attention {
     source: "marketing" | "pm";
     id: number;
     title: string;
-    dueAt: number | null;
+    dueAt: string | null; // "YYYY-MM-DD" — formatDate localizes it
     overdue: boolean;
     projectId: number | null;
   }[];
