@@ -65,6 +65,9 @@ function normalizeLead(row) {
     consent: get('consent'),
     source: get('source'),
     designSpec: get('designSpec'),
+    // Machine-readable design state ('{"type":"fence","state":{…}}') when the
+    // website sent one — parseLead imports it instead of reading the prose.
+    designState: get('designState'),
     notes: get('notes'),
     lang: get('lang') || 'en',
     reason: get('reason'), // alert rows: why the website reported a delivery failure

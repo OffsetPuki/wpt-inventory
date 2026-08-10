@@ -166,7 +166,14 @@ export default function QuoteBuilder({ initialSettings }) {
   // assigned number; later transitions update the same row.
   const resaveQueued = useRef(false);
   const persistQuoteRef = useRef(() => {});
+  // Mirrors saveQuote.isPending in a ref: an async caller (Preview) that awaits
+  // must read the CURRENT state, not the value its render closed over.
+  const savingRef = useRef(false);
+  // Same reason for the saved row's id: it only exists after the first POST
+  // returns, which is exactly what Preview waits for.
+  const persistedIdRef = useRef(null);
   const saveQuote = useMutation({
+    onMutate: () => { savingRef.current = true; },
     mutationFn: async ({ sess, totalCents }) => {
       const body = {
         type: sess.type,
@@ -183,7 +190,11 @@ export default function QuoteBuilder({ initialSettings }) {
     onSuccess: (row, { sess }) => {
       // Only stamp the response onto the session that started this save — the
       // user may have opened a different quote while the request was in flight.
-      setSession((s) => (s && s.sid === sess.sid ? { ...s, quoteId: row.id, number: row.number } : s));
+      setSession((s) => {
+        if (!s || s.sid !== sess.sid) return s;
+        persistedIdRef.current = row.id;
+        return { ...s, quoteId: row.id, number: row.number };
+      });
       qc.invalidateQueries({ queryKey: ['quotes'] });
     },
     onError: (e, { sess }) => {
@@ -196,6 +207,7 @@ export default function QuoteBuilder({ initialSettings }) {
       toast({ variant: 'destructive', title: 'Quote not saved', description: msg || 'Could not reach the suite.' });
     },
     onSettled: () => {
+      savingRef.current = false;
       // A transition that arrived while this save was in flight was skipped by
       // the isPending guard — replay it once so the row never misses the last
       // step's data (e.g. customer details entered during a slow first POST).
@@ -248,12 +260,16 @@ export default function QuoteBuilder({ initialSettings }) {
     [lineState, effectiveBook],
   );
 
+  // Keep the id mirror in step with the session (reopening a saved quote,
+  // starting a new one). onSuccess also stamps it, for the await-ing caller.
+  persistedIdRef.current = session?.quoteId ?? null;
+
   const persistQuote = () => {
     if (!session) return;
     // One save in flight at a time — a quick configure → details → print run
     // must not fire a second POST before the first returns the quote id. The
     // skipped save is queued and replayed from onSettled.
-    if (saveQuote.isPending) { resaveQueued.current = true; return; }
+    if (savingRef.current) { resaveQueued.current = true; return; }
     // Stamp the book this quote was priced with into the payload (rate
     // versioning). A locked quote keeps its own snapshot; a live one freezes
     // the current book as of this save.
@@ -274,7 +290,13 @@ export default function QuoteBuilder({ initialSettings }) {
   // actually sending it stays in the Share panel.
   const openCustomerPage = async () => {
     persistQuote();
-    const id = session?.quoteId;
+    // The page renders from the STORED payload, so the save (and any replay it
+    // queued behind an in-flight one) has to land first — otherwise Preview
+    // shows the quote as it was one edit ago.
+    for (let i = 0; savingRef.current && i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 100)); // ponytail: 10s cap, then show what we have
+    }
+    const id = persistedIdRef.current;
     if (!id) {
       toast({ title: 'Saving the quote…', description: 'One second — try Preview again once the quote number appears.' });
       return;
