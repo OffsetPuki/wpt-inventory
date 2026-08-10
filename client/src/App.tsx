@@ -36,11 +36,9 @@ const HrEmployeesPage = lazy(() => import("./pages/hr/employees"));
 const HrPayrollPage = lazy(() => import("./pages/hr/payroll"));
 const HrLeavePage = lazy(() => import("./pages/hr/leave"));
 const PmBoardPage = lazy(() => import("./pages/pm/board"));
-const PmGanttPage = lazy(() => import("./pages/pm/gantt"));
 const PmSchedulePage = lazy(() => import("./pages/pm/schedule"));
 const PmTimePage = lazy(() => import("./pages/pm/time"));
 const PmContractsPage = lazy(() => import("./pages/pm/contracts"));
-const PmKbPage = lazy(() => import("./pages/pm/kb"));
 const FinanceOverviewPage = lazy(() => import("./pages/finance/index"));
 const FinanceInvoicesPage = lazy(() => import("./pages/finance/invoices"));
 const FinanceExpensesPage = lazy(() => import("./pages/finance/expenses"));
@@ -167,9 +165,6 @@ export default function App() {
           <Route path="/pm/board">
             <PmBoardPage />
           </Route>
-          <Route path="/pm/gantt">
-            <PmGanttPage />
-          </Route>
           <Route path="/pm/schedule">
             <PmSchedulePage />
           </Route>
@@ -178,9 +173,6 @@ export default function App() {
           </Route>
           <Route path="/pm/contracts">
             <PmContractsPage />
-          </Route>
-          <Route path="/pm/kb">
-            <PmKbPage />
           </Route>
 
           {/* HR — self-service pages open to everyone; the oversight pages

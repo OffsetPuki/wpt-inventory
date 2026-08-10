@@ -8,6 +8,7 @@ import { Chip, type ChipTone } from "@/components/ui/Chip";
 import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import InlineNewClient from "@/components/InlineNewClient";
 import { cn } from "@/lib/utils";
 import { formatDate, formatMoney, parseMoney, formatBp, todayYmd } from "@/lib/format";
 import {
@@ -165,6 +166,8 @@ function InvoiceFormModal({
 }) {
   const [clientId, setClientId] = useState("");
   const [clientName, setClientName] = useState("");
+  // Free-text names hide behind this toggle — the picker is the normal path.
+  const [freeText, setFreeText] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [issueDate, setIssueDate] = useState(todayYmd());
   const [dueDate, setDueDate] = useState("");
@@ -181,6 +184,7 @@ function InvoiceFormModal({
     if (invoice) {
       setClientId(invoice.clientId != null ? String(invoice.clientId) : "");
       setClientName(invoice.clientName ?? "");
+      setFreeText(invoice.clientId == null && !!invoice.clientName);
       setProjectId(invoice.projectId != null ? String(invoice.projectId) : "");
       setIssueDate(invoice.issueDate ?? "");
       setDueDate(invoice.dueDate ?? "");
@@ -205,6 +209,7 @@ function InvoiceFormModal({
     } else {
       setClientId("");
       setClientName("");
+      setFreeText(false);
       setProjectId("");
       setIssueDate(todayYmd());
       setDueDate("");
@@ -331,7 +336,7 @@ function InvoiceFormModal({
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
             >
-              <option value="">— No linked client —</option>
+              <option value="">— Pick a client —</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -339,18 +344,33 @@ function InvoiceFormModal({
                 </option>
               ))}
             </select>
+            <InlineNewClient
+              onCreated={(c) => {
+                setClientId(String(c.id));
+                setFreeText(false);
+              }}
+            />
           </label>
-          {!clientId && (
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Client name</span>
-              <input
-                className={inputCls}
-                placeholder="Free-text name"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-              />
-            </label>
-          )}
+          {!clientId &&
+            (freeText ? (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-foreground">Client name</span>
+                <input
+                  className={inputCls}
+                  placeholder="Free-text name"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                />
+              </label>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setFreeText(true)}
+                className="w-fit self-end pb-3 text-sm text-muted-foreground hover:text-foreground hover:underline"
+              >
+                No client record? Enter a name
+              </button>
+            ))}
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Project (optional)</span>
             <select

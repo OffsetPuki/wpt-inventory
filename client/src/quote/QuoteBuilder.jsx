@@ -20,6 +20,8 @@ import { toast } from '@/components/ui/toaster';
 import { defaultState } from './data/configurators.js';
 import { DEFAULT_PRICE_BOOK } from './data/priceBook.js';
 import { buildLineState, deriveWarnings, materialTotals } from './lib/estimate.js';
+import { fetchLeads } from './lib/leads.js';
+import { parseLead } from './lib/designSpec.js';
 import { computeTotals } from './lib/quote.js';
 import {
   deepMerge, DEFAULT_SHOP, loadSession, saveSession, setPath,
@@ -337,7 +339,18 @@ export default function QuoteBuilder({ initialSettings }) {
     setSession((s) => ({ ...s, customer: { ...s.customer, [field]: value } }));
 
   // ── Navigation ──────────────────────────────────────────────────────────────
-  const startConfig = (type) => { const sess = newSession(type, priceBook); setSession(sess); setView('configure'); };
+  // Customer waiting to be stamped onto the next new quote — set by the
+  // "Quote this lead" handoff below when the lead has no website design.
+  const pendingCustomer = useRef(null);
+  const startConfig = (type) => {
+    const sess = newSession(type, priceBook);
+    if (pendingCustomer.current) {
+      sess.customer = { ...sess.customer, ...pendingCustomer.current };
+      pendingCustomer.current = null;
+    }
+    setSession(sess);
+    setView('configure');
+  };
   const goHome = () => setView('home');
 
   // A looked-up website design becomes a quote: the customer's options overlay
@@ -357,6 +370,42 @@ export default function QuoteBuilder({ initialSettings }) {
     setSession(sess);
     setView('configure');
   };
+
+  // "Quote this lead" handoff from the CRM (pages/crm/leads.tsx): the lead
+  // modal stores { name, phone, email, designRef } under this key and
+  // navigates here. With a designRef we run the same design-import path Find
+  // design uses (startFromLead), so the configurator state loads too; without
+  // one the customer waits in pendingCustomer for the next "New quote" pick.
+  useEffect(() => {
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem('cjm.quote.prefillLead');
+      if (raw != null) sessionStorage.removeItem('cjm.quote.prefillLead');
+    } catch { /* storage unavailable */ }
+    if (!raw) return;
+    let lead;
+    try { lead = JSON.parse(raw); } catch { return; }
+    const customer = {
+      name: lead.name || '', company: '', phone: lead.phone || '',
+      email: lead.email || '', location: '',
+    };
+    pendingCustomer.current = customer;
+    setView('home');
+    if (!lead.designRef) return;
+    fetchLeads({ ref: lead.designRef })
+      .then((rows) => {
+        const row = rows.find((r) => parseLead(r));
+        if (!row) return; // design not found — plain customer prefill stays pending
+        pendingCustomer.current = null;
+        startFromLead({
+          ...row,
+          name: row.name || customer.name,
+          phone: row.phone || customer.phone,
+          email: row.email || customer.email,
+        }, parseLead(row));
+      })
+      .catch(() => { /* lookup failed — plain customer prefill stays pending */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reopen a saved quote from the suite — edits keep saving to the same number.
   const openSaved = (sess) => {

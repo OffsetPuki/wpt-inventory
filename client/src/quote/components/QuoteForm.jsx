@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
 import { summaryLine, typeLabel } from '../data/configurators.js';
 import { fmtMoney } from '../lib/format.js';
 import ShareQuote from './ShareQuote.jsx';
@@ -14,6 +16,21 @@ export default function QuoteForm({
     </label>
   );
 
+  // CRM clients for the "use existing" shortcut — picking one fills the
+  // fields below (they stay editable; nothing is linked, just prefilled).
+  const { data: clients = [] } = useQuery({
+    queryKey: ['crm-clients'],
+    queryFn: async () => (await apiRequest('GET', '/api/crm/clients')).json(),
+  });
+  const pickClient = (id) => {
+    const c = clients.find((x) => String(x.id) === id);
+    if (!c) return;
+    onChangeCustomer('name', c.name || '');
+    onChangeCustomer('company', c.company || '');
+    onChangeCustomer('phone', c.phone || '');
+    onChangeCustomer('email', c.email || '');
+  };
+
   return (
     <div className="page">
       <div className="container">
@@ -25,6 +42,19 @@ export default function QuoteForm({
 
         <div className="cfg">
           <div className="cfg-controls" style={{ position: 'static' }}>
+            {clients.length > 0 && (
+              <label className="field">
+                <span>Use existing client (optional)</span>
+                <select value="" onChange={(e) => pickClient(e.target.value)}>
+                  <option value="">— Pick from CRM clients —</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.company ? ` (${c.company})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="fields two">
               {field('name', 'Customer name', { required: true })}
               {field('company', 'Company (optional)')}

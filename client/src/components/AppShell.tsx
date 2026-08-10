@@ -30,11 +30,9 @@ import {
   Contact,
   Megaphone,
   Kanban,
-  GanttChart,
   Timer,
   CalendarDays,
   CalendarRange,
-  BookOpen,
   Banknote,
   Receipt,
   Landmark,
@@ -78,31 +76,23 @@ interface NavGroup {
 const NAV_GROUPS: NavGroup[] = [
   {
     key: "crm",
-    label: "CRM & Sales",
+    label: "Sales",
     entries: [
-      { to: "/crm", label: "Sales Overview", icon: BarChart3 },
       { to: "/crm/leads", label: "Leads", icon: UserPlus },
       { to: "/crm/clients", label: "Clients", icon: Contact },
-      { to: "/crm/quotes", label: "Quote Builder", icon: PencilRuler },
+      { to: "/crm/quotes", label: "Quotes", icon: PencilRuler },
+      { to: "/crm", label: "Reports", icon: BarChart3 },
     ],
   },
   {
-    key: "marketing",
-    label: "Marketing",
-    needs: "elevated",
-    entries: [{ to: "/marketing", label: "Control Center", icon: Megaphone }],
-  },
-  {
     key: "projects",
-    label: "Projects",
+    label: "Jobs",
     entries: [
       { to: "/projects", label: "Projects", icon: FolderKanban },
-      { to: "/pm/board", label: "Board", icon: Kanban },
-      { to: "/pm/gantt", label: "Gantt", icon: GanttChart },
+      { to: "/pm/board", label: "Tasks", icon: Kanban },
       { to: "/pm/schedule", label: "Schedule", icon: CalendarRange },
-      { to: "/pm/time", label: "Time Tracking", icon: Timer },
-      { to: "/pm/contracts", label: "Contracts & SOWs", icon: ClipboardCheck },
-      { to: "/pm/kb", label: "Knowledge Base", icon: BookOpen },
+      { to: "/pm/time", label: "Time", icon: Timer },
+      { to: "/pm/contracts", label: "Contracts", icon: ClipboardCheck },
     ],
   },
   {
@@ -116,8 +106,19 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    key: "finance",
+    label: "Money",
+    needs: "elevated",
+    entries: [
+      { to: "/finance/invoices", label: "Invoices", icon: Receipt },
+      { to: "/finance/expenses", label: "Expenses", icon: Banknote },
+      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
+      { to: "/finance", label: "Reports", icon: Landmark },
+    ],
+  },
+  {
     key: "hr",
-    label: "HR & Payroll",
+    label: "Team",
     entries: [
       { to: "/hr/employees", label: "Employees", icon: Users2, needs: "elevated" },
       { to: "/hr/payroll", label: "Payroll", icon: Banknote },
@@ -125,15 +126,10 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    key: "finance",
-    label: "Finance",
+    key: "marketing",
+    label: "Marketing",
     needs: "elevated",
-    entries: [
-      { to: "/finance", label: "Accounting", icon: Landmark },
-      { to: "/finance/invoices", label: "Invoices", icon: Receipt },
-      { to: "/finance/expenses", label: "Expenses", icon: Banknote },
-      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
-    ],
+    entries: [{ to: "/marketing", label: "Marketing", icon: Megaphone }],
   },
   {
     key: "admin",

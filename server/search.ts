@@ -4,7 +4,7 @@ import { db } from "./storage";
 import { requireAuth } from "./auth";
 import { items, projects } from "../shared/schema";
 import { clients, leads } from "../shared/crm-schema";
-import { pmTasks, kbArticles, contracts } from "../shared/pm-schema";
+import { pmTasks, contracts } from "../shared/pm-schema";
 import { invoices, purchaseOrders, expenses } from "../shared/finance-schema";
 import { quotes } from "../shared/quote-schema";
 import { employees } from "../shared/hr-schema";
@@ -112,15 +112,6 @@ export function registerSearchRoutes(app: Express): void {
         .where(and(isNull(pmTasks.deletedAt), likeEsc(pmTasks.title, p)))
         .limit(PER_SOURCE).all()) {
         hits.push({ type: "Tasks", label: r.title, href: "/pm/board" });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: kbArticles.id, title: kbArticles.title, category: kbArticles.category })
-        .from(kbArticles)
-        .where(and(isNull(kbArticles.deletedAt), likeEsc(kbArticles.title, p)))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Knowledge Base", label: r.title, sublabel: r.category, href: "/pm/kb" });
       }
     });
 

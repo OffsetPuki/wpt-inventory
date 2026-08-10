@@ -175,25 +175,6 @@ export const pmDocuments = sqliteTable("pm_documents", {
   deletedAt: integer("deleted_at"),
 });
 
-export const kbArticles = sqliteTable("pm_kb_articles", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  category: text("category"),
-  content: text("content").notNull().default(""), // markdown
-  tags: text("tags"), // JSON string[]
-  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
-  authorId: integer("author_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  deletedAt: integer("deleted_at"),
-});
-
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
 export const insertPmTaskSchema = createInsertSchema(pmTasks).omit({
@@ -233,13 +214,6 @@ export const insertChangeOrderSchema = createInsertSchema(changeOrders, {
   approvedAt: true, // server-stamped on the draft→approved transition
 });
 
-export const insertKbArticleSchema = createInsertSchema(kbArticles).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  deletedAt: true,
-});
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type PmTask = typeof pmTasks.$inferSelect;
@@ -247,12 +221,10 @@ export type TimeEntry = typeof timeEntries.$inferSelect;
 export type Contract = typeof contracts.$inferSelect;
 export type ChangeOrder = typeof changeOrders.$inferSelect;
 export type PmDocument = typeof pmDocuments.$inferSelect;
-export type KbArticle = typeof kbArticles.$inferSelect;
 
 export type InsertPmTask = z.infer<typeof insertPmTaskSchema>;
 export type InsertContract = z.infer<typeof insertContractSchema>;
 export type InsertChangeOrder = z.infer<typeof insertChangeOrderSchema>;
-export type InsertKbArticle = z.infer<typeof insertKbArticleSchema>;
 
 // ─── Label maps ──────────────────────────────────────────────────────────────
 

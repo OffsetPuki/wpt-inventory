@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
@@ -38,6 +38,7 @@ import {
   Mail,
   StickyNote,
   UserPlus,
+  PencilRuler,
   Trash2,
 } from "lucide-react";
 
@@ -368,6 +369,27 @@ function LeadDetailModal({
     onSuccess: () => onClose(),
   });
 
+  const [, navigate] = useLocation();
+  // "Quote this lead" — hand the customer (and their website design, when one
+  // is linked) to the quote builder so nothing gets retyped. The builder
+  // consumes this key on mount (see quote/QuoteBuilder.jsx).
+  const quoteThisLead = () => {
+    try {
+      sessionStorage.setItem(
+        "cjm.quote.prefillLead",
+        JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          designRef: extras?.design?.ref || null,
+        })
+      );
+    } catch {
+      /* storage unavailable — the builder just opens blank */
+    }
+    navigate("/crm/quotes");
+  };
+
   const quickBtn =
     "flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary disabled:opacity-60";
 
@@ -485,6 +507,14 @@ function LeadDetailModal({
             >
               {save.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
               Save changes
+            </button>
+            <button
+              type="button"
+              onClick={quoteThisLead}
+              className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary"
+            >
+              <PencilRuler className="h-4 w-4" />
+              Quote this lead
             </button>
             {lead.clientId != null ? (
               <Link

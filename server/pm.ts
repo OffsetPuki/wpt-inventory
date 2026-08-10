@@ -10,9 +10,9 @@ import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { users, projects } from "../shared/schema";
 import {
-  pmTasks, timeEntries, contracts, changeOrders, pmDocuments, kbArticles,
+  pmTasks, timeEntries, contracts, changeOrders, pmDocuments,
   insertPmTaskSchema, insertTimeEntrySchema, insertContractSchema,
-  insertChangeOrderSchema, insertKbArticleSchema,
+  insertChangeOrderSchema,
   TASK_STATUSES, DOCUMENT_KINDS,
 } from "../shared/pm-schema";
 import { clients } from "../shared/crm-schema";
@@ -123,24 +123,9 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_pm_documents_project ON pm_documents(project_id, deleted_at);
   CREATE INDEX IF NOT EXISTS idx_pm_documents_expires ON pm_documents(expires_at);
-
-  CREATE TABLE IF NOT EXISTS pm_kb_articles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    category TEXT,
-    content TEXT NOT NULL DEFAULT '',
-    tags TEXT,
-    pinned INTEGER NOT NULL DEFAULT 0,
-    author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    deleted_at INTEGER
-  );
-  -- List order is pinned-first / recently-updated — one composite index.
-  CREATE INDEX IF NOT EXISTS idx_pm_kb_deleted_pinned_updated ON pm_kb_articles(deleted_at, pinned, updated_at);
-  CREATE INDEX IF NOT EXISTS idx_pm_kb_category ON pm_kb_articles(category);
-  CREATE INDEX IF NOT EXISTS idx_pm_kb_created ON pm_kb_articles(created_at);
 `);
+// The knowledge base module was removed (Package F) — any existing
+// pm_kb_articles table is left in place so no data is dropped.
 
 // Additive migration (wiring plan, Fix 4): pm_time_entries.invoice_id arrived
 // after installs existed. SQLite has no IF NOT EXISTS for columns — the throw
@@ -337,13 +322,11 @@ export function registerPmRoutes(app: Express): void {
       .from(contracts)
       .where(and(isNull(contracts.deletedAt), or(eq(contracts.status, "signed"), eq(contracts.status, "active"))))
       .get()!.n;
-    const kbCount = db.select({ n: sql<number>`count(*)` }).from(kbArticles)
-      .where(isNull(kbArticles.deletedAt)).get()!.n;
     // Powers the dashboard's completion ring: done ÷ (open + done).
     const doneTasks = db.select({ n: sql<number>`count(*)` }).from(pmTasks)
       .where(and(isNull(pmTasks.deletedAt), eq(pmTasks.status, "done"))).get()!.n;
 
-    res.json({ openTasks, inProgress, overdueTasks, hoursThisWeekMin, activeContractsValueCents, kbCount, doneTasks });
+    res.json({ openTasks, inProgress, overdueTasks, hoursThisWeekMin, activeContractsValueCents, doneTasks });
   });
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
@@ -858,82 +841,5 @@ export function registerPmRoutes(app: Express): void {
   registerSoftDelete(app, "/api/pm/documents/:id", requireElevated, {
     table: pmDocuments, notFound: "Document not found",
     action: "pm.document_delete", targetType: "pm_document", name: (d) => d.title, audit,
-  });
-
-  // ── Knowledge base ─────────────────────────────────────────────────────────
-
-  app.get("/api/pm/kb", requireAuth, (req, res) => {
-    const conditions: any[] = [isNull(kbArticles.deletedAt)];
-    const q = qstr(req.query.q);
-    const category = qstr(req.query.category);
-    const tag = qstr(req.query.tag);
-    if (q) {
-      const pat = `%${q}%`;
-      conditions.push(or(like(kbArticles.title, pat), like(kbArticles.content, pat)));
-    }
-    if (category) conditions.push(eq(kbArticles.category, category));
-    // tags is a JSON string[] column; matching the quoted token is exact
-    // enough without pulling every row into JS.
-    if (tag) conditions.push(like(kbArticles.tags, `%"${tag}"%`));
-    const rows = db.select({
-      ...getTableColumns(kbArticles),
-      authorName: users.name,
-    })
-      .from(kbArticles)
-      .leftJoin(users, eq(kbArticles.authorId, users.id))
-      .where(and(...conditions))
-      .orderBy(desc(kbArticles.pinned), desc(kbArticles.updatedAt))
-      .all();
-    res.json(rows);
-  });
-
-  app.get("/api/pm/kb/:id", requireAuth, (req, res) => {
-    const id = pid(req.params.id);
-    const row = db.select({
-      ...getTableColumns(kbArticles),
-      authorName: users.name,
-    })
-      .from(kbArticles)
-      .leftJoin(users, eq(kbArticles.authorId, users.id))
-      .where(and(eq(kbArticles.id, id), isNull(kbArticles.deletedAt)))
-      .get();
-    if (!row) return res.status(404).json({ message: "Article not found" });
-    res.json(row);
-  });
-
-  app.post("/api/pm/kb", requireAuth, (req, res) => {
-    let body;
-    try {
-      body = insertKbArticleSchema.parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message || "Invalid request" });
-    }
-    // Authorship is server-assigned — clients can't publish as someone else.
-    const row = db.insert(kbArticles).values({ ...body, authorId: req.user!.userId }).returning().get();
-    audit(req, "pm.kb_create", { targetType: "pm_kb_article", targetId: row.id, targetName: row.title });
-    res.status(201).json(row);
-  });
-
-  app.patch("/api/pm/kb/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const existing = db.select().from(kbArticles)
-      .where(and(eq(kbArticles.id, id), isNull(kbArticles.deletedAt))).get();
-    if (!existing) return res.status(404).json({ message: "Article not found" });
-    let patch;
-    try {
-      patch = insertKbArticleSchema.partial().parse(req.body);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message || "Invalid request" });
-    }
-    const updated = db.update(kbArticles)
-      .set({ ...patch, updatedAt: new Date() })
-      .where(eq(kbArticles.id, id))
-      .returning().get();
-    res.json(updated);
-  });
-
-  registerSoftDelete(app, "/api/pm/kb/:id", requireElevated, {
-    table: kbArticles, notFound: "Article not found",
-    action: "pm.kb_delete", targetType: "pm_kb_article", name: (a) => a.title, audit,
   });
 }

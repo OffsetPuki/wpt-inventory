@@ -44,7 +44,6 @@ interface PmStats {
   overdueTasks: number;
   hoursThisWeekMin: number;
   activeContractsValueCents: number;
-  kbCount: number;
   doneTasks: number;
 }
 
@@ -479,7 +478,7 @@ export default function DashboardPage() {
         />
       </Section>
 
-      <Section title="Work" href="/pm/board" isLoading={pm.isLoading} cols={5}>
+      <Section title="Work" href="/pm/board" isLoading={pm.isLoading} cols={4}>
         <StatCard label="Open tasks" value={pm.data?.openTasks} href="/pm/board" />
         <StatCard label="In progress" value={pm.data?.inProgress} href="/pm/board" />
         <StatCard
@@ -493,7 +492,6 @@ export default function DashboardPage() {
           value={pm.data && formatMoney(pm.data.activeContractsValueCents)}
           href="/pm/contracts"
         />
-        <StatCard label="KB articles" value={pm.data?.kbCount} href="/pm/kb" />
       </Section>
 
       <Section title="Team" href="/hr/employees" isLoading={hr.isLoading} cols={4}>

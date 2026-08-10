@@ -16,7 +16,7 @@ import { useAuth } from "@/lib/auth";
 import { DEFAULT_PRICE_BOOK } from "@/quote/data/priceBook.js";
 import PhotoSlots from "./PhotoSlots";
 import { cn } from "@/lib/utils";
-import { Zap, Flame, Cpu, Package, Wrench, Loader2 } from "lucide-react";
+import { Zap, Flame, Cpu, Package, Wrench, Loader2, ChevronDown } from "lucide-react";
 
 const CATEGORY_ICON: Record<Category, typeof Zap> = {
   electric: Zap,
@@ -142,6 +142,23 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
   const [materialKey, setMaterialKey] = useState(seed.materialKey ?? "");
   const [notes, setNotes] = useState(seed.notes ?? "");
 
+  // The daily flow is photos + name + category + location + quantity; the
+  // rest hides behind "More details". Editing an item that already uses any
+  // of those fields opens the panel so nothing looks lost.
+  const [moreOpen, setMoreOpen] = useState(
+    () =>
+      mode === "edit" &&
+      Boolean(
+        seed.partNumber ||
+          seed.mfgPartNumber ||
+          (seed.lowStockThreshold ?? 0) > 0 ||
+          (seed.itemType != null && seed.itemType !== "stock") ||
+          (seed.quantityReserved ?? 0) > 0 ||
+          seed.materialKey ||
+          seed.notes
+      )
+  );
+
   // Price-book materials for the "Quote material" mapping: owner's saved
   // overrides merged over the defaults, same as the quote builder.
   const { data: quoteSettings } = useQuery<{ priceBook?: { materials?: Record<string, any> } }>({
@@ -199,33 +216,15 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
 
       {/* Identity */}
       <Section title="Details">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Field label="Name">
-              <input
-                className={inputCls}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Door seal, silicone"
-                required
-              />
-            </Field>
-          </div>
-          <Field label="Part number">
-            <input
-              className={inputCls}
-              value={partNumber}
-              onChange={(e) => setPartNumber(e.target.value)}
-            />
-          </Field>
-          <Field label="Mfg part number">
-            <input
-              className={inputCls}
-              value={mfgPartNumber}
-              onChange={(e) => setMfgPartNumber(e.target.value)}
-            />
-          </Field>
-        </div>
+        <Field label="Name">
+          <input
+            className={inputCls}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Door seal, silicone"
+            required
+          />
+        </Field>
       </Section>
 
       {/* Category */}
@@ -342,7 +341,7 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
       </Section>
 
       {/* Stock */}
-      <Section title="Stock & tracking">
+      <Section title="Stock">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Quantity">
             <input
@@ -352,71 +351,105 @@ export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFo
               onChange={(e) => setQuantity(e.target.value)}
             />
           </Field>
-          {isElevated && (
-            <Field label="Low-stock threshold">
+        </div>
+      </Section>
+
+      {/* Everything the daily flow doesn't need, behind one toggle. All the
+          state stays mounted, so a collapsed panel still submits its values. */}
+      <button
+        type="button"
+        onClick={() => setMoreOpen((o) => !o)}
+        className="flex w-fit items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+      >
+        <ChevronDown
+          className={cn("h-4 w-4 transition-transform", !moreOpen && "-rotate-90")}
+        />
+        More details
+      </button>
+
+      {moreOpen && (
+        <Section title="More details">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Part number">
               <input
                 className={inputCls}
-                type="number"
-                value={lowStockThreshold}
-                onChange={(e) => setLowStockThreshold(e.target.value)}
+                value={partNumber}
+                onChange={(e) => setPartNumber(e.target.value)}
               />
             </Field>
-          )}
-          <Field label="Item type">
-            <select
-              className={inputCls}
-              value={itemType}
-              onChange={(e) => setItemType(e.target.value as ItemType)}
-            >
-              {ITEM_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {ITEM_TYPE_LABELS[t]}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {isElevated && (
-            <Field label="Reserved quantity">
+            <Field label="Mfg part number">
               <input
                 className={inputCls}
-                type="number"
-                value={quantityReserved}
-                onChange={(e) => setQuantityReserved(e.target.value)}
+                value={mfgPartNumber}
+                onChange={(e) => setMfgPartNumber(e.target.value)}
               />
             </Field>
-          )}
-          <div className="sm:col-span-2">
-            <Field label="Quote material (optional)">
+            {isElevated && (
+              <Field label="Low-stock threshold">
+                <input
+                  className={inputCls}
+                  type="number"
+                  value={lowStockThreshold}
+                  onChange={(e) => setLowStockThreshold(e.target.value)}
+                />
+              </Field>
+            )}
+            <Field label="Item type">
               <select
                 className={inputCls}
-                value={materialKey}
-                onChange={(e) => setMaterialKey(e.target.value)}
+                value={itemType}
+                onChange={(e) => setItemType(e.target.value as ItemType)}
               >
-                <option value="">— Not a quoted material —</option>
-                {Object.entries(materials).map(([key, m]) => (
-                  <option key={key} value={key}>
-                    {m?.name || key}
+                {ITEM_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {ITEM_TYPE_LABELS[t]}
                   </option>
                 ))}
               </select>
             </Field>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Link this item to the quote price book so accepted quotes reserve it
-              and received purchase orders stock it in.
-            </p>
+            {isElevated && (
+              <Field label="Reserved quantity">
+                <input
+                  className={inputCls}
+                  type="number"
+                  value={quantityReserved}
+                  onChange={(e) => setQuantityReserved(e.target.value)}
+                />
+              </Field>
+            )}
+            <div className="sm:col-span-2">
+              <Field label="Quote material (optional)">
+                <select
+                  className={inputCls}
+                  value={materialKey}
+                  onChange={(e) => setMaterialKey(e.target.value)}
+                >
+                  <option value="">— Not a quoted material —</option>
+                  {Object.entries(materials).map(([key, m]) => (
+                    <option key={key} value={key}>
+                      {m?.name || key}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Link this item to the quote price book so accepted quotes reserve it
+                and received purchase orders stock it in.
+              </p>
+            </div>
+            <div className="sm:col-span-2 lg:col-span-4">
+              <Field label="Notes">
+                <textarea
+                  className={cn(inputCls, "h-24 resize-y py-2")}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Anything workers should know about this item…"
+                />
+              </Field>
+            </div>
           </div>
-        </div>
-      </Section>
-
-      {/* Notes */}
-      <Section title="Notes">
-        <textarea
-          className={cn(inputCls, "h-24 resize-y py-2")}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Anything workers should know about this item…"
-        />
-      </Section>
+        </Section>
+      )}
 
       <div className="sticky bottom-0 flex justify-end gap-3 border-t border-border bg-background/80 py-4 backdrop-blur">
         <button

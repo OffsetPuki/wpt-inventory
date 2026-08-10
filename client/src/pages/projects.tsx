@@ -8,6 +8,7 @@ import type { Project, ProjectStatus } from "@shared/schema";
 import type { Client } from "@shared/crm-schema";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import InlineNewClient from "@/components/InlineNewClient";
 import FromTemplateDialog from "@/components/FromTemplateDialog";
 import { cn } from "@/lib/utils";
 import { Sparkles, Plus, FolderKanban, Loader2, Search } from "lucide-react";
@@ -86,7 +87,7 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">CRM client (optional)</span>
+          <span className="text-sm font-medium text-foreground">Client</span>
           <select
             className={inputCls}
             value={clientId ?? ""}
@@ -105,6 +106,12 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
               </option>
             ))}
           </select>
+          <InlineNewClient
+            onCreated={(c) => {
+              setClientId(c.id);
+              setCustomer(c.name);
+            }}
+          />
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Customer name (optional)</span>
