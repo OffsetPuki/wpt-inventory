@@ -53,6 +53,16 @@ try {
   /* column already exists */
 }
 
+// Additive migration: the machine-readable design state (JSON
+// '{ "type": "fence", "state": {...} }') the configurators already build for
+// live ballparks now rides along on submit — importing a design reads this
+// instead of reverse-parsing the localized prose spec.
+try {
+  sqlite.exec("ALTER TABLE web_designs ADD COLUMN design_state TEXT");
+} catch {
+  /* column already exists */
+}
+
 // ─── Design PNG snapshots ────────────────────────────────────────────────────
 // The website sends the configurator preview as a data:image/png base64 URL.
 // Same uploads dir + filename style as the multer photo flow in routes.ts, so
@@ -107,6 +117,9 @@ const intakeSchema = z.object({
   designRef: z.string().trim().max(40).optional(),
   designSource: z.string().trim().max(100).optional(),
   designSpec: z.string().trim().max(8000).optional(),
+  // Machine-readable twin of designSpec ('{"type":"fence","state":{...}}').
+  // Stored verbatim; the importer JSON.parses it defensively.
+  designState: z.string().trim().max(16000).optional(),
   contact: z.string().trim().max(60).optional(),
   bestTime: z.string().trim().max(120).optional(),
   consent: z.string().trim().max(10).optional(),
@@ -197,6 +210,10 @@ export function webDesignRowToLead(d: any) {
     consent: d.consent ?? "",
     source: d.source_tool ?? "",
     designSpec: d.design_spec ?? "",
+    // Raw JSON string ('{"type":"fence","state":{...}}') when the website sent
+    // one — the builder imports this directly and only falls back to parsing
+    // designSpec prose for pre-designState rows.
+    designState: d.design_state ?? "",
     notes: "",
     lang: d.lang ?? "en",
   };
@@ -327,10 +344,12 @@ export function registerPublicRoutes(app: Express): void {
       sqlite.prepare(`
         INSERT INTO web_designs
           (ref, lead_id, name, phone, email, contact, best_time, service,
-           location, consent, source_tool, design_spec, design_png_url, lang)
+           location, consent, source_tool, design_spec, design_state,
+           design_png_url, lang)
         VALUES
           (@ref, @leadId, @name, @phone, @email, @contact, @bestTime, @service,
-           @location, @consent, @sourceTool, @designSpec, @designPngUrl, @lang)
+           @location, @consent, @sourceTool, @designSpec, @designState,
+           @designPngUrl, @lang)
         ON CONFLICT(ref) DO UPDATE SET
           lead_id = excluded.lead_id, name = excluded.name,
           phone = excluded.phone, email = excluded.email,
@@ -338,7 +357,8 @@ export function registerPublicRoutes(app: Express): void {
           service = excluded.service, location = excluded.location,
           consent = excluded.consent, source_tool = excluded.source_tool,
           design_spec = excluded.design_spec,
-          -- A resubmit without a snapshot keeps the one we already saved.
+          -- A resubmit without state/snapshot keeps what we already saved.
+          design_state = COALESCE(excluded.design_state, design_state),
           design_png_url = COALESCE(excluded.design_png_url, design_png_url),
           lang = excluded.lang
       `).run({
@@ -354,6 +374,7 @@ export function registerPublicRoutes(app: Express): void {
         consent: body.consent ?? null,
         sourceTool: body.designSource ?? null,
         designSpec: body.designSpec ?? null,
+        designState: body.designState ?? null,
         designPngUrl: pngUrl,
         lang: body.lang ?? "en",
       });

@@ -22,7 +22,7 @@ import { insertNumbered } from "./finance";
 import { deriveItems, lineCost, buildLineState, materialTotals } from "../client/src/quote/lib/estimate.js";
 import { computeTotals } from "../client/src/quote/lib/quote.js";
 import { distributeToTotal } from "../client/src/quote/lib/calc.js";
-// The same three helpers PrintQuote.jsx uses to describe the design, so the
+// The same three helpers the builder uses to describe the design, so the
 // customer's web page and their PDF word the project identically.
 import { specRows, summaryLine, typeLabel } from "../client/src/quote/data/configurators.js";
 import { deepMerge, DEFAULT_SHOP, termLines } from "../client/src/quote/lib/store.js";
@@ -103,7 +103,7 @@ interface CalcTotals {
 }
 
 // ─── The customer's quote document ───────────────────────────────────────────
-// Rebuild what PrintQuote.jsx puts on the customer's PDF — the design spec, the
+// Build the customer's quote document — the design spec, the
 // itemized rows (material items with markup blended in, then labor / install /
 // delivery) and the totals ladder — from the stored builder session, so the web
 // page at /quote/<token> and the PDF are the same document.
@@ -164,7 +164,7 @@ function quoteDocument(quote: Quote): QuoteDoc | null {
     }) as unknown as CalcTotals;
     if (Math.round(totals.total * 100) !== quote.totalCents) return null;
 
-    // Same construction as PrintQuote.jsx: distribute the marked-up material
+    // Same construction as the builder's costing: distribute the marked-up material
     // total across the items so the parts sum exactly to the material line.
     const items: any[] = lineState.items || [];
     const prices = distributeToTotal(items.map((it) => lineCost(it)), totals.lines.material.total);
@@ -336,16 +336,19 @@ export function registerPublicPortalRoutes(app: Express): void {
   // The link the owner sends from the builder (POST /api/quotes/:id/share).
   // Drafts stay invisible even if a token somehow exists on one.
 
-  const findSharedQuote = (token: string): Quote | undefined => {
+  // allowDraft: the owner's preview flow (share {preview:true}) mints a token
+  // before sending and views the page with ?preview=1 — the only holder of a
+  // never-shared draft's token is the owner. Accept/asset routes never pass it.
+  const findSharedQuote = (token: string, allowDraft = false): Quote | undefined => {
     if (!TOKEN_RE.test(token)) return undefined;
     const quote = db.select().from(quotes)
       .where(and(eq(quotes.shareToken, token), isNull(quotes.deletedAt)))
       .get();
-    return quote && quote.status !== "draft" ? quote : undefined;
+    return quote && (allowDraft || quote.status !== "draft") ? quote : undefined;
   };
 
   app.get("/api/public/quote/:token", publicLimiter(120), (req, res) => {
-    const quote = findSharedQuote(String(req.params.token));
+    const quote = findSharedQuote(String(req.params.token), req.query.preview === "1");
     if (!quote) return res.status(404).json({ ok: false });
 
     const sess = parseJson<any>(quote.payload, {});

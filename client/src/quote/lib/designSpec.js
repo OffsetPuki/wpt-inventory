@@ -267,6 +267,28 @@ export function leadTool(lead) {
  * Returns null when the lead can't be mapped to a configurator at all.
  */
 export function parseLead(lead) {
+  // Preferred path: the website now sends the configurator's raw state as
+  // JSON ('{"type":"fence","state":{...}}') alongside the prose spec — same
+  // object its live-ballpark POST uses, so no reverse-parsing and no
+  // localization drift. Overlaid on defaults so missing fields stay sane.
+  // The prose parser below remains the fallback for pre-designState rows.
+  const rawState = String(lead?.designState || '').trim();
+  if (rawState) {
+    try {
+      const parsed = JSON.parse(rawState);
+      if (parsed && TOOLS[parsed.type] && parsed.state && typeof parsed.state === 'object') {
+        return {
+          type: parsed.type,
+          state: { ...defaultState(parsed.type), ...parsed.state },
+          warnings: [],
+          hasSpec: true,
+        };
+      }
+    } catch {
+      /* malformed JSON — fall through to the prose parser */
+    }
+  }
+
   const type = leadTool(lead);
   if (!type) return null;
 

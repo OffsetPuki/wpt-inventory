@@ -118,9 +118,9 @@ export default function QuoteForm({
               </div>
             </div>
             <button className="btn block" onClick={onPreview}>
-              Preview &amp; download PDF <span aria-hidden="true">→</span>
+              Preview the customer&apos;s page <span aria-hidden="true">→</span>
             </button>
-            <p className="hint">The customer PDF shows priced line items, subtotal, tax and total — never your cost basis or markup.</p>
+            <p className="hint">Opens the quote exactly as the customer will see it (print / Save as PDF from there) — priced line items, subtotal, tax and total, never your cost basis or markup.</p>
             {/* quoteId exists once the auto-save returns — that's when there's
                 a row for the website link to point at. */}
             {quoteId && (

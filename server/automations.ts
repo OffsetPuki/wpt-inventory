@@ -4,7 +4,7 @@ import path from "path";
 import { sqlite, storage } from "./storage";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
-import { renderTemplate, runCustomEmailSweep, firstNameOf } from "./email-templates";
+import { renderTemplate, runCustomEmailSweep, firstNameOf, shopSignoff } from "./email-templates";
 import { ymdLocal as localDate, fmtUsd } from "./http-util";
 // Leaf module like mailer — snapshot/rotation mechanics live there, the
 // scheduling (nightly + weekly offsite, steps 21/21b) lives here.
@@ -451,7 +451,7 @@ function runBusinessSweep(): void {
             `30 seconds:\n\n` +
             `${PUBLIC_SITE_URL}/review/${rr.token}\n\n` +
             `Thank you!\n\n` +
-            `— CJM Metals · Arlington, TX`,
+            shopSignoff(),
         });
         if (ok) {
           sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")

@@ -485,6 +485,18 @@ export function registerQuoteRoutes(app: Express): void {
     if (!quote) return res.status(404).json({ message: "Quote not found" });
 
     const token = quote.shareToken ?? crypto.randomBytes(24).toString("hex");
+
+    // Preview: mint the link with NONE of the send side effects — no
+    // draft→sent flip, no CRM bridge, no follow-up ladder, no email. The
+    // public endpoint only serves a draft when the URL carries ?preview=1,
+    // and the token itself hasn't left the shop yet.
+    if (req.body?.preview) {
+      if (!quote.shareToken) {
+        db.update(quotes).set({ shareToken: token }).where(eq(quotes.id, id)).run();
+      }
+      return res.json({ url: `${PUBLIC_SITE_URL}/quote/${token}?preview=1`, emailed: false });
+    }
+
     const updates: Partial<typeof quotes.$inferInsert> = { shareToken: token };
     if (quote.status === "draft") {
       updates.status = "sent";

@@ -30,7 +30,6 @@ import {
 import Home from './components/Home.jsx';
 import Configurator from './components/Configurator.jsx';
 import QuoteForm from './components/QuoteForm.jsx';
-import PrintQuote from './components/PrintQuote.jsx';
 import PriceBookPanel from './components/PriceBookPanel.jsx';
 import FindDesign from './components/FindDesign.jsx';
 import SavedQuotes from './components/SavedQuotes.jsx';
@@ -155,23 +154,12 @@ export default function QuoteBuilder({ initialSettings }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The suite shell (sidebar, padding) steps aside for this page: qa-page
-  // removes the content padding; qa-printing hides the shell chrome so the
-  // printable quote is the only thing on paper.
+  // removes the content padding. (The printable document itself lives on the
+  // website — cjmmetals.com/quote/<token> — so there is no in-app print view.)
   useEffect(() => {
     document.body.classList.add('qa-page');
-    return () => { document.body.classList.remove('qa-page', 'qa-printing'); };
+    return () => { document.body.classList.remove('qa-page'); };
   }, []);
-  useEffect(() => {
-    document.body.classList.toggle('qa-printing', view === 'print');
-    if (view !== 'print') return;
-    // @page can't be scoped by selector, so keep the quote's 18mm print
-    // margins mounted only while the print view is open — printing any other
-    // suite page keeps the browser's default margins.
-    const style = document.createElement('style');
-    style.textContent = '@media print { @page { margin: 18mm; } }';
-    document.head.appendChild(style);
-    return () => { style.remove(); };
-  }, [view]);
 
   // ── Auto-save to the suite ──────────────────────────────────────────────────
   // First save (entering details) creates the row and brings back the server-
@@ -279,6 +267,25 @@ export default function QuoteBuilder({ initialSettings }) {
     saveQuote.mutate({ sess, totalCents: Math.round((totals?.total ?? 0) * 100) });
   };
   persistQuoteRef.current = persistQuote;
+
+  // The customer's page on cjmmetals.com is the ONE rendering of the quote
+  // document (print/PDF included). Preview mints the share token WITHOUT the
+  // send side effects (?preview=1 lets the site show a still-draft quote);
+  // actually sending it stays in the Share panel.
+  const openCustomerPage = async () => {
+    persistQuote();
+    const id = session?.quoteId;
+    if (!id) {
+      toast({ title: 'Saving the quote…', description: 'One second — try Preview again once the quote number appears.' });
+      return;
+    }
+    try {
+      const res = await (await apiRequest('POST', `/api/quotes/${id}/share`, { preview: true })).json();
+      window.open(res.url, '_blank', 'noopener');
+    } catch (e) {
+      toast({ variant: 'destructive', title: 'Could not open the preview', description: e?.message });
+    }
+  };
 
   // ── Session mutators ────────────────────────────────────────────────────────
   const patchSession = (patch) => setSession((s) => ({ ...s, ...patch }));
@@ -434,7 +441,7 @@ export default function QuoteBuilder({ initialSettings }) {
     }
   };
 
-  const inQuoteFlow = view === 'home' || view === 'configure' || view === 'details' || view === 'print';
+  const inQuoteFlow = view === 'home' || view === 'configure' || view === 'details';
 
   // Guard: flow views need a session.
   const activeView = (inQuoteFlow && view !== 'home' && !session) ? 'home' : view;
@@ -520,38 +527,9 @@ export default function QuoteBuilder({ initialSettings }) {
             onChangeAttachments={(v) => patchSession({ attachments: v })}
             onChangeDeposit={(v) => patchSession({ depositPct: v })}
             onBack={() => setView('configure')}
-            onPreview={() => { setView('print'); persistQuote(); }}
+            onPreview={openCustomerPage}
             onPersist={persistQuote}
           />
-        )}
-
-        {activeView === 'print' && session && (
-          <>
-            <div className="print-toolbar no-print">
-              <button className="btn ghost" onClick={() => setView('details')}>← Back to details</button>
-              <button className="btn" onClick={() => window.print()}>Print / Save as PDF</button>
-              <span className="hint">
-                {session.number
-                  ? 'Choose "Save as PDF" in the dialog to send the customer a file.'
-                  : '⚠ Not saved to the suite yet — the quote number appears once it saves. Go back and forward to retry.'}
-              </span>
-            </div>
-            <PrintQuote
-              shop={shop}
-              type={session.type}
-              state={session.state}
-              designRef={session.designRef}
-              customer={session.customer}
-              notes={session.notes}
-              depositPct={session.depositPct}
-              features={session.features}
-              attachments={session.attachments}
-              number={session.number || '—'}
-              createdAt={session.createdAt}
-              lineState={lineState}
-              totals={totals}
-            />
-          </>
         )}
 
         {activeView === 'pricebook' && (

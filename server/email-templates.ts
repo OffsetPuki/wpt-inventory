@@ -70,7 +70,27 @@ export interface BuiltIn {
   mustInclude?: string;
 }
 
-const SIGNOFF = "— CJM Metals · Arlington, TX";
+// Shop identity lives in quote_settings.shop (owner-edited in the Price Book
+// screen) — one place to change the name/city everywhere mail is signed. The
+// literal is only the pre-settings fallback.
+export function shopSignoff(): string {
+  try {
+    const row = sqlite.prepare("SELECT shop FROM quote_settings WHERE id = 1").get() as
+      | { shop?: string }
+      | undefined;
+    const shop = row?.shop ? JSON.parse(row.shop) : null;
+    const name = typeof shop?.name === "string" ? shop.name.trim() : "";
+    const location = typeof shop?.location === "string" ? shop.location.trim() : "";
+    if (name) return `— ${name}${location ? ` · ${location}` : ""}`;
+  } catch {
+    /* quote_settings not created yet */
+  }
+  return "— CJM Metals · Arlington, TX";
+}
+
+// Rendered lazily per send via the auto-injected {{signoff}} var, so a shop
+// rename reaches every default template without touching this file.
+const SIGNOFF = "{{signoff}}";
 
 export const BUILT_INS: BuiltIn[] = [
   {
@@ -300,9 +320,12 @@ export function renderTemplate(
   }
 
   const optional = new Set((def?.vars ?? []).filter((v) => v.optional).map((v) => v.token));
+  // {{signoff}} is auto-supplied (callers never pass it) — an explicit var of
+  // the same name would win, which is fine.
+  const allVars = { signoff: shopSignoff(), ...vars };
   return {
-    subject: render(subjectSrc, vars, optional).trim(),
-    text: render(bodySrc, vars, optional),
+    subject: render(subjectSrc, allVars, optional).trim(),
+    text: render(bodySrc, allVars, optional),
     // Rides along into sendMail so the sent history knows which email this was.
     template: id,
   };
