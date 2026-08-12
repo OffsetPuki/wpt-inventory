@@ -233,6 +233,64 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
                 onChange={(e) => onChangeShop('terms', e.target.value)}
               />
             </div>
+
+            <div style={{ marginTop: 18 }}>
+              <span className="pb-label">Invoice terms</span>
+              <p className="note" style={{ margin: '4px 0 8px' }}>
+                The small print at the foot of every invoice — one term per line. An
+                invoice is a bill, not an offer, so these are separate from the quote
+                terms above.
+              </p>
+              <textarea
+                className="pb-input"
+                style={{ width: '100%', textAlign: 'left', minHeight: '4.5rem', lineHeight: 1.5, resize: 'vertical' }}
+                value={shop.invoiceTerms ?? ''}
+                placeholder={DEFAULT_SHOP.invoiceTerms}
+                onChange={(e) => onChangeShop('invoiceTerms', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="pb-group">
+            <h3>Where customers send payment</h3>
+            <p className="note">
+              Printed on every invoice for anyone paying by bank transfer or ACH — never
+              on a quote. Leave the fields blank and the block is left off. Customers
+              paying by card, Apple&nbsp;Pay or Google&nbsp;Pay use the Pay button
+              instead and never see this.
+            </p>
+            {[
+              ['accountName', 'Account name'],
+              ['bankName', 'Bank'],
+              ['routing', 'Routing number (ACH)'],
+              ['account', 'Account number'],
+              ['accountType', 'Account type'],
+            ].map(([key, label]) => (
+              <div key={key} className="pb-field">
+                <span className="pb-label">{label}</span>
+                <input
+                  className="pb-input"
+                  style={{ width: '13rem', textAlign: 'right' }}
+                  value={(shop.bank || {})[key] || ''}
+                  onChange={(e) => onChangeShop(`bank.${key}`, e.target.value)}
+                />
+              </div>
+            ))}
+            <div style={{ marginTop: 14 }}>
+              <span className="pb-label">Note about the account name</span>
+              <p className="note" style={{ margin: '4px 0 8px' }}>
+                Only needed when the account is not in the business&rsquo;s name. Banks
+                reject transfers where the name doesn&rsquo;t match, so say plainly whose
+                name to enter.
+              </p>
+              <textarea
+                className="pb-input"
+                style={{ width: '100%', textAlign: 'left', minHeight: '3.5rem', lineHeight: 1.5, resize: 'vertical' }}
+                value={(shop.bank || {}).nameNote || ''}
+                placeholder="This account is held individually in the name of …, an owner of CJM Metals LLC. Enter the account name exactly as shown above, not the business name, or your bank may reject the transfer."
+                onChange={(e) => onChangeShop('bank.nameNote', e.target.value)}
+              />
+            </div>
           </div>
         </div>
 

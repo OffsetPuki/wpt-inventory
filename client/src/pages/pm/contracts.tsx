@@ -136,7 +136,7 @@ async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: a
   }
   if (c.body?.trim()) sections.push({ heading: "Additional Terms", text: c.body.trim() });
 
-  const contact = [shop.location, shop.phone, shop.email].filter(Boolean).join("    ·    ");
+  const contact = [shop.location, shop.phone, shop.email].filter(Boolean).join("  ·  ");
   const metaRows: [string, string][] = [
     ["Client", c.clientName || "—"],
     ...(c.projectName ? [["Project", c.projectName] as [string, string]] : []),
@@ -144,6 +144,32 @@ async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: a
     ["Effective date", effective],
     ...(c.endDate ? [["End date", formatDate(ymdToDate(c.endDate))] as [string, string]] : []),
   ];
+
+  // A ruled grey band, the same section marker the invoice and quote use. On
+  // paper it is what lets someone find one clause without reading the rest.
+  const bar = (text: string) => ({
+    table: { widths: ["*"], body: [[{ text: text.toUpperCase(), style: "secH" }]] },
+    layout: {
+      hLineWidth: () => 0,
+      vLineWidth: () => 0,
+      paddingTop: () => 4,
+      paddingBottom: () => 4,
+      paddingLeft: () => 8,
+      paddingRight: () => 8,
+      fillColor: () => "#EBEBEB",
+    },
+    margin: [0, 16, 0, 6],
+  });
+
+  // Label above value, the same "BILLED TO / PROJECT" block the invoice prints,
+  // instead of a bordered grid — the shop's paperwork doesn't box its facts in.
+  const factCol = (pairs: [string, string][]) => ({
+    width: "*",
+    stack: pairs.flatMap(([k, v]) => [
+      { text: k.toUpperCase(), style: "factK" },
+      { text: v, style: "factV" },
+    ]),
+  });
 
   const sigCol = (who: string) => ({
     width: "*",
@@ -159,9 +185,11 @@ async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: a
     pageSize: "LETTER",
     pageMargins: [54, 54, 54, 66],
     info: { title: `${kindLabel} — ${c.title}`, author: shop.name, subject: kindLabel },
+    // Carried identity + page count, worded like the invoice's printed footer:
+    // a sheet that arrives on its own still says what it belongs to.
     footer: (page: number, total: number) => ({
       columns: [
-        { text: `${shop.name} — ${kindLabel}`, style: "foot" },
+        { text: `${kindLabel} — ${c.title} · ${shop.name}`.toUpperCase(), style: "foot" },
         { text: `Page ${page} of ${total}`, style: "foot", alignment: "right" },
       ],
       margin: [54, 24, 54, 0],
@@ -180,48 +208,44 @@ async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: a
             stack: [
               { text: kindLabel.toUpperCase(), style: "kind", alignment: "right" },
               { text: today, style: "coSub", alignment: "right" },
+              // The quote this paperwork answers to, worded exactly as the
+              // invoice's "Ref." line — three documents on one job have to
+              // name each other or the customer can't file them together.
+              ...(c.quoteRef
+                ? [{ text: `Ref. Quote ${c.quoteRef}`, style: "coSub", alignment: "right" }]
+                : []),
             ],
           },
         ],
         columnGap: 16,
       },
-      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 504, y2: 0, lineWidth: 1.4 }], margin: [0, 12, 0, 20] },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 504, y2: 0, lineWidth: 1 }], margin: [0, 10, 0, 18] },
       { text: c.title, style: "h1" },
       {
         text:
           `This ${kindLabel} (the “Agreement”) is made as of ${effective} by and between ` +
           `${shop.name} (the “Provider”) and ${c.clientName || "the Client"} (the “Client”).`,
-        margin: [0, 10, 0, 2],
+        margin: [0, 8, 0, 2],
         lineHeight: 1.35,
       },
+      // The facts, split into two columns like the invoice's parties block.
       {
-        table: {
-          widths: [132, "*"],
-          body: metaRows.map(([k, v]) => [
-            { text: k.toUpperCase(), style: "metaK" },
-            { text: v, style: "metaV" },
-          ]),
-        },
-        layout: {
-          hLineColor: () => "#BBBBBB",
-          vLineColor: () => "#BBBBBB",
-          hLineWidth: () => 0.7,
-          vLineWidth: () => 0.7,
-          paddingTop: () => 5,
-          paddingBottom: () => 5,
-          paddingLeft: () => 8,
-          paddingRight: () => 8,
-          fillColor: (_row: number, _node: unknown, col: number) => (col === 0 ? "#F3F1EC" : null),
-        },
-        margin: [0, 14, 0, 4],
+        columns: [
+          factCol(metaRows.slice(0, Math.ceil(metaRows.length / 2))),
+          factCol(metaRows.slice(Math.ceil(metaRows.length / 2))),
+        ],
+        columnGap: 28,
+        margin: [0, 16, 0, 2],
       },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 504, y2: 0, lineWidth: 0.5, lineColor: "#D6D5D2" }], margin: [0, 14, 0, 0] },
       ...sections.flatMap((s, i) => [
-        { text: `${i + 1}.  ${s.heading.toUpperCase()}`, style: "secH" },
+        bar(`${i + 1}.  ${s.heading}`),
         { text: s.text, style: "secBody" },
       ]),
+      bar("Signatures"),
       {
         text: "Agreed and accepted by the parties as of the dates written below.",
-        margin: [0, 28, 0, 0],
+        margin: [0, 6, 0, 0],
       },
       {
         columns: [sigCol(`${shop.name} — Authorized signature`), sigCol(`${c.clientName || "Client"} — Signature`)],
@@ -229,19 +253,25 @@ async function makeContractPdf(c: ContractRow, shop: ShopInfo): Promise<{ pdf: a
         unbreakable: true,
       },
     ],
+    // The same scale and palette the printed quote and invoice use (see the
+    // website's src/styles/quote-doc.css @media print block), converted px→pt.
+    // Ink #0a0a0a, muted #6b6b68, hairline #d6d5d2 — so the three documents
+    // read as one shop's paperwork even though this one is drawn by pdfmake
+    // and those two are HTML. Fraunces isn't embedded: shipping a display face
+    // in the bundle to set two headings is not worth the weight.
     styles: {
-      co: { fontSize: 15, bold: true, characterSpacing: 0.6 },
-      coSub: { fontSize: 8.5, color: "#555555", margin: [0, 3, 0, 0] },
-      kind: { fontSize: 9, color: "#555555", characterSpacing: 1.4 },
-      h1: { fontSize: 16, bold: true },
-      metaK: { fontSize: 7.5, color: "#555555", characterSpacing: 0.6, margin: [0, 1.5, 0, 0] },
-      metaV: { fontSize: 10 },
-      secH: { fontSize: 10, bold: true, characterSpacing: 0.7, margin: [0, 16, 0, 4] },
-      secBody: { fontSize: 10.5, lineHeight: 1.35, preserveLeadingSpaces: true },
-      sigLbl: { fontSize: 7.5, color: "#555555", characterSpacing: 0.6 },
-      foot: { fontSize: 7.5, color: "#888888" },
+      co: { fontSize: 15, bold: true, characterSpacing: 0.4, color: "#0A0A0A" },
+      coSub: { fontSize: 8.6, color: "#6B6B68", margin: [0, 3, 0, 0] },
+      kind: { fontSize: 8, color: "#6B6B68", characterSpacing: 2.4 },
+      h1: { fontSize: 15, bold: true, color: "#0A0A0A" },
+      factK: { fontSize: 7.2, color: "#6B6B68", characterSpacing: 1.7, margin: [0, 8, 0, 3] },
+      factV: { fontSize: 10.5, color: "#0A0A0A" },
+      secH: { fontSize: 7.2, color: "#4A4A48", characterSpacing: 1.7 },
+      secBody: { fontSize: 10.2, lineHeight: 1.4, preserveLeadingSpaces: true, color: "#0A0A0A" },
+      sigLbl: { fontSize: 7.2, color: "#6B6B68", characterSpacing: 1.7 },
+      foot: { fontSize: 7.2, color: "#6B6B68", characterSpacing: 1.3 },
     },
-    defaultStyle: { fontSize: 10.5, lineHeight: 1.3 },
+    defaultStyle: { fontSize: 10.2, lineHeight: 1.35, color: "#0A0A0A" },
   };
 
   const file = `${kindLabel} - ${c.title}`.replace(/[\\/:*?"<>|]+/g, "").slice(0, 80).trim() + ".pdf";

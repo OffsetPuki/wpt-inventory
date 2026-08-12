@@ -4,7 +4,10 @@ import rateLimit from "express-rate-limit";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, sqlite } from "./storage";
 import { hasLeadKey } from "./public-api";
-import { currentShop } from "./public-portal";
+import { currentShop, currentShopInvoice, quoteDocument } from "./public-portal";
+import { quotes } from "../shared/quote-schema";
+import { clients } from "../shared/crm-schema";
+import { contracts } from "../shared/pm-schema";
 // payInFullDiscountBp: the owner-editable rate (Finance → Billing markups),
 // shared with the invoice email that advertises the offer.
 import { presentInvoice, recordInvoicePayment, payInFullDiscountBp as discountBp } from "./finance";
@@ -114,6 +117,61 @@ const amountFor = (inv: Invoice, which: string): number => {
   if (which === "full" && full) return full.totalCents;
   return which === "deposit" && depositCents > 0 ? depositCents : balanceCents;
 };
+
+// ─── The rest of the document ────────────────────────────────────────────────
+// An invoice on its own is a number and some line items. What makes it read
+// like the shop's own paperwork — who it's for in full, what the job actually
+// is, which quote and contract it answers to — lives in records beside it.
+// All of it degrades to null: an invoice typed by hand with no quote behind it
+// still prints, just with fewer blocks.
+
+function billTo(inv: Invoice) {
+  if (inv.clientId == null) return { name: inv.clientName ?? "", lines: [] as string[] };
+  const c = db.select().from(clients).where(eq(clients.id, inv.clientId)).get();
+  if (!c) return { name: inv.clientName ?? "", lines: [] as string[] };
+  // Street, then "City, ZIP", then contact — the shape an envelope wants.
+  const cityZip = [c.city, c.zip].filter(Boolean).join(", ");
+  return {
+    name: c.name || inv.clientName || "",
+    lines: [
+      c.company,
+      c.address,
+      cityZip,
+      [c.phone, c.email].filter(Boolean).join("  ·  "),
+    ].filter((l): l is string => !!l && l.trim().length > 0),
+  };
+}
+
+/**
+ * The quote this invoice bills against: the job in the customer's own words,
+ * the full contract price, and the reference codes. Deposit invoices lean on
+ * this — without it a $2,266 deposit reads as the whole price of the job.
+ */
+function fromQuote(inv: Invoice) {
+  if (inv.quoteId == null) return null;
+  const quote = db.select().from(quotes)
+    .where(and(eq(quotes.id, inv.quoteId), isNull(quotes.deletedAt)))
+    .get();
+  if (!quote) return null;
+  const doc = quoteDocument(quote);
+  // The signed paperwork behind the job, if there is any. quote_ref is how the
+  // contracts module already points back at a quote.
+  const contract = db.select({ title: contracts.title, id: contracts.id })
+    .from(contracts)
+    .where(and(eq(contracts.quoteRef, quote.number), isNull(contracts.deletedAt)))
+    .get();
+  return {
+    quoteNumber: quote.number,
+    designRef: quote.designRef,
+    contractTitle: contract?.title ?? null,
+    contractCents: quote.totalCents,
+    project: {
+      label: doc?.project.label ?? "",
+      summary: doc?.project.summary ?? "",
+      specs: (doc?.specs ?? []).slice(0, 14),
+    },
+  };
+}
 
 const findInvoice = (token: string): Invoice | undefined => {
   if (!TOKEN_RE.test(token)) return undefined;
@@ -247,6 +305,13 @@ export function registerPayRoutes(app: Express): void {
           && inv.status !== "void"
           && inv.status !== "paid",
         shop: currentShop(),
+        // Bank remit-to + the invoice's own small print. Bank details are
+        // printed for anyone paying by transfer; the Pay button covers cards.
+        pay: currentShopInvoice(),
+        billTo: billTo(inv),
+        // Null when the invoice wasn't raised from a quote — the document
+        // simply drops the project block and the contract-price ladder.
+        quote: fromQuote(inv),
         createdAt: inv.createdAt.getTime(),
         sentAt: inv.sentAt,
       },

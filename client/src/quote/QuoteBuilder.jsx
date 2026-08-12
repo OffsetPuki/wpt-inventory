@@ -455,7 +455,12 @@ export default function QuoteBuilder({ initialSettings }) {
       return next;
     });
   };
-  const updateShop = (field, value) => { settingsDirty.current = true; setShop((sh) => ({ ...sh, [field]: value })); };
+  // Dot-paths ('bank.routing') go through setPath — a flat spread would create
+  // a literal "bank.routing" key and the nested value would never be read back.
+  const updateShop = (field, value) => {
+    settingsDirty.current = true;
+    setShop((sh) => (field.includes('.') ? setPath(sh, field, value) : { ...sh, [field]: value }));
+  };
   const resetPriceBook = () => {
     if (window.confirm('Reset all rates to the defaults?')) {
       settingsDirty.current = true;

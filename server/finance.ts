@@ -135,6 +135,9 @@ for (const ddl of [
   "ALTER TABLE fin_invoices ADD COLUMN share_token TEXT",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_invoices_share ON fin_invoices(share_token)",
   "ALTER TABLE fin_invoices ADD COLUMN discount_cents INTEGER",
+  // The quote this invoice bills against — see shared/finance-schema.ts.
+  "ALTER TABLE fin_invoices ADD COLUMN quote_id INTEGER",
+  "CREATE INDEX IF NOT EXISTS idx_fin_invoices_quote ON fin_invoices(quote_id)",
   // NOTE: fin_settings is created BELOW, so its own migration lives after it —
   // an ALTER here would silently no-op on a fresh install and the column would
   // never exist.

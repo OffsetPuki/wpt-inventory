@@ -52,7 +52,49 @@ export const DEFAULT_SHOP = {
   // the Price Book. Printed on the PDF and on the customer's web page.
   terms: 'Quote valid for 30 days. Final price confirmed after an on-site measure.\n'
     + 'Permit, engineering and HOA approval by others unless itemized above.',
+  // The small print at the foot of an INVOICE — a bill, not an offer, so it
+  // says nothing about the price still standing. One term per line.
+  invoiceTerms: 'Payment is due by the date shown above.\n'
+    + 'Work is scheduled against cleared funds; a late deposit moves the start date by the length of the delay.',
+  // Where a customer paying by transfer sends the money. Printed on the invoice
+  // (and only the invoice — a quote is not a request for payment). Every field
+  // blank = the remit-to block is left off entirely.
+  bank: {
+    accountName: '',
+    bankName: '',
+    routing: '',
+    account: '',
+    accountType: 'Checking',
+    // Shown under the details when the account is not in the business's name —
+    // banks reject transfers whose name doesn't match, so the customer has to
+    // be told which name to type.
+    nameNote: '',
+  },
 };
+
+/** The shop's invoice terms as printable lines (blank lines dropped). */
+export function invoiceTermLines(shop) {
+  return String((shop && shop.invoiceTerms) ?? '')
+    .split('\n')
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/** Remit-to details, or null when the owner hasn't filled them in. */
+export function bankBlock(shop) {
+  const b = (shop && shop.bank) || {};
+  const has = ['accountName', 'bankName', 'routing', 'account'].some((k) => String(b[k] ?? '').trim());
+  return has
+    ? {
+        accountName: String(b.accountName ?? '').trim(),
+        bankName: String(b.bankName ?? '').trim(),
+        routing: String(b.routing ?? '').trim(),
+        account: String(b.account ?? '').trim(),
+        accountType: String(b.accountType ?? '').trim(),
+        nameNote: String(b.nameNote ?? '').trim(),
+      }
+    : null;
+}
 
 /** The shop's quote terms as printable lines (blank lines dropped). */
 export function termLines(shop) {

@@ -11,7 +11,9 @@ import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
 import { reviews, marketingSettings } from "../shared/marketing-schema";
 import { pmTasks } from "../shared/pm-schema"; // Package C: tasks live on the pm board
-import { todayLocal } from "./http-util";
+import { todayLocal, pid } from "./http-util";
+import { requireElevated } from "./auth";
+import { clients } from "../shared/crm-schema";
 import { invoices } from "../shared/finance-schema";
 import { projects } from "../shared/schema";
 import { onQuoteEvent, findOrCreateClientByContact, logEmailActivity } from "./crm";
@@ -25,7 +27,7 @@ import { distributeToTotal } from "../client/src/quote/lib/calc.js";
 // The same three helpers the builder uses to describe the design, so the
 // customer's web page and their PDF word the project identically.
 import { specRows, summaryLine, typeLabel } from "../client/src/quote/data/configurators.js";
-import { deepMerge, DEFAULT_SHOP, termLines } from "../client/src/quote/lib/store.js";
+import { deepMerge, DEFAULT_SHOP, termLines, invoiceTermLines, bankBlock } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 
 // ─── Public portal: the website's customer-facing endpoints ─────────────────
@@ -67,6 +69,26 @@ export function currentShop(): {
     // The owner's own small print (Price Book → Shop details), one term per
     // line, so the online quote reads exactly like the PDF.
     terms: termLines(shop).slice(0, 8).map((t: string) => t.slice(0, 300)),
+  };
+}
+
+// Invoice-only shop settings. Deliberately NOT part of currentShop(): a quote
+// is an offer, not a request for payment, and printing bank details on one
+// invites a customer to pay against a price that hasn't been agreed yet.
+export function currentShopInvoice(): {
+  terms: string[];
+  bank: {
+    accountName: string; bankName: string; routing: string;
+    account: string; accountType: string; nameNote: string;
+  } | null;
+} {
+  const row = sqlite.prepare(
+    "SELECT shop FROM quote_settings WHERE id = 1",
+  ).get() as { shop?: string } | undefined;
+  const shop = deepMerge(DEFAULT_SHOP, parseJson<Record<string, unknown>>(row?.shop, {}));
+  return {
+    terms: invoiceTermLines(shop).slice(0, 8).map((t: string) => t.slice(0, 300)),
+    bank: bankBlock(shop),
   };
 }
 
@@ -118,7 +140,7 @@ interface CalcTotals {
 // ⚠ Customer-visible. Send ONLY what the printed quote shows: never the cost
 // basis, markup %, labor hours, material unit costs or the shop's buy list.
 
-interface QuoteDoc {
+export interface QuoteDoc {
   designRef: string | null;
   customer: { name: string; company: string; location: string; phone: string; email: string };
   project: { label: string; summary: string };
@@ -144,7 +166,7 @@ const cents = (n: number): number => Math.round((Number(n) || 0) * 100);
 const str = (v: unknown, max = 200): string =>
   typeof v === "string" ? v.slice(0, max) : "";
 
-function quoteDocument(quote: Quote): QuoteDoc | null {
+export function quoteDocument(quote: Quote): QuoteDoc | null {
   try {
     const sess = parseJson<any>(quote.payload, null);
     if (!sess || typeof sess !== "object" || !sess.state) return null;
@@ -329,6 +351,98 @@ export function registerPublicPortalRoutes(app: Express): void {
         { key: "quoted", at: iso(quoted?.sentAt), done: !!quoted },
         { key: "accepted", at: iso(accepted?.acceptedAt), done: !!accepted },
       ],
+    });
+  });
+
+  // ─── Fill an invoice from its quote (owner-only) ──────────────────────────
+  // Not a public route — it lives here because quoteDocument() does, and
+  // importing that into finance.ts would close an import cycle
+  // (public-portal already pulls insertNumbered out of finance).
+  //
+  // Returns a ready-to-use draft for the New Invoice form: the customer, the
+  // job's own words, the priced lines and the deposit the customer already
+  // agreed to. Nothing is written — the owner still reviews and saves.
+  app.get("/api/finance/invoice-prefill/:quoteId", requireElevated, (req, res) => {
+    const quote = db.select().from(quotes)
+      .where(and(eq(quotes.id, pid(req.params.quoteId)), isNull(quotes.deletedAt)))
+      .get();
+    if (!quote) return res.status(404).json({ message: "Quote not found" });
+
+    const doc = quoteDocument(quote);
+    const sess = parseJson<any>(quote.payload, {});
+    const taxPct = Number(sess?.taxPct);
+
+    // Bill the whole job as its own priced lines when they reconcile to the
+    // cent against what the customer was told. A quote carrying a discount or
+    // a minimum-job adjustment can't be expressed as non-negative line items,
+    // so those fall back to one line at the quote total — the invoice must
+    // never disagree with the quote the customer accepted.
+    const rows = doc ? [...doc.materials, ...doc.services] : [];
+    const lineSum = rows.reduce((s, r) => s + r.amountCents, 0);
+    const taxable = Number.isFinite(taxPct) && taxPct > 0 ? taxPct : 0;
+    const reconciles =
+      rows.length > 0
+      && lineSum + Math.round((lineSum * taxable) / 100) === quote.totalCents;
+
+    const fullItems = reconciles
+      ? rows.map((r) => ({ description: r.name, qty: 1, unitPriceCents: r.amountCents }))
+      // Tax is already inside quote.totalCents here, so the fallback line
+      // carries the whole figure and the invoice's own tax rate stays 0.
+      : [{ description: `Per quote ${quote.number}`, qty: 1, unitPriceCents: quote.totalCents }];
+    const fullTaxPct = reconciles ? taxable : 0;
+
+    // The deposit the customer saw on the shared quote. Its line is the whole
+    // amount due now — the contract price (tax included) is what the deposit is
+    // a percentage OF, so this invoice adds no tax of its own.
+    const depositPct = doc?.totals.depositPct ?? 0;
+    const depositCents = doc?.totals.depositCents ?? 0;
+
+    // An existing CRM client, looked up but never created — creating one as a
+    // side effect of opening a form would litter the CRM with every quote the
+    // owner merely previewed.
+    const cust = doc?.customer ?? { name: quote.customerName, email: "", phone: "" };
+    const client = (cust.email || cust.phone)
+      ? db.select({ id: clients.id, name: clients.name }).from(clients)
+          .where(and(
+            isNull(clients.deletedAt),
+            cust.email
+              ? eq(sql`lower(${clients.email})`, cust.email.trim().toLowerCase())
+              : eq(clients.phone, cust.phone),
+          ))
+          .get()
+      : undefined;
+
+    // The job in Projects, if the accept hook already made one.
+    const project = sqlite.prepare(
+      "SELECT id FROM projects WHERE job_number = ? AND deleted_at IS NULL",
+    ).get(quote.number) as { id: number } | undefined;
+
+    res.json({
+      quoteId: quote.id,
+      quoteNumber: quote.number,
+      designRef: quote.designRef,
+      clientId: client?.id ?? null,
+      clientName: client?.name ?? quote.customerName,
+      projectId: project?.id ?? null,
+      project: {
+        label: doc?.project.label ?? QUOTE_TYPE_LABELS[quote.type],
+        summary: doc?.project.summary ?? "",
+        specs: doc?.specs ?? [],
+      },
+      contractCents: quote.totalCents,
+      full: { items: fullItems, taxPct: fullTaxPct },
+      deposit: depositCents > 0
+        ? {
+            pct: depositPct,
+            items: [{
+              description: `Deposit — ${depositPct}% of contract price`,
+              qty: 1,
+              unitPriceCents: depositCents,
+            }],
+            taxPct: 0,
+            balanceCents: quote.totalCents - depositCents,
+          }
+        : null,
     });
   });
 

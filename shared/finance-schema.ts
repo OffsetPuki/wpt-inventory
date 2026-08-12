@@ -89,6 +89,12 @@ export const invoices = sqliteTable("fin_invoices", {
   // Soft ref to crm_leads (no FK — cross-module). Stamped by the quote-accept
   // hook so a fully paid invoice can push realized revenue back onto the lead.
   leadId: integer("lead_id"),
+  // Soft ref to quotes.id — the quote this invoice bills against. Set when the
+  // invoice was filled from a quote (or created by the accept hook). It is what
+  // lets the document print "Ref. Quote Q-…", carry the job's spec block, and
+  // show a deposit against the full contract price instead of pretending the
+  // deposit IS the price. No FK: cross-module, same stance as leadId.
+  quoteId: integer("quote_id"),
   // Bearer token for the customer's /invoice/<token> page on the website (and
   // its Pay button). 24 random bytes hex; minted on the first send and reused
   // forever after, so a link already in an inbox never goes dead. Nullable,
@@ -198,6 +204,10 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   // cents directly could desync the balance math from the stored total.
   retainageCents: true,
   retainageReleasedAt: true,
+  // Granted by the Stripe webhook alone (server/pay.ts) when a customer clears
+  // the whole invoice online. A client writing it would print a discount nobody
+  // gave and break subtotal − discount + tax = total on the document.
+  discountCents: true,
   createdAt: true,
   deletedAt: true,
   // Server-derived from items + taxRateBp — never client-writable, or the

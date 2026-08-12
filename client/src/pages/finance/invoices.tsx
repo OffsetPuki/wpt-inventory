@@ -179,6 +179,11 @@ function InvoiceFormModal({
   // Progress-billing helper inputs (Phase G #2).
   const [progressPct, setProgressPct] = useState("");
   const [progressAmount, setProgressAmount] = useState("");
+  // The quote this invoice bills against. Set by the fill-from-quote picker and
+  // carried to the server so the customer's document can print the project
+  // block, the quote/contract refs and the full contract price.
+  const [quoteId, setQuoteId] = useState<number | null>(null);
+  const [pickQuote, setPickQuote] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -207,6 +212,7 @@ function InvoiceFormModal({
           : ""
       );
       setNotes(invoice.notes ?? "");
+      setQuoteId(invoice.quoteId ?? null);
     } else {
       setClientId("");
       setClientName("");
@@ -218,9 +224,11 @@ function InvoiceFormModal({
       setTaxPct("0");
       setRetainagePct("");
       setNotes("");
+      setQuoteId(null);
     }
     setProgressPct("");
     setProgressAmount("");
+    setPickQuote("");
   }, [open, invoice]);
 
   const { data: clients = [] } = useQuery<Client[]>({
@@ -250,6 +258,62 @@ function InvoiceFormModal({
     (projSummary?.totals.contractCents ?? 0) + (projSummary?.totals.changeOrderCents ?? 0);
   const billedToDateCents = projSummary?.totals.invoicedCents ?? 0;
   const project = projects.find((p) => p.id === Number(projectId));
+
+  // Quotes worth billing: sent or accepted, newest first. A draft quote is not
+  // something to raise an invoice against.
+  const { data: quotesList = [] } = useQuery<
+    { id: number; number: string; customerName: string; status: string; totalCents: number }[]
+  >({
+    queryKey: ["quotes"],
+    queryFn: async () => (await apiRequest("GET", "/api/quotes")).json(),
+    enabled: open && !invoice,
+  });
+  const billable = quotesList.filter((q) => q.status === "sent" || q.status === "accepted");
+
+  // Pull the quote's own numbers into the form. `mode` picks WHAT to bill:
+  // the deposit the customer already agreed to, or the whole job.
+  const fillFromQuote = async (mode: "deposit" | "full") => {
+    const id = Number(pickQuote);
+    if (!id) return;
+    let d: any;
+    try {
+      d = await (await apiRequest("GET", `/api/finance/invoice-prefill/${id}`)).json();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not read that quote", description: e?.message });
+      return;
+    }
+    const src = mode === "deposit" ? d.deposit : d.full;
+    if (!src) {
+      toast({ variant: "destructive", title: "That quote has no deposit on it" });
+      return;
+    }
+    if (d.clientId) {
+      setClientId(String(d.clientId));
+      setFreeText(false);
+    } else {
+      setClientId("");
+      setClientName(d.clientName ?? "");
+      setFreeText(true);
+    }
+    if (d.projectId) setProjectId(String(d.projectId));
+    setDrafts(src.items.map((it: any) => ({
+      description: it.description,
+      qty: String(it.qty),
+      unitPrice: (it.unitPriceCents / 100).toFixed(2),
+    })));
+    setTaxPct(String(src.taxPct ?? 0));
+    setQuoteId(d.quoteId);
+    // The project block prints from the quote, so notes stay free for anything
+    // the owner wants to add — seeded with the job's own summary line.
+    if (!notes.trim()) {
+      setNotes([d.project?.label, d.project?.summary].filter(Boolean).join(" — "));
+    }
+    toast({
+      title: mode === "deposit"
+        ? `Deposit from ${d.quoteNumber} — ${formatMoney(src.items[0].unitPriceCents)}`
+        : `Filled from ${d.quoteNumber}`,
+    });
+  };
 
   const addProgressLine = () => {
     const pctIn = parseFloat(progressPct);
@@ -296,6 +360,7 @@ function InvoiceFormModal({
         // Server derives retainage_cents = round(total × pct); 0 clears it.
         retainagePct: projectId ? parseFloat(retainagePct) || 0 : undefined,
         notes: notes.trim() || null,
+        quoteId,
       };
       return invoice
         ? { method: "PATCH", url: `/api/finance/invoices/${invoice.id}`, body }
@@ -329,6 +394,51 @@ function InvoiceFormModal({
         }}
         className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
       >
+        {/* Fill from the quote — the fast path. Everything below is still
+            editable afterwards; this only saves the retyping, and it is what
+            lets the customer's invoice print the job, the quote reference and
+            the full contract price behind a deposit. */}
+        {!invoice && billable.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <p className="text-sm font-semibold text-foreground">Bill against a quote</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Pulls the customer, the job and the priced lines straight from the quote
+              they accepted.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                className={cn(inputCls, "flex-1 min-w-[14rem]")}
+                value={pickQuote}
+                onChange={(e) => setPickQuote(e.target.value)}
+              >
+                <option value="">— Pick a quote —</option>
+                {billable.map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.number} — {q.customerName} — {formatMoney(q.totalCents)}
+                    {q.status === "accepted" ? " (accepted)" : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!pickQuote}
+                onClick={() => fillFromQuote("deposit")}
+                className={cn(primaryBtn, "disabled:opacity-50")}
+              >
+                Bill the deposit
+              </button>
+              <button
+                type="button"
+                disabled={!pickQuote}
+                onClick={() => fillFromQuote("full")}
+                className={cn(secondaryBtn, "disabled:opacity-50")}
+              >
+                Bill in full
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Client</span>
