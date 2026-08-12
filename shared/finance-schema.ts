@@ -79,9 +79,21 @@ export const invoices = sqliteTable("fin_invoices", {
   // "Bill retainage" release invoice, which stamps retainage_released_at.
   retainageCents: integer("retainage_cents"),
   retainageReleasedAt: integer("retainage_released_at"), // unix ms
+  // Prompt-payment discount actually GRANTED when the customer cleared the
+  // whole invoice online in one go (server/pay.ts). Unlike retainage this is
+  // money never collected, so it is subtracted from subtotal_cents and
+  // tax/total are restated — every "total − retainage − paid" balance query in
+  // the app then reads correctly with no change. Kept here only so the
+  // document can show the ladder honestly. Nullable, ALTER'd in finance.ts.
+  discountCents: integer("discount_cents"),
   // Soft ref to crm_leads (no FK — cross-module). Stamped by the quote-accept
   // hook so a fully paid invoice can push realized revenue back onto the lead.
   leadId: integer("lead_id"),
+  // Bearer token for the customer's /invoice/<token> page on the website (and
+  // its Pay button). 24 random bytes hex; minted on the first send and reused
+  // forever after, so a link already in an inbox never goes dead. Nullable,
+  // ALTER'd in finance.ts — same shape as quotes.share_token.
+  shareToken: text("share_token"),
   sentAt: integer("sent_at"), // unix ms
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -142,6 +154,9 @@ export const finSettings = sqliteTable("fin_settings", {
   id: integer("id").primaryKey(),
   laborMarkupBp: integer("labor_markup_bp").notNull().default(0),
   expenseMarkupBp: integer("expense_markup_bp").notNull().default(0),
+  // Discount offered for clearing an invoice online in one payment, basis
+  // points (600 = 6%). 0 turns the offer off entirely.
+  payInFullDiscountBp: integer("payinfull_discount_bp").notNull().default(600),
   updatedAt: integer("updated_at"),
 });
 
@@ -220,6 +235,9 @@ export const insertExpenseSchema = createInsertSchema(expenses, {
 export const updateFinSettingsSchema = z.object({
   laborMarkupBp: z.number().int().min(0).max(50000).optional(),
   expenseMarkupBp: z.number().int().min(0).max(50000).optional(),
+  // Capped at 50%: this one gives money away, so a fat-fingered 600 (meaning
+  // 6) must not be able to mean 600%.
+  payInFullDiscountBp: z.number().int().min(0).max(5000).optional(),
 });
 
 export const pullUnbilledSchema = z.object({

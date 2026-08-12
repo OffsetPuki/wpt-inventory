@@ -120,6 +120,11 @@ app.use(compression());
 // skips a body that's already been parsed, so this scoped 4 MB limit wins for
 // that one route and everything else stays at 1 MB.
 app.use("/api/public/leads", express.json({ limit: "4mb" }));
+// Stripe signs the exact bytes it sent, so this one route needs the raw body —
+// a reparsed-and-restringified JSON never matches the signature. Same
+// mounted-first trick as the lead route above: the global parser below skips a
+// body that has already been read.
+app.use("/api/public/stripe/webhook", express.raw({ type: "application/json", limit: "256kb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 

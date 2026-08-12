@@ -52,7 +52,7 @@ function currentPriceBook(): Record<string, any> {
   return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
 }
 
-function currentShop(): {
+export function currentShop(): {
   name: string; location: string; phone: string; email: string; terms: string[];
 } {
   const row = sqlite.prepare(

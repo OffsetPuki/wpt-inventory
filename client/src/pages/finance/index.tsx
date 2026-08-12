@@ -61,6 +61,7 @@ interface FinanceReports {
 interface FinSettingsShape {
   laborMarkupBp: number;
   expenseMarkupBp: number;
+  payInFullDiscountBp: number;
 }
 
 function MarkupSettingsCard() {
@@ -70,10 +71,12 @@ function MarkupSettingsCard() {
   });
   const [labor, setLabor] = useState("");
   const [expense, setExpense] = useState("");
+  const [discount, setDiscount] = useState("");
   useEffect(() => {
     if (data) {
       setLabor(String(data.laborMarkupBp / 100));
       setExpense(String(data.expenseMarkupBp / 100));
+      setDiscount(String(data.payInFullDiscountBp / 100));
     }
   }, [data]);
 
@@ -84,10 +87,11 @@ function MarkupSettingsCard() {
       body: {
         laborMarkupBp: Math.round((parseFloat(labor) || 0) * 100),
         expenseMarkupBp: Math.round((parseFloat(expense) || 0) * 100),
+        payInFullDiscountBp: Math.round((parseFloat(discount) || 0) * 100),
       },
     }),
     invalidate: [["finance-settings"]],
-    successTitle: "Markups saved",
+    successTitle: "Settings saved",
     errorTitle: "Could not save",
   });
 
@@ -97,12 +101,12 @@ function MarkupSettingsCard() {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <h2 className="mb-1 flex items-center gap-2 font-semibold text-foreground">
-        <Percent className="h-4 w-4" /> Billing markups
+        <Percent className="h-4 w-4" /> Billing rates
       </h2>
       <p className="mb-4 text-sm text-muted-foreground">
-        Used by “Pull unbilled from job” on draft invoices: labor bills at each
-        worker’s pay rate plus the labor markup; billable expenses at cost plus
-        the expense markup.
+        The first two are used by “Pull unbilled from job” on draft invoices:
+        labor bills at each worker’s pay rate plus the labor markup; billable
+        expenses at cost plus the expense markup.
       </p>
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1.5">
@@ -119,6 +123,13 @@ function MarkupSettingsCard() {
             value={expense} onChange={(e) => setExpense(e.target.value)}
           />
         </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Pay-in-full discount %</span>
+          <input
+            type="number" min={0} max={50} step={0.5} className={numCls}
+            value={discount} onChange={(e) => setDiscount(e.target.value)}
+          />
+        </label>
         <button
           onClick={() => save.mutate()}
           disabled={save.isPending}
@@ -128,6 +139,12 @@ function MarkupSettingsCard() {
           Save
         </button>
       </div>
+      <p className="mt-4 text-sm text-muted-foreground">
+        The discount is offered on the customer’s invoice page and in the invoice
+        email, and applies only when they clear the whole invoice online in one
+        payment — no deposit taken, no retainage held. Set it to 0 to stop
+        offering it.
+      </p>
     </div>
   );
 }

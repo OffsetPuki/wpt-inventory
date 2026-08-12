@@ -22,6 +22,7 @@ import { registerPublicRoutes } from "./public-api";
 // Customer-facing portal (estimates, quote links, reviews, site info) —
 // reads tables owned by public-api, quotes and marketing, so it loads last.
 import { registerPublicPortalRoutes } from "./public-portal";
+import { registerPayRoutes } from "./pay";
 // Quote builder (ported CJM Quote app). Imports public-api's web_designs row
 // mapper, so it loads after public-api's DDL has created that table.
 import { registerQuoteRoutes } from "./quotes";
@@ -785,6 +786,7 @@ export function registerRoutes(app: Express): void {
   registerPublicRoutes(app);
   registerQuoteRoutes(app);
   registerPublicPortalRoutes(app);
+  registerPayRoutes(app);
   registerBackupRoutes(app);
   registerEmailTemplateRoutes(app);
 

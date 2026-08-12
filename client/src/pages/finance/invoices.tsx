@@ -36,11 +36,12 @@ import {
   CreditCard,
   FolderInput,
   Trash2,
+  Copy,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
-type InvoiceRow = Invoice & { balanceCents: number };
+type InvoiceRow = Invoice & { balanceCents: number; payUrl: string | null };
 
 const STATUS_TONE: Record<InvoiceStatus, ChipTone> = {
   draft: "zinc",
@@ -778,6 +779,18 @@ function InvoiceDetailModal({
               <span className="text-muted-foreground">Subtotal</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.subtotalCents)}</span>
             </div>
+            {/* Granted when the customer cleared the whole invoice online in
+                one payment (server/pay.ts). Unlike retainage this money is
+                never collected, so subtotal − discount + restated tax IS the
+                total — which is why it sits above the Total line. */}
+            {(inv.discountCents ?? 0) > 0 && (
+              <div className="flex justify-between py-0.5">
+                <span className="text-emerald-700 dark:text-emerald-400">Paid-in-full discount</span>
+                <span className="tabular-nums text-emerald-700 dark:text-emerald-400">
+                  −{formatMoney(inv.discountCents!)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between py-0.5">
               <span className="text-muted-foreground">Tax ({formatBp(inv.taxRateBp)})</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.taxCents)}</span>
@@ -859,6 +872,39 @@ function InvoiceDetailModal({
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* The customer's copy. Minted on the first send, so a draft shows
+              nothing here. Already in the invoice email — this is for resending
+              by text, or when there was no address on file. */}
+          {inv.payUrl && (
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-sm font-semibold text-foreground">Customer link</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The invoice as they see it, with a Pay button — card, Apple Pay or Google Pay.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  readOnly
+                  value={inv.payUrl}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className={cn(inputCls, "flex-1 text-xs")}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(inv.payUrl!).then(
+                      () => toast({ title: "Link copied" }),
+                      () => toast({ title: "Could not copy — select it and copy by hand", variant: "destructive" }),
+                    );
+                  }}
+                  className={secondaryBtn}
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy
+                </button>
               </div>
             </div>
           )}

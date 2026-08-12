@@ -1,4 +1,5 @@
 import type { Express, Request } from "express";
+import type { z } from "zod";
 import crypto from "crypto";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
@@ -130,6 +131,13 @@ for (const ddl of [
   // Phase G #3: commercial retainage — see shared/finance-schema.ts.
   "ALTER TABLE fin_invoices ADD COLUMN retainage_cents INTEGER",
   "ALTER TABLE fin_invoices ADD COLUMN retainage_released_at INTEGER",
+  // Online payment: the customer's /invoice/<token> page (server/pay.ts).
+  "ALTER TABLE fin_invoices ADD COLUMN share_token TEXT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_invoices_share ON fin_invoices(share_token)",
+  "ALTER TABLE fin_invoices ADD COLUMN discount_cents INTEGER",
+  // NOTE: fin_settings is created BELOW, so its own migration lives after it —
+  // an ALTER here would silently no-op on a fresh install and the column would
+  // never exist.
 ]) {
   try {
     sqlite.exec(ddl);
@@ -146,9 +154,18 @@ sqlite.exec(`
     id INTEGER PRIMARY KEY,
     labor_markup_bp INTEGER NOT NULL DEFAULT 0,
     expense_markup_bp INTEGER NOT NULL DEFAULT 0,
+    -- Prompt-payment discount for clearing an invoice online in one payment
+    -- (server/pay.ts). 600 = 6%; 0 stops offering it.
+    payinfull_discount_bp INTEGER NOT NULL DEFAULT 600,
     updated_at INTEGER
   );
 `);
+// Same column onto installs that predate it. Must follow the CREATE above.
+try {
+  sqlite.exec("ALTER TABLE fin_settings ADD COLUMN payinfull_discount_bp INTEGER NOT NULL DEFAULT 600");
+} catch {
+  /* column already exists */
+}
 sqlite.exec("INSERT OR IGNORE INTO fin_settings (id) VALUES (1)");
 
 // Package D: the 5-status PO lifecycle collapsed to open/received/cancelled,
@@ -206,11 +223,14 @@ function heldRetainageOf(inv: Invoice): number {
   return Math.min(retainageOf(inv), Math.max(0, inv.totalCents - inv.paidCents));
 }
 
-function presentInvoice(inv: Invoice, today: string) {
+export function presentInvoice(inv: Invoice, today: string) {
   return {
     ...inv,
     status: derivedStatus(inv, today),
     balanceCents: inv.totalCents - retainageOf(inv) - inv.paidCents,
+    // The customer's page, once it exists — the UI offers it to copy, and the
+    // site's domain is the server's to know, not the browser's to hardcode.
+    payUrl: invoicePayLink(inv),
   };
 }
 
@@ -400,6 +420,24 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
   });
 }
 
+// ─── The customer's invoice link ─────────────────────────────────────────────
+// Same address the quote share uses, so both documents live on the website
+// under the shop's own domain. Token is minted at the first send (see the
+// status PATCH) and never rotated — a link already in an inbox stays live.
+
+export const invoicePayLink = (inv: Invoice): string | null =>
+  inv.shareToken ? `${PUBLIC_SITE_URL}/invoice/${inv.shareToken}` : null;
+
+// The prompt-payment discount rate in basis points (Finance → Billing markups).
+// server/pay.ts owns granting it; this is here so the invoice email can offer
+// it. 0 = the offer is off.
+export function payInFullDiscountBp(): number {
+  const row = sqlite.prepare("SELECT payinfull_discount_bp AS bp FROM fin_settings WHERE id = 1")
+    .get() as { bp?: number } | undefined;
+  const bp = Number(row?.bp);
+  return Number.isFinite(bp) && bp > 0 ? Math.min(bp, 5000) : 0;
+}
+
 // ─── Invoice "sent" → email the customer (Phase A #1) ────────────────────────
 // The invoice itself, the moment it goes out — before this the customer's
 // first contact about a bill was the overdue chaser. Same contract as the
@@ -435,6 +473,18 @@ function queueInvoiceEmail(inv: Invoice): void {
         }
       } catch { /* quote module absent — stock signature */ }
 
+      // The pay link, when there is one — the invoice page carries the Pay
+      // button (card / Apple Pay / Google Pay). Without a token the email is
+      // exactly what it always was, so nothing here depends on Stripe.
+      const payUrl = invoicePayLink(inv);
+      // The prompt-payment offer, worded from this invoice's own numbers. An
+      // incentive nobody is told about doesn't incentivise anything — this is
+      // the one place the customer reliably reads before deciding how to pay.
+      const discountBp = payUrl ? payInFullDiscountBp() : 0;
+      const savesCents = discountBp > 0 && inv.paidCents === 0 && retainageOf(inv) === 0
+        ? Math.round((inv.totalCents * discountBp) / 10_000)
+        : 0;
+
       const ok = await sendMail({
         to,
         subject: `Invoice ${inv.number} from CJM Metals${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
@@ -448,6 +498,12 @@ function queueInvoiceEmail(inv: Invoice): void {
           `Balance due: ${usd(inv.totalCents - retainageOf(inv) - inv.paidCents)}\n` +
           ((inv.depositCents ?? 0) > 0 ? `Deposit due: ${usd(inv.depositCents!)}\n` : "") +
           (inv.dueDate ? `Due date:    ${inv.dueDate}\n` : "") +
+          (payUrl ? `\nView it online and pay by card, Apple Pay or Google Pay:\n${payUrl}\n` : "") +
+          (savesCents > 0
+            ? `\nPay the whole invoice online in one payment and take ${discountBp / 100}% off — `
+              + `${usd(inv.totalCents - savesCents)} instead of ${usd(inv.totalCents)}, `
+              + `a saving of ${usd(savesCents)}.\n`
+            : "") +
           `\nQuestions? Just reply to this email or give us a call.\n\n` +
           `— ${shopBlock}`,
       });
@@ -588,6 +644,58 @@ function queuePaidCloseLoop(req: Request, inv: Invoice): void {
       console.error("[finance] paid close-loop hook failed", e);
     }
   });
+}
+
+// ─── Recording money — the one path ──────────────────────────────────────────
+// The owner typing a check into the UI and Stripe's webhook reporting a card
+// both land here, so the status ladder, the receipt email, the review ask and
+// the close-loop hooks can never drift apart between the two. Callers own the
+// validation and the void check; this owns everything that happens after.
+
+export function recordInvoicePayment(
+  req: Request,
+  inv: Invoice,
+  body: z.infer<typeof insertInvoicePaymentSchema>,
+  // Who recorded it, when the request carries no signed-in user — the Stripe
+  // webhook. Owner entries leave it unset and the audit log names the session.
+  source?: string,
+): { payment: typeof invoicePayments.$inferSelect; invoice: Invoice } {
+  const payment = db.insert(invoicePayments)
+    .values({ invoiceId: inv.id, ...body })
+    .returning()
+    .get();
+  // Auto-status from the running paid total: covered → paid, anything → partial.
+  const paidCents = inv.paidCents + body.amountCents;
+  // A $0-total invoice must not auto-settle to "paid" (mirrors the reversal
+  // path's `&& inv.totalCents > 0` guard). Retainage-aware: the GC paying
+  // everything BUT the withheld retainage settles the invoice — the retainage
+  // is collected later via the release invoice (Phase G #3).
+  const status: InvoiceStatus =
+    paidCents >= inv.totalCents - retainageOf(inv) && inv.totalCents > 0 ? "paid" : "partial";
+  const invoice = db.update(invoices)
+    .set({ paidCents, status })
+    .where(eq(invoices.id, inv.id))
+    .returning()
+    .get();
+
+  // Newly settled → queue the review ask, push realized revenue back onto the
+  // CRM lead and retire the "Schedule the job" task (Phase A #6). All
+  // deferred; none can break this path.
+  if (status === "paid" && inv.status !== "paid") {
+    queueReviewRequest(invoice);
+    queuePaidCloseLoop(req, invoice);
+  }
+  // Every recorded payment → receipt email to the customer (same contract).
+  queuePaymentReceipt(invoice, body.amountCents);
+
+  audit(req, "finance.payment_record", {
+    targetType: "invoice", targetId: inv.id, targetName: inv.number,
+    details: {
+      amountCents: body.amountCents, method: body.method, newStatus: status,
+      ...(source ? { source } : {}),
+    },
+  });
+  return { payment, invoice };
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -975,6 +1083,12 @@ export function registerFinanceRoutes(app: Express): void {
     if (body.status === "sent" && inv.status !== "sent" && !inv.sentAt) {
       updates.sentAt = Date.now();
     }
+    // …and mints the customer's /invoice/<token> link, once. Minted here rather
+    // than in the email hook so the row the owner gets back already carries it
+    // (the detail modal offers it to copy) even when there's no address on file.
+    if (body.status === "sent" && !inv.shareToken) {
+      updates.shareToken = crypto.randomBytes(24).toString("hex");
+    }
     if (Object.keys(updates).length === 0) {
       return res.json(presentInvoice(inv, todayLocal()));
     }
@@ -1030,39 +1144,8 @@ export function registerFinanceRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
 
-    const payment = db.insert(invoicePayments)
-      .values({ invoiceId: inv.id, ...body })
-      .returning()
-      .get();
-    // Auto-status from the running paid total: covered → paid, anything → partial.
-    const paidCents = inv.paidCents + body.amountCents;
-    // A $0-total invoice must not auto-settle to "paid" (mirrors the reversal
-    // path's `&& inv.totalCents > 0` guard below). Retainage-aware: the GC
-    // paying everything BUT the withheld retainage settles the invoice — the
-    // retainage is collected later via the release invoice (Phase G #3).
-    const status: InvoiceStatus =
-      paidCents >= inv.totalCents - retainageOf(inv) && inv.totalCents > 0 ? "paid" : "partial";
-    const updated = db.update(invoices)
-      .set({ paidCents, status })
-      .where(eq(invoices.id, inv.id))
-      .returning()
-      .get();
-
-    // Newly settled → queue the review ask, push realized revenue back onto
-    // the CRM lead and retire the "Schedule the job" task (Phase A #6). All
-    // deferred; none can break this path.
-    if (status === "paid" && inv.status !== "paid") {
-      queueReviewRequest(updated);
-      queuePaidCloseLoop(req, updated);
-    }
-    // Every recorded payment → receipt email to the customer (same contract).
-    queuePaymentReceipt(updated, body.amountCents);
-
-    audit(req, "finance.payment_record", {
-      targetType: "invoice", targetId: inv.id, targetName: inv.number,
-      details: { amountCents: body.amountCents, method: body.method, newStatus: status },
-    });
-    res.status(201).json({ payment, invoice: presentInvoice(updated, todayLocal()) });
+    const { payment, invoice } = recordInvoicePayment(req, inv, body);
+    res.status(201).json({ payment, invoice: presentInvoice(invoice, todayLocal()) });
   });
 
   // Payment reversal — mistyped amount, bounced check. Rewinds the invoice's
