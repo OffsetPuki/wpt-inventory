@@ -137,6 +137,7 @@ for (const ddl of [
   "ALTER TABLE fin_invoices ADD COLUMN discount_cents INTEGER",
   // The quote this invoice bills against — see shared/finance-schema.ts.
   "ALTER TABLE fin_invoices ADD COLUMN quote_id INTEGER",
+  "ALTER TABLE fin_invoices ADD COLUMN restated_from TEXT",
   "CREATE INDEX IF NOT EXISTS idx_fin_invoices_quote ON fin_invoices(quote_id)",
   // NOTE: fin_settings is created BELOW, so its own migration lives after it —
   // an ALTER here would silently no-op on a fresh install and the column would
@@ -1165,21 +1166,59 @@ export function registerFinanceRoutes(app: Express): void {
     let updated = inv;
     if (inv) {
       const paidCents = Math.max(0, inv.paidCents - payment.amountCents);
+
+      // Undo an online settle-in-full. Paying the whole job from a deposit
+      // invoice grows that invoice to cover the contract and grants the
+      // prompt-payment discount (server/pay.ts). Reversing the payment that
+      // bought it must put the invoice back — otherwise a bounced card leaves
+      // an unpaid invoice that has quietly kept the discount and forgotten it
+      // was ever a deposit. Only when nothing is left paid: a part-reversal
+      // hasn't undone the settlement.
+      const restore = paidCents === 0 && inv.restatedFrom
+        ? (() => {
+            try {
+              const s = JSON.parse(inv.restatedFrom!);
+              return typeof s?.totalCents === "number"
+                ? {
+                    items: String(s.items ?? "[]"),
+                    subtotalCents: s.subtotalCents as number,
+                    taxRateBp: s.taxRateBp as number,
+                    taxCents: s.taxCents as number,
+                    totalCents: s.totalCents as number,
+                    discountCents: null,
+                    restatedFrom: null,
+                  }
+                : null;
+            } catch {
+              return null; // unreadable snapshot — leave the row alone
+            }
+          })()
+        : null;
+      // Status is derived against the total the invoice will HAVE, not the one
+      // it is being rolled back from.
+      const effectiveTotal = restore ? restore.totalCents : inv.totalCents;
+
       // void stays void; otherwise: covered → paid, some → partial, none →
       // back to sent (if it ever went out) or draft.
       let status = inv.status;
       if (inv.status !== "void") {
         status =
-          paidCents >= inv.totalCents - retainageOf(inv) && inv.totalCents > 0 ? "paid"
+          paidCents >= effectiveTotal - retainageOf(inv) && effectiveTotal > 0 ? "paid"
           : paidCents > 0 ? "partial"
           : inv.sentAt ? "sent"
           : "draft";
       }
       updated = db.update(invoices)
-        .set({ paidCents, status })
+        .set({ paidCents, status, ...(restore ?? {}) })
         .where(eq(invoices.id, inv.id))
         .returning()
         .get();
+      if (restore) {
+        audit(req, "finance.invoice_unrestated", {
+          targetType: "invoice", targetId: inv.id, targetName: inv.number,
+          details: { from: inv.totalCents, to: restore.totalCents },
+        });
+      }
 
       // The re-derivation can also land on "paid" (e.g. reversing an overpaid
       // duplicate still leaves the total covered) — same newly-paid rule.

@@ -95,6 +95,13 @@ export const invoices = sqliteTable("fin_invoices", {
   // show a deposit against the full contract price instead of pretending the
   // deposit IS the price. No FK: cross-module, same stance as leadId.
   quoteId: integer("quote_id"),
+  // Set when a customer settled the whole job from a DEPOSIT invoice: a JSON
+  // snapshot of { items, subtotalCents, taxRateBp, taxCents, totalCents } as
+  // this invoice stood before it grew to cover the contract. Reversing the
+  // payment restores it — without this, a bounced card would leave an unpaid
+  // invoice that had silently kept the prompt-payment discount and forgotten
+  // it was ever a deposit. Server-managed; never client-writable.
+  restatedFrom: text("restated_from"),
   // Bearer token for the customer's /invoice/<token> page on the website (and
   // its Pay button). 24 random bytes hex; minted on the first send and reused
   // forever after, so a link already in an inbox never goes dead. Nullable,
@@ -208,6 +215,7 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   // the whole invoice online. A client writing it would print a discount nobody
   // gave and break subtotal − discount + tax = total on the document.
   discountCents: true,
+  restatedFrom: true,
   createdAt: true,
   deletedAt: true,
   // Server-derived from items + taxRateBp — never client-writable, or the

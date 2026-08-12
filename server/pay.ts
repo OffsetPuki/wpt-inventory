@@ -12,7 +12,8 @@ import { contracts } from "../shared/pm-schema";
 // shared with the invoice email that advertises the offer.
 import { presentInvoice, recordInvoicePayment, payInFullDiscountBp as discountBp } from "./finance";
 import { invoices, type Invoice } from "../shared/finance-schema";
-import { parseLineItems } from "../shared/biz-common";
+import { parseLineItems, lineItemsTotalCents } from "../shared/biz-common";
+import { parseJson } from "./quotes";
 import { todayLocal, usd } from "./http-util";
 
 // ─── Online invoice payment (Stripe Checkout) ───────────────────────────────
@@ -83,21 +84,69 @@ const publicLimiter = (max: number) => rateLimit({
  * are the same multiplication; doing it in this order is just what keeps
  * subtotal − discount + tax = total true on the printed document.)
  */
-function payInFull(inv: Invoice): { discountCents: number; taxCents: number; totalCents: number } | null {
+interface PayInFull {
+  /** What the customer pays. */
+  totalCents: number;
+  /** Restated invoice figures, so subtotal − discount + tax = total exactly. */
+  subtotalCents: number;
+  taxRateBp: number;
+  taxCents: number;
+  discountCents: number;
+  /** 'contract' = settling the WHOLE job from a deposit invoice, which
+   *  restates this invoice into the invoice for the job. */
+  scope: "invoice" | "contract";
+  /** The single line the restated invoice carries, for 'contract' only. */
+  itemLabel: string;
+  /** The undiscounted figure this is measured against — what "was" shows. */
+  grossCents: number;
+}
+
+function payInFull(inv: Invoice): PayInFull | null {
   const bp = discountBp();
   if (bp <= 0) return null;
   if (inv.paidCents !== 0) return null;
   if ((inv.retainageCents ?? 0) !== 0) return null;
   if (inv.discountCents != null) return null; // already granted
-  if (inv.subtotalCents <= 0) return null;
 
-  const discountCents = Math.round((inv.subtotalCents * bp) / 10_000);
-  const taxCents = Math.round(((inv.subtotalCents - discountCents) * inv.taxRateBp) / 10_000);
-  const totalCents = inv.subtotalCents - discountCents + taxCents;
-  // A discount that doesn't actually save anything, or that drops the invoice
-  // under Stripe's floor, is not an offer worth showing.
-  if (totalCents >= inv.totalCents || totalCents < STRIPE_MIN_CENTS) return null;
-  return { discountCents, taxCents, totalCents };
+  // What "in full" MEANS depends on the invoice. On an ordinary one it's this
+  // bill. On a deposit — a slice of a bigger contract — paying this invoice in
+  // full settles nothing, so the offer is to clear the whole job instead, and
+  // it has to be priced off the contract, not off the deposit.
+  let scope: "invoice" | "contract" = "invoice";
+  let grossCents = inv.totalCents;
+  let subtotalCents = inv.subtotalCents;
+  let taxRateBp = inv.taxRateBp;
+  let itemLabel = "";
+
+  if (inv.quoteId != null) {
+    const quote = db.select().from(quotes)
+      .where(and(eq(quotes.id, inv.quoteId), isNull(quotes.deletedAt)))
+      .get();
+    if (quote && quote.totalCents > inv.totalCents) {
+      scope = "contract";
+      grossCents = quote.totalCents;
+      itemLabel = `Balance of contract — settled with the deposit (quote ${quote.number})`;
+      // A deposit line is a percentage of the TAX-INCLUSIVE contract price, so
+      // the restated invoice stays on those terms: subtotal is the contract
+      // price with tax already inside it, exactly as the deposit invoice was
+      // already built and as its terms say. That also makes the appended line
+      // come out at precisely the balance this invoice already quotes.
+      subtotalCents = grossCents;
+      taxRateBp = 0;
+    }
+  }
+  if (subtotalCents <= 0) return null;
+
+  // The customer is promised "X% off", so the TOTAL is pinned to exactly that
+  // and the tax line is whatever makes the ladder add up. Deriving tax
+  // independently leaves the two disagreeing by a cent on some amounts, and a
+  // printed document that doesn't add up is worse than a rounded tax figure.
+  const discountCents = Math.round((subtotalCents * bp) / 10_000);
+  const totalCents = Math.round((grossCents * (10_000 - bp)) / 10_000);
+  const taxCents = totalCents - subtotalCents + discountCents;
+  // An offer that saves nothing, or lands under Stripe's floor, isn't one.
+  if (totalCents >= grossCents || totalCents < STRIPE_MIN_CENTS || taxCents < 0) return null;
+  return { totalCents, subtotalCents, taxRateBp, taxCents, discountCents, scope, itemLabel, grossCents };
 }
 
 function payable(inv: Invoice) {
@@ -294,8 +343,17 @@ export function registerPayRoutes(app: Express): void {
         depositCents,
         // Present = clearing it in one payment is discounted. `totalCents` is
         // what they'd pay, `savesCents` what they keep.
+        // `scope: 'contract'` means this settles the WHOLE job from a deposit
+        // invoice — the page offers it beside the deposit rather than instead
+        // of it, and `wasCents` is the contract price, not this bill.
         payInFull: full
-          ? { totalCents: full.totalCents, savesCents: balanceCents - full.totalCents, pct: discountBp() / 100 }
+          ? {
+              totalCents: full.totalCents,
+              wasCents: full.grossCents,
+              savesCents: full.grossCents - full.totalCents,
+              pct: discountBp() / 100,
+              scope: full.scope,
+            }
           : null,
         // Whether the Pay button should be live at all: money still owed, the
         // invoice still open, Stripe configured, and above Stripe's floor.
@@ -432,6 +490,36 @@ export function registerPayRoutes(app: Express): void {
             discountCents: offer.discountCents,
             taxCents: offer.taxCents,
             totalCents: offer.totalCents,
+            // Settling the whole job from a DEPOSIT invoice grows that invoice
+            // to cover the contract. The deposit line is KEPT — it is what the
+            // customer was actually billed, and an invoice already sent is a
+            // record, not a draft. A second line covers the rest of the job, so
+            // the two sum to the contract price and the itemisation survives.
+            //
+            // The pre-restatement figures are snapshotted so reversing the
+            // payment can put it back: without that, a bounced card leaves an
+            // unpaid invoice that has quietly kept the discount.
+            ...(offer.scope === "contract"
+              ? {
+                  restatedFrom: JSON.stringify({
+                    items: inv.items,
+                    subtotalCents: inv.subtotalCents,
+                    taxRateBp: inv.taxRateBp,
+                    taxCents: inv.taxCents,
+                    totalCents: inv.totalCents,
+                  }),
+                  subtotalCents: offer.subtotalCents,
+                  taxRateBp: offer.taxRateBp,
+                  items: JSON.stringify([
+                    ...parseLineItems(inv.items),
+                    {
+                      description: offer.itemLabel,
+                      qty: 1,
+                      unitPriceCents: offer.subtotalCents - lineItemsTotalCents(parseLineItems(inv.items)),
+                    },
+                  ]),
+                }
+              : {}),
           })
           .where(eq(invoices.id, inv.id))
           .returning()

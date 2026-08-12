@@ -271,6 +271,111 @@ await check("the discount can't be taken twice", async () => {
   assert.equal(inv.total_cents, DISCOUNTED_TOTAL);
 });
 
+// ─── Deposit invoice: pay the slice, or settle the whole job ─────────────────
+// A 2,000.00 deposit against a 10,000.00 contract. The deposit is the ask; the
+// discount applies to clearing the CONTRACT, never to the deposit itself —
+// discounting a deposit cuts the shop's money while the contract price stays
+// put, and settles nothing.
+
+const depToken = crypto.randomBytes(24).toString("hex");
+const depNum = `TEST-DEP-${Date.now()}`;
+const depQuote = db.prepare(
+  "INSERT INTO quotes (number, type, customer_name, status, total_cents, payload, created_at) " +
+  "VALUES (?, 'fence', 'Test Customer', 'accepted', 1000000, ?, ?)",
+).run(`Q-DEP-${Date.now()}`, JSON.stringify({ taxPct: 0 }), Date.now());
+db.prepare(`
+  INSERT INTO fin_invoices
+    (number, client_name, status, items, subtotal_cents, tax_rate_bp, tax_cents,
+     total_cents, paid_cents, quote_id, share_token, sent_at)
+  VALUES (?, 'Test Customer', 'sent', ?, 200000, 0, 0, 200000, 0, ?, ?, ?)
+`).run(depNum, JSON.stringify([{ description: "Deposit — 20% of contract price", qty: 1, unitPriceCents: 200000 }]),
+  depQuote.lastInsertRowid, depToken, Date.now());
+const depId = db.prepare("SELECT id FROM fin_invoices WHERE number = ?").get(depNum).id;
+
+await check("a deposit invoice offers the deposit AND settling the whole job", async () => {
+  const { invoice } = await (await fetch(`${BASE}/api/public/invoice/${depToken}`)).json();
+  // The ask is the deposit, undiscounted.
+  assert.equal(invoice.balanceCents, 200_000);
+  // The offer beside it is the whole contract at 6% off — measured against the
+  // CONTRACT price, never against the deposit.
+  assert.ok(invoice.payInFull, "a deposit invoice should offer to settle the job");
+  assert.equal(invoice.payInFull.scope, "contract");
+  assert.equal(invoice.payInFull.wasCents, 1_000_000);
+  assert.equal(invoice.payInFull.totalCents, 940_000);
+  assert.equal(invoice.payInFull.savesCents, 60_000);
+  // The deposit itself is never the thing being discounted.
+  assert.notEqual(invoice.payInFull.totalCents, Math.round(200_000 * 0.94));
+});
+
+await check("settling the job grows the invoice without erasing the deposit line", async () => {
+  const body = JSON.stringify({
+    id: "evt_depfull", type: "checkout.session.completed",
+    data: { object: {
+      id: "cs_depfull", payment_intent: "pi_depfull", payment_status: "paid",
+      amount_total: 940_000,
+      metadata: { invoiceId: String(depId), which: "full" },
+    } },
+  });
+  const res = await postWebhook(body, signed(body));
+  assert.equal(res.status, 200);
+  const inv = invoiceRow(depId);
+  assert.equal(inv.paid_cents, 940_000);
+  assert.equal(inv.total_cents, 940_000);
+  assert.equal(inv.discount_cents, 60_000);
+  assert.equal(inv.status, "paid", "paying the contract must settle the invoice");
+  assert.equal(inv.total_cents - inv.paid_cents, 0, "nothing may be left owing");
+
+  // THE point of appending: the invoice the customer was SENT said "Deposit —
+  // 20% of contract price". That is a record, not a draft, and it survives.
+  const items = JSON.parse(inv.items);
+  assert.equal(items.length, 2);
+  assert.match(items[0].description, /^Deposit/, "the billed deposit line must survive");
+  assert.equal(items[0].unitPriceCents, 200_000);
+  assert.match(items[1].description, /^Balance of contract/);
+  // The two lines are the deposit and the balance the invoice already quoted.
+  assert.equal(items[1].unitPriceCents, 800_000);
+  assert.equal(items[0].unitPriceCents + items[1].unitPriceCents, inv.subtotal_cents);
+  assert.equal(
+    inv.subtotal_cents - inv.discount_cents + inv.tax_cents,
+    inv.total_cents,
+    "the printed ladder has to add up",
+  );
+  assert.ok(inv.restated_from, "the pre-restatement figures must be kept");
+});
+
+await check("reversing that payment puts the deposit invoice back", async () => {
+  // A bounced card or a cancelled job. Without this the invoice would sit
+  // unpaid at 940,000 having silently kept a 60,000 discount it never earned.
+  const pay = db.prepare("SELECT id FROM fin_invoice_payments WHERE invoice_id = ?").get(depId);
+  // Owner-only route. --pin signs in first (dev seed is Owner/1234); without a
+  // session the check FAILS rather than skipping — an unexercised rollback on
+  // the money path is exactly the thing that silently rots.
+  const login = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: arg("--user", "Owner"), pin: arg("--pin", "1234") }),
+  });
+  assert.equal(login.status, 200, "could not sign in — pass --user/--pin");
+  const auth = (await login.json()).token;
+  assert.ok(auth, "login returned no token");
+
+  const res = await fetch(`${BASE}/api/finance/payments/${pay.id}`, {
+    method: "DELETE",
+    headers: { "X-Auth": auth },
+  });
+  assert.equal(res.status, 200, await res.text());
+
+  const inv = invoiceRow(depId);
+  assert.equal(inv.paid_cents, 0);
+  assert.equal(inv.total_cents, 200_000, "back to the deposit it billed");
+  assert.equal(inv.discount_cents, null, "the discount must not survive the reversal");
+  assert.equal(inv.restated_from, null);
+  const items = JSON.parse(inv.items);
+  assert.equal(items.length, 1, "the appended balance line must be gone");
+  assert.match(items[0].description, /^Deposit/);
+  assert.equal(inv.status, "sent", "an unpaid, already-sent invoice is 'sent'");
+});
+
 await check("an invoice with money already on it is never offered the discount", async () => {
   // The first invoice was seeded with $100 paid and has taken payments since —
   // "pay in full at first" no longer applies to it however it's asked.
@@ -300,8 +405,11 @@ await check("a settled invoice stops offering to be paid", async () => {
 });
 
 cleanup();
-db.prepare("DELETE FROM fin_invoice_payments WHERE invoice_id = ?").run(invoice2Id);
-db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(invoice2Id);
+for (const id of [invoice2Id, depId]) {
+  db.prepare("DELETE FROM fin_invoice_payments WHERE invoice_id = ?").run(id);
+  db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(id);
+}
+db.prepare("DELETE FROM quotes WHERE id = ?").run(depQuote.lastInsertRowid);
 db.close();
 console.log(failed ? "\nFAILED\n" : "\nall good\n");
 process.exit(failed ? 1 : 0);
