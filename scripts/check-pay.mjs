@@ -404,7 +404,52 @@ await check("a settled invoice stops offering to be paid", async () => {
   assert.equal(res.status, 409);
 });
 
+// ─── The owner's pre-send preview ────────────────────────────────────────────
+// A draft carries a share token only because the owner asked to proof it. It
+// must stay invisible without ?preview=1, and must never be chargeable — the
+// bill hasn't been issued.
+const draftToken = crypto.randomBytes(24).toString("hex");
+const draftNum = `TEST-DRAFT-${Date.now()}`;
+db.prepare(`
+  INSERT INTO fin_invoices
+    (number, client_name, status, items, subtotal_cents, tax_rate_bp, tax_cents,
+     total_cents, paid_cents, share_token, issue_date)
+  VALUES (?, 'Test Customer', 'draft', ?, 50000, 0, 0, 50000, 0, ?, '2026-08-12')
+`).run(draftNum, JSON.stringify([{ description: "Draft gate", qty: 1, unitPriceCents: 50000 }]), draftToken);
+const draftId = db.prepare("SELECT id FROM fin_invoices WHERE number = ?").get(draftNum).id;
+
+await check("a draft stays invisible without the preview flag", async () => {
+  const res = await fetch(`${BASE}/api/public/invoice/${draftToken}`);
+  assert.equal(res.status, 404);
+});
+
+await check("the owner's preview renders the draft, unpayable", async () => {
+  const res = await fetch(`${BASE}/api/public/invoice/${draftToken}?preview=1`);
+  assert.equal(res.status, 200);
+  const { invoice } = await res.json();
+  assert.equal(invoice.number, draftNum);
+  assert.equal(invoice.status, "draft");
+  // Stripe is configured in this run, and 500.00 clears its floor — so only the
+  // draft status can be what's holding the Pay button back.
+  assert.equal(invoice.payable, false);
+});
+
+await check("a draft cannot be charged for, preview flag or not", async () => {
+  for (const url of [
+    `${BASE}/api/public/invoice/${draftToken}/checkout`,
+    `${BASE}/api/public/invoice/${draftToken}/checkout?preview=1`,
+  ]) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ which: "balance" }),
+    });
+    assert.equal(res.status, 404, `${url} must not open checkout on an unissued bill`);
+  }
+});
+
 cleanup();
+db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(draftId);
 for (const id of [invoice2Id, depId]) {
   db.prepare("DELETE FROM fin_invoice_payments WHERE invoice_id = ?").run(id);
   db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(id);

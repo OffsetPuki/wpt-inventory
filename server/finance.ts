@@ -429,8 +429,14 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
 // under the shop's own domain. Token is minted at the first send (see the
 // status PATCH) and never rotated — a link already in an inbox stays live.
 
+// A draft carries a token only because the owner asked to proof it, and the
+// public page refuses a draft without ?preview=1 — so the flag rides along or
+// the owner's own link 404s at them. The send hook emails the UPDATED row
+// (status "sent"), so a customer's link never carries it.
 export const invoicePayLink = (inv: Invoice): string | null =>
-  inv.shareToken ? `${PUBLIC_SITE_URL}/invoice/${inv.shareToken}` : null;
+  inv.shareToken
+    ? `${PUBLIC_SITE_URL}/invoice/${inv.shareToken}${inv.status === "draft" ? "?preview=1" : ""}`
+    : null;
 
 // The prompt-payment discount rate in basis points (Finance → Billing markups).
 // server/pay.ts owns granting it; this is here so the invoice email can offer
@@ -1027,6 +1033,23 @@ export function registerFinanceRoutes(app: Express): void {
       .orderBy(desc(invoicePayments.createdAt), desc(invoicePayments.id))
       .all();
     res.json({ invoice: presentInvoice(inv, todayLocal()), payments });
+  });
+
+  // Proof the customer's page before it's the customer's page. Mints the share
+  // token early and hands back the ?preview=1 URL — no status flip, no email,
+  // no side effects of any kind. Same shape as the quote builder's preview.
+  app.post("/api/finance/invoices/:id/preview", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    // Re-sharing reuses the token, so a link already copied never goes dead.
+    const fresh = inv.shareToken
+      ? inv
+      : db.update(invoices)
+          .set({ shareToken: crypto.randomBytes(24).toString("hex") })
+          .where(eq(invoices.id, inv.id))
+          .returning()
+          .get();
+    res.json({ url: invoicePayLink(fresh) });
   });
 
   app.patch("/api/finance/invoices/:id", requireElevated, (req, res) => {

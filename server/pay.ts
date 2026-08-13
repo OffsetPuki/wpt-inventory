@@ -222,14 +222,17 @@ function fromQuote(inv: Invoice) {
   };
 }
 
-const findInvoice = (token: string): Invoice | undefined => {
+// allowDraft: the owner proofing an unsent bill (POST /api/finance/invoices/:id/
+// preview mints the token early and views it with ?preview=1). Only the GET
+// passes it — the checkout route never does, so a draft can't be charged for.
+const findInvoice = (token: string, allowDraft = false): Invoice | undefined => {
   if (!TOKEN_RE.test(token)) return undefined;
   const inv = db.select().from(invoices)
     .where(and(eq(invoices.shareToken, token), isNull(invoices.deletedAt)))
     .get();
-  // A token only exists after a send, but a draft behind one would still be an
-  // unfinished document — never show it.
-  return inv && inv.status !== "draft" ? inv : undefined;
+  // A draft behind a token is an unfinished document — shown only to the one
+  // person who could have the link before it was sent: whoever minted it.
+  return inv && (allowDraft || inv.status !== "draft") ? inv : undefined;
 };
 
 // ─── Stripe REST ─────────────────────────────────────────────────────────────
@@ -309,7 +312,7 @@ export function registerPayRoutes(app: Express): void {
   // is a credential, and client_id/lead_id/project_id are none of their
   // business. Send the sheet of paper, nothing else.
   app.get("/api/public/invoice/:token", publicLimiter(120), (req, res) => {
-    const inv = findInvoice(String(req.params.token));
+    const inv = findInvoice(String(req.params.token), req.query.preview === "1");
     if (!inv) return res.status(404).json({ ok: false });
 
     const view = presentInvoice(inv, todayLocal());
@@ -357,9 +360,13 @@ export function registerPayRoutes(app: Express): void {
           : null,
         // Whether the Pay button should be live at all: money still owed, the
         // invoice still open, Stripe configured, and above Stripe's floor.
+        // A draft is only ever visible to the owner proofing it, and a bill
+        // that hasn't been issued must not be collectable — the checkout route
+        // refuses it too, so this keeps the page from offering what it can't do.
         payable:
           !!stripeKey()
           && balanceCents >= STRIPE_MIN_CENTS
+          && inv.status !== "draft"
           && inv.status !== "void"
           && inv.status !== "paid",
         shop: currentShop(),

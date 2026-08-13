@@ -37,6 +37,7 @@ import {
   FolderInput,
   Trash2,
   Copy,
+  Eye,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
@@ -812,6 +813,14 @@ function InvoiceDetailModal({
     errorTitle: "Could not pull unbilled work",
   });
 
+  // The customer's page, opened before anything is sent. Silent on success —
+  // the new tab IS the feedback.
+  const preview = useApiMutation<{ url: string | null }>({
+    request: () => ({ method: "POST", url: `/api/finance/invoices/${id}/preview` }),
+    invalidate: INVOICE_KEYS,
+    errorTitle: "Could not open the preview",
+  });
+
   const inv = data?.invoice;
   const payments = data?.payments ?? [];
   const items = inv ? parseLineItems(inv.items) : [];
@@ -986,14 +995,18 @@ function InvoiceDetailModal({
             </div>
           )}
 
-          {/* The customer's copy. Minted on the first send, so a draft shows
-              nothing here. Already in the invoice email — this is for resending
-              by text, or when there was no address on file. */}
+          {/* The customer's copy. Minted on the first send — or early, if the
+              owner previewed a draft. Already in the invoice email; this is for
+              resending by text, or when there was no address on file. */}
           {inv.payUrl && (
             <div className="rounded-lg border border-border p-3">
-              <p className="text-sm font-semibold text-foreground">Customer link</p>
+              <p className="text-sm font-semibold text-foreground">
+                {inv.status === "draft" ? "Preview link" : "Customer link"}
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                The invoice as they see it, with a Pay button — card, Apple Pay or Google Pay.
+                {inv.status === "draft"
+                  ? "Your proof copy — it shows no Pay button until the invoice is sent. Don't share it yet."
+                  : "The invoice as they see it, with a Pay button — card, Apple Pay or Google Pay."}
               </p>
               <div className="mt-2 flex items-center gap-2">
                 <input
@@ -1043,6 +1056,29 @@ function InvoiceDetailModal({
                       Pull unbilled from job
                     </button>
                   )}
+                  {/* Opened synchronously — a tab opened from the async reply
+                      is what popup blockers exist to stop. */}
+                  <button
+                    onClick={() => {
+                      const tab = window.open("about:blank", "_blank");
+                      preview.mutate(undefined, {
+                        onSuccess: (d) => {
+                          if (!tab) return;
+                          if (d?.url) tab.location.href = d.url;
+                          else tab.close();
+                        },
+                        onError: () => tab?.close(),
+                      });
+                    }}
+                    disabled={preview.isPending}
+                    className={secondaryBtn}
+                    title="See the invoice exactly as the customer will, without sending it"
+                  >
+                    {preview.isPending
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <Eye className="h-4 w-4" />}
+                    Preview
+                  </button>
                   <button
                     onClick={() => setStatus.mutate("sent")}
                     disabled={setStatus.isPending}
