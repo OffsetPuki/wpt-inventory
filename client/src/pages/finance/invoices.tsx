@@ -38,6 +38,7 @@ import {
   Trash2,
   Copy,
   Eye,
+  Banknote,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
@@ -656,12 +657,15 @@ function InvoiceFormModal({
 
 function RecordPaymentForm({
   invoice,
+  initialCents,
   onDone,
 }: {
   invoice: InvoiceRow;
+  // Pre-fill (e.g. the deposit handed over in cash) instead of the balance.
+  initialCents?: number;
   onDone: () => void;
 }) {
-  const [amount, setAmount] = useState((invoice.balanceCents / 100).toFixed(2));
+  const [amount, setAmount] = useState(((initialCents ?? invoice.balanceCents) / 100).toFixed(2));
   const [method, setMethod] = useState<PaymentMethod>("check");
   const [reference, setReference] = useState("");
   const [paidAt, setPaidAt] = useState(todayYmd());
@@ -764,6 +768,8 @@ function InvoiceDetailModal({
   onEdit: (invoice: Invoice) => void;
 }) {
   const [paying, setPaying] = useState(false);
+  // Set when the form was opened via "Deposit paid" — pre-fills that amount.
+  const [payPrefill, setPayPrefill] = useState<number | null>(null);
 
   const { data, isLoading } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
     queryKey: ["finance-invoice", id],
@@ -1034,7 +1040,11 @@ function InvoiceDetailModal({
 
           {/* Actions by state */}
           {paying && receivable ? (
-            <RecordPaymentForm invoice={inv} onDone={() => setPaying(false)} />
+            <RecordPaymentForm
+              invoice={inv}
+              initialCents={payPrefill ?? undefined}
+              onDone={() => { setPaying(false); setPayPrefill(null); }}
+            />
           ) : (
             <div className="flex flex-wrap gap-2">
               {inv.status === "draft" && (
@@ -1091,10 +1101,29 @@ function InvoiceDetailModal({
               )}
               {receivable && (
                 <>
-                  <button onClick={() => setPaying(true)} className={primaryBtn}>
+                  <button onClick={() => { setPayPrefill(null); setPaying(true); }} className={primaryBtn}>
                     <CreditCard className="h-4 w-4" />
                     Record payment
                   </button>
+                  {/* The deposit handed over in cash or by check — one click
+                      opens the payment form with exactly the deposit still
+                      owing filled in; method and date are picked there. */}
+                  {(() => {
+                    const depositLeft = Math.max(
+                      0,
+                      Math.min((inv.depositCents ?? 0) - inv.paidCents, inv.balanceCents),
+                    );
+                    return depositLeft > 0 ? (
+                      <button
+                        onClick={() => { setPayPrefill(depositLeft); setPaying(true); }}
+                        className={secondaryBtn}
+                        title="Record the deposit as paid — cash, check, or however it arrived"
+                      >
+                        <Banknote className="h-4 w-4" />
+                        Deposit paid — {formatMoney(depositLeft)}
+                      </button>
+                    ) : null;
+                  })()}
                   <button
                     onClick={() => {
                       if (window.confirm(`Void invoice ${inv.number}? This cannot be undone.`)) {
