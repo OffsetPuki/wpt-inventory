@@ -89,6 +89,7 @@ export const TYPES = [
   { key: 'railing', label: 'Railing', tagline: 'Stairs, balconies & handrails' },
   { key: 'pergola', label: 'Pergola', tagline: 'Rectangular shade structure' },
   { key: 'table',   label: 'Table',   tagline: 'Steel base — customer brings the top' },
+  { key: 'custom',  label: 'Custom',  tagline: 'Grills, doors, repairs — you price every line' },
 ];
 
 const ftDisplay = (v) => `${v} ft`;
@@ -552,6 +553,22 @@ export const CONFIG = {
       { kind: 'swatch', name: 'color', label: 'Finish', options: RAILING_FINISHES },
     ],
   },
+
+  // ---- Custom ---------------------------------------------------------------
+  // The escape hatch: window grills, security doors, repairs, one-offs — work
+  // the website configurators don't cover. Nothing here derives a price on
+  // purpose; you say what it is, then build the quote line by line from the
+  // material library ("+ Add line"), which is what lets it fit anything.
+  custom: {
+    defaults: { title: '', color: '#0A0A0A' },
+    controls: [
+      {
+        kind: 'text', name: 'title', label: 'What are you building?',
+        placeholder: 'e.g. Window grills — 6 openings',
+      },
+      { kind: 'swatch', name: 'color', label: 'Finish', options: RAILING_FINISHES },
+    ],
+  },
 };
 
 export function typeLabel(type) {
@@ -579,6 +596,10 @@ export function visibleControls(type, state) {
 /** One-line human summary of a configuration (preview header + PDF spec line). */
 export function summaryLine(type, s) {
   const fin = finishLabel(s.color);
+  if (type === 'custom') {
+    const title = String(s.title || '').trim();
+    return title ? `${title} · ${fin}` : `Custom build · ${fin}`;
+  }
   if (type === 'fence') {
     const t = s.type === 'wood-mesh' && s.meshMaterial === 'corrugated'
       ? 'Wood + Corrugated'
@@ -616,6 +637,15 @@ export function summaryLine(type, s) {
 /** Spec rows for the printable quote (label / value pairs). */
 export function specRows(type, s) {
   const fin = finishLabel(s.color);
+  if (type === 'custom') {
+    // The itemized lines carry the detail here — the spec block just says what
+    // the job is and what colour it leaves the shop.
+    const rows = [];
+    const title = String(s.title || '').trim();
+    if (title) rows.push(['Build', title]);
+    rows.push(['Finish', fin]);
+    return rows.map(([label, value]) => ({ label, value }));
+  }
   if (type === 'fence') {
     const rows = [
       ['Style', optionLabel('fence', 'type', s.type)],

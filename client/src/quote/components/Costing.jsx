@@ -103,6 +103,10 @@ export default function Costing({ priceBook, onChangePriceBook }) {
     const byType = new Map();
     for (const r of rows) {
       if (r.projectStatus !== 'done' || !r.actual) continue;
+      // Calibration compares like with like. A Custom quote is a different job
+      // every time (and has no per-type labor rates to scale), so it stays in
+      // the table below but never suggests a price-book change.
+      if (!LABOR_FIELDS[r.type]) continue;
       const quotedHours = (r.quoted.shopHours || 0) + (r.quoted.installHours || 0);
       const cur = byType.get(r.type) || { laborRatios: [], materialRatios: [] };
       if (quotedHours > 0 && r.actual.laborMinutes > 0) {

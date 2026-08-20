@@ -31,7 +31,7 @@ function Num({ value, onChange, ...rest }) {
   );
 }
 
-function ItemRow({ item, onEdit, onRemove }) {
+function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
   const fields = KIND_FIELDS[item.kind];
   const flags = [item.edited && 'edited', item.unpriced && 'unpriced'].filter(Boolean).join(' ');
   return (
@@ -47,6 +47,30 @@ function ItemRow({ item, onEdit, onRemove }) {
           onChange={(e) => onEdit(item.key, 'name', e.target.value)}
         />
         {item.unpriced && <span className="line-warn" title="A rate driving this line isn't set in the Price Book — open it and fill in the missing rate.">⚠ unset rate</span>}
+        {/* Line order is what the customer reads on their quote — put the
+            headline work at the top, the odds and ends underneath. */}
+        {onMove && (
+          <span className="line-move">
+            <button
+              type="button"
+              className="estimate-reset"
+              title="Move up — this is the order the customer reads"
+              disabled={first}
+              onClick={() => onMove(item.key, -1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="estimate-reset"
+              title="Move down — this is the order the customer reads"
+              disabled={last}
+              onClick={() => onMove(item.key, 1)}
+            >
+              ↓
+            </button>
+          </span>
+        )}
         {onRemove && (
           <button
             type="button"
@@ -176,13 +200,14 @@ export default function LineItems({
   lineState, totals, warnings, materialsSummary, priceLockAt, priceBook,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
   onEditItem, onEditLabor, onEditInstall, onAddCustomLine, onRemoveCustomLine, onSetLineRemoved,
-  onUnlockPrices, onReset,
+  onMoveLine, onUnlockPrices, onReset,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate,
 }) {
   const { items, labor, install } = lineState;
   const removedItems = lineState.removedItems || [];
-  const edited = items.some((it) => it.edited) || removedItems.length > 0 || labor.edited || (install && install.edited);
+  const edited = items.some((it) => it.edited) || removedItems.length > 0 || labor.edited
+    || (install && install.edited) || lineState.reordered;
   const unpricedCount = items.filter((it) => it.unpriced).length;
   const deliveryCost = (Number(deliveryMiles) || 0) * (Number(deliveryRate) || 0);
   const rawCost = round2(totals.subtotal - totals.totalMarkup);
@@ -228,8 +253,16 @@ export default function LineItems({
       )}
 
       <div className="lines">
-        {items.map((item) => (
-          <ItemRow key={item.key} item={item} onEdit={onEditItem} onRemove={removeLine} />
+        {items.map((item, i) => (
+          <ItemRow
+            key={item.key}
+            item={item}
+            onEdit={onEditItem}
+            onRemove={removeLine}
+            onMove={onMoveLine}
+            first={i === 0}
+            last={i === items.length - 1}
+          />
         ))}
 
         {adding && (

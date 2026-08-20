@@ -11,7 +11,7 @@ export default function Configurator({
   type, state, lineState, totals, warnings, materialsSummary, priceLockAt, priceBook,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
   onChangeOption, onEditItem, onEditLabor, onEditInstall,
-  onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onUnlockPrices, onResetOverrides,
+  onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onMoveLine, onUnlockPrices, onResetOverrides,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
 }) {
@@ -22,7 +22,9 @@ export default function Configurator({
       <div className="container">
         <div className="page-head">
           <button className="back-link" onClick={onBack}>← Build type</button>
-          <p className="eyebrow" style={{ marginTop: 28 }}>Design your own</p>
+          <p className="eyebrow" style={{ marginTop: 28 }}>
+            {type === 'custom' ? 'Build it line by line' : 'Design your own'}
+          </p>
           <h1 className="display">{typeLabel(type)}</h1>
         </div>
 
@@ -54,6 +56,7 @@ export default function Configurator({
               onAddCustomLine={onAddCustomLine}
               onRemoveCustomLine={onRemoveCustomLine}
               onSetLineRemoved={onSetLineRemoved}
+              onMoveLine={onMoveLine}
               onUnlockPrices={onUnlockPrices}
               onReset={onResetOverrides}
               onChangeMaterialMarkup={onChangeMaterialMarkup}

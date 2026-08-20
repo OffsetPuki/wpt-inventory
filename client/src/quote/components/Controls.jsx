@@ -154,12 +154,30 @@ function NumberField({ control, value, onChange }) {
   );
 }
 
+/** Plain text control — what a Custom build is, in the owner's own words. */
+function TextField({ control, value, onChange }) {
+  return (
+    <fieldset className="ctrl">
+      <legend className="ctrl-legend"><span className="lbl">{control.label}</span></legend>
+      <input
+        type="text"
+        className="ctrl-text"
+        name={control.name}
+        value={value ?? ''}
+        placeholder={control.placeholder || ''}
+        onChange={(e) => onChange(control.name, e.target.value)}
+      />
+    </fieldset>
+  );
+}
+
 export default function Control({ control, value, onChange }) {
   switch (control.kind) {
     case 'segment': return <Segment control={control} value={value} onChange={onChange} />;
     case 'swatch':  return <Swatch control={control} value={value} onChange={onChange} />;
     case 'range':   return <Range control={control} value={value} onChange={onChange} />;
     case 'number':  return <NumberField control={control} value={value} onChange={onChange} />;
+    case 'text':    return <TextField control={control} value={value} onChange={onChange} />;
     default:        return null;
   }
 }

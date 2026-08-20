@@ -9,8 +9,8 @@ import {
   deriveItems, buildLineState, deriveWarnings, materialTotals, materialLibrary, lineCost, matRate,
 } from '../client/src/quote/lib/estimate.js';
 import { computeTotals } from '../client/src/quote/lib/quote.js';
-import { defaultState } from '../client/src/quote/data/configurators.js';
-import { deepMerge } from '../client/src/quote/lib/store.js';
+import { defaultState, summaryLine, specRows } from '../client/src/quote/data/configurators.js';
+import { deepMerge, duplicateSession } from '../client/src/quote/lib/store.js';
 
 let failures = 0;
 function check(name, cond, detail = '') {
@@ -260,6 +260,137 @@ console.log('\nDeleted materials:');
   check('its line is flagged, not silently charged', conc && conc.unpriced === true && lineCost(conc) === 0, JSON.stringify(conc));
   // Putting it back restores the seeded price — nothing was destroyed.
   check('restores when put back', matRate(deepMerge(pb, { removedMaterials: [] }), 'concrete_bag') === 7);
+}
+
+// ── 13. Custom build type (grills, doors, repairs — hand-priced) ─────────────
+console.log('\nCustom build type:');
+{
+  const s = { ...defaultState('custom'), title: 'Window grills — 6 openings' };
+
+  // Nothing is derived: the only line a fresh custom quote has is consumables.
+  const fresh = deriveItems('custom', s, pb);
+  check('derives no build items', fresh.items.filter((i) => i.key !== 'consumables').length === 0);
+  check('no auto labor hours', fresh.laborHours === 0 && fresh.installHours === 0);
+
+  // A real grill quote: tubing by the foot + a flat fabrication charge.
+  const ov = {
+    items: {
+      custom_1: {
+        custom: true, name: '1×1 tube — grill bars', kind: 'length',
+        materialId: 'tube_1x1', unit: 'ft', qty: 200, rate: matRate(pb, 'tube_1x1'),
+      },
+      custom_2: { custom: true, name: 'Anchors & expansion bolts', kind: 'flat', qty: 1, rate: 90 },
+    },
+    labor: { hours: 24 },
+    install: { hours: 8 },
+  };
+  const ls = buildLineState('custom', s, pb, ov);
+  const bars = item(ls.items, 'custom_1');
+  check('hand-added length line prices', bars && approx(lineCost(bars), 200 * matRate(pb, 'tube_1x1')), `got ${bars && lineCost(bars)}`);
+  check('bars land in the buy list', materialTotals(ls.items, pb).some((m) => m.id === 'tube_1x1' && approx(m.qty, 200)));
+
+  // Consumables recompute off the hand-added FABRICATED material only — the
+  // flat anchors line is excluded, same rule every other build type follows.
+  const cons = item(ls.items, 'consumables');
+  check('consumables = 5% of the tubing (flat lines excluded)', approx(lineCost(cons), lineCost(bars) * 0.05), `got ${lineCost(cons)}`);
+
+  const totals = computeTotals(ls, {
+    materialMarkupPct: 35, laborMarkupPct: 35, taxPct: 8.25, minJobCharge: pb.minJobCharge,
+  });
+  check('quote totals up', totals.total > 0 && totals.lines.labor.total > 0 && totals.lines.finishing.total > 0);
+
+  // The checklist nags an empty custom quote and shuts up once it has lines.
+  const empty = deriveWarnings('custom', s, buildLineState('custom', s, pb, {}), { materialMarkupPct: 35, laborMarkupPct: 35 });
+  check('flags an empty custom quote', /\+ Add line/.test(empty.map((w) => w.msg).join(' | ')));
+  const built = deriveWarnings('custom', s, ls, { materialMarkupPct: 35, laborMarkupPct: 35 });
+  check('stops nagging once lines exist', !/\+ Add line/.test(built.map((w) => w.msg).join(' | ')));
+  const untitled = deriveWarnings('custom', { ...s, title: '' }, ls, { materialMarkupPct: 35, laborMarkupPct: 35 });
+  check('nudges for a missing description', /description/i.test(untitled.map((w) => w.msg).join(' | ')));
+
+  // What the customer's quote page prints (project.summary + spec rows).
+  check('summary says what it is', summaryLine('custom', s) === 'Window grills — 6 openings · Matte Black', summaryLine('custom', s));
+  check('spec rows carry build + finish', specRows('custom', s).map((r) => r.label).join(',') === 'Build,Finish');
+  check('untitled still renders', summaryLine('custom', { ...s, title: '' }) === 'Custom build · Matte Black');
+}
+
+// ── 14. Line order (the ▲▼ arrows) ───────────────────────────────────────────
+console.log('\nLine order:');
+{
+  const s = defaultState('fence');
+  const natural = buildLineState('fence', s, pb, {}).items.map((i) => i.key);
+  check('starts in formula order', natural[0] === 'posts', natural.join(','));
+
+  // Move the last line to the front — the order the CUSTOMER reads.
+  const moved = [natural[natural.length - 1], ...natural.slice(0, -1)];
+  const ls = buildLineState('fence', s, pb, { order: moved });
+  check('honors the stored order', ls.items.map((i) => i.key).join(',') === moved.join(','), ls.items.map((i) => i.key).join(','));
+  check('flags the quote as reordered', ls.reordered === true);
+  check('a natural-order quote is not flagged', buildLineState('fence', s, pb, {}).reordered === false);
+
+  // Reordering must not touch the money.
+  const money = (x) => computeTotals(x, { materialMarkupPct: 35, laborMarkupPct: 35, taxPct: 8.25 }).total;
+  check('reordering does not move the total', approx(money(ls), money(buildLineState('fence', s, pb, {}))));
+
+  // A line added AFTER the reorder isn't in the list — it lands at the end,
+  // which is where a newly added line belongs anyway.
+  const withNew = buildLineState('fence', s, pb, {
+    order: moved,
+    items: { custom_9: { custom: true, name: 'Core drilling', kind: 'flat', qty: 1, rate: 200 } },
+  });
+  check('unlisted keys sort to the end', withNew.items[withNew.items.length - 1].key === 'custom_9', withNew.items.map((i) => i.key).join(','));
+
+  // Stale keys (a line struck off after the reorder) must not strand anything.
+  const withRemoved = buildLineState('fence', s, pb, { order: moved, items: { concrete: { removed: true } } });
+  check('a removed line just drops out of the order', !withRemoved.items.some((i) => i.key === 'concrete')
+    && withRemoved.items.length === moved.length - 1);
+
+  // Order survives an option change, exactly like a rename does.
+  const resized = buildLineState('fence', { ...s, totalLengthFt: 80 }, pb, { order: moved });
+  check('order survives an option change', resized.items[0].key === moved[0]);
+}
+
+// ── 15. Duplicating a saved quote ─────────────────────────────────────────────
+console.log('\nDuplicate a saved quote:');
+{
+  const saved = {
+    sid: 'old-sid', type: 'custom', state: { title: 'Window grills — 6 openings', color: '#0A0A0A' },
+    overrides: { items: { custom_1: { custom: true, name: 'Bars', kind: 'length', qty: 200, rate: 2.75 } }, order: ['custom_1'], labor: { hours: 24 } },
+    materialMarkupPct: 35, laborMarkupPct: 35, taxPct: 8.25, discountPct: 5,
+    customer: { name: 'Ana Ruiz', company: '', phone: '555-0101', email: 'ana@example.com', location: 'Arlington' },
+    notes: 'Ships in 3 weeks', features: 'Anchored into brick', attachments: [{ url: '/uploads/a.png', caption: 'Shop drawing' }],
+    designRef: 'CJM-F7K2', depositPct: 50,
+    priceBookSnapshot: { laborRatePerHour: 40 }, priceBookSnapshotAt: '2026-01-01T00:00:00.000Z',
+    number: 'Q-2026-0631', quoteId: 42, createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const copy = duplicateSession(saved, 'new-sid');
+
+  // The whole point: it cannot write back over the quote it came from.
+  check('drops the quote id', copy.quoteId === null);
+  check('drops the quote number', copy.number === null);
+  check('gets its own session id', copy.sid === 'new-sid');
+
+  // Nothing that identifies the original customer travels.
+  check('customer card is blank', Object.values(copy.customer).every((v) => v === ''));
+  check('website design code is dropped', copy.designRef === undefined);
+
+  // Everything you priced does travel.
+  check('lines come along', copy.overrides.items.custom_1.qty === 200);
+  check('line order comes along', copy.overrides.order.join(',') === 'custom_1');
+  check('labor override comes along', copy.overrides.labor.hours === 24);
+  check('markups / tax / discount come along', copy.materialMarkupPct === 35 && copy.taxPct === 8.25 && copy.discountPct === 5);
+  check('notes, features and drawings come along', copy.notes === saved.notes && copy.features === saved.features && copy.attachments.length === 1);
+  check('deposit comes along', copy.depositPct === 50);
+
+  // A new quote prices off today's book, not the original's frozen one.
+  check('price lock is released', copy.priceBookSnapshot === null && copy.priceBookSnapshotAt === null);
+  check('stamped as created now', copy.createdAt !== saved.createdAt);
+
+  // And the original object is untouched (it is still on screen behind the copy).
+  check('the original is not mutated', saved.quoteId === 42 && saved.designRef === 'CJM-F7K2' && saved.customer.name === 'Ana Ruiz');
+
+  // The copy still prices — same total as the original priced at today's rates.
+  const lsCopy = buildLineState(copy.type, copy.state, pb, copy.overrides);
+  check('the copy prices', lineCost(item(lsCopy.items, 'custom_1')) === 550);
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);

@@ -64,6 +64,15 @@ const ICONS = {
       <path d="M14 158 H306" strokeOpacity="0.25" />
     </svg>
   ),
+  // A window grill — the job this type was added for.
+  custom: (
+    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="48" y="16" width="224" height="148" strokeWidth="3" />
+      {[80, 112, 144, 176, 208, 240].map((x) => <line key={x} x1={x} y1="16" x2={x} y2="164" />)}
+      <line x1="48" y1="62" x2="272" y2="62" strokeWidth="2" />
+      <line x1="48" y1="118" x2="272" y2="118" strokeWidth="2" />
+    </svg>
+  ),
 };
 
 export default function Home({ onPick, onFind }) {

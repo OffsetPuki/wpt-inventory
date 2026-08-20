@@ -20,6 +20,10 @@ export default function Preview({ type, state }) {
 
   const summary = useMemo(() => summaryLine(type, state), [type, state]);
 
+  // A Custom build has no drawing to render — an empty stage would just be a
+  // hole in the page, so the line items move up into its place.
+  if (!RENDERERS[type]) return null;
+
   return (
     <div className="preview">
       <div className="preview-top">

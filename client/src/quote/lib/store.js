@@ -39,6 +39,32 @@ export function deepMerge(base, over) {
   return out;
 }
 
+/**
+ * A saved quote as the starting point for a new one — "same grill, different
+ * window". Everything you priced (lines, overrides, order, markups, notes,
+ * features, drawings) rides along; everything that identifies the ORIGINAL is
+ * dropped:
+ *   · quoteId / number — else the first save would overwrite the original.
+ *   · customer + designRef — a copy is for someone else, and their quote must
+ *     never carry another customer's details or lead code.
+ *   · the price-book snapshot — a new quote prices off today's rates. Rates
+ *     you typed BY HAND stay typed; only book-driven lines move.
+ */
+export function duplicateSession(sess, sid) {
+  const copy = { ...sess };
+  delete copy.designRef;
+  return {
+    ...copy,
+    sid,
+    quoteId: null,
+    number: null,
+    customer: { name: '', company: '', phone: '', email: '', location: '' },
+    priceBookSnapshot: null,
+    priceBookSnapshotAt: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export function loadSession() { return safeParse(localStorage.getItem(SESSION_KEY), null); }
 export function saveSession(sess) { return safeSet(SESSION_KEY, sess); }
 export function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ } }

@@ -350,6 +350,19 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .cell:focus { outline: none; border-bottom-color: var(--ink); }
 .qa .cell.read { border-bottom-style: dotted; color: var(--steel); }
 
+/* Free-text control — the Custom build type's description. */
+.qa .ctrl-text {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 0.95rem;
+  padding: 4px 0;
+}
+.qa .ctrl-text:focus { outline: none; border-bottom-color: var(--ink); }
+.qa .ctrl-text::placeholder { color: var(--steel); opacity: 0.7; }
+
 /* Totals */
 .qa .totals { padding: 6px 22px 20px; }
 .qa .totals-row { display: flex; align-items: baseline; justify-content: space-between; padding: 7px 0; font-size: 0.9rem; }
@@ -610,6 +623,11 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .removed-line .line-name { color: var(--steel); text-decoration: line-through; }
 .qa .removed-line .line-remove { opacity: 1; text-decoration: none; }
 .qa .removed-line .line-cost { color: var(--steel); }
+
+/* Line-order arrows — same reveal-on-hover treatment as the remove ✕. */
+.qa .line-move { display: inline-flex; gap: 2px; margin-left: 4px; opacity: 0; transition: opacity 0.15s ease; }
+.qa .line:hover .line-move, .qa .line-move:focus-within { opacity: 1; }
+.qa .line-move button { font-size: 0.8rem; letter-spacing: 0; line-height: 1; padding: 0 2px; }
 
 /* ---- Design features (builder panel) -------------------------------------- */
 

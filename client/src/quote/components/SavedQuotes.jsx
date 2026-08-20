@@ -120,7 +120,7 @@ function BuyList({ ids, onClose }) {
  * same number), check several to build a combined material buy list, or
  * delete the ones that went nowhere.
  */
-export default function SavedQuotes({ onOpen }) {
+export default function SavedQuotes({ onOpen, onDuplicate }) {
   const qc = useQueryClient();
   // Which row has its send-to-customer panel open (one at a time).
   const [shareId, setShareId] = useState(null);
@@ -142,16 +142,21 @@ export default function SavedQuotes({ onOpen }) {
     });
   };
 
+  // One fetch, two destinations: open the quote itself, or start a copy of it.
   const openQuote = useMutation({
-    mutationFn: async (id) => (await apiRequest('GET', `/api/quotes/${id}`)).json(),
-    onSuccess: (row) => {
+    mutationFn: async ({ id }) => (await apiRequest('GET', `/api/quotes/${id}`)).json(),
+    onSuccess: (row, { duplicate }) => {
       let payload = null;
       try { payload = JSON.parse(row.payload); } catch { /* handled below */ }
       if (!payload || !payload.type) {
         toast({ variant: 'destructive', title: 'Could not open quote', description: 'This quote\'s saved data is unreadable.' });
         return;
       }
-      onOpen({ ...payload, quoteId: row.id, number: row.number });
+      // A copy deliberately gets NEITHER id nor number — duplicateSession drops
+      // them anyway, but not handing them over makes that impossible to undo by
+      // accident later.
+      if (duplicate) onDuplicate(payload);
+      else onOpen({ ...payload, quoteId: row.id, number: row.number });
     },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not open quote', description: e?.message }),
   });
@@ -230,9 +235,19 @@ export default function SavedQuotes({ onOpen }) {
                   </div>
                   <div className="line-cost">${fmtMoney((q.totalCents || 0) / 100)}</div>
                   <div className="line-controls">
-                    <button className="btn ghost sq-btn" onClick={() => openQuote.mutate(q.id)} disabled={openQuote.isPending}>
+                    <button className="btn ghost sq-btn" onClick={() => openQuote.mutate({ id: q.id })} disabled={openQuote.isPending}>
                       Open
                     </button>
+                    {onDuplicate && (
+                      <button
+                        className="btn ghost sq-btn"
+                        title="Start a new quote from this one — same lines and rates, blank customer"
+                        onClick={() => openQuote.mutate({ id: q.id, duplicate: true })}
+                        disabled={openQuote.isPending}
+                      >
+                        Duplicate
+                      </button>
+                    )}
                     <button className="btn ghost sq-btn" onClick={() => setShareId(shareId === q.id ? null : q.id)}>
                       {shareId === q.id ? 'Close' : 'Send'}
                     </button>

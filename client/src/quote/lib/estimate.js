@@ -747,7 +747,16 @@ function estimateTable(s, pb) {
   };
 }
 
-const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable };
+/**
+ * Custom build — derives nothing on purpose. Every line is added by hand from
+ * the material library ("+ Add line"); consumables still ride along, because
+ * buildLineState recomputes them from whatever ends up on the quote.
+ */
+function estimateCustom() {
+  return { items: [], laborHours: 0, installHours: 0 };
+}
+
+const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable, custom: estimateCustom };
 
 /**
  * Consumables (wire, gas, discs, primer/paint, fasteners) scale with FABRICATED
@@ -854,6 +863,18 @@ export function buildLineState(type, state, priceBook, overrides) {
   merged.length = 0;
   merged.push(...kept);
 
+  // Per-quote line order (the ▲▼ arrows). This is the order the CUSTOMER reads
+  // on their quote, so it lives in the overrides and rides along into the saved
+  // payload. A key the list doesn't mention — a line added after the reorder,
+  // or one a design change introduced — sorts to the end, which is where a new
+  // line appears anyway. (Array#sort is stable, so ties keep formula order.)
+  const order = Array.isArray(ov.order) ? ov.order : null;
+  if (order && order.length) {
+    const rank = new Map(order.map((k, i) => [k, i]));
+    const at = (it) => (rank.has(it.key) ? rank.get(it.key) : Number.MAX_SAFE_INTEGER);
+    merged.sort((a, b) => at(a) - at(b));
+  }
+
   // Consumables ride on the material subtotal — recompute from the
   // POST-override lines (including custom ones, minus removed ones) so
   // per-quote edits move it too. An explicit override on the consumables line
@@ -881,7 +902,7 @@ export function buildLineState(type, state, priceBook, overrides) {
     edited: ov.install?.hours != null || ov.install?.rate != null,
   };
 
-  return { items: merged, removedItems, labor, install };
+  return { items: merged, removedItems, labor, install, reordered: !!(order && order.length) };
 }
 
 // -----------------------------------------------------------------------------
@@ -953,6 +974,14 @@ export function deriveWarnings(type, state, lineState, pricing) {
   if (type === 'table') {
     info('Steel base only — confirm the customer knows they are buying the wood top.');
     if (!has('topFastening')) info('No top-fastening hardware — how is their top attaching?');
+  }
+  if (type === 'custom') {
+    // Nothing is derived here, so an empty quote is a real possibility —
+    // consumables ride on the other lines and don't count as one.
+    if (!ls.items.some((it) => it.key !== 'consumables' && lineCost(it) > 0)) {
+      warn('No priced lines yet — build this quote with "+ Add line".');
+    }
+    if (!String(s.title || '').trim()) info('No description — the customer\'s quote will just say "Custom build".');
   }
 
   return out;

@@ -24,7 +24,7 @@ import { fetchLeads } from './lib/leads.js';
 import { parseLead } from './lib/designSpec.js';
 import { computeTotals } from './lib/quote.js';
 import {
-  deepMerge, DEFAULT_SHOP, loadSession, saveSession, setPath,
+  deepMerge, DEFAULT_SHOP, duplicateSession, loadSession, saveSession, setPath,
 } from './lib/store.js';
 
 import Home from './components/Home.jsx';
@@ -360,6 +360,20 @@ export default function QuoteBuilder({ initialSettings }) {
       return { ...s, overrides: { ...s.overrides, items } };
     });
 
+  // Move a line one place up (-1) or down (+1). The order is stored as a list
+  // of item keys in the overrides, seeded from the order you're looking at when
+  // you click — so it survives option changes exactly like a rename does, and
+  // lines the design adds later fall in at the end.
+  const moveLine = (key, dir) =>
+    setSession((s) => {
+      const keys = (lineState?.items || []).map((it) => it.key);
+      const i = keys.indexOf(key);
+      const j = i + dir;
+      if (i === -1 || j < 0 || j >= keys.length) return s;
+      [keys[i], keys[j]] = [keys[j], keys[i]];
+      return { ...s, overrides: { ...s.overrides, order: keys } };
+    });
+
   // Unlock a snapshot-priced quote so it reprices with today's book (the next
   // save freezes today's book in as the new snapshot).
   const unlockPrices = () =>
@@ -442,6 +456,18 @@ export default function QuoteBuilder({ initialSettings }) {
     setView('configure');
   };
 
+  // Start a NEW quote from a saved one — the second grill, the next fence on
+  // the same street. It has no number until it reaches the details step, so
+  // nothing can write back over the quote it was copied from.
+  const duplicateSaved = (sess) => {
+    setSession(duplicateSession(migrateSession(sess, priceBook), newSid()));
+    setView('configure');
+    toast({
+      title: 'Copy started',
+      description: 'Lines and rates came along; the customer is blank and it gets its own number when you reach the details step.',
+    });
+  };
+
   // ── Price book ──────────────────────────────────────────────────────────────
   // Editing a material's COST also stamps materials.<id>.updatedAt — that
   // feeds the staleness badges here and the hourly "review material prices"
@@ -493,7 +519,7 @@ export default function QuoteBuilder({ initialSettings }) {
         )}
 
         {activeView === 'saved' && (
-          <SavedQuotes onOpen={openSaved} />
+          <SavedQuotes onOpen={openSaved} onDuplicate={duplicateSaved} />
         )}
 
         {activeView === 'costing' && (
@@ -523,6 +549,7 @@ export default function QuoteBuilder({ initialSettings }) {
             onAddCustomLine={addCustomLine}
             onRemoveCustomLine={removeCustomLine}
             onSetLineRemoved={setLineRemoved}
+            onMoveLine={moveLine}
             onUnlockPrices={unlockPrices}
             onResetOverrides={resetOverrides}
             onChangeMaterialMarkup={(v) => patchSession({ materialMarkupPct: v })}

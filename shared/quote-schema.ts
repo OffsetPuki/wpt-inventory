@@ -9,7 +9,10 @@ import { z } from "zod";
 // versions and carries its own migration in QuoteBuilder.migrateSession), so
 // the columns here are just the identity + list-view fields.
 
-export const QUOTE_TYPES = ["fence", "gate", "carport", "railing", "pergola", "table"] as const;
+// "custom" is the hand-priced escape hatch (grills, security doors, repairs) —
+// it has no configurator math, just typed line items. Column is plain TEXT in
+// SQLite, so adding a member needs no migration.
+export const QUOTE_TYPES = ["fence", "gate", "carport", "railing", "pergola", "table", "custom"] as const;
 export type QuoteType = (typeof QUOTE_TYPES)[number];
 
 // Share/accept lifecycle: draft (builder only) → sent (share link created) →
@@ -97,4 +100,5 @@ export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
   railing: "Railing",
   pergola: "Pergola",
   table: "Table",
+  custom: "Custom",
 };
