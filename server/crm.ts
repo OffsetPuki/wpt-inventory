@@ -8,8 +8,8 @@ import { requireAuth, requireElevated } from "./auth";
 import {
   clients, leads, crmActivities,
   insertClientSchema, insertLeadSchema, insertCrmActivitySchema,
-  LEAD_SOURCES, LEAD_STAGES, CLIENT_STATUSES,
-  type Lead, type LeadStage, type LeadSource, type ClientStatus,
+  LEAD_SOURCES, LEAD_STAGES, LEAD_SITES, CLIENT_STATUSES,
+  type Lead, type LeadStage, type LeadSource, type LeadSite, type ClientStatus,
 } from "../shared/crm-schema";
 // Cross-module automation hooks. These TABLE OBJECTS are safe to import (pure
 // schema definitions); the underlying tables are created by the owning
@@ -57,6 +57,8 @@ sqlite.exec(`
     email TEXT,
     phone TEXT,
     source TEXT NOT NULL DEFAULT 'other',
+    -- Which family website sent the lead (metals/concrete/insulation/trades).
+    site TEXT NOT NULL DEFAULT 'metals',
     -- Soft ref to mk_campaigns (marketing module owns that table); no FK to
     -- avoid cross-module creation-order coupling.
     campaign_id INTEGER,
@@ -97,12 +99,18 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_crm_activities_created ON crm_activities(created_at);
 `);
 
-// Additive migration: raw UTM columns arrived after installs existed (the
-// website intake writes them for attribution reporting). SQLite has no
-// IF NOT EXISTS for columns — the throw on re-run is expected.
-for (const col of ["utm_source", "utm_medium", "utm_campaign"]) {
+// Additive migrations: columns that arrived after installs existed (raw UTM
+// for attribution reporting; `site` when the sister sites joined the one
+// intake). SQLite has no IF NOT EXISTS for columns — the throw on re-run is
+// expected.
+for (const col of [
+  "utm_source TEXT",
+  "utm_medium TEXT",
+  "utm_campaign TEXT",
+  "site TEXT NOT NULL DEFAULT 'metals'",
+]) {
   try {
-    sqlite.exec(`ALTER TABLE crm_leads ADD COLUMN ${col} TEXT`);
+    sqlite.exec(`ALTER TABLE crm_leads ADD COLUMN ${col}`);
   } catch {
     /* column already exists */
   }
@@ -545,6 +553,25 @@ export function registerCrmRoutes(app: Express): void {
       /* quotes table not created */
     }
 
+    // Per-site split of new leads this month. Scoped exactly like the
+    // dashboard's "New leads (month)" number, which reads the current bucket
+    // of /api/crm/reports monthlyLeads: calendar month by the same
+    // strftime('%Y-%m', …, 'unixepoch') (UTC) bucketing.
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const leadsBySite = Object.fromEntries(
+      LEAD_SITES.map((s) => [s, 0]),
+    ) as Record<LeadSite, number>;
+    for (const r of db.select({ site: leads.site, n: sql<number>`count(*)` })
+      .from(leads)
+      .where(and(
+        isNull(leads.deletedAt),
+        sql`strftime('%Y-%m', ${leads.createdAt} / 1000, 'unixepoch') = ${monthKey}`,
+      ))
+      .groupBy(leads.site)
+      .all()) {
+      if (r.site in leadsBySite) leadsBySite[r.site] = r.n;
+    }
+
     const topSourceRow = db.select({
       source: leads.source,
       count: sql<number>`count(*)`,
@@ -562,6 +589,7 @@ export function registerCrmRoutes(app: Express): void {
       quotesSentLast30,
       closeRate,
       revenueClosed30dCents,
+      leadsBySite,
       topSource: topSourceRow
         ? { source: topSourceRow.source, count: topSourceRow.count }
         : null,
@@ -661,6 +689,10 @@ export function registerCrmRoutes(app: Express): void {
     const stage = qstr(req.query.stage);
     if (stage && (LEAD_STAGES as readonly string[]).includes(stage)) {
       conds.push(eq(leads.stage, stage as LeadStage));
+    }
+    const site = qstr(req.query.site);
+    if (site && (LEAD_SITES as readonly string[]).includes(site)) {
+      conds.push(eq(leads.site, site as LeadSite));
     }
     const assignedTo = qstr(req.query.assignedTo);
     if (assignedTo) conds.push(eq(leads.assignedTo, parseInt(assignedTo, 10)));

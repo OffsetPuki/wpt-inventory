@@ -15,14 +15,17 @@ import { formatDateTime, formatMoney, parseMoney } from "@/lib/format";
 import {
   LEAD_STAGES,
   LEAD_SOURCES,
+  LEAD_SITES,
   WIN_LOSS_REASONS,
   LEAD_STAGE_LABELS,
   LEAD_SOURCE_LABELS,
+  leadSiteLabel,
   WIN_LOSS_REASON_LABELS,
   ACTIVITY_KIND_LABELS,
   type Lead,
   type LeadStage,
   type LeadSource,
+  type LeadSite,
   type WinLossReason,
   type CrmActivity,
 } from "@shared/crm-schema";
@@ -41,6 +44,21 @@ import {
   PencilRuler,
   Trash2,
 } from "lucide-react";
+
+// Per-trade brand hues for the site badge. Arbitrary Tailwind values must stay
+// literal in this file so the JIT scan generates them.
+const SITE_CHIP_CLS: Record<LeadSite, string> = {
+  metals: "bg-[#2F5A73] text-white",
+  concrete: "bg-[#A84B1E] text-white",
+  insulation: "bg-[#136A66] text-white",
+  trades: "bg-[#101215] text-white",
+};
+
+function SiteChip({ site, className }: { site: LeadSite; className?: string }) {
+  return (
+    <Chip className={cn(SITE_CHIP_CLS[site], className)}>{leadSiteLabel[site]}</Chip>
+  );
+}
 
 const STAGE_TONE: Record<LeadStage, ChipTone> = {
   new: "zinc",
@@ -432,6 +450,12 @@ function LeadDetailModal({
                 ))}
               </select>
             </label>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-foreground">Site</span>
+              <span className="flex h-11 items-center">
+                <SiteChip site={lead.site} />
+              </span>
+            </div>
             <label className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-foreground">Stage</span>
               <select className={inputCls} value={stage} onChange={(e) => setStage(e.target.value as LeadStage)}>
@@ -643,6 +667,7 @@ export default function LeadsPage() {
   const [view, setView] = useState<"board" | "list">("board");
   const [q, setQ] = useState("");
   const [source, setSource] = useState("");
+  const [site, setSite] = useState("");
   const [stage, setStage] = useState("");
   const [assignee, setAssignee] = useState("");
   const [from, setFrom] = useState("");
@@ -656,13 +681,14 @@ export default function LeadsPage() {
   const params = new URLSearchParams();
   if (q.trim()) params.set("q", q.trim());
   if (source) params.set("source", source);
+  if (site) params.set("site", site);
   if (assignee) params.set("assignedTo", assignee);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   const leadsUrl = `/api/crm/leads${params.toString() ? `?${params.toString()}` : ""}`;
 
   const { data: leads = [], isLoading } = useQuery<Lead[]>({
-    queryKey: ["crm-leads", q.trim(), source, assignee, from, to],
+    queryKey: ["crm-leads", q.trim(), source, site, assignee, from, to],
     queryFn: async () => (await apiRequest("GET", leadsUrl)).json(),
   });
 
@@ -752,6 +778,12 @@ export default function LeadsPage() {
             <option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>
           ))}
         </select>
+        <select className={selectCls} value={site} onChange={(e) => setSite(e.target.value)}>
+          <option value="">All sites</option>
+          {LEAD_SITES.map((s) => (
+            <option key={s} value={s}>{leadSiteLabel[s]}</option>
+          ))}
+        </select>
         {view === "list" && (
           <select className={selectCls} value={stage} onChange={(e) => setStage(e.target.value)}>
             <option value="">All stages</option>
@@ -830,6 +862,7 @@ export default function LeadsPage() {
                         >
                           <p className="font-medium text-foreground">{lead.name}</p>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <SiteChip site={lead.site} />
                             <Chip tone="blue">{LEAD_SOURCE_LABELS[lead.source]}</Chip>
                             {lead.stale && <Chip tone="amber">Stale</Chip>}
                           </div>
@@ -885,6 +918,7 @@ export default function LeadsPage() {
                     >
                       <td className="px-4 py-3 font-medium text-foreground">
                         {lead.name}
+                        <SiteChip site={lead.site} className="ml-2" />
                         {lead.stale && (
                           <Chip tone="amber" className="ml-2">Stale</Chip>
                         )}

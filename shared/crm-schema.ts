@@ -33,6 +33,11 @@ export const LEAD_SOURCES = [
 ] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
+// Which family website a lead arrived from — all four sites share the one
+// intake endpoint; 'metals' is the original cjmmetals.com.
+export const LEAD_SITES = ["metals", "concrete", "insulation", "trades"] as const;
+export type LeadSite = (typeof LEAD_SITES)[number];
+
 export const WIN_LOSS_REASONS = [
   "price",
   "no_response",
@@ -77,6 +82,8 @@ export const leads = sqliteTable("crm_leads", {
   email: text("email"),
   phone: text("phone"),
   source: text("source", { enum: LEAD_SOURCES }).notNull().default("other"),
+  // Which family website sent the lead (see LEAD_SITES).
+  site: text("site", { enum: LEAD_SITES }).notNull().default("metals"),
   campaignId: integer("campaign_id").references(() => campaigns.id, {
     onDelete: "set null",
   }),
@@ -186,6 +193,13 @@ export const WIN_LOSS_REASON_LABELS: Record<WinLossReason, string> = {
   good_fit: "Good fit",
   referral_trust: "Referral / trust",
   other: "Other",
+};
+
+export const leadSiteLabel: Record<LeadSite, string> = {
+  metals: "CJM Metals",
+  concrete: "CJM Concrete",
+  insulation: "CJM Insulation",
+  trades: "CJM Trades",
 };
 
 export const ACTIVITY_KIND_LABELS: Record<ActivityKind, string> = {

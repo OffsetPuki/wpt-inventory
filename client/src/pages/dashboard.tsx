@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { apiRequest } from "@/lib/queryClient";
 import { formatMoney, formatPercent, formatHours, formatDate } from "@/lib/format";
+import { LEAD_SITES, leadSiteLabel, type LeadSite } from "@shared/crm-schema";
 import Header from "@/components/Header";
 import StatCard, { type Trend } from "@/components/StatCard";
 import { AlertTriangle, ArrowRight, Clock4, Loader2 } from "lucide-react";
@@ -21,7 +22,17 @@ interface CrmStats {
   leadsThisWeek: number;
   pipelineValueCents: number;
   closeRate: number | null;
+  leadsBySite?: Record<LeadSite, number>;
 }
+
+// Per-trade brand hues for the site dots — literal Tailwind arbitrary values
+// so the JIT scan generates them (same map idiom as the leads page badges).
+const SITE_DOT_CLS: Record<LeadSite, string> = {
+  metals: "bg-[#2F5A73]",
+  concrete: "bg-[#A84B1E]",
+  insulation: "bg-[#136A66]",
+  trades: "bg-[#101215]",
+};
 
 interface CrmReports {
   monthlyLeads: { month: string; count: number }[];
@@ -219,6 +230,8 @@ export default function DashboardPage() {
 
   const taskTotal = (pm.data?.openTasks ?? 0) + (pm.data?.doneTasks ?? 0);
   const donePct = taskTotal > 0 ? (pm.data?.doneTasks ?? 0) / taskTotal : 0;
+
+  const leadsBySite = crm.data?.leadsBySite;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -461,6 +474,24 @@ export default function DashboardPage() {
           href="/pm/board"
         />
       </Section>
+
+      {/* New leads this month, split by family website. */}
+      {leadsBySite && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+          <span className="text-[11px] font-semibold uppercase tracking-wider">
+            Leads by site (month)
+          </span>
+          {LEAD_SITES.map((s) => (
+            <span key={s} className="flex items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ring-1 ring-inset ring-border ${SITE_DOT_CLS[s]}`} />
+              {leadSiteLabel[s]}
+              <span className="font-medium tabular-nums text-foreground">
+                {leadsBySite[s] ?? 0}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
 
       <Section title="Quotes" href="/crm/quotes" isLoading={quotes.isLoading} cols={4}>
         <StatCard label="Drafts" value={quotes.data?.draft} href="/crm/quotes" />

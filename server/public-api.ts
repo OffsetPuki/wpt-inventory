@@ -8,7 +8,7 @@ import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage, uploadsDir } from "./storage";
 import { mailEnabled, sendOwnerMail } from "./mailer";
-import { leads, type LeadSource } from "../shared/crm-schema";
+import { leads, LEAD_SITES, type LeadSource, type LeadSite } from "../shared/crm-schema";
 import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
 
 // ─── Public API: how the outside world talks to the suite ────────────────────
@@ -96,10 +96,15 @@ function saveDesignPng(designPng: unknown): string | null {
 // context the form controller collects: page path, language, UTM params.
 const intakeSchema = z.object({
   name: z.string().trim().min(1).max(200),
+  // Which family website is submitting; absent = the original metals site.
+  site: z.enum(LEAD_SITES).optional(),
   phone: z.string().trim().max(60).optional(),
   email: z.string().trim().max(200).optional(),
   service: z.string().trim().max(400).optional(),
-  area: z.string().trim().max(160).optional(), // city / ZIP
+  // City / ZIP / street address. The sites cap their location field at 300 —
+  // matching here, because zod .max REJECTS the whole lead rather than
+  // truncating, and a long address must never cost the suite a lead.
+  area: z.string().trim().max(300).optional(),
   message: z.string().trim().max(5000).optional(),
   lang: z.enum(["en", "es"]).optional(),
   page: z.string().trim().max(300).optional(),
@@ -122,12 +127,22 @@ const intakeSchema = z.object({
   designState: z.string().trim().max(16000).optional(),
   contact: z.string().trim().max(60).optional(),
   bestTime: z.string().trim().max(120).optional(),
+  timeline: z.string().trim().max(60).optional(),
   consent: z.string().trim().max(10).optional(),
   // PNG snapshot of the configurator preview ('data:image/png;base64,…').
   // Deliberately unvalidated here: an oversized/malformed snapshot is ignored
   // by saveDesignPng, never a reason to reject the lead itself.
   designPng: z.unknown().optional(),
 });
+
+// Attribution domain per family site — the notes "From <domain>" line, the
+// audit userName, and the owner email all key off the sending site.
+const SITE_DOMAINS: Record<LeadSite, string> = {
+  metals: "cjmmetals.com",
+  concrete: "cjm-concrete.com",
+  insulation: "cjminsulation.com",
+  trades: "cjmtrades.com",
+};
 
 // Map a UTM source onto the CRM's lead-source enum. Anything we can't place
 // confidently stays "website" — the form itself is the source of truth, the
@@ -157,9 +172,13 @@ function findCampaignId(utmCampaign: string | undefined): number | null {
 // lead they just created — not clutter the pipeline with copies. Match on
 // normalized email OR digits-only phone (both only when non-empty on BOTH
 // sides). The 10-minute window is tiny, so matching in JS is fine.
+// Scoped to the submitting site: the same person asking a SECOND family shop
+// for a different job minutes later is a distinct lead (own site, service and
+// owner email), not a resubmit — folding it would silently drop the inquiry.
 function findRecentDuplicate(
   email: string | undefined,
   phone: string | undefined,
+  site: string,
 ): typeof leads.$inferSelect | undefined {
   const emailNorm = (email ?? "").trim().toLowerCase();
   const phoneDigits = (phone ?? "").replace(/\D/g, "");
@@ -170,6 +189,7 @@ function findRecentDuplicate(
     .orderBy(desc(leads.createdAt), desc(leads.id))
     .all()
     .find((l) => {
+      if ((l.site ?? "metals") !== site) return false;
       const lEmail = (l.email ?? "").trim().toLowerCase();
       const lPhone = (l.phone ?? "").replace(/\D/g, "");
       return (!!emailNorm && !!lEmail && lEmail === emailNorm)
@@ -270,6 +290,9 @@ export function registerPublicRoutes(app: Express): void {
     }
 
     const source = mapSource(body.utm?.source);
+    // Pre-`site` senders (the metals site before the rollout) omit the field.
+    const site: LeadSite = body.site ?? "metals";
+    const domain = SITE_DOMAINS[site];
     const campaignId = findCampaignId(body.utm?.campaign);
     // Design-preview snapshot → /uploads file. Null when absent or unusable —
     // never a reason to reject the lead.
@@ -280,7 +303,8 @@ export function registerPublicRoutes(app: Express): void {
     const noteLines = [
       body.message,
       "—",
-      `From cjmmetals.com${body.page ?? ""}${body.lang === "es" ? " (Español)" : ""}`,
+      `From ${domain}${body.page ?? ""}${body.lang === "es" ? " (Español)" : ""}`,
+      body.timeline ? `Timeline: ${body.timeline}` : null,
       body.utm && Object.values(body.utm).some(Boolean)
         ? `UTM: ${Object.entries(body.utm)
             .filter(([, v]) => v)
@@ -292,10 +316,15 @@ export function registerPublicRoutes(app: Express): void {
     // Resubmit within 10 minutes → annotate the existing lead instead of
     // inserting a copy. The design row, PNG and response still flow as usual;
     // only the duplicate pipeline entry (and a second owner email) are spared.
-    const dupe = findRecentDuplicate(body.email, body.phone);
+    // Same-site only: a submission from a DIFFERENT family site inserts fresh.
+    const dupe = findRecentDuplicate(body.email, body.phone, site);
     let row: typeof leads.$inferSelect;
     if (dupe) {
-      const resubmit = [`Resubmitted ${new Date().toISOString()}`, body.message]
+      const resubmit = [
+        `Resubmitted ${new Date().toISOString()}`,
+        body.message,
+        body.timeline ? `Timeline: ${body.timeline}` : null,
+      ]
         .filter(Boolean)
         .join("\n");
       // The resubmission is the freshest copy of the contact card — a customer
@@ -320,6 +349,7 @@ export function registerPublicRoutes(app: Express): void {
         phone: body.phone || null,
         email: body.email || null,
         source,
+        site,
         campaignId,
         serviceRequested: body.service || null,
         serviceArea: body.area || null,
@@ -384,14 +414,14 @@ export function registerPublicRoutes(app: Express): void {
       try {
         storage.appendAudit({
           userId: null,
-          userName: "cjmmetals.com",
+          userName: domain,
           role: null,
           action: "crm.lead_intake",
           targetType: "lead",
           targetId: row.id,
           targetName: row.name,
           ip: req.ip ?? null,
-          details: { source, campaignId, page: body.page ?? null, deduped: !!dupe },
+          details: { source, site, campaignId, page: body.page ?? null, deduped: !!dupe },
         });
       } catch {
         /* audit is best-effort */
@@ -403,13 +433,14 @@ export function registerPublicRoutes(app: Express): void {
     // unconfigured mailer skips silently.
     if (!dupe && mailEnabled()) {
       const text =
-        `New quote request from cjmmetals.com\n\n` +
+        `New quote request from ${domain}\n\n` +
         `Name:      ${body.name}\n` +
         `Phone:     ${body.phone || "(not given)"}\n` +
         `Email:     ${body.email || "(not given)"}\n` +
         `Contact:   ${body.contact || "(no preference)"}${body.bestTime ? " — best time: " + body.bestTime : ""}\n` +
         `Service:   ${body.service || "(not given)"}\n` +
         `Location:  ${body.area || "(not given)"}\n` +
+        (body.timeline ? `Timeline:  ${body.timeline}\n` : "") +
         `Consent:   ${body.consent === "yes" ? "agreed to call/text" : "NOT given"}\n` +
         (body.designRef ? `Design:    ${body.designRef} (${body.designSource || "configurator"})\n` : "") +
         (pngUrl ? `Snapshot:  ${pngUrl}\n` : "") +
@@ -418,7 +449,7 @@ export function registerPublicRoutes(app: Express): void {
         `\nLang: ${body.lang ?? "en"} · Page: ${body.page || "?"} · Lead #${row.id}`;
       setImmediate(() => {
         void sendOwnerMail({
-          subject: `[CJM Suite] New website lead — ${body.name}`,
+          subject: `[CJM Suite] New lead from ${domain} — ${body.name}`,
           text,
         });
       });
