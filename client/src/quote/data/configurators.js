@@ -20,6 +20,9 @@
 // =============================================================================
 
 import { formatMeasure, formatTick } from '../lib/measure.js';
+import {
+  areaSqft, cubicYards, trucks, rebarGridIn, rebarFeet, jointSpacingFt, insulationAreas,
+} from '../lib/tradeMath.js';
 
 // Frame / metal finishes (shared by all three types).
 export const FINISHES = [
@@ -89,6 +92,8 @@ export const TYPES = [
   { key: 'railing', label: 'Railing', tagline: 'Stairs, balconies & handrails' },
   { key: 'pergola', label: 'Pergola', tagline: 'Rectangular shade structure' },
   { key: 'table',   label: 'Table',   tagline: 'Steel base — customer brings the top' },
+  { key: 'concrete',   label: 'Concrete',   tagline: 'Flatwork — driveways, patios & slabs' },
+  { key: 'insulation', label: 'Insulation', tagline: 'Industrial pipe, tank & blanket work' },
   { key: 'custom',  label: 'Custom',  tagline: 'Grills, doors, repairs — you price every line' },
 ];
 
@@ -554,6 +559,136 @@ export const CONFIG = {
     ],
   },
 
+  // ---- Concrete ---------------------------------------------------------------
+  // Mirrors the CJM Concrete calculator (CJM-Concrete/src/layouts/Calculator.astro
+  // + lib/estimate.mjs): same project kinds, thicknesses, finishes and state
+  // keys, so a website estimateState imports as a near-identity.
+  concrete: {
+    defaults: {
+      project: 'driveway',
+      lengthFt: 30,
+      widthFt: 20,
+      thickness: 4,      // inches
+      finish: 'broom',
+      demo: 'no',        // tear-out of old concrete
+      rebar: 'no',
+    },
+    controls: [
+      {
+        kind: 'segment', name: 'project', label: 'Project', cols: 2,
+        options: [
+          { value: 'driveway', label: 'Driveway' },
+          { value: 'patio', label: 'Patio' },
+          { value: 'slab', label: 'Slab' },
+          { value: 'walkway', label: 'Walkway' },
+        ],
+      },
+      { kind: 'number', name: 'lengthFt', label: 'Length', unit: 'ft', min: 1, max: 500, step: 1 },
+      { kind: 'number', name: 'widthFt', label: 'Width', unit: 'ft', min: 1, max: 500, step: 1 },
+      {
+        kind: 'segment', name: 'thickness', label: 'Thickness', cols: 4,
+        options: [4, 5, 6, 8].map((t) => ({ value: t, label: `${t} in` })),
+      },
+      {
+        kind: 'segment', name: 'finish', label: 'Finish', cols: 3,
+        options: [
+          { value: 'broom', label: 'Broom' },
+          { value: 'smooth', label: 'Smooth Trowel' },
+          { value: 'aggregate', label: 'Exposed Aggregate' },
+          { value: 'stamped', label: 'Stamped' },
+          { value: 'stained', label: 'Stained' },
+          { value: 'salt', label: 'Salt Finish' },
+        ],
+      },
+      {
+        kind: 'segment', name: 'rebar', label: 'Rebar grid', cols: 2,
+        options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
+      },
+      {
+        kind: 'segment', name: 'demo', label: 'Tear out old concrete', cols: 2,
+        options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
+      },
+    ],
+  },
+
+  // ---- Insulation -------------------------------------------------------------
+  // Mirrors the CJM Insulation calculator (CJM-Insulation/src/layouts/
+  // Calculator.astro + lib/estimate.mjs): same systems, sizes and per-system
+  // control visibility. The tank/autoclave shell dimension is `heightFt` here
+  // (the site's client script calls it shellFt — the lead importer maps it).
+  insulation: {
+    defaults: {
+      system: 'pipe',
+      tempF: 350,
+      nps: '4',          // nominal pipe size, inches
+      lengthFt: 200,     // pipe run
+      diaFt: 8,          // tank / autoclave diameter
+      heightFt: 12,      // tank height / autoclave shell length
+      count: 12,         // blanket covers
+      thickness: 2,      // inches of insulation
+      material: 'mineralwool',
+      jacket: 'aluminum',
+    },
+    controls: [
+      {
+        kind: 'segment', name: 'system', label: 'System', cols: 2,
+        options: [
+          { value: 'pipe', label: 'Pipe' },
+          { value: 'tank', label: 'Tank' },
+          { value: 'autoclave', label: 'Autoclave' },
+          { value: 'blanket', label: 'Blanket Covers' },
+        ],
+      },
+      { kind: 'number', name: 'tempF', label: 'Operating temperature', unit: '°F', min: 120, max: 1200, step: 5 },
+      {
+        kind: 'segment', name: 'nps', label: 'Line size (NPS)', cols: 4,
+        options: ['1', '2', '3', '4', '6', '8', '12'].map((n) => ({ value: n, label: `${n}"` })),
+        visibleWhen: (s) => s.system === 'pipe' || s.system === 'blanket',
+      },
+      {
+        kind: 'number', name: 'lengthFt', label: 'Run length', unit: 'ft', min: 1, max: 5000, step: 5,
+        visibleWhen: (s) => s.system === 'pipe',
+      },
+      {
+        kind: 'number', name: 'diaFt', label: 'Diameter', unit: 'ft', min: 1, max: 40, step: 1,
+        visibleWhen: (s) => s.system === 'tank' || s.system === 'autoclave',
+      },
+      {
+        kind: 'number', name: 'heightFt', label: 'Shell length / height', unit: 'ft', min: 2, max: 200, step: 1,
+        visibleWhen: (s) => s.system === 'tank' || s.system === 'autoclave',
+      },
+      {
+        kind: 'number', name: 'count', label: 'How many covers', unit: 'covers', min: 1, max: 500, step: 1,
+        visibleWhen: (s) => s.system === 'blanket',
+      },
+      {
+        kind: 'segment', name: 'thickness', label: 'Insulation thickness', cols: 5,
+        options: [1, 1.5, 2, 3, 4].map((t) => ({ value: t, label: `${t}"` })),
+        visibleWhen: (s) => s.system !== 'blanket',
+      },
+      {
+        kind: 'segment', name: 'material', label: 'Material', cols: 2,
+        options: [
+          { value: 'fiberglass', label: 'Fiberglass' },
+          { value: 'mineralwool', label: 'Mineral Wool' },
+          { value: 'calsil', label: 'Calcium Silicate' },
+          { value: 'aerogel', label: 'Aerogel' },
+        ],
+        visibleWhen: (s) => s.system !== 'blanket',
+      },
+      {
+        kind: 'segment', name: 'jacket', label: 'Jacketing', cols: 4,
+        options: [
+          { value: 'aluminum', label: 'Aluminum' },
+          { value: 'stainless', label: 'Stainless' },
+          { value: 'pvc', label: 'PVC' },
+          { value: 'none', label: 'None' },
+        ],
+        visibleWhen: (s) => s.system !== 'blanket',
+      },
+    ],
+  },
+
   // ---- Custom ---------------------------------------------------------------
   // The escape hatch: window grills, security doors, repairs, one-offs — work
   // the website configurators don't cover. Nothing here derives a price on
@@ -628,6 +763,20 @@ export function summaryLine(type, s) {
     const tt = optionLabel('table', 'tableType', s.tableType || 'bar');
     const n = Number(s.qty) > 1 ? `${s.qty} × ` : '';
     return `${n}${tt} · ${ft(s.lengthFt)} × ${inch(s.widthIn)} top · ${inch(s.frameHeightIn)} frame · ${fin}`;
+  }
+  if (type === 'concrete') {
+    const proj = optionLabel('concrete', 'project', s.project);
+    const finish = optionLabel('concrete', 'finish', s.finish);
+    return `${proj} · ${ft(s.lengthFt)} × ${ft(s.widthFt)} · ${s.thickness}" slab · ${finish} finish`;
+  }
+  if (type === 'insulation') {
+    const sys = optionLabel('insulation', 'system', s.system);
+    if (s.system === 'blanket') return `${sys} · ${s.count} × ${s.nps}" · ${s.tempF}°F`;
+    const dims = s.system === 'pipe'
+      ? `${s.nps}" × ${ft(s.lengthFt)}`
+      : `${ft(s.diaFt)} ⌀ × ${ft(s.heightFt)}`;
+    const mat = optionLabel('insulation', 'material', s.material);
+    return `${sys} · ${dims} @ ${s.tempF}°F · ${s.thickness}" ${mat}`;
   }
   // carport
   const roof = optionLabel('carport', 'roof', s.roof);
@@ -743,6 +892,52 @@ export function specRows(type, s) {
     // The product boundary, stated on the printed quote so there's no argument
     // later about who was buying the wood.
     rows.push(['Scope', 'Steel base only — customer supplies the wood top']);
+    return rows.map(([label, value]) => ({ label, value }));
+  }
+  if (type === 'concrete') {
+    const length = Number(s.lengthFt) || 0;
+    const width = Number(s.widthFt) || 0;
+    const thick = Number(s.thickness) || 4;
+    const area = Math.round(areaSqft(length, width));
+    // Truck count from the EXACT yardage the estimator prices with — rounding
+    // first could disagree with the priced line at a truck boundary.
+    const yardsExact = cubicYards(areaSqft(length, width), thick);
+    const yards = Math.round(yardsExact * 10) / 10;
+    const t = trucks(yardsExact);
+    const joints = jointSpacingFt(thick, Math.min(length, width));
+    const rows = [
+      ['Project', optionLabel('concrete', 'project', s.project)],
+      ['Slab size', `${FT(length)} × ${FT(width)} — ${area} sq ft`],
+      ['Thickness', `${thick} in`],
+      ['Finish', optionLabel('concrete', 'finish', s.finish)],
+      ['Concrete', `~${yards} cu yd incl. waste (${t.loads} ${t.loads === 1 ? 'truck' : 'trucks'})`],
+    ];
+    if (s.rebar === 'yes' || s.rebar === true) {
+      const grid = rebarGridIn(thick);
+      rows.push(['Rebar', `~${rebarFeet(length, width, grid)} ft on a ${grid} in grid`]);
+    }
+    rows.push(['Control joints', `Cut every ${joints.min}–${joints.max} ft`]);
+    if (s.demo === 'yes' || s.demo === true) rows.push(['Removal', 'Old concrete torn out & hauled off']);
+    return rows.map(([label, value]) => ({ label, value }));
+  }
+  if (type === 'insulation') {
+    const rows = [['System', optionLabel('insulation', 'system', s.system)]];
+    rows.push(['Operating temperature', `${Number(s.tempF) || 0} °F`]);
+    if (s.system === 'blanket') {
+      rows.push(['Covers', `${Number(s.count) || 0} × ${s.nps}" (valves, flanges, heads)`]);
+      rows.push(['Fit', 'Sewn to fit, removable for service']);
+      return rows.map(([label, value]) => ({ label, value }));
+    }
+    if (s.system === 'pipe') rows.push(['Line', `${s.nps}" NPS × ${FT(s.lengthFt)}`]);
+    else rows.push(['Vessel', `${FT(s.diaFt)} diameter × ${FT(s.heightFt)} shell`]);
+    rows.push(['Insulation', `${s.thickness} in ${optionLabel('insulation', 'material', s.material)}`]);
+    rows.push(['Jacketing', optionLabel('insulation', 'jacket', s.jacket)]);
+    const a = insulationAreas({
+      system: s.system, nps: String(s.nps), diaFt: Number(s.diaFt) || 0,
+      thickness: Number(s.thickness) || 2,
+      lengthFt: s.system === 'pipe' ? Number(s.lengthFt) || 0 : Number(s.heightFt) || 0,
+    });
+    rows.push(['Finished surface', `~${Math.round(a.finished)} sq ft`]);
     return rows.map(([label, value]) => ({ label, value }));
   }
   // carport

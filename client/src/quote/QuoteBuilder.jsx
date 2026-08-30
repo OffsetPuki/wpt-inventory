@@ -410,6 +410,9 @@ export default function QuoteBuilder({ initialSettings }) {
       location: lead.location || '',
     };
     sess.designRef = lead.ref || '';
+    // A trades-planner lead carries its multi-trade scope as prose — parseLead
+    // hands it back as `notes` so the plan lands on the quote screen.
+    if (parsed.notes) sess.notes = parsed.notes;
     setSession(sess);
     setView('configure');
   };

@@ -33,6 +33,10 @@
 
 import { round2 } from './format.js';
 import { optionLabel, finishLabel, tableBaseFootprint } from '../data/configurators.js';
+import {
+  cubicYards, trucks, rebarGridIn, rebarFeet, insulationAreas,
+  recommendThickness, MATERIAL_MAX_TEMP_F,
+} from './tradeMath.js';
 
 // ── Number & material helpers ─────────────────────────────────────────────────
 
@@ -747,6 +751,132 @@ function estimateTable(s, pb) {
   };
 }
 
+// The concrete/insulation crews price their labor INTO the per-sq-ft rates
+// (they're site trades — no shop fabrication), so both estimators return 0
+// labor/install hours and the sites' mobilization floor rides as its own line.
+const isYes = (v) => v === 'yes' || v === true;
+
+/** The sites' job-minimum rule: a floor line making up the shortfall. */
+function jobMinimumItem(items, minJob) {
+  const total = items.reduce((sum, it) => sum + lineCost(it), 0);
+  if (!(total > 0) || !(minJob > total)) return null;
+  // ponytail: floors the pre-markup line total only (labor rides in the rates
+  // here anyway) — the sites floor their installed band the same one-knob way.
+  return {
+    key: 'minimum', name: 'Small-job minimum (mobilization floor)',
+    kind: 'flat', qty: 1, rate: round2(minJob - total),
+  };
+}
+
+/**
+ * Concrete flatwork — quantity math ported from the concrete site's
+ * estimate.mjs: yards with the same 10% waste, rebar footage with the same
+ * 12"-at-5"+-else-18" grid rule. Rates carry the crew labor (site work).
+ */
+function estimateConcrete(s, pb) {
+  const c = pb.concrete || {};
+  const length = Math.max(0, num(s.lengthFt, 0));
+  const width = Math.max(0, num(s.widthFt, 0));
+  const area = round2(length * width);
+  const thickness = num(s.thickness, 4);
+  const yards = cubicYards(area, thickness); // incl. 10% waste
+  const t = trucks(yards);
+
+  const items = [];
+  pushPriced(items, {
+    key: 'readymix',
+    name: `Ready-mix concrete — ${Math.round(yards * 10) / 10} cu yd incl. 10% waste `
+      + `(${t.loads} ${t.loads === 1 ? 'truck' : 'trucks'}${t.shortLoad ? ', short load' : ''})`,
+    kind: 'unit', unit: 'cu yd', qty: round2(yards), rate: round2(num(c.readyMixPerYd, 0)),
+  });
+  pushPriced(items, {
+    key: 'base', name: `Subgrade prep & base — ${area} sq ft`,
+    kind: 'area', qty: area, rate: round2(num(c.basePerSqFt, 0)),
+  });
+  pushPriced(items, {
+    key: 'forms', name: 'Forms & setup', kind: 'flat', qty: 1, rate: round2(num(c.formsFlat, 0)),
+  });
+  pushPriced(items, {
+    key: 'finish',
+    name: `${optionLabel('concrete', 'finish', s.finish)} finish — pour & finish crew (${area} sq ft)`,
+    kind: 'area', qty: area, rate: round2(num((c.finishPerSqFt || {})[s.finish], 0)),
+  });
+  if (isYes(s.rebar)) {
+    const grid = rebarGridIn(thickness);
+    pushPriced(items, {
+      key: 'rebar', name: `Rebar — ~${rebarFeet(length, width, grid)} ft on a ${grid}" grid, supplied & tied`,
+      kind: 'area', qty: area, rate: round2(num(c.rebarPerSqFt, 0)),
+    });
+  }
+  if (isYes(s.demo)) {
+    pushPriced(items, {
+      key: 'demo', name: `Tear-out of old concrete — ${area} sq ft`,
+      kind: 'area', qty: area, rate: round2(num(c.demoPerSqFt, 0)),
+    });
+    pushPriced(items, {
+      key: 'dump', name: 'Dump / haul-off fee', kind: 'flat',
+      qty: 1, rate: round2(num(pb.dumpFeeFlat, 0)),
+    });
+  }
+  const floor = jobMinimumItem(items, num(c.jobMinimum, 0));
+  if (floor) items.push(floor);
+
+  return { items, laborHours: 0, installHours: 0 };
+}
+
+/**
+ * Industrial insulation — geometry ported from the insulation site's areas():
+ * pipe and vessels price on the finished (jacketed) surface, removable
+ * blankets per sewn cover. Rates carry the crew labor (site work).
+ */
+function estimateInsulation(s, pb) {
+  const i = pb.insulation || {};
+  const system = ['pipe', 'tank', 'autoclave', 'blanket'].includes(s.system) ? s.system : 'pipe';
+  const nps = String(s.nps ?? '4');
+  const items = [];
+
+  if (system === 'blanket') {
+    const count = Math.max(0, Math.round(num(s.count, 0)));
+    const covers = i.blanketCoverEach || {};
+    const each = Object.prototype.hasOwnProperty.call(covers, nps) ? covers[nps] : covers['4'];
+    pushPriced(items, {
+      key: 'covers', name: `Removable blanket covers — ${count} × ${nps}", sewn to fit`,
+      kind: 'unit', unit: 'covers', qty: count, rate: round2(num(each, 0)),
+    });
+  } else {
+    const thickness = num(s.thickness, 2);
+    const a = insulationAreas({
+      system, nps, thickness,
+      diaFt: num(s.diaFt, 0),
+      // areas() reads lengthFt for the pipe run AND the vessel shell dimension.
+      lengthFt: system === 'pipe' ? num(s.lengthFt, 0) : num(s.heightFt, 0),
+    });
+    const finished = round2(a.finished);
+    const factor = num((i.thicknessFactor || {})[String(thickness).replace('.', '_')], 1);
+    const matRate = num((i.materialPerSqFt || {})[s.material], 0) * factor;
+    pushPriced(items, {
+      key: 'material',
+      name: `${optionLabel('insulation', 'material', s.material)} — ${thickness}" over ${finished} sq ft of jacket surface`,
+      kind: 'area', qty: finished, rate: round2(matRate),
+    });
+    pushPriced(items, {
+      key: 'install', name: `Installation — fit, band & seal (${finished} sq ft)`,
+      kind: 'area', qty: finished, rate: round2(num(i.installPerSqFt, 0)),
+    });
+    const jacketRate = num((i.jacketPerSqFt || {})[s.jacket], 0);
+    if (jacketRate > 0) {
+      items.push({
+        key: 'jacket', name: `${optionLabel('insulation', 'jacket', s.jacket)} jacket upcharge`,
+        kind: 'area', qty: finished, rate: round2(jacketRate),
+      });
+    }
+  }
+  const floor = jobMinimumItem(items, num(i.jobMinimum, 0));
+  if (floor) items.push(floor);
+
+  return { items, laborHours: 0, installHours: 0 };
+}
+
 /**
  * Custom build — derives nothing on purpose. Every line is added by hand from
  * the material library ("+ Add line"); consumables still ride along, because
@@ -756,7 +886,7 @@ function estimateCustom() {
   return { items: [], laborHours: 0, installHours: 0 };
 }
 
-const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable, custom: estimateCustom };
+const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable, concrete: estimateConcrete, insulation: estimateInsulation, custom: estimateCustom };
 
 /**
  * Consumables (wire, gas, discs, primer/paint, fasteners) scale with FABRICATED
@@ -793,6 +923,12 @@ function consumablesItem(materialItems, priceBook) {
   return item;
 }
 
+// The field trades price consumables INTO their per-sq-ft rates — a welding
+// "wire, gas, discs" line on a driveway pour or a pipe-insulation job would
+// read wrong on the customer's quote (and stack on top of the mobilization
+// floor).
+const NO_CONSUMABLES = new Set(['concrete', 'insulation']);
+
 /** Derive generic line items + labor hours for a design (no overrides applied). */
 export function deriveItems(type, state, priceBook) {
   const fn = ESTIMATORS[type];
@@ -800,7 +936,7 @@ export function deriveItems(type, state, priceBook) {
   const { items, laborHours, installHours } = fn(state, priceBook);
   // Consumables ride on the material subtotal, so append after the build items.
   return {
-    items: [...items, consumablesItem(items, priceBook)],
+    items: NO_CONSUMABLES.has(type) ? items : [...items, consumablesItem(items, priceBook)],
     laborHours,
     installHours: installHours || 0,
   };
@@ -891,6 +1027,27 @@ export function buildLineState(type, state, priceBook, overrides) {
     }
   }
 
+  // The mobilization floor likewise rides on the POST-override build total: an
+  // edit that lifts the job past the minimum drops the floor, a struck line
+  // that sinks it below brings the floor (back) up to the mark. An explicit
+  // override on the minimum line itself — including striking it — still wins.
+  if (NO_CONSUMABLES.has(type) && !ovItems.minimum) {
+    const minJob = num((priceBook[type] || {}).jobMinimum, 0);
+    const mi = merged.findIndex((m) => m.key === 'minimum');
+    const rest = merged.reduce((sum, it) => (it.key === 'minimum' ? sum : sum + lineCost(it)), 0);
+    const shortfall = rest > 0 && minJob > rest ? round2(minJob - rest) : 0;
+    if (shortfall > 0) {
+      const line = {
+        key: 'minimum', name: 'Small-job minimum (mobilization floor)',
+        kind: 'flat', qty: 1, rate: shortfall,
+      };
+      if (mi !== -1) merged[mi] = { ...merged[mi], ...line };
+      else merged.push(line);
+    } else if (mi !== -1) {
+      merged.splice(mi, 1);
+    }
+  }
+
   const labor = {
     hours: ov.labor?.hours != null ? ov.labor.hours : laborHours,
     rate: ov.labor?.rate != null ? ov.labor.rate : priceBook.laborRatePerHour,
@@ -944,11 +1101,15 @@ export function deriveWarnings(type, state, lineState, pricing) {
     info('Double swing without the 2 extra support posts — is the existing structure carrying it?');
   }
 
-  // Labor
-  if (!(Number(ls.labor?.hours) > 0) || !(Number(ls.labor?.rate) > 0)) {
+  // Labor. Concrete and insulation are site trades whose crew labor rides
+  // inside the per-sq-ft line rates, so zero shop/install hours is their
+  // normal state — nagging about it every time would train the owner to
+  // ignore the checklist.
+  const fieldTrade = type === 'concrete' || type === 'insulation';
+  if (!fieldTrade && (!(Number(ls.labor?.hours) > 0) || !(Number(ls.labor?.rate) > 0))) {
     warn('No shop fabrication labor on this quote.');
   }
-  if (!(Number(ls.install?.hours) > 0) || !(Number(ls.install?.rate) > 0)) {
+  if (!fieldTrade && (!(Number(ls.install?.hours) > 0) || !(Number(ls.install?.rate) > 0))) {
     warn('No installation labor on this quote.');
   }
 
@@ -971,6 +1132,33 @@ export function deriveWarnings(type, state, lineState, pricing) {
     if (!(num(s.demoFt, 0) > 0)) info('Old fence removal not included.');
   }
   if (type === 'gate' && s.demoOld !== 'yes') info('Old gate removal not included.');
+  if (type === 'concrete') {
+    const thick = num(s.thickness, 4);
+    // The site's thickness guidance: 4" is patio/walkway territory, trucks and
+    // shop slabs want 5"+ — and a 5"+ slab is what triggers the 12" rebar grid.
+    if (s.project === 'driveway' && thick < 4) warn('A driveway below 4 in will crack under vehicles.');
+    if ((s.project === 'walkway' || s.project === 'patio') && thick >= 6) {
+      info(`A ${thick} in slab on a ${s.project} — thicker than foot traffic needs. Intentional?`);
+    }
+    if (s.project === 'driveway' && !isYes(s.rebar)) info('Driveway without a rebar grid — plain slab intended?');
+    if (!isYes(s.demo)) info('Old concrete tear-out not included.');
+  }
+  if (type === 'insulation') {
+    const tempF = num(s.tempF, 0);
+    if (s.system !== 'blanket') {
+      // The site gates material picks by MATERIALS.maxTempF — same rule here.
+      const maxF = MATERIAL_MAX_TEMP_F[s.material];
+      if (maxF && tempF > maxF) {
+        warn(`${optionLabel('insulation', 'material', s.material)} is rated to ${maxF}°F — this line runs ${tempF}°F. Switch to mineral wool.`);
+      }
+      const rec = recommendThickness(tempF);
+      if (num(s.thickness, 2) < rec) {
+        info(`${s.thickness}" is under the ${rec}" minimum the site recommends at ${tempF}°F.`);
+      }
+    } else if (!(num(s.count, 0) > 0)) {
+      warn('Blanket quote with no covers counted.');
+    }
+  }
   if (type === 'table') {
     info('Steel base only — confirm the customer knows they are buying the wood top.');
     if (!has('topFastening')) info('No top-fastening hardware — how is their top attaching?');

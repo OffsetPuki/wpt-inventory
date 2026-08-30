@@ -10,44 +10,10 @@
 
 import { getAuthToken } from '@/lib/queryClient';
 
-/**
- * Normalize whatever the owner types OR pastes into a canonical design code:
- *   "f7k2", "CJM F7K2", "cjm-f7k2"            → "CJM-F7K2"
- *   "[DESIGN CJM-F7K2] New quote request …"    → "CJM-F7K2"   (email subject)
- *   "Diseño CJM-F7K2" / "Design CJM-F7K2"      → "CJM-F7K2"   (SMS first line)
- * Returns '' when there's nothing usable.
- */
-export function normalizeRef(input) {
-  const raw = String(input || '').toUpperCase();
-  const flat = raw.replace(/[^A-Z0-9]/g, '');
-  if (!flat) return '';
-
-  // The whole input is the code (with or without the CJM prefix/dash/spaces).
-  if (flat.startsWith('CJM')) {
-    const body = flat.slice(3);
-    if (!body) return '';
-    // Carport codes can legitimately start with 'CJM' (CJM-CJM2K), so a bare
-    // body like 'CJM2K' is ambiguous — prefer the reading that leaves a valid
-    // tool letter (F/G/C/R/P/T) up front.
-    if (/^[FGCRPT][A-Z0-9]+$/.test(body)) return `CJM-${body}`;
-    if (/^[FGCRPT][A-Z0-9]+$/.test(flat)) return `CJM-${flat}`;
-    return `CJM-${body}`;
-  }
-
-  // Code embedded in pasted context — pick out the CJM token instead of
-  // gluing the surrounding words into a garbage ref.
-  const m = raw.match(/CJM[\s-]*([A-Z0-9]{2,8})/);
-  if (m) return `CJM-${m[1]}`;
-
-  return `CJM-${flat}`;
-}
-
-/** The configurator tool a design code came from (F/G/C/R/P/T), or null. */
-export function refTool(ref) {
-  const m = /^CJM-([FGCRPT])/i.exec(String(ref || '').trim());
-  if (!m) return null;
-  return { F: 'fence', G: 'gate', C: 'carport', R: 'railing', P: 'pergola', T: 'table' }[m[1].toUpperCase()] || null;
-}
+// normalizeRef / refTool live in refs.js (pure — no client-only imports) so
+// designSpec.js and the node check scripts can load them; re-exported here so
+// existing client imports keep working.
+export { normalizeRef, refTool } from './refs.js';
 
 function normalizeLead(row) {
   const get = (k) => (row && row[k] != null ? String(row[k]).trim() : '');

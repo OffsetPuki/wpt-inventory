@@ -12,7 +12,10 @@ import { z } from "zod";
 // "custom" is the hand-priced escape hatch (grills, security doors, repairs) —
 // it has no configurator math, just typed line items. Column is plain TEXT in
 // SQLite, so adding a member needs no migration.
-export const QUOTE_TYPES = ["fence", "gate", "carport", "railing", "pergola", "table", "custom"] as const;
+// "concrete" and "insulation" are the sister shops' trades (flatwork and
+// industrial insulation) quoted through the same builder — their configurator
+// schemas + estimators live beside the metals ones in client/src/quote.
+export const QUOTE_TYPES = ["fence", "gate", "carport", "railing", "pergola", "table", "concrete", "insulation", "custom"] as const;
 export type QuoteType = (typeof QUOTE_TYPES)[number];
 
 // Share/accept lifecycle: draft (builder only) → sent (share link created) →
@@ -100,5 +103,7 @@ export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
   railing: "Railing",
   pergola: "Pergola",
   table: "Table",
+  concrete: "Concrete",
+  insulation: "Insulation",
   custom: "Custom",
 };

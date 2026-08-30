@@ -172,6 +172,50 @@ export const DEFAULT_PRICE_BOOK = {
     installHoursPerFt: 0.2,      // on-site install
   },
 
+  // Concrete flatwork (the sister shop's trade). Rates carry the crew labor —
+  // it's site work, not shop fabrication — so these lines ARE the installed
+  // price before markup. Finish rates seeded off the website calculator's
+  // FINISH_RATES bands ($8–14/sq ft installed for 4" broom, etc.).
+  concrete: {
+    readyMixPerYd: 160,          // delivered ready-mix, $/cu yd
+    basePerSqFt: 1.5,            // subgrade prep, grading & base
+    formsFlat: 350,              // forms & setup, per pour
+    finishPerSqFt: {             // pour + finish crew labor, by finish
+      broom: 4.5,
+      smooth: 4.75,
+      aggregate: 7,
+      stamped: 11,
+      stained: 8.5,
+      salt: 5.5,
+    },
+    rebarPerSqFt: 0.85,          // supplied + tied (grid math sets the footage)
+    demoPerSqFt: 3.5,            // tear-out of old concrete (dump fee added separately)
+    jobMinimum: 1800,            // mobilization floor — the website's JOB_MINIMUM
+  },
+
+  // Industrial insulation (the sister shop's trade). Priced per sq ft of
+  // FINISHED (jacketed) surface; blanket covers price per sewn cover. Material
+  // rates seeded off the website calculator's MATERIALS bands (low end — the
+  // install rate and markup carry the rest of the installed band).
+  insulation: {
+    installPerSqFt: 4,           // crew labor: fit, band & seal
+    materialPerSqFt: {
+      fiberglass: 14,
+      mineralwool: 16,
+      calsil: 24,
+      aerogel: 45,
+    },
+    // Thicker insulation = more material + a bigger jacket. Multiplies the
+    // material rate. Keys are inches with '.'→'_' (dot-paths can't hold a dot).
+    thicknessFactor: { '1': 0.9, '1_5': 1, '2': 1.1, '3': 1.3, '4': 1.5 },
+    // Upcharge over the standard aluminum jacket ($0 baseline).
+    jacketPerSqFt: { aluminum: 0, stainless: 7, pvc: 0, none: 0 },
+    // Removable blanket covers, per sewn cover by line size (website's
+    // BLANKET_COVER band midpoints).
+    blanketCoverEach: { '1': 300, '2': 335, '3': 370, '4': 420, '6': 520, '8': 620, '12': 800 },
+    jobMinimum: 1500,            // survey, benches, lift, crew — website's floor
+  },
+
   table: {
     // Tabs, clips and fasteners that fix the CUSTOMER'S top to our base.
     topFasteningPerTable: 25,
@@ -290,6 +334,50 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'railing.fasciaMountPerPost', label: 'Fascia mount', prefix: '$', suffix: '/ post', step: 1 },
       { path: 'railing.laborHoursPerFt', label: 'Shop labor', suffix: 'hrs / ft', step: 0.05 },
       { path: 'railing.installHoursPerFt', label: 'Install labor', suffix: 'hrs / ft', step: 0.05 },
+    ],
+  },
+  {
+    title: 'Concrete',
+    note: 'Site work — these rates carry the crew labor. Finish rates are per sq ft poured & finished.',
+    fields: [
+      { path: 'concrete.readyMixPerYd', label: 'Ready-mix concrete', prefix: '$', suffix: '/ cu yd', step: 5 },
+      { path: 'concrete.basePerSqFt', label: 'Subgrade prep & base', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.formsFlat', label: 'Forms & setup', prefix: '$', suffix: '/ pour', step: 25 },
+      { path: 'concrete.finishPerSqFt.broom', label: 'Broom finish', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.finishPerSqFt.smooth', label: 'Smooth trowel finish', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.finishPerSqFt.aggregate', label: 'Exposed aggregate finish', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.finishPerSqFt.stamped', label: 'Stamped finish', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.finishPerSqFt.stained', label: 'Stained finish', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.finishPerSqFt.salt', label: 'Salt finish', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.rebarPerSqFt', label: 'Rebar (supplied & tied)', prefix: '$', suffix: '/ sq ft', step: 0.05 },
+      { path: 'concrete.demoPerSqFt', label: 'Tear-out of old concrete', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'concrete.jobMinimum', label: 'Concrete job minimum', prefix: '$', step: 50 },
+    ],
+  },
+  {
+    title: 'Insulation',
+    note: 'Per sq ft of finished (jacketed) surface. Blanket covers price per sewn cover.',
+    fields: [
+      { path: 'insulation.installPerSqFt', label: 'Install labor (fit, band & seal)', prefix: '$', suffix: '/ sq ft', step: 0.25 },
+      { path: 'insulation.materialPerSqFt.fiberglass', label: 'Fiberglass', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'insulation.materialPerSqFt.mineralwool', label: 'Mineral wool', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'insulation.materialPerSqFt.calsil', label: 'Calcium silicate', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'insulation.materialPerSqFt.aerogel', label: 'Aerogel', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'insulation.thicknessFactor.1', label: 'Thickness factor — 1"', suffix: '×', step: 0.05 },
+      { path: 'insulation.thicknessFactor.1_5', label: 'Thickness factor — 1.5"', suffix: '×', step: 0.05 },
+      { path: 'insulation.thicknessFactor.2', label: 'Thickness factor — 2"', suffix: '×', step: 0.05 },
+      { path: 'insulation.thicknessFactor.3', label: 'Thickness factor — 3"', suffix: '×', step: 0.05 },
+      { path: 'insulation.thicknessFactor.4', label: 'Thickness factor — 4"', suffix: '×', step: 0.05 },
+      { path: 'insulation.jacketPerSqFt.stainless', label: 'Stainless jacket upcharge', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'insulation.jacketPerSqFt.pvc', label: 'PVC jacket upcharge', prefix: '$', suffix: '/ sq ft', step: 0.5 },
+      { path: 'insulation.blanketCoverEach.1', label: 'Blanket cover — 1"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.blanketCoverEach.2', label: 'Blanket cover — 2"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.blanketCoverEach.3', label: 'Blanket cover — 3"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.blanketCoverEach.4', label: 'Blanket cover — 4"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.blanketCoverEach.6', label: 'Blanket cover — 6"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.blanketCoverEach.8', label: 'Blanket cover — 8"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.blanketCoverEach.12', label: 'Blanket cover — 12"', prefix: '$', suffix: '/ cover', step: 5 },
+      { path: 'insulation.jobMinimum', label: 'Insulation job minimum', prefix: '$', step: 50 },
     ],
   },
   {

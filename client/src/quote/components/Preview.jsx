@@ -5,10 +5,12 @@ import { renderCarport } from '../lib/preview/carport.js';
 import { renderRailing } from '../lib/preview/railing.js';
 import { renderPergola } from '../lib/preview/pergola.js';
 import { renderTable } from '../lib/preview/table.js';
+import { renderConcrete } from '../lib/preview/concrete.js';
+import { renderInsulation } from '../lib/preview/insulation.js';
 import { summaryLine } from '../data/configurators.js';
 
-const RENDERERS = { fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing, pergola: renderPergola, table: renderTable };
-const ARIA = { fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview', table: 'Table preview' };
+const RENDERERS = { fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing, pergola: renderPergola, table: renderTable, concrete: renderConcrete, insulation: renderInsulation };
+const ARIA = { fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview', table: 'Table preview', concrete: 'Slab plan preview', insulation: 'Insulation section preview' };
 
 /** Live SVG preview driven by the same config state as the price estimate. */
 export default function Preview({ type, state }) {

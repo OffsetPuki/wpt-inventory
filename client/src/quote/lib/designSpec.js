@@ -18,7 +18,7 @@
 // =============================================================================
 
 import { defaultState } from '../data/configurators.js';
-import { refTool } from './leads.js';
+import { refTool } from './refs.js';
 
 /** Lowercase, strip accents, collapse whitespace — so 'Elevación ' matches 'elevacion'. */
 function norm(s) {
@@ -248,7 +248,62 @@ const SERVICE_TO_TOOL = oneOf({
   railing: ['railing', 'barandal'],
   pergola: ['pergola'], // norm() strips the accent, so 'Pérgola' matches too
   table: ['table', 'mesa'],
+  // Sister-shop service words. Listed AFTER the metals entries so a shared
+  // prefix always resolves to the metals tool first (oneOf matches in order).
+  concrete: ['concrete', 'driveway', 'patio', 'walkway', 'slab', 'flatwork', 'concreto', 'losa', 'banqueta', 'entrada de auto'],
+  insulation: ['insulation', 'pipe', 'tank', 'autoclave', 'blanket', 'aislamiento', 'aislante', 'tuberia', 'tubería'],
 });
+
+// ---------------------------------------------------------------------------
+//  Sister-site designState envelopes. The concrete/insulation calculators send
+//  their estimateState VERBATIM ('{"type":"concrete-calculator","ref":"CJC-…",
+//  "state":{…},"result":{…}}'); the trades planner sends its planState
+//  ('{"type":"trades-planner","ref":"CJT-…","ids":[…],…}'). Each maps onto a
+//  suite build type with invalid values clamped to the configurator defaults.
+// ---------------------------------------------------------------------------
+
+/** Number in range, else undefined (→ the default survives the overlay). */
+function inRange(v, min, max) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= min && n <= max ? n : undefined;
+}
+const pick = (list, v) => (list.includes(v) ? v : undefined);
+const yesNo = (v) => (v === true || v === 'yes' ? 'yes' : v === false || v === 'no' ? 'no' : undefined);
+
+/** Overlay only the defined entries of `patch` onto the type's defaults. */
+function overlayDefaults(type, patch) {
+  const state = defaultState(type);
+  for (const [k, v] of Object.entries(patch)) if (v !== undefined) state[k] = v;
+  return state;
+}
+
+function concreteFromEnvelope(s) {
+  return overlayDefaults('concrete', {
+    project: pick(['driveway', 'patio', 'slab', 'walkway'], s.project),
+    lengthFt: inRange(s.lengthFt, 1, 500),
+    widthFt: inRange(s.widthFt, 1, 500),
+    thickness: pick([4, 5, 6, 8], Number(s.thickness)),
+    finish: pick(['broom', 'smooth', 'aggregate', 'stamped', 'stained', 'salt'], s.finish),
+    demo: yesNo(s.demo),
+    rebar: yesNo(s.rebar),
+  });
+}
+
+function insulationFromEnvelope(s) {
+  return overlayDefaults('insulation', {
+    system: pick(['pipe', 'tank', 'autoclave', 'blanket'], s.system),
+    tempF: inRange(s.tempF, 120, 1200),
+    nps: pick(['1', '2', '3', '4', '6', '8', '12'], String(s.nps)),
+    lengthFt: inRange(s.lengthFt, 1, 5000),
+    diaFt: inRange(s.diaFt, 1, 40),
+    // The site's client state calls the vessel shell dimension shellFt.
+    heightFt: inRange(s.heightFt ?? s.shellFt, 2, 200),
+    count: inRange(s.count, 1, 500),
+    thickness: pick([1, 1.5, 2, 3, 4], Number(s.thickness)),
+    material: pick(['fiberglass', 'mineralwool', 'calsil', 'aerogel'], s.material),
+    jacket: pick(['aluminum', 'stainless', 'pvc', 'none'], s.jacket),
+  });
+}
 
 /** Which configurator a lead belongs to — from source, then ref, then service. */
 export function leadTool(lead) {
@@ -260,10 +315,12 @@ export function leadTool(lead) {
 }
 
 /**
- * Parse a lead into { type, state, warnings, hasSpec }.
- * - type: 'fence' | 'gate' | 'carport' | 'railing' | null (can't tell)
+ * Parse a lead into { type, state, warnings, hasSpec, notes? }.
+ * - type: any QUOTE_TYPES member (concrete/insulation from the sister sites'
+ *   envelopes; a trades plan lands as 'custom') — or null (can't tell)
  * - state: defaultState(type) overlaid with everything the spec yielded
  * - warnings: spec lines that were present but couldn't be read
+ * - notes: text the builder should seed the session notes with (trades plans)
  * Returns null when the lead can't be mapped to a configurator at all.
  */
 export function parseLead(lead) {
@@ -284,6 +341,27 @@ export function parseLead(lead) {
           hasSpec: true,
         };
       }
+      // Sister-site envelopes: the concrete/insulation calculators' verbatim
+      // estimateState, and the trades planner's planState.
+      if (parsed && parsed.type === 'concrete-calculator' && parsed.state && typeof parsed.state === 'object') {
+        return { type: 'concrete', state: concreteFromEnvelope(parsed.state), warnings: [], hasSpec: true };
+      }
+      if (parsed && parsed.type === 'insulation-calculator' && parsed.state && typeof parsed.state === 'object') {
+        return { type: 'insulation', state: insulationFromEnvelope(parsed.state), warnings: [], hasSpec: true };
+      }
+      if (parsed && parsed.type === 'trades-planner') {
+        // A trades plan is a multi-trade scope and the parent site publishes
+        // no prices — Custom is the honest type. The plan's prose spec rides
+        // into the session notes so the scope lands on the quote screen.
+        const title = `Multi-trade plan${typeof parsed.ref === 'string' && parsed.ref ? ` — ${parsed.ref}` : ''}`;
+        return {
+          type: 'custom',
+          state: { ...defaultState('custom'), title },
+          warnings: [],
+          hasSpec: false,
+          notes: String(lead?.designSpec || '').trim(),
+        };
+      }
     } catch {
       /* malformed JSON — fall through to the prose parser */
     }
@@ -293,6 +371,10 @@ export function parseLead(lead) {
   if (!type) return null;
 
   const tool = TOOLS[type];
+  // Sister-shop leads (concrete/insulation via ref or service words) have no
+  // prose field table — their real import path is the designState envelope
+  // above. Without one, start the right build type at its defaults.
+  if (!tool) return { type, state: defaultState(type), warnings: [], hasSpec: false };
   const state = defaultState(type);
   const warnings = [];
   const spec = String(lead?.designSpec || '').trim();

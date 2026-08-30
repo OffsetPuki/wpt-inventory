@@ -64,6 +64,36 @@ const ICONS = {
       <path d="M14 158 H306" strokeOpacity="0.25" />
     </svg>
   ),
+  // A slab plan with its control-joint grid — the concrete calculator's view.
+  concrete: (
+    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="40" y="24" width="240" height="132" strokeWidth="3" />
+      <line x1="120" y1="24" x2="120" y2="156" strokeDasharray="2 8" strokeWidth="2" />
+      <line x1="200" y1="24" x2="200" y2="156" strokeDasharray="2 8" strokeWidth="2" />
+      <line x1="40" y1="90" x2="280" y2="90" strokeDasharray="2 8" strokeWidth="2" />
+      {[64, 88, 144, 168, 224, 248].map((x) => <line key={x} x1={x} y1="24" x2={x} y2="156" strokeOpacity="0.15" />)}
+      {[46, 68, 112, 134].map((y) => <line key={y} x1="40" y1={y} x2="280" y2={y} strokeOpacity="0.15" />)}
+    </svg>
+  ),
+  // A pipe in section — insulation hatch between bore and jacket.
+  insulation: (
+    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="160" cy="90" r="72" strokeWidth="2" />
+      <circle cx="160" cy="90" r="34" strokeWidth="2" />
+      <circle cx="160" cy="90" r="26" strokeOpacity="0.4" />
+      {Array.from({ length: 16 }, (_, i) => {
+        const a = (i / 16) * Math.PI * 2;
+        return (
+          <line
+            key={i}
+            x1={160 + 34 * Math.cos(a)} y1={90 + 34 * Math.sin(a)}
+            x2={160 + 72 * Math.cos(a)} y2={90 + 72 * Math.sin(a)}
+            strokeOpacity="0.35"
+          />
+        );
+      })}
+    </svg>
+  ),
   // A window grill — the job this type was added for.
   custom: (
     <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
