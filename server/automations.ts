@@ -4,7 +4,7 @@ import path from "path";
 import { sqlite, storage } from "./storage";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
-import { renderTemplate, runCustomEmailSweep, firstNameOf, shopSignoff } from "./email-templates";
+import { renderTemplate, runCustomEmailSweep, firstNameOf } from "./email-templates";
 import { ymdLocal as localDate, fmtUsd } from "./http-util";
 // Leaf module like mailer — snapshot/rotation mechanics live there, the
 // scheduling (nightly + weekly offsite, steps 21/21b) lives here.
@@ -14,6 +14,9 @@ import { maybeNightlyBackup, latestSnapshot } from "./backup";
 // deferred + try/catch'd internally, and every mail this sweep sends should
 // land on the customer's timeline.
 import { logEmailActivity } from "./crm";
+// Schema-only (no server module): the per-site dead-pipe alarm names the shop
+// whose pipe went quiet.
+import { LEAD_SITES, SITE_DOMAINS } from "../shared/crm-schema";
 
 // ─── Business automations ────────────────────────────────────────────────────
 // THE hourly cross-module sweep (plus one on boot): chases money, nudges
@@ -66,8 +69,19 @@ function isoWeek(ms: number): string {
 
 // Dedupe on auto_key (Package C: automation tasks live on the pm board now).
 // Returns true when a task was actually created.
-// ponytail: open-only check — a done task whose condition persists gets
-// re-created next sweep; check all statuses if it nags.
+//
+// "Done" sticks for a week rather than forever. The check used to match OPEN
+// tasks only, so an auto card the owner ticked off came back within the hour,
+// re-dated to today and back in the next morning's digest — which made tidying
+// the board the very thing that caused it to nag, and taught him to stop
+// reading both. Checking all statuses forever is wrong in the other direction:
+// `auto:dead-pipe`, the low-stock and document-expiry cards and the tool chase
+// are standing alarms that MUST re-arm once the condition persists. A cooldown
+// gives both what they need.
+// ponytail: one fixed period for every key — give a key its own interval only
+// if one of them turns out to genuinely need a different one.
+const TASK_COOLDOWN_MS = 7 * DAY_MS;
+
 function ensureTask(
   key: string,
   title: string,
@@ -75,9 +89,11 @@ function ensureTask(
   leadId: number | null = null,
   projectId: number | null = null, // Phase D #20: surfaces the task on the job hub
 ): boolean {
-  const open = sqlite.prepare(
-    "SELECT id FROM pm_tasks WHERE deleted_at IS NULL AND status != 'done' AND auto_key = ?",
-  ).get(key);
+  const open = sqlite.prepare(`
+    SELECT id FROM pm_tasks
+    WHERE deleted_at IS NULL AND auto_key = ?
+      AND (status != 'done' OR COALESCE(completed_at, 0) > ?)
+  `).get(key, Date.now() - TASK_COOLDOWN_MS);
   if (open) return false;
   sqlite.prepare(`
     INSERT INTO pm_tasks (title, kind, lead_id, project_id, status, auto_created, due_date, auto_key)
@@ -267,15 +283,32 @@ function runBusinessSweep(): void {
     }
   });
 
-  // 4. Stale draft invoices.
+  // 4. Draft invoices that are actually ready to go out.
+  //
+  // This used to be purely time-based — 7 days after the invoice row appeared,
+  // which for a quote accepted online is 7 days after the customer said yes.
+  // On a six-week gate job that lands in week two, while holding the draft is
+  // exactly the right thing to do, and it said "send or void it" every hour
+  // until he did one or the other. Meanwhile the case that actually costs
+  // money — the job is finished and the draft is still sitting there — got no
+  // prompt at all, because by then the invoice was older than the nag.
+  //
+  // So: branch on the JOB, not the clock. Finished (or never linked to a job,
+  // where the clock is the only signal there is) earns the nag; still running
+  // stays quiet.
   step("stale draft invoices", () => {
     const rows = sqlite.prepare(`
-      SELECT number FROM fin_invoices
-      WHERE deleted_at IS NULL AND status = 'draft' AND created_at < ?
+      SELECT i.number, p.name AS project_name, p.status AS project_status
+      FROM fin_invoices i
+      LEFT JOIN projects p ON p.id = i.project_id AND p.deleted_at IS NULL
+      WHERE i.deleted_at IS NULL AND i.status = 'draft' AND i.created_at < ?
+        AND (p.id IS NULL OR p.status = 'done')
     `).all(now - 7 * DAY_MS) as any[];
     for (const inv of rows) {
       ensureTask(`auto:draft-invoice:${inv.number}`,
-        `${inv.number} has sat in draft — send or void it`);
+        inv.project_name
+          ? `${inv.project_name} is finished — send invoice ${inv.number}`
+          : `${inv.number} has sat in draft — send or void it`);
     }
   });
 
@@ -397,27 +430,26 @@ function runBusinessSweep(): void {
     }
   });
 
-  // 9. Campaign auto-end.
-  step("campaign auto-end", () => {
-    sqlite.prepare(`
-      UPDATE mk_campaigns SET status = 'ended'
-      WHERE deleted_at IS NULL AND status = 'active'
-        AND end_date IS NOT NULL AND end_date < ?
-    `).run(today);
-  });
+  // 9. (Campaign auto-end deleted with the campaigns screen — mk_campaigns has
+  // had no writer since marketing was cut back to Overview/Reviews/Portfolio/
+  // Settings, so this only ever re-ran over frozen rows. The table is left
+  // alone; only the reader is gone.)
 
   // 10. Unquoted website designs — same design↔quote join as the public
   // status tracker (public-portal.ts), minus its sent/accepted narrowing.
+  // Bounded at 30 days: past a month the design is cold and the card is just
+  // noise the owner cannot dismiss. All four brands' refs qualify — a CJT-
+  // trades plan is quotable and tends to be the biggest job on the board.
   step("unquoted designs", () => {
     const rows = sqlite.prepare(`
       SELECT d.ref, d.name FROM web_designs d
-      WHERE d.created_at < ?
+      WHERE d.created_at < ? AND d.created_at > ?
         AND NOT EXISTS (
           SELECT 1 FROM quotes q
           WHERE q.deleted_at IS NULL AND q.status != 'draft'
             AND upper(q.design_ref) = upper(d.ref)
         )
-    `).all(now - 48 * HOUR_MS) as any[];
+    `).all(now - 48 * HOUR_MS, now - 30 * DAY_MS) as any[];
     for (const d of rows) {
       ensureTask(`auto:unquoted-design:${d.ref}`,
         `Quote design ${d.ref} for ${d.name || "the customer"}`, "quote_reminder");
@@ -426,7 +458,14 @@ function runBusinessSweep(): void {
 
   // 11. Review-ask retry — queueReviewRequest (finance.ts) only stamps
   // review_requests.sent_at when its send succeeded, so a NULL there with an
-  // email on file means the ask never went out. Same wording, same stamp.
+  // email on file means the ask never went out.
+  //
+  // It goes back out through renderTemplate, exactly like the first attempt.
+  // This step used to carry its own hardcoded copy of the email, which made a
+  // NULL sent_at ambiguous: it also covers the case where the owner switched
+  // the template OFF (renderTemplate returns null and finance.ts never stamps),
+  // so the retry cheerfully sent the factory wording 15 minutes after he
+  // switched it off — and quietly reverted any rewording he had done.
   step("review-ask retry", () => {
     if (!mailEnabled()) return;
     const rows = sqlite.prepare(`
@@ -440,19 +479,12 @@ function runBusinessSweep(): void {
     for (const rr of rows) {
       if (isOptedOut(rr.email)) continue;
       setImmediate(async () => {
-        const first = firstNameOf(rr.name);
-        const ok = await sendMail({
-          to: rr.email,
-          subject: "How did we do? — CJM Metals",
-          text:
-            `Hi ${first},\n\n` +
-            `Thanks for choosing CJM Metals for your project. If you have a ` +
-            `minute, we'd really appreciate a quick review — it takes about ` +
-            `30 seconds:\n\n` +
-            `${PUBLIC_SITE_URL}/review/${rr.token}\n\n` +
-            `Thank you!\n\n` +
-            shopSignoff(),
+        const msg = renderTemplate("review.request", {
+          firstName: firstNameOf(rr.name),
+          reviewUrl: `${PUBLIC_SITE_URL}/review/${rr.token}`,
         });
+        if (!msg) return; // switched off in the Emails section — respect it
+        const ok = await sendMail({ to: rr.email, ...msg });
         if (ok) {
           sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
             .run(Date.now(), rr.id);
@@ -501,23 +533,58 @@ function runBusinessSweep(): void {
       `Review material prices — ${stale.length} seed or 90+ days old (${head}${stale.length > 4 ? ", …" : ""})`);
   });
 
-  // 13. Dead-pipe heartbeat — the ≥5 floor keeps brand-new installs quiet;
-  // the open task doubles as the once-per-quiet-period dedupe for the email.
+  // 13. Dead-pipe heartbeat — PER SITE.
+  //
+  // This used to count all four brands in one bucket with no `site` predicate,
+  // which made it useless for exactly the three sites that need it: metals
+  // volume kept the counter healthy, so concrete/insulation/trades could stop
+  // delivering leads entirely and no alarm would ever fire. Those three also
+  // have no backup channel, so a broken pipe there loses the enquiry outright.
+  //
+  // Each brand is judged against its OWN history rather than a fixed floor: a
+  // shop that normally gets one lead a week is flagged in about three weeks
+  // instead of never, and a brand with no traffic yet (< 3 lifetime leads)
+  // never nags. This can only ever catch "worked, then stopped" — the intake
+  // endpoint's own 401 counter (public-api.ts) is what catches "never worked".
   step("dead-pipe heartbeat", () => {
-    const r = sqlite.prepare(`
-      SELECT COUNT(*) AS n, MAX(created_at) AS newest FROM crm_leads
-      WHERE deleted_at IS NULL AND source IN ('website','facebook','instagram')
-    `).get() as any;
-    if (r.n < 5 || r.newest == null || r.newest > now - 10 * DAY_MS) return;
-    if (ensureTask("auto:dead-pipe", "No website leads in 10+ days — check the site")) {
-      setImmediate(() => {
-        void sendOwnerMail({
-          subject: "[CJM Suite] No website leads in 10+ days",
-          text:
-            `The newest website/social lead is ${Math.floor((now - r.newest) / DAY_MS)} days old.\n\n` +
-            `Worth checking that cjmmetals.com, its quote form, and the ad campaigns are still working.`,
+    for (const site of LEAD_SITES) {
+      const rows = sqlite.prepare(`
+        SELECT created_at FROM crm_leads
+        WHERE deleted_at IS NULL AND source IN ('website','facebook','instagram')
+          AND COALESCE(site, 'metals') = ?
+        ORDER BY created_at DESC LIMIT 10
+      `).all(site) as { created_at: number }[];
+      // Under 3 lifetime leads is a brand that hasn't started, not a dead pipe.
+      const total = sqlite.prepare(`
+        SELECT COUNT(*) AS n FROM crm_leads
+        WHERE deleted_at IS NULL AND source IN ('website','facebook','instagram')
+          AND COALESCE(site, 'metals') = ?
+      `).get(site) as { n: number };
+      if (total.n < 3 || rows.length === 0) continue;
+
+      // Median gap between this brand's recent leads → what "quiet" means here.
+      const gaps: number[] = [];
+      for (let i = 1; i < rows.length; i++) gaps.push(rows[i - 1].created_at - rows[i].created_at);
+      gaps.sort((a, b) => a - b);
+      const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+      const quietMs = Math.max(10 * DAY_MS, 3 * median);
+
+      const newest = rows[0].created_at;
+      if (newest > now - quietMs) continue;
+
+      const days = Math.floor((now - newest) / DAY_MS);
+      const domain = SITE_DOMAINS[site];
+      if (ensureTask(`auto:dead-pipe:${site}`, `No leads from ${domain} in ${days} days — check the site`)) {
+        setImmediate(() => {
+          void sendOwnerMail({
+            subject: `[CJM Suite] No leads from ${domain} in ${days} days`,
+            text:
+              `The newest lead from ${domain} is ${days} days old.\n\n` +
+              `Worth checking that the site, its quote form and any ad campaigns are still working — ` +
+              `and, on the sister sites, that SUITE_BASE_URL and SUITE_LEAD_KEY are still set on its Railway service.`,
+          });
         });
-      });
+      }
     }
   });
 
@@ -677,20 +744,28 @@ function runBusinessSweep(): void {
     maybeNightlyBackup(now);
   });
 
-  // 21b. Weekly offsite copy (Phase E) — small enough and SMTP configured:
+  // 21b. Weekly offsite copy (Phase E) — small enough and mail configured:
   // email the latest snapshot to the owner; otherwise a reminder task to use
-  // Admin → Download backup. Stamped before either branch (same stance as the
-  // digest) so one week never gets both, or two of either.
+  // Admin → Download backup.
+  //
+  // Unlike the digest, the week is stamped only once the mail has actually gone
+  // out. Stamping first (the digest's stance, where losing one day's summary
+  // costs nothing) meant a failed send silently burned the whole week: no
+  // email, no reminder card, and the next attempt not until the following
+  // Monday — which would do the same thing again. A backup nobody is told is
+  // missing is the one failure this file must not have.
   step("weekly offsite backup", () => {
     const week = isoWeek(now);
     if (cfg.last_backup_week === week) return;
     const snap = latestSnapshot(); // step 21 just ran, so this exists
     if (!snap) return;
-    sqlite.prepare("UPDATE mk_settings SET last_backup_week = ? WHERE id = 1").run(week);
+    const stampWeek = () =>
+      sqlite.prepare("UPDATE mk_settings SET last_backup_week = ? WHERE id = 1").run(week);
+
     if (mailEnabled() && snap.bytes < 8 * 1024 * 1024) {
       const filename = path.basename(snap.file);
-      setImmediate(() => {
-        void sendOwnerMail({
+      setImmediate(async () => {
+        const ok = await sendOwnerMail({
           subject: `CJM Suite weekly backup — ${today}`,
           text:
             `Attached is this week's gzipped snapshot of the suite database (${filename}).\n\n` +
@@ -698,11 +773,53 @@ function runBusinessSweep(): void {
             `See RESTORE.md in the repo for how to restore it.`,
           attachments: [{ filename, content: fs.readFileSync(snap.file) }],
         });
+        // A failed send falls through to the card, so the week still produces
+        // exactly one prompt — it just isn't the email.
+        if (ok) stampWeek();
+        else {
+          ensureTask(`auto:backup-download:${week}`,
+            "Download an offsite backup of the suite database (Admin → Download backup) — this week's backup email failed to send");
+          stampWeek();
+        }
       });
     } else {
       ensureTask(`auto:backup-download:${week}`,
         "Download an offsite backup of the suite database (Admin → Download backup)");
+      stampWeek();
     }
+  });
+
+  // 22. Payroll not booked for last month.
+  //
+  // Twenty-odd steps above chase invoices, quotes, leads, stock, tools and
+  // backups. None of them mentioned wages — the shop's biggest cost and the
+  // only one with no prompt anywhere. Forgotten, that labour never reaches the
+  // books at all, so job costing under-reports and the monthly P&L in the
+  // digest reads better than the business actually did.
+  //
+  // ponytail: assumes a calendar-month pay period, because nothing in the
+  // schema records a cadence. Month-keyed like the unbilled and stale-lead
+  // nags, so it asks once per month rather than once per sweep.
+  step("payroll booked", () => {
+    const d = new Date(now);
+    // Only from the 2nd — on the 1st, last month's payroll isn't late yet.
+    if (d.getDate() < 2) return;
+    const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    const prevMonth = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+
+    const staff = sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM hr_employees WHERE deleted_at IS NULL AND status = 'active'",
+    ).get() as { n: number };
+    if (staff.n === 0) return; // no crew, no payroll
+
+    const booked = sqlite.prepare(`
+      SELECT 1 FROM fin_expenses
+      WHERE deleted_at IS NULL AND category = 'payroll' AND date LIKE ?
+    `).get(`${prevMonth}-%`);
+    if (booked) return;
+
+    ensureTask(`auto:payroll:${prevMonth}`,
+      `Payroll for ${prevMonth} isn't in the books yet — run it in HR → Payroll and record the expense`);
   });
 }
 
@@ -760,13 +877,45 @@ function buildDigest(now: number, today: string): string {
     ].join("\n"));
   }
 
+  // Emails that failed in the last 24h. A bounced or rejected send is logged
+  // and then resolves false — nothing surfaces it, so an invoice the customer
+  // never received looks identical to one they are ignoring. The audit row is
+  // already written (mailer.recordSend); this just reads it back.
+  const failedMail = sqlite.prepare(`
+    SELECT target_name AS who, details FROM audit_log
+    WHERE action = 'email.failed' AND created_at > ?
+    ORDER BY created_at DESC LIMIT 10
+  `).all(now - DAY_MS) as any[];
+  if (failedMail.length > 0) {
+    parts.push([
+      `EMAILS THAT DID NOT GO OUT (${failedMail.length})`,
+      ...failedMail.map((f) => {
+        let subject = "", error = "";
+        try {
+          const d = f.details ? JSON.parse(f.details) : {};
+          subject = d.subject ?? "";
+          error = d.error ?? "";
+        } catch { /* details is a nicety */ }
+        return `  - ${f.who || "(no recipient)"}${subject ? ` · ${subject}` : ""}${error ? ` · ${error}` : ""}`;
+      }),
+    ].join("\n"));
+  }
+
+  // Oldest first, capped. A quote stays 'sent' until someone accepts or
+  // declines it, and nothing ever marks one lost — so this section grew without
+  // limit and, after a year, buried the two things that actually needed him
+  // today under a wall of quotes that were never coming back.
+  const DIGEST_QUOTE_LIMIT = 10;
   const waiting = sqlite.prepare(
     "SELECT number, customer_name, total_cents FROM quotes WHERE deleted_at IS NULL AND status = 'sent' ORDER BY sent_at",
   ).all() as any[];
   if (waiting.length > 0) {
+    const shown = waiting.slice(0, DIGEST_QUOTE_LIMIT);
+    const rest = waiting.length - shown.length;
     parts.push([
       `QUOTES WAITING ON CUSTOMERS (${waiting.length})`,
-      ...waiting.map((q) => `  - ${q.number} · ${q.customer_name || "(no name)"} · ${fmtUsd(q.total_cents)}`),
+      ...shown.map((q) => `  - ${q.number} · ${q.customer_name || "(no name)"} · ${fmtUsd(q.total_cents)}`),
+      ...(rest > 0 ? [`  …and ${rest} older — mark the dead ones lost in Quotes to clear this list.`] : []),
     ].join("\n"));
   }
 

@@ -255,25 +255,11 @@ export function registerMarketingRoutes(app: Express): void {
       .where(and(isNull(leads.deletedAt), sql`${leads.createdAt} >= ${weekAgo}`))
       .get()?.n ?? 0;
 
-    // campaigns.spend_cents is a cumulative lifetime figure — it carries no
-    // time dimension, so there's no honest "30-day spend" to divide by 30-day
-    // leads. Report an all-time cost per lead instead: total campaign spend
-    // over the leads that spend has been attributed, both measured over all
-    // time so the numerator and denominator share the same window.
-    const campaignSpendCents = db.select({ total: sql<number>`coalesce(sum(${campaigns.spendCents}), 0)` })
-      .from(campaigns)
-      .where(isNull(campaigns.deletedAt))
-      .get()?.total ?? 0;
-    const attributedLeads = db.select({ n: sql<number>`count(*)` }).from(leads)
-      .where(and(
-        isNull(leads.deletedAt),
-        isNotNull(leads.campaignId),
-      )).get()?.n ?? 0;
-    // All-time cost per attributed lead (lifetime spend ÷ lifetime attributed
-    // leads); null until there's both spend and at least one attributed lead.
-    const cplCents = campaignSpendCents > 0 && attributedLeads > 0
-      ? Math.round(campaignSpendCents / attributedLeads)
-      : null;
+    // (Cost per lead removed along with its dashboard tile. It divided lifetime
+    // campaign spend by attributed leads, and mk_campaigns has had no writer
+    // since the campaigns CRUD was cut — so spend was always 0 and the tile
+    // always rendered "—". The table is retained for the historical
+    // crm_leads.campaign_id references.)
 
     // Package C: task counts mean follow-ups (board rows with kind != 'task');
     // the board's own stats cover everything.
@@ -306,7 +292,6 @@ export function registerMarketingRoutes(app: Express): void {
 
     res.json({
       leadsThisWeek,
-      cplCents,
       openTasks,
       overdueTasks,
       avgRating30d,

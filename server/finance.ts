@@ -6,7 +6,7 @@ import { sqlite, db } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, isOptedOut } from "./mailer";
-import { renderTemplate, firstNameOf } from "./email-templates";
+import { renderTemplate, firstNameOf, shopBrand } from "./email-templates";
 import {
   invoices, invoicePayments, expenses, purchaseOrders,
   finSettings,
@@ -32,7 +32,7 @@ import { contracts, changeOrders, pmTasks } from "../shared/pm-schema";
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
 import { marketingSettings } from "../shared/marketing-schema";
 import { parseLineItems, computeDocTotals } from "../shared/biz-common";
-import { pid, qstr, todayLocal, usd, registerSoftDelete, registerCreate } from "./http-util";
+import { pid, qstr, todayLocal, ymdLocal, usd, registerSoftDelete, registerCreate } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/finance-schema.ts exactly. client_id / estimate_id are soft
@@ -453,6 +453,23 @@ export function payInFullDiscountBp(): number {
 // first contact about a bill was the overdue chaser. Same contract as the
 // receipt hook: deferred + try/catch, skips silently with no mailer/address.
 
+// Who this invoice's email would go to, or null if there is nobody to send to.
+// Cheap and synchronous, so the PATCH route can tell the client what is about
+// to happen: "Mark sent" used to report a flat "Invoice marked sent" whether or
+// not an address existed, and a customer with no email on file simply never
+// heard from us until the overdue chaser — by which time the due date had
+// already passed and the money had sat unasked-for for the whole window.
+export function invoiceRecipient(inv: Invoice): string | null {
+  const client = inv.clientId != null
+    ? db.select({ name: clients.name, email: clients.email })
+        .from(clients).where(eq(clients.id, inv.clientId)).get()
+    : undefined;
+  // Fallback: any email typed into the invoice notes (unlinked clients).
+  return client?.email
+    || (inv.notes ?? "").match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/)?.[0]
+    || null;
+}
+
 function queueInvoiceEmail(inv: Invoice): void {
   setImmediate(async () => {
     try {
@@ -461,9 +478,7 @@ function queueInvoiceEmail(inv: Invoice): void {
         ? db.select({ name: clients.name, email: clients.email })
             .from(clients).where(eq(clients.id, inv.clientId)).get()
         : undefined;
-      // Fallback: any email typed into the invoice notes (unlinked clients).
-      const to = client?.email
-        || (inv.notes ?? "").match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/)?.[0];
+      const to = invoiceRecipient(inv);
       if (!to) return;
 
       const first = firstNameOf(client?.name ?? inv.clientName);
@@ -472,7 +487,7 @@ function queueInvoiceEmail(inv: Invoice): void {
 
       // Shop identity — the same quote_settings singleton the shared quote
       // page renders; a missing table/row degrades to the stock signature.
-      let shopBlock = "CJM Metals · Arlington, TX";
+      let shopBlock = `${shopBrand()} · Arlington, TX`;
       try {
         const row = sqlite.prepare("SELECT shop FROM quote_settings WHERE id = 1")
           .get() as { shop?: string } | undefined;
@@ -497,7 +512,7 @@ function queueInvoiceEmail(inv: Invoice): void {
 
       const ok = await sendMail({
         to,
-        subject: `Invoice ${inv.number} from CJM Metals${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
+        subject: `Invoice ${inv.number} from ${shopBrand()}${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
         text:
           `Hi ${first},\n\n` +
           `Here's your invoice ${inv.number}:\n\n` +
@@ -1110,6 +1125,24 @@ export function registerFinanceRoutes(app: Express): void {
     if (body.status === "sent" && inv.status !== "sent" && !inv.sentAt) {
       updates.sentAt = Date.now();
     }
+    // …and fills the two dates every collection path depends on. An invoice with
+    // no dueDate is invisible to ALL of them: the overdue sweep filters on
+    // `due_date IS NOT NULL`, derivedStatus only returns "overdue" when it is
+    // set, and the digest, the dashboard badge and the overdue total key off
+    // that. The customer's copy drops its "Due date:" line too, so neither side
+    // knows when payment is expected. The invoice minted when a customer accepts
+    // a quote online arrives with NEITHER date, and "Mark sent" is a one-click
+    // button that never opens the form — so nothing ever prompts for them.
+    // A date typed by hand still wins; this only removes the silent case, and
+    // only on the transition, so invoices already sent are left alone.
+    // ponytail: net-14 hardcoded — move it to fin_settings only if a second
+    // value is ever actually wanted.
+    if (body.status === "sent" && inv.status !== "sent") {
+      if (!inv.issueDate && body.issueDate === undefined) updates.issueDate = todayLocal();
+      if (!inv.dueDate && body.dueDate === undefined) {
+        updates.dueDate = ymdLocal(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      }
+    }
     // …and mints the customer's /invoice/<token> link, once. Minted here rather
     // than in the email hook so the row the owner gets back already carries it
     // (the detail modal offers it to copy) even when there's no address on file.
@@ -1137,7 +1170,13 @@ export function registerFinanceRoutes(app: Express): void {
       // invoice (deferred; a re-PATCH that stays "sent" doesn't re-send).
       if (body.status === "sent") queueInvoiceEmail(row);
     }
-    res.json(presentInvoice(row, todayLocal()));
+    // `emailedTo` rides along on the send transition so the UI can say who it
+    // is going to — or that there is nobody to send to, which is the case that
+    // used to pass silently as a green "Invoice marked sent".
+    const emailedTo = body.status === "sent" && body.status !== inv.status
+      ? (mailEnabled() ? invoiceRecipient(row) : null)
+      : undefined;
+    res.json({ ...presentInvoice(row, todayLocal()), ...(emailedTo !== undefined ? { emailedTo } : {}) });
   });
 
   app.delete("/api/finance/invoices/:id", requireElevated, (req, res) => {

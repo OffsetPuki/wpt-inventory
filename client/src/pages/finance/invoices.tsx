@@ -10,7 +10,7 @@ import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import InlineNewClient from "@/components/InlineNewClient";
 import { cn } from "@/lib/utils";
-import { formatDate, formatMoney, parseMoney, formatBp, todayYmd } from "@/lib/format";
+import { formatDate, formatMoney, parseMoney, formatBp, todayYmd, ymdInDays } from "@/lib/format";
 import {
   INVOICE_STATUS_LABELS,
   PAYMENT_METHODS,
@@ -173,7 +173,7 @@ function InvoiceFormModal({
   const [freeText, setFreeText] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [issueDate, setIssueDate] = useState(todayYmd());
-  const [dueDate, setDueDate] = useState("");
+  const [dueDate, setDueDate] = useState(ymdInDays(14));
   const [drafts, setDrafts] = useState<ItemDraft[]>([{ ...EMPTY_ITEM }]);
   const [taxPct, setTaxPct] = useState("0");
   const [retainagePct, setRetainagePct] = useState("");
@@ -221,7 +221,11 @@ function InvoiceFormModal({
       setFreeText(false);
       setProjectId("");
       setIssueDate(todayYmd());
-      setDueDate("");
+      // Net-14, matching what the server stamps on send. Left blank, this field
+      // looked optional and the invoice went out with no due date at all —
+      // which quietly excluded it from every reminder, the overdue list and the
+      // customer's own copy. Editable as always.
+      setDueDate(ymdInDays(14));
       setDrafts([{ ...EMPTY_ITEM }]);
       setTaxPct("0");
       setRetainagePct("");
@@ -776,15 +780,24 @@ function InvoiceDetailModal({
     queryFn: async () => (await apiRequest("GET", `/api/finance/invoices/${id}`)).json(),
   });
 
-  const setStatus = useApiMutation<unknown, InvoiceStatus>({
+  const setStatus = useApiMutation<{ emailedTo?: string | null }, InvoiceStatus>({
     request: (status) => ({
       method: "PATCH",
       url: `/api/finance/invoices/${id}`,
       body: { status },
     }),
     invalidate: INVOICE_KEYS,
-    successTitle: (_row, status) =>
-      status === "void" ? "Invoice voided" : "Invoice marked sent",
+    // Say whether the customer is actually being emailed. The server skips the
+    // send when the client record has no address and none is in the notes — a
+    // flat "Invoice marked sent" then read as done, and the bill sat unasked-for
+    // until the overdue chaser fired, which is after the due date has passed.
+    // `emailedTo` is absent on older server builds; fall back to the old wording.
+    successTitle: (row, status) => {
+      if (status === "void") return "Invoice voided";
+      if (row?.emailedTo) return `Marked sent — emailing ${row.emailedTo}`;
+      if (row && "emailedTo" in row) return "Marked sent — no email on file, send them the link below";
+      return "Invoice marked sent";
+    },
     errorTitle: "Could not update",
   });
 

@@ -13,7 +13,21 @@
 //
 //  No email is sent — the transport is stubbed — and every row this writes is
 //  removed again on the way out.
+//
+//  ⚠ It writes template overrides and scheduled-send rows, so it must NEVER
+//  open the real database. It used to inherit whatever DATA_DIR the environment
+//  had, which meant running it on the server — or against a restored backup —
+//  wiped the owner's custom wording for quote follow-up #1 and switched that
+//  email back on. DATA_DIR is now pinned to a throwaway directory BEFORE
+//  storage.ts is imported: that import opens the database file, so this has to
+//  come first and must not be moved below the imports.
 // =============================================================================
+
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "cjm-email-check-"));
 
 process.env.RESEND_API_KEY = "test-key-not-real";
 process.env.MAIL_FROM = "CJM Metals <support@cjmmetals.com>";
@@ -40,6 +54,11 @@ globalThis.fetch = async (url, init) => {
 
 const { renderTemplate, render, runCustomEmailSweep } = await import("../server/email-templates.ts");
 const { sqlite } = await import("../server/storage.ts");
+// Imported for its side effect only: the module owns the `quotes` DDL, and the
+// scheduled-send section below inserts one. Needed now that DATA_DIR points at
+// an empty throwaway directory rather than borrowing whatever database the
+// machine happened to have.
+await import("../server/quotes.ts");
 
 const SIGNOFF = "— CJM Metals · Arlington, TX";
 

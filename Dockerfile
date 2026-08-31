@@ -7,7 +7,11 @@ FROM node:22-bookworm-slim
 # build-essential (make + g++) lets better-sqlite3 compile from source when its
 # prebuilt binary download flakes — without it the slim image has no compiler
 # and `npm ci` fails intermittently with node-gyp errors.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 build-essential ca-certificates \
+# tzdata ships the zoneinfo files TZ below needs. The slim image doesn't carry
+# them, and without them Node silently ignores TZ and stays on UTC — which is
+# the whole bug this is here to fix, failing in exactly the way that looks like
+# it worked.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 build-essential ca-certificates tzdata \
   && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -25,6 +29,12 @@ ENV NODE_ENV=production
 ENV PORT=5000
 ENV DATA_DIR=/data
 ENV PYTHON_BIN=python3
+# The shop's clock. Without this the container runs UTC, which put the daily
+# digest in the owner's inbox at 1-2am (it fires on getHours() < 7) and, from
+# 7pm to midnight local, dated invoices, expenses and payroll a day forward —
+# sometimes into the next month, moving money on the P&L. A Railway variable of
+# the same name overrides this if the shop ever moves.
+ENV TZ=America/Chicago
 
 EXPOSE 5000
 CMD ["node", "dist/index.cjs"]

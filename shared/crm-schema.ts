@@ -38,6 +38,18 @@ export type LeadSource = (typeof LEAD_SOURCES)[number];
 export const LEAD_SITES = ["metals", "concrete", "insulation", "trades"] as const;
 export type LeadSite = (typeof LEAD_SITES)[number];
 
+// Public domain per family site. It lives here beside LEAD_SITES rather than in
+// one route file because more than one place has to name the sending shop: the
+// lead's "From <domain>" note, the audit userName and the owner email
+// (public-api.ts), and the per-site dead-pipe alarm (automations.ts, which
+// deliberately imports no other server module — a shared schema is fine).
+export const SITE_DOMAINS: Record<LeadSite, string> = {
+  metals: "cjmmetals.com",
+  concrete: "cjm-concrete.com",
+  insulation: "cjminsulation.com",
+  trades: "cjmtrades.com",
+};
+
 export const WIN_LOSS_REASONS = [
   "price",
   "no_response",

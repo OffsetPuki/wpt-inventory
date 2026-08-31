@@ -12,8 +12,6 @@ updates:
       time: "06:00"
     open-pull-requests-limit: 5
     groups:
-      radix:
-        patterns: ["@radix-ui/*"]
       types:
         patterns: ["@types/*"]
       drizzle:

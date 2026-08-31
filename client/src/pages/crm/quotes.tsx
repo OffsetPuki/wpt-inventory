@@ -11,6 +11,8 @@ import "@/quote/quote.css";
 interface QuoteSettings {
   priceBook: Record<string, unknown>;
   shop: Record<string, unknown>;
+  /** Owner-only. Workers still quote — they just can't rewrite the shared rates. */
+  canEditRates?: boolean;
 }
 
 export default function QuoteBuilderPage() {

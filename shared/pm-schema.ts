@@ -195,7 +195,11 @@ export const insertTimeEntrySchema = z.object({
   // Manual entry: pass both; timer: server stamps startedAt, stop stamps endedAt.
   startedAt: z.number().int().optional(),
   endedAt: z.number().int().optional(),
-  durationMin: z.number().int().nonnegative().optional(),
+  // Capped at one day. Unbounded, a mistyped 48000 logged an 800-hour shift
+  // that reached the payroll summary, the one-click "record as expense", and a
+  // billable line on the customer's invoice. Auto-stopped runaway timers top
+  // out near 780 min, well under the cap.
+  durationMin: z.number().int().nonnegative().max(1440).optional(),
   billable: z.boolean().optional(),
 });
 

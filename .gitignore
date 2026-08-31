@@ -10,3 +10,9 @@ dist/
 .env.*
 *.log
 .DS_Store
+
+# Per-machine editor state. `launch.json` IS shared (it defines how to run the
+# app); these two are personal and were committed by accident — settings.local
+# is one developer's permission allowlist, and the lock file is transient.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
