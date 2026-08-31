@@ -218,6 +218,13 @@ html {
     min-height: 44px;
   }
 
+  /* A native range track is a ~16px ribbon — precise to hit with a mouse, not
+     with a thumb. Grow the control box so the target is 44px tall; the track
+     stays centred inside it, so nothing looks different. */
+  input[type="range"] {
+    min-height: 44px;
+  }
+
   /* Native checkboxes render at 13px. The email on/off switches decide whether
      automated customer mail goes out — not a control to fat-finger. */
   input[type="checkbox"],
