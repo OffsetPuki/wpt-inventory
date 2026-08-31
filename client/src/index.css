@@ -192,8 +192,12 @@ html {
    zoom would come back with the viewport guard gone. This is (0,2,1)/(0,3,1),
    which outranks both. The exclusions are the only fields deliberately larger
    than 16px: the login name + PIN boxes, the item search, and the quote
-   builder's design-code lookup. !important would flatten those instead. */
-@media (max-width: 767px) {
+   builder's design-code lookup. !important would flatten those instead.
+
+   1023px, not 767px: the touch layout runs until Tailwind's lg, so an iPhone
+   in landscape (932px) and an iPad in portrait sat in the gap and still got
+   the focus-zoom this rule exists to prevent. */
+@media (max-width: 1023px) {
   input:not(.text-lg):not(.text-2xl):not(.find-input),
   select:not(.text-lg):not(.text-2xl),
   textarea:not(.text-lg):not(.text-2xl) {
