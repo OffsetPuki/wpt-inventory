@@ -21,19 +21,26 @@ export default function QRDialog({ item, open, onClose }: QRDialogProps) {
       .catch(() => setDataUrl(""));
   }, [open, target]);
 
+  // The popup inherits this origin's CSP (script-src 'self'), so an inline
+  // <script>window.print()</script> in the written document gets blocked and
+  // nothing ever prints. Drive the print from here instead, once the QR image
+  // has actually decoded — otherwise the label prints blank.
   function print() {
+    const esc = (v: string) => v.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
     const w = window.open("", "_blank", "width=400,height=500");
     if (!w) return;
     w.document.write(`
-      <html><head><title>${item.name}</title></head>
+      <html><head><title>${esc(item.name)}</title></head>
       <body style="text-align:center;font-family:sans-serif;padding:24px">
         <img src="${dataUrl}" style="width:280px;height:280px" />
-        <h2 style="margin:12px 0 4px">${item.name}</h2>
-        <p style="color:#666;margin:0">${item.partNumber ?? ""}</p>
-        <script>window.onload=()=>{window.print();}</script>
+        <h2 style="margin:12px 0 4px">${esc(item.name)}</h2>
+        <p style="color:#666;margin:0">${esc(item.partNumber ?? "")}</p>
       </body></html>
     `);
     w.document.close();
+    const img = w.document.querySelector("img");
+    if (!img || img.complete) w.print();
+    else img.addEventListener("load", () => w.print(), { once: true });
   }
 
   return (

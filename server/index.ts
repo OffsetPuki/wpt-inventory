@@ -55,6 +55,12 @@ app.use(
             // font files from fonts.gstatic.com.
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             imgSrc: ["'self'", "data:", "blob:"],
+            // The contract/change-order PDF preview frames a blob: object URL
+            // (pm/contracts.tsx). With no frame-src, it falls back to default-src
+            // 'self', which does NOT cover blob: — so that preview has been a blank
+            // white box in production since it shipped. Same reason imgSrc has to
+            // spell blob: out above.
+            frameSrc: ["'self'", "blob:"],
             connectSrc: ["'self'"],
             fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
             objectSrc: ["'none'"],
