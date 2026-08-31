@@ -233,6 +233,14 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   outline: none;
   margin: 8px 0;
 }
+/* The shell gives every range a 44px touch box under pointer:coarse. This one
+   paints its own hairline track from the ELEMENT background, so a taller box
+   turns that 1px line into a 44px grey slab. Keep its real height — the 16px
+   thumb below is the drag target here. */
+@media (pointer: coarse) {
+  .qa .range { min-height: 0; }
+}
+
 .qa .range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; background: var(--ink); border-radius: 0; cursor: pointer; }
 .qa .range::-moz-range-thumb { width: 16px; height: 16px; background: var(--ink); border-radius: 0; border: 0; cursor: pointer; }
 
