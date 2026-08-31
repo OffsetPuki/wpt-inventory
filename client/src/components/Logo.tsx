@@ -23,7 +23,10 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
   const textSize = size === "sm" ? "text-lg" : size === "lg" ? "text-2xl" : "text-xl";
 
   return (
-    <div className="flex items-center gap-2.5">
+    // min-w-0 so the block can actually shrink in a flex row: the tagline below
+    // is `truncate` (white-space:nowrap), which otherwise sets a min-content width
+    // wide enough to shove the topbar theme toggle off the right edge of a phone.
+    <div className="flex min-w-0 items-center gap-2.5">
       <div className="relative shrink-0">
         {logoUrl ? (
           <img
@@ -40,7 +43,7 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
           <span className={`${textSize} truncate font-bold leading-tight tracking-tight text-foreground`}>
             {name}
           </span>
-          <span className="text-[10px] uppercase leading-none tracking-[0.2em] text-muted-foreground">
+          <span className="truncate text-[10px] uppercase leading-none tracking-[0.2em] text-muted-foreground">
             {settings?.companyTagline || "Custom Metalwork"}
           </span>
         </div>

@@ -93,7 +93,7 @@ function LineItemsEditor({
         <span className="flex-1">Description</span>
         <span className="w-16 text-right">Qty</span>
         <span className="w-24 text-right">Unit $</span>
-        <span className="w-8" />
+        <span className="w-8 [@media(pointer:coarse)]:w-11" />
       </div>
       {drafts.map((d, i) => (
         <div key={i} className="flex items-center gap-2">

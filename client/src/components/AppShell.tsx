@@ -313,7 +313,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 bg-black/60"
+            className="absolute inset-0 touch-none bg-black/60"
             onClick={() => setMobileOpen(false)}
           />
           <aside className="absolute left-0 top-0 flex h-full w-72 flex-col border-r border-sidebar-border bg-sidebar">
@@ -327,7 +327,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto py-2">
+            <div className="flex-1 overflow-y-auto overscroll-contain py-2">
               <NavLinks onNavigate={() => setMobileOpen(false)} />
             </div>
             <UserFooter />

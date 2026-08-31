@@ -179,3 +179,46 @@ html {
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+/* ─── Phone form fields ───────────────────────────────────────────────────── */
+/* iOS auto-zooms the page when you focus a field smaller than 16px, and does not
+   zoom back out. The old fix was maximum-scale=1 in the viewport tag, which on
+   Android also killed pinch-zoom for good — bad on a shop floor where the owner
+   wants to zoom a table. Bump the fields instead and let pinch-zoom live.
+
+   The :not() chain is load-bearing, not decoration. A bare element selector is
+   (0,0,1) and LOSES to Tailwind's .text-sm (0,1,0) and to the quote builder's
+   .qa .cell (0,2,0) — the rule would apply to nothing that needed it and the
+   zoom would come back with the viewport guard gone. This is (0,2,1)/(0,3,1),
+   which outranks both. The exclusions are the only fields deliberately larger
+   than 16px: the login name + PIN boxes, the item search, and the quote
+   builder's design-code lookup. !important would flatten those instead. */
+@media (max-width: 767px) {
+  input:not(.text-lg):not(.text-2xl):not(.find-input),
+  select:not(.text-lg):not(.text-2xl),
+  textarea:not(.text-lg):not(.text-2xl) {
+    font-size: 16px;
+  }
+}
+
+/* ─── Touch hit areas ─────────────────────────────────────────────────────── */
+/* Icon-only buttons are drawn at icon size — the "Remove user" trash can is
+   20×20 CSS px. On a finger that's a coin toss, and half of these delete
+   something. Give every icon-only control a 44px hit area on touch devices;
+   the icon itself is unchanged, and pointer:fine (mouse) is untouched. One
+   rule here beats chasing the same padding through eight pages. */
+@media (pointer: coarse) {
+  button:has(> svg:only-child),
+  a:has(> svg:only-child) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Native checkboxes render at 13px. The email on/off switches decide whether
+     automated customer mail goes out — not a control to fat-finger. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-width: 22px;
+    min-height: 22px;
+  }
+}
