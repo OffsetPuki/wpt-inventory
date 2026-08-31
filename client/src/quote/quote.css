@@ -69,7 +69,7 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .topbar {
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: 40; /* see the lg override below */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -78,6 +78,16 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   background: rgba(245, 242, 236, 0.86);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
+}
+
+
+/* Below lg the suite shell has its own sticky topbar (search + menu) at the
+   same z-index, and this bar sits later in the DOM, so it painted straight
+   over it — 89px of cream covering the hamburger, and a tap landing on NEW
+   QUOTE instead. The shell chrome wins on a phone; this nav scrolls away here
+   exactly as it did before the shell bar became sticky. */
+@media (max-width: 1023px) {
+  .qa .topbar { position: static; }
 }
 
 .qa .topnav { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 26px; }

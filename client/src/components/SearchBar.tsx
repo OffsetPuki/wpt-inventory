@@ -59,6 +59,10 @@ export default function SearchBar() {
   }, []);
 
   const go = (hit: SearchHit) => {
+    // Nothing unmounts this input on navigation (it lives in the persistent
+    // shell header), so without this the soft keyboard stays up over the page
+    // the user just opened.
+    (document.activeElement as HTMLElement | null)?.blur();
     setOpen(false);
     setQ("");
     setLocation(hit.href);
@@ -84,13 +88,22 @@ export default function SearchBar() {
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);
-          if (e.key === "Enter" && hits.length > 0) go(hits[0]);
+          // !loading, or the phone keyboard's Go opens the hit for the query
+          // BEFORE the one just typed — hits still holds the old results for the
+          // 250ms debounce plus the round trip, while the panel shows a spinner.
+          if (e.key === "Enter" && !loading && hits.length > 0) go(hits[0]);
         }}
         placeholder="Search clients, invoices, items…"
         className="h-10 w-full rounded-full border border-input bg-background pl-10 pr-4 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
       />
+      {/* On a phone the input only gets the slice of the topbar left over
+          after the menu, logo and theme toggle — about 210px — which truncates
+          every result to the same unreadable stub. The panel breaks out to full
+          width there. 4.25rem is the mobile topbar: py-3 twice plus a 44px
+          control. From lg: up the desktop topbar takes over and the panel
+          anchors back to the input. */}
       {open && q.trim().length >= 2 && (
-        <div className="absolute left-0 right-0 top-12 z-50 max-h-96 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-lg">
+        <div className="fixed inset-x-3 top-[4.25rem] z-50 max-h-[40vh] overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1.5 shadow-lg lg:absolute lg:inset-x-auto lg:left-0 lg:right-0 lg:top-full lg:mt-2 lg:max-h-96">
           {loading ? (
             <div className="flex justify-center py-4 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />

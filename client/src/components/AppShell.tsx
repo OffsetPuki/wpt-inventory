@@ -337,20 +337,30 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile topbar */}
-        <header className="flex items-center gap-3 border-b border-border bg-sidebar px-4 py-3 lg:hidden">
+        {/* Mobile topbar. The wordmark is dropped here (the drawer still
+            carries it) so the search box gets the width instead — on a shop
+            floor, finding a part is what the topbar is for, and a phone had
+            no global search at all before this. Sticky because the document is
+            what scrolls here, not <main>: without it the bar (and the results
+            panel pinned under it) would scroll away mid-search. z-40 keeps it
+            under the drawer and dialogs, which are z-50. */}
+        <header className="sticky top-0 z-40 flex items-center gap-2 border-b border-border bg-sidebar px-3 py-3 lg:hidden">
           <button
             onClick={() => setMobileOpen(true)}
-            className="rounded-lg p-2 text-foreground hover:bg-accent"
+            className="shrink-0 rounded-lg p-2 text-foreground hover:bg-accent"
             aria-label="Open menu"
           >
             <Menu className="h-6 w-6" />
           </button>
-          <Logo size="sm" />
-          <div className="ml-auto">
+          <Logo size="sm" showText={false} />
+          <div className="min-w-0 flex-1">
+            <SearchBar />
+          </div>
+          <div className="shrink-0">
             <ThemeToggle />
           </div>
         </header>
+
 
         {/* Desktop topbar — global search + theme + who's signed in */}
         <header className="hidden h-16 items-center gap-4 border-b border-border bg-sidebar px-6 lg:flex">
