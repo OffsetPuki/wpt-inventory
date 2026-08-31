@@ -108,10 +108,22 @@ export function registerBackupRoutes(app: Express): void {
       } catch { /* fresh install / already checkpointed */ }
     }
     const snap = latestSnapshot();
+    // When a copy last actually LEFT this server. The nightly snapshot sits on
+    // the same volume as the database, so it is worth nothing if that volume
+    // dies — this is the number that says whether the business is really backed
+    // up, and nothing anywhere reported it.
+    let lastOffsiteAt: number | null = null;
+    try {
+      const row = sqlite.prepare(
+        "SELECT MAX(created_at) AS at FROM audit_log WHERE action = 'backup_download'",
+      ).get() as { at?: number | null } | undefined;
+      lastOffsiteAt = row?.at ?? null;
+    } catch { /* audit table absent — the card just omits the line */ }
     res.json({
       dbBytes,
       lastSnapshotAt: snap ? Math.round(snap.mtimeMs) : null,
       lastSnapshotBytes: snap?.bytes ?? null,
+      lastOffsiteAt,
     });
   });
 }

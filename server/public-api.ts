@@ -7,8 +7,9 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage, uploadsDir } from "./storage";
-import { mailEnabled, sendOwnerMail } from "./mailer";
-import { leads, LEAD_SITES, type LeadSource, type LeadSite } from "../shared/crm-schema";
+import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
+import { renderTemplate, firstNameOf } from "./email-templates";
+import { leads, LEAD_SITES, SITE_DOMAINS, type LeadSource, type LeadSite } from "../shared/crm-schema";
 import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
 
 // ─── Public API: how the outside world talks to the suite ────────────────────
@@ -135,14 +136,10 @@ const intakeSchema = z.object({
   designPng: z.unknown().optional(),
 });
 
-// Attribution domain per family site — the notes "From <domain>" line, the
-// audit userName, and the owner email all key off the sending site.
-const SITE_DOMAINS: Record<LeadSite, string> = {
-  metals: "cjmmetals.com",
-  concrete: "cjm-concrete.com",
-  insulation: "cjminsulation.com",
-  trades: "cjmtrades.com",
-};
+// SITE_DOMAINS (the notes "From <domain>" line, the audit userName and the
+// owner email subject) moved to shared/crm-schema.ts — the per-site dead-pipe
+// alarm in automations.ts needs it too, and that module imports no other
+// server module by design.
 
 // Map a UTM source onto the CRM's lead-source enum. Anything we can't place
 // confidently stays "website" — the form itself is the source of truth, the
@@ -154,18 +151,11 @@ function mapSource(utmSource: string | undefined): LeadSource {
   return "website";
 }
 
-// Case-insensitive campaign-name match links the lead to a Marketing campaign
-// so CPL / revenue-by-campaign reporting works without manual tagging.
-function findCampaignId(utmCampaign: string | undefined): number | null {
-  if (!utmCampaign) return null;
-  const row = db.select({ id: campaigns.id }).from(campaigns)
-    .where(and(
-      isNull(campaigns.deletedAt),
-      sql`lower(${campaigns.name}) = ${utmCampaign.toLowerCase()}`,
-    ))
-    .get();
-  return row?.id ?? null;
-}
+// (findCampaignId deleted with the campaigns UI. It matched a UTM campaign name
+// against mk_campaigns, which has had no writer since the CRUD was cut, so it
+// could only ever return null — one query per lead to learn nothing. The
+// crm_leads.campaign_id column stays for the historical rows that have one; the
+// raw utm_campaign string is still preserved in the notes below.)
 
 // Near-duplicate suppression: the same person double-clicking submit, or
 // fixing a typo and sending again within 10 minutes, should fold into the
@@ -175,14 +165,21 @@ function findCampaignId(utmCampaign: string | undefined): number | null {
 // Scoped to the submitting site: the same person asking a SECOND family shop
 // for a different job minutes later is a distinct lead (own site, service and
 // owner email), not a resubmit — folding it would silently drop the inquiry.
+// Also scoped to the DESIGN: a configurator mints one ref per page load, so an
+// impatient double-submit carries the same ref and still folds, while pricing a
+// fence and then a gate four minutes later stays two leads. Without this, the
+// second design silently replaced the first on one row and the first job became
+// invisible — the customer had asked about two things and only one survived.
 function findRecentDuplicate(
   email: string | undefined,
   phone: string | undefined,
   site: string,
+  designRef: string | undefined,
 ): typeof leads.$inferSelect | undefined {
   const emailNorm = (email ?? "").trim().toLowerCase();
   const phoneDigits = (phone ?? "").replace(/\D/g, "");
   if (!emailNorm && !phoneDigits) return undefined;
+  const refNorm = (designRef ?? "").trim().toUpperCase();
   const cutoff = Date.now() - 10 * 60 * 1000;
   return db.select().from(leads)
     .where(and(isNull(leads.deletedAt), sql`${leads.createdAt} >= ${cutoff}`))
@@ -190,6 +187,14 @@ function findRecentDuplicate(
     .all()
     .find((l) => {
       if ((l.site ?? "metals") !== site) return false;
+      // Two designs = two jobs. The ref lives on web_designs (soft lead_id
+      // ref), not on the lead row, so ask that table what this candidate is
+      // already carrying. At most a handful of rows fall in a 10-minute
+      // window, so a lookup per candidate costs nothing.
+      const prior = sqlite.prepare(
+        "SELECT ref FROM web_designs WHERE lead_id = ? ORDER BY id DESC LIMIT 1",
+      ).get(l.id) as { ref?: string } | undefined;
+      if ((prior?.ref ?? "").trim().toUpperCase() !== refNorm) return false;
       const lEmail = (l.email ?? "").trim().toLowerCase();
       const lPhone = (l.phone ?? "").replace(/\D/g, "");
       return (!!emailNorm && !!lEmail && lEmail === emailNorm)
@@ -269,6 +274,52 @@ const intakeLimiter = rateLimit({
   message: { message: "Too many submissions — try again later." },
 });
 
+// A wrong SUITE_LEAD_KEY on one of the sister sites is the single failure mode
+// no lead-volume alarm can catch quickly: the site keeps showing customers a
+// thank-you page, the suite records nothing, and the per-site dead-pipe
+// heartbeat needs weeks of silence before it can tell "broken" from "quiet".
+// The 401 itself is the signal, and it was being thrown away — so count it.
+//
+// ponytail: in-memory latch, cleared by a restart and by the next good key, so
+// a recurrence after a fix alerts again. That is the right shape for "someone
+// just deployed with the wrong secret"; persist it only if an incident ever
+// gets missed across a redeploy.
+let badKeyNotified = false;
+
+function noteBadIntakeKey(): void {
+  if (badKeyNotified) return;
+  badKeyNotified = true;
+  try {
+    sqlite.prepare(`
+      INSERT INTO pm_tasks (title, kind, status, auto_created, due_date, auto_key)
+      SELECT ?, 'other', 'todo', 1, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pm_tasks
+        WHERE auto_key = ? AND deleted_at IS NULL AND status != 'done'
+      )
+    `).run(
+      "A website was rejected with a bad lead key — check SUITE_LEAD_KEY on each site's Railway service",
+      new Date().toISOString().slice(0, 10),
+      "auto:bad-intake-key",
+      "auto:bad-intake-key",
+    );
+  } catch {
+    /* pm_tasks not created yet — never let this cost us the 401 response */
+  }
+  if (mailEnabled()) {
+    setImmediate(() => {
+      void sendOwnerMail({
+        subject: "[CJM Suite] A website is being rejected — bad lead key",
+        text:
+          `A site POSTed to /api/public/leads with the wrong X-Lead-Key and was rejected.\n\n` +
+          `Any lead it was carrying is GONE — the sister sites have no backup channel.\n\n` +
+          `Check that SUITE_LEAD_KEY on each site's Railway service still matches ` +
+          `LEAD_INTAKE_KEY on the suite, then submit a test enquiry to confirm.`,
+      });
+    });
+  }
+}
+
 export function registerPublicRoutes(app: Express): void {
   app.post("/api/public/leads", intakeLimiter, (req, res) => {
     // Shared secret: the website's server sends X-Lead-Key. Unset env means
@@ -279,8 +330,10 @@ export function registerPublicRoutes(app: Express): void {
       return res.status(503).json({ message: "Lead intake not configured (LEAD_INTAKE_KEY unset)" });
     }
     if (!safeKeyEqual(req.headers["x-lead-key"] as string | undefined, configured)) {
+      noteBadIntakeKey();
       return res.status(401).json({ message: "Bad intake key" });
     }
+    badKeyNotified = false; // a good key re-arms the alarm for the next break
 
     let body;
     try {
@@ -293,7 +346,6 @@ export function registerPublicRoutes(app: Express): void {
     // Pre-`site` senders (the metals site before the rollout) omit the field.
     const site: LeadSite = body.site ?? "metals";
     const domain = SITE_DOMAINS[site];
-    const campaignId = findCampaignId(body.utm?.campaign);
     // Design-preview snapshot → /uploads file. Null when absent or unusable —
     // never a reason to reject the lead.
     const pngUrl = saveDesignPng(body.designPng);
@@ -305,6 +357,17 @@ export function registerPublicRoutes(app: Express): void {
       "—",
       `From ${domain}${body.page ?? ""}${body.lang === "es" ? " (Español)" : ""}`,
       body.timeline ? `Timeline: ${body.timeline}` : null,
+      // Consent and contact preference are received on every lead but only had
+      // a home on the design-carrying ones, so for concrete/insulation/trades
+      // the sole record that a customer agreed to be called or texted was a
+      // single owner email. Written here for every lead: it is the answer to
+      // "prove he asked to be contacted".
+      body.consent
+        ? `Consent: ${body.consent === "yes" ? "agreed to call/text" : `NOT given (${body.consent})`}`
+        : "Consent: not given",
+      body.contact
+        ? `Prefers: ${body.contact}${body.bestTime ? ` — best time: ${body.bestTime}` : ""}`
+        : (body.bestTime ? `Best time: ${body.bestTime}` : null),
       body.utm && Object.values(body.utm).some(Boolean)
         ? `UTM: ${Object.entries(body.utm)
             .filter(([, v]) => v)
@@ -317,7 +380,7 @@ export function registerPublicRoutes(app: Express): void {
     // inserting a copy. The design row, PNG and response still flow as usual;
     // only the duplicate pipeline entry (and a second owner email) are spared.
     // Same-site only: a submission from a DIFFERENT family site inserts fresh.
-    const dupe = findRecentDuplicate(body.email, body.phone, site);
+    const dupe = findRecentDuplicate(body.email, body.phone, site, body.designRef);
     let row: typeof leads.$inferSelect;
     if (dupe) {
       const resubmit = [
@@ -350,7 +413,6 @@ export function registerPublicRoutes(app: Express): void {
         email: body.email || null,
         source,
         site,
-        campaignId,
         serviceRequested: body.service || null,
         serviceArea: body.area || null,
         // Raw UTM strings get real columns for the attribution report; the
@@ -421,7 +483,7 @@ export function registerPublicRoutes(app: Express): void {
           targetId: row.id,
           targetName: row.name,
           ip: req.ip ?? null,
-          details: { source, site, campaignId, page: body.page ?? null, deduped: !!dupe },
+          details: { source, site, page: body.page ?? null, deduped: !!dupe },
         });
       } catch {
         /* audit is best-effort */
@@ -453,6 +515,29 @@ export function registerPublicRoutes(app: Express): void {
           text,
         });
       });
+    }
+
+    // Customer acknowledgement, for the three sister sites only.
+    //
+    // Concrete, insulation and trades hand ALL their customer mail to a Google
+    // Apps Script webhook that has never been configured, so their customers
+    // saw a thank-you page and then heard nothing — no reference to quote back,
+    // nothing to reply to with photos. The suite can send it itself and needs
+    // no Google account to do it.
+    //
+    // Skipping metals is not optional: that site's script already sends this
+    // exact email, and sending here too would give every metals customer two.
+    if (!dupe && site !== "metals" && body.email && mailEnabled() && !isOptedOut(body.email)) {
+      const msg = renderTemplate("lead.received", {
+        firstName: firstNameOf(body.name),
+        service: body.service || body.message || "your project",
+        refLine: body.designRef ? `Your project code is ${body.designRef} — quote it if you call.\n` : "",
+      });
+      if (msg) {
+        setImmediate(() => {
+          void sendMail({ to: body.email!, ...msg });
+        });
+      }
     }
 
     res.status(201).json(

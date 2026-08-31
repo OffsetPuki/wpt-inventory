@@ -61,7 +61,6 @@ interface OverviewPayload {
 
 interface MarketingStats {
   leadsThisWeek: number;
-  cplCents: number | null;
   openTasks: number;
   overdueTasks: number;
   avgRating30d: number | null;

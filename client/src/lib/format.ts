@@ -170,35 +170,31 @@ export function todayYmd(): string {
   ).padStart(2, "0")}`;
 }
 
+/**
+ * Local "YYYY-MM-DD" `days` from today. Seeds the invoice due date so that
+ * field is never silently blank: an invoice with no due date is invisible to
+ * every collection path on the server — no reminder email, no overdue flag, no
+ * digest line, no dashboard badge — and its email drops the "Due date:" line,
+ * so the customer is never told when to pay either.
+ */
+export function ymdInDays(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
 /** Parse a bare "YYYY-MM-DD" as a LOCAL date (reuses the toLocalDate guard). */
 export function ymdToDate(ymd: string): Date {
   return toLocalDate(ymd);
 }
-/** Alias of {@link ymdToDate}. */
-export const parseYmd = ymdToDate;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Whole days between `ms` (epoch millis) and now; negative if `ms` is in the future. */
-export function daysAgo(ms: number): number {
-  return Math.floor((Date.now() - ms) / DAY_MS);
-}
-
-/** Relative "3 days ago" label; "never" when there is no timestamp, "today" for <1 day. */
-export function relDays(ms: number | null | undefined): string {
-  if (!ms) return "never";
-  const days = daysAgo(ms);
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  return `${days} days ago`;
-}
-
-// ─── Money input helper ────────────────────────────────────────────────────────
-
-/** Integer cents → an editable dollar string; "" for zero, trailing .00 stripped. */
-export function centsToInput(cents: number): string {
-  return cents === 0 ? "" : (cents / 100).toFixed(2).replace(/\.00$/, "");
-}
+// Deleted here, all four with zero importers across the whole tree: `parseYmd`
+// (an alias of ymdToDate, which is the one everything actually calls),
+// `relDays` and its only caller `daysAgo`, and `centsToInput`.
+//
+// Do NOT reintroduce centsToInput for the money inputs it looks made for: it
+// renders 0 as an empty string, which would blank the payment-amount field.
 
 // ─── JSON column helpers (server stores some columns as raw JSON strings) ──────
 

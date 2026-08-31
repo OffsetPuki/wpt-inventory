@@ -20,7 +20,10 @@ import json
 import re
 import urllib.request
 
-DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# Sonnet 5 is both newer and cheaper than the 4-6 this used to pin
+# ($2/$10 per Mtok against $3/$15), and identifying a part from a photo sits
+# well inside what it does. ANTHROPIC_MODEL still overrides.
+DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 API_URL = "https://api.anthropic.com/v1/messages"
 
 

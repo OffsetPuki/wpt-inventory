@@ -164,13 +164,19 @@ export function registerQuoteRoutes(app: Express): void {
   // The shared price book + shop identity. The client deep-merges these over
   // its own defaults, so an empty object simply means "all defaults".
 
-  app.get("/api/quotes/settings", requireAuth, (_req, res) => {
+  // Everyone who quotes needs to READ the rates — the builder hard-fails
+  // without them — so this stays open to any signed-in user. `canEditRates`
+  // tells the client which of the two halves this user may write, so a worker
+  // sees the inputs read-only instead of typing into a field whose save the
+  // PUT below will quietly discard.
+  app.get("/api/quotes/settings", requireAuth, (req, res) => {
     const row = sqlite.prepare(
       "SELECT price_book, shop FROM quote_settings WHERE id = 1",
     ).get() as { price_book?: string; shop?: string } | undefined;
     res.json({
       priceBook: parseJson(row?.price_book, {}),
       shop: parseJson(row?.shop, {}),
+      canEditRates: isElevated(req),
     });
   });
 
@@ -179,21 +185,33 @@ export function registerQuoteRoutes(app: Express): void {
       const data = quoteSettingsSchema.parse(req.body);
       assertSafeKeys(data.priceBook, "priceBook");
       assertSafeKeys(data.shop, "shop");
-      // Shop identity (name, city, phone, email, quote terms) is what signs
-      // every outbound customer email and heads the quote — owner-only, even
-      // though the price book itself stays open to whoever quotes.
-      const shopWritable = isElevated(req);
+      // Both halves are owner-only. Shop identity (name, city, phone, email,
+      // quote terms) signs every outbound customer email and heads the quote.
+      // The price book used to be open to whoever quotes — but the builder
+      // auto-saves 800ms after any keystroke, with no save button and no
+      // confirmation, so a worker nudging the labor rate or a markup silently
+      // repriced every future quote AND every instant estimate on the public
+      // website, leaving one audit row as the only trace.
+      //
+      // A worker's save is a no-op rather than a 403: the builder auto-saves
+      // unprompted, so an error banner would fire on a keystroke he can't
+      // control. He never sees an editable field either — the GET above hands
+      // the client `canEditRates`, which renders the rate inputs read-only.
+      // Reading stays open; only the write is gated.
+      if (!isElevated(req)) {
+        audit(req, "quote.settings_update_denied");
+        return res.json({ ok: true, saved: false });
+      }
       sqlite.prepare(`
         INSERT INTO quote_settings (id, price_book, shop, updated_at)
         VALUES (1, @priceBook, @shop, @now)
         ON CONFLICT(id) DO UPDATE SET
           price_book = excluded.price_book,
-          shop = CASE WHEN @shopWritable = 1 THEN excluded.shop ELSE quote_settings.shop END,
+          shop = excluded.shop,
           updated_at = excluded.updated_at
       `).run({
         priceBook: JSON.stringify(data.priceBook),
         shop: JSON.stringify(data.shop),
-        shopWritable: shopWritable ? 1 : 0,
         now: Date.now(),
       });
       // The shared price book is the most financially consequential write in

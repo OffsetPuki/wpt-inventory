@@ -1,24 +1,29 @@
-import nodemailer from "nodemailer";
-import type { Transporter } from "nodemailer";
 import { sqlite, storage } from "./storage";
 
 // ─── Outbound mail ───────────────────────────────────────────────────────────
-// One tiny facade the whole suite sends through. Two transports, tried in
-// priority order:
-//   1. Resend HTTP API (RESEND_API_KEY) — works on hosts that block outbound
-//      SMTP entirely (Railway's Hobby plan blocks 465 AND 587; verified
-//      2026-07-02 on the website's server).
-//   2. Gmail SMTP via nodemailer (SMTP_USER + SMTP_PASS) — same transporter
-//      shape and short timeouts as the website's src/pages/api/quote.ts, so a
-//      blocked/stalled connection fails in seconds instead of hanging.
+// One tiny facade the whole suite sends through. ONE transport: the Resend
+// HTTP API (RESEND_API_KEY).
+//
+// There was a Gmail SMTP transport via nodemailer as well. It could never
+// fire: Railway blocks outbound SMTP on 465 AND 587 (verified 2026-07-02 on
+// the website's server — the same finding that got that site's own mail path
+// deleted). Worse than useless, in fact: mailEnabled() answered "yes" for a
+// shop that had only SMTP_* set, so callers took their has-mail branch and
+// every send then failed one at a time, instead of the caller taking the
+// no-mail branch that would have told the owner something was wrong.
+//
 // Unconfigured is a supported state: mailEnabled() is false and every send is
 // a logged no-op — callers never need their own "is email set up" checks.
 //
 // Env:
-//   RESEND_API_KEY — enables the Resend transport
-//   SMTP_USER / SMTP_PASS / SMTP_HOST / SMTP_PORT — enables the SMTP transport
-//   MAIL_FROM   — sender ("CJM Metals Suite <owner@…>"); required for Resend,
-//                 defaults to the SMTP user for SMTP
+//   RESEND_API_KEY — enables sending; without it nothing goes out
+//   MAIL_FROM   — sender ("CJM Suite <owner@…>"); required for Resend
+//   SMTP_USER   — NOT a transport any more. Kept only as the last fallback for
+//                 MAIL_FROM and the owner address below: it is set on the live
+//                 service, and dropping it blind would silently kill every
+//                 new-lead alert, the daily digest and the weekly backup
+//                 email. SMTP_PASS / SMTP_HOST / SMTP_PORT are dead and can be
+//                 deleted from the Railway service.
 //   OWNER_EMAIL — where sendOwnerMail delivers (falls back to TO_EMAIL, the
 //                 website's owner-notification address, then SMTP_USER)
 //   MAIL_ARCHIVE — blind copy of every outbound email, so the shop has its own
@@ -143,30 +148,10 @@ function recordSend(
 }
 
 const resendConfigured = (): boolean => !!(process.env.RESEND_API_KEY && mailFrom());
-const smtpConfigured = (): boolean => !!(process.env.SMTP_USER && process.env.SMTP_PASS);
 
-/** Is any transport configured? Callers use this to skip email-only steps. */
+/** Is the transport configured? Callers use this to skip email-only steps. */
 export function mailEnabled(): boolean {
-  return resendConfigured() || smtpConfigured();
-}
-
-// Lazy singleton — building a transporter is cheap but not free, and most
-// requests never send mail. Rebuilt never: env doesn't change mid-process.
-let transporter: Transporter | null = null;
-function getTransporter(): Transporter {
-  if (!transporter) {
-    const port = Number(process.env.SMTP_PORT || 465);
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port,
-      secure: port === 465, // 465 = implicit TLS; 587 = STARTTLS (set SMTP_PORT=587 if 465 is blocked)
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
-    });
-  }
-  return transporter;
+  return resendConfigured();
 }
 
 async function sendViaResend(msg: MailMessage, bcc: string | null): Promise<boolean> {
@@ -199,19 +184,6 @@ async function sendViaResend(msg: MailMessage, bcc: string | null): Promise<bool
   return true;
 }
 
-async function sendViaSmtp(msg: MailMessage, bcc: string | null): Promise<boolean> {
-  await getTransporter().sendMail({
-    from: mailFrom() ?? undefined,
-    to: msg.to,
-    ...(bcc ? { bcc } : {}),
-    subject: msg.subject,
-    text: msg.text,
-    replyTo: msg.replyTo,
-    attachments: msg.attachments,
-  });
-  return true;
-}
-
 /**
  * Send one plain-text email. Logs failures and resolves false — NEVER throws,
  * so callers can fire-and-forget from anywhere (including setImmediate hooks
@@ -222,12 +194,10 @@ export async function sendMail(
   opts?: { archive?: boolean },
 ): Promise<boolean> {
   const bcc = opts?.archive === false ? null : archiveFor(msg.to);
-  const via = resendConfigured() ? "resend" : smtpConfigured() ? "smtp" : "none";
+  const via = resendConfigured() ? "resend" : "none";
   try {
     if (via === "resend") {
       await sendViaResend(msg, bcc);
-    } else if (via === "smtp") {
-      await sendViaSmtp(msg, bcc);
     } else {
       console.warn(`[mailer] no transport configured — "${msg.subject}" to ${msg.to} not sent`);
       recordSend(msg, { ok: false, via, bcc: null, error: "no transport configured" });

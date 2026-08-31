@@ -39,7 +39,7 @@ interface CrmReports {
 }
 
 interface MarketingStats {
-  cplCents: number | null;
+  // (cplCents removed — the campaigns table it came from has no writer.)
   overdueTasks: number;
   alerts: string[];
 }
@@ -462,11 +462,9 @@ export default function DashboardPage() {
           value={crm.data && (crm.data.closeRate == null ? "—" : formatPercent(crm.data.closeRate, 0))}
           href="/crm"
         />
-        <StatCard
-          label="Cost per lead (30d)"
-          value={mk.data && (mk.data.cplCents == null ? "—" : formatMoney(mk.data.cplCents))}
-          href="/marketing"
-        />
+        {/* "Cost per lead" removed: it divided campaign spend by attributed
+            leads, and mk_campaigns has had no writer since the campaigns screen
+            was cut — so the tile read "—" on every load, and always would. */}
         <StatCard
           label="Follow-ups due"
           value={mk.data?.overdueTasks}

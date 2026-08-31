@@ -1,0 +1,32 @@
+name: checks
+
+# The suite's own self-checks: the quoting engine and its trade math, quote
+# numbering, the mail archive/audit trail, and the customer email wording.
+# They were written to guard exactly the things that break silently — a wrong
+# price, a duplicate quote number, an email nobody can prove was sent — and
+# until now nothing ran them.
+#
+# Deliberately a SEPARATE workflow from npm audit: that job installs with
+# --ignore-scripts, which skips better-sqlite3's native build. These checks all
+# open a real (throwaway) database, so they need the full install.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      # Every check points DATA_DIR at its own temp directory, so none of them
+      # can touch a real database.
+      - run: npm test

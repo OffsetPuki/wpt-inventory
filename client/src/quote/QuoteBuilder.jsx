@@ -103,6 +103,14 @@ function migrateSession(sess, priceBook) {
 export default function QuoteBuilder({ initialSettings }) {
   const qc = useQueryClient();
 
+  // Writing the SHARED price book is owner-only — the rates here price every
+  // future quote and every instant estimate on the public website, and this
+  // panel auto-saves 800ms after a keystroke with no save button to think
+  // twice at. The server enforces it; this flag stops a worker typing into a
+  // field whose save would be silently discarded. Absent (older server build)
+  // means allowed, so client and server can deploy in either order.
+  const canEditRates = initialSettings?.canEditRates !== false;
+
   const [priceBook, setPriceBook] = useState(() =>
     deepMerge(DEFAULT_PRICE_BOOK, initialSettings?.priceBook || {}));
   const [shop, setShop] = useState(() =>
@@ -132,6 +140,7 @@ export default function QuoteBuilder({ initialSettings }) {
 
   useEffect(() => {
     if (!settingsDirty.current) return;
+    if (!canEditRates) { settingsDirty.current = false; return; } // server would discard it
     // Mirror local state into the query cache right away so a remount within
     // the cache's staleTime (navigate away and back) can't revert the edits.
     qc.setQueryData(['quote-settings'], { priceBook, shop });
@@ -596,6 +605,7 @@ export default function QuoteBuilder({ initialSettings }) {
             shop={shop}
             onChangeShop={updateShop}
             onReset={resetPriceBook}
+            readOnly={!canEditRates}
           />
         )}
       </div>

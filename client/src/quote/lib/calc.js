@@ -91,55 +91,10 @@ function migrateLegacyMaterial(m) {
   }
 }
 
-// --- Pipeline / dashboard helpers --------------------------------------------
-
-/**
- * Is this quote past its valid-until date and not yet decided?
- * validUntil is a "YYYY-MM-DD" string; treated as end of that day.
- */
-export function isExpired(quote, now = new Date()) {
-  const q = quote || {};
-  if (!q.validUntil) return false;
-  if (q.status === "accepted" || q.status === "declined") return false;
-  const due = new Date(q.validUntil + "T23:59:59");
-  return !Number.isNaN(due.getTime()) && due < now;
-}
-
-/**
- * Roll up saved quotes into dashboard numbers.
- * Returns { quotedMonth, acceptedMonth, winRate (0..1 or null), counts, decided }.
- */
-export function quoteStats(quotes, now = new Date()) {
-  const list = Array.isArray(quotes) ? quotes : [];
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const counts = { draft: 0, sent: 0, accepted: 0, declined: 0 };
-  let quotedMonth = 0;
-  let acceptedMonth = 0;
-  let accepted = 0;
-  let declined = 0;
-
-  for (const q of list) {
-    const total = calcQuote(q).total;
-    const status = q.status || "draft";
-    counts[status] = (counts[status] || 0) + 1;
-
-    const d = q.createdAt ? new Date(q.createdAt) : null;
-    const inMonth = d && d.getFullYear() === y && d.getMonth() === m;
-    if (inMonth) quotedMonth += total;
-    if (status === "accepted") { accepted++; if (inMonth) acceptedMonth += total; }
-    if (status === "declined") declined++;
-  }
-
-  const decided = accepted + declined;
-  return {
-    quotedMonth: round2(quotedMonth),
-    acceptedMonth: round2(acceptedMonth),
-    winRate: decided > 0 ? accepted / decided : null,
-    counts,
-    decided,
-  };
-}
+// (isExpired and quoteStats deleted — leftovers from the standalone
+// Quote App, with zero importers and not even present in the shipped bundle.
+// isExpired read quote.validUntil, a field this schema does not have, so it
+// could only ever return false.)
 
 /**
  * Split `targetTotal` across items weighted by `weights`, rounded to cents so

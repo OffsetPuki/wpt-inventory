@@ -184,6 +184,7 @@ function BackupCard() {
     dbBytes: number;
     lastSnapshotAt: number | null;
     lastSnapshotBytes: number | null;
+    lastOffsiteAt: number | null;
   }>({
     queryKey: ["backup-status"],
     queryFn: async () => (await apiRequest("GET", "/api/admin/backup/status")).json(),
@@ -217,6 +218,17 @@ function BackupCard() {
       <p className="mt-1 text-sm text-muted-foreground">
         Database size: {fmtBytes(status?.dbBytes)} · Last nightly snapshot:{" "}
         {status?.lastSnapshotAt ? formatDateTime(status.lastSnapshotAt) : "none yet"}
+      </p>
+      {/* The nightly snapshot lives on the same volume as the database, so it
+          is worth nothing if that volume dies. This line is the one that says
+          whether a copy has actually left the server. */}
+      <p className="mt-1 text-sm text-muted-foreground">
+        Last offsite copy:{" "}
+        {status?.lastOffsiteAt ? (
+          formatDateTime(status.lastOffsiteAt)
+        ) : (
+          <span className="font-medium text-amber-600 dark:text-amber-500">never</span>
+        )}
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
         Download a fresh copy and keep it off this server — your PC, OneDrive, a USB stick.

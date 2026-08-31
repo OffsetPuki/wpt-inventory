@@ -262,10 +262,10 @@ export const projectChecklist = sqliteTable("project_checklist", {
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────────────
 
-export const insertItemSchema = createInsertSchema(items).omit({
-  id: true,
-  createdAt: true,
-});
+// (`insertItemSchema` deleted — zero importers anywhere, and it could not have
+// been adopted as written: it typed `photos` as a string while the item form
+// sends an array, so validating against it would have rejected every save. The
+// items routes do their own checking.)
 
 export const insertAdjustmentSchema = z.object({
   delta: z.number().int(),
@@ -299,7 +299,6 @@ export type User = typeof users.$inferSelect;
 export type PublicUser = Omit<User, "pin">;
 
 export type Item = typeof items.$inferSelect;
-export type InsertItem = z.infer<typeof insertItemSchema>;
 
 export type Adjustment = typeof adjustments.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;

@@ -123,16 +123,17 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Automation knobs live in mk_settings (marketing module). If that module
 // hasn't registered yet (table missing) or the singleton row doesn't exist,
 // fall back to the schema defaults so CRM side effects still behave sanely.
-function getAutomationSettings(): { quoteFollowUpDays: number; autoReviewRequest: boolean } {
+// (`autoReviewRequest` lives on the same row but is read by finance.ts, which
+// owns the one review invite that survives — see the note above the deleted
+// maybeCreateReviewTask.)
+function getAutomationSettings(): { quoteFollowUpDays: number } {
   try {
     const row = db.select().from(marketingSettings).limit(1).get();
-    if (row) {
-      return { quoteFollowUpDays: row.quoteFollowUpDays, autoReviewRequest: row.autoReviewRequest };
-    }
+    if (row) return { quoteFollowUpDays: row.quoteFollowUpDays };
   } catch {
     // mk_settings not created yet — marketing module owns it.
   }
-  return { quoteFollowUpDays: 3, autoReviewRequest: true };
+  return { quoteFollowUpDays: 3 };
 }
 
 // Canonical client-name lookup (this module owns crm_clients). finance.ts
@@ -175,33 +176,16 @@ function ensureQuoteReminder(lead: Lead, now: number): void {
   }
 }
 
-// Won side effect: ask the customer for a review (if the automation knob is
-// on). Due in 3 days — soon enough that the job is fresh in their mind.
-function maybeCreateReviewTask(lead: Lead, now: number): void {
-  try {
-    if (!getAutomationSettings().autoReviewRequest) return;
-    // Dedupe like ensureQuoteReminder: re-winning a corrected lead must not
-    // stack a second "ask for a review" task on top of an open one.
-    const open = db.select({ id: pmTasks.id }).from(pmTasks)
-      .where(and(
-        eq(pmTasks.leadId, lead.id),
-        eq(pmTasks.kind, "review_request"),
-        sql`${pmTasks.status} != 'done'`,
-        isNull(pmTasks.deletedAt),
-      ))
-      .get();
-    if (open) return;
-    db.insert(pmTasks).values({
-      title: `Ask ${lead.name} for a review`,
-      kind: "review_request",
-      leadId: lead.id,
-      autoCreated: true,
-      dueDate: ymdLocal(now + 3 * DAY_MS),
-    }).run();
-  } catch {
-    // pm_tasks not created yet — see ensureQuoteReminder.
-  }
-}
+// There is deliberately NO "ask for a review" task created here any more. It
+// used to fire the moment a lead was marked won — i.e. the day a quote was
+// accepted, weeks before a six-week gate job existed — and then AGAIN when the
+// invoice was paid, leaving two identical cards on the board. Both hung off the
+// one `autoReviewRequest` knob, so silencing the premature one also switched
+// off the real invite.
+//
+// finance.ts (the invoice-paid path) is now the single creator: correctly timed
+// on money received, with the actual review email attached and retried if the
+// send fails. The knob still gates that one.
 
 // Sending an estimate linked to a lead should move that lead forward in the
 // funnel: new/contacted → quote_sent (never regress a lead that's already in
@@ -330,7 +314,6 @@ function winLeadForAcceptedQuote(
       stale: false,
       revenueClosedCents: addCents || lead.revenueClosedCents || lead.estimatedValueCents || 0,
     }).where(eq(leads.id, lead.id)).run();
-    maybeCreateReviewTask(lead, now);
   } else {
     // Repeat business — the lead stays won; ADD the new job's revenue so the
     // closed-revenue KPI agrees with the monthly chart, and refresh the stamp.
@@ -464,10 +447,7 @@ export function onQuoteEvent(
             : `Quote ${info.quoteNumber} shared with this contact`,
         }).run();
         if (evt === "sent") ensureQuoteReminder(created, now);
-        else {
-          maybeCreateReviewTask(created, now);
-          stampInvoiceLead(info.quoteNumber, created.id);
-        }
+        else stampInvoiceLead(info.quoteNumber, created.id);
         return;
       }
 
@@ -844,7 +824,6 @@ export function registerCrmRoutes(app: Express): void {
 
     if (stageChanged) {
       // (b) / (c) marketing-side automation hooks — best-effort.
-      if (row.stage === "won") maybeCreateReviewTask(row, now);
       if (row.stage === "quote_sent") ensureQuoteReminder(row, now);
       audit(req, "crm.lead_stage", {
         targetType: "lead", targetId: row.id, targetName: row.name,

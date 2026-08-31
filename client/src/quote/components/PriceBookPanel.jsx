@@ -172,7 +172,12 @@ function MaterialsGroup({ priceBook, onChange }) {
   );
 }
 
-export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop, onReset }) {
+export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop, onReset, readOnly = false }) {
+  // Workers can READ the rates — the builder cannot price anything without
+  // them — but not change them. This panel auto-saves on a keystroke with no
+  // save button, so one nudged markup silently repriced every future quote and
+  // every instant estimate on the public website. The server is the real guard;
+  // this keeps anyone from typing into a field whose save is discarded.
   return (
     <div className="page">
       <div className="container">
@@ -184,8 +189,18 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
             override any line on the quote itself. Material prices live in the shared
             library: change one price, every product that uses it follows.
           </p>
+          {readOnly && (
+            <p className="note" style={{ marginTop: 14, color: '#d24d3e' }}>
+              These are the shop's shared rates — only the owner can change them. You can
+              still override any line on an individual quote.
+            </p>
+          )}
         </div>
 
+      {/* One native disabled fieldset switches off every input, select and
+          button inside it — no per-field plumbing, and it survives new fields
+          being added below. Unstyled so the layout is unchanged. */}
+      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="pb-grid">
           <MaterialsGroup priceBook={priceBook} onChange={onChange} />
 
@@ -297,6 +312,7 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
         <div className="btn-row" style={{ marginTop: 32 }}>
           <button className="btn ghost" onClick={onReset}>Reset price book to defaults</button>
         </div>
+      </fieldset>
       </div>
     </div>
   );

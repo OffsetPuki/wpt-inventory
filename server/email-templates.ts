@@ -73,23 +73,47 @@ export interface BuiltIn {
 // Shop identity lives in quote_settings.shop (owner-edited in the Price Book
 // screen) — one place to change the name/city everywhere mail is signed. The
 // literal is only the pre-settings fallback.
-export function shopSignoff(): string {
+function shopRow(): { name: string; location: string } {
   try {
     const row = sqlite.prepare("SELECT shop FROM quote_settings WHERE id = 1").get() as
       | { shop?: string }
       | undefined;
     const shop = row?.shop ? JSON.parse(row.shop) : null;
-    const name = typeof shop?.name === "string" ? shop.name.trim() : "";
-    const location = typeof shop?.location === "string" ? shop.location.trim() : "";
-    if (name) return `— ${name}${location ? ` · ${location}` : ""}`;
+    return {
+      name: typeof shop?.name === "string" ? shop.name.trim() : "",
+      location: typeof shop?.location === "string" ? shop.location.trim() : "",
+    };
   } catch {
     /* quote_settings not created yet */
+    return { name: "", location: "" };
   }
+}
+
+// The shop's name on its own, for the templates that used to spell "CJM Metals"
+// into their subject line. The suite quotes concrete and insulation too now, so
+// a customer who asked cjm-concrete.com for a driveway was reading "Your quote
+// from CJM Metals" on the one document where he decides whether to spend money.
+//
+// Both fall back to the historical literal, unchanged — the pre-settings
+// default is not the place to make a branding decision. The fix the owner
+// actually wants is one settings edit: set the shop name in the Price Book
+// screen to the parent brand ("CJM Trades") and every subject, sign-off and
+// invoice header follows it, on all four trades, with no deploy.
+// ponytail: one name for the whole family. Real per-trade branding needs the
+// sister sites to host their own /quote and /invoice pages first — until they
+// do, a per-site name would only put the wrong label on a metals link.
+export function shopBrand(): string {
+  return shopRow().name || "CJM Metals";
+}
+
+export function shopSignoff(): string {
+  const { name, location } = shopRow();
+  if (name) return `— ${name}${location ? ` · ${location}` : ""}`;
   return "— CJM Metals · Arlington, TX";
 }
 
-// Rendered lazily per send via the auto-injected {{signoff}} var, so a shop
-// rename reaches every default template without touching this file.
+// Rendered lazily per send via the auto-injected {{signoff}} / {{brand}} vars,
+// so a shop rename reaches every default template without touching this file.
 const SIGNOFF = "{{signoff}}";
 
 export const BUILT_INS: BuiltIn[] = [
@@ -98,12 +122,12 @@ export const BUILT_INS: BuiltIn[] = [
     name: "Quote sent to the customer",
     audience: "customer",
     trigger: "When you share a quote with “email the customer” ticked.",
-    subject: "Your quote from CJM Metals — {{quoteNumber}}",
+    subject: "Your quote from {{brand}} — {{quoteNumber}}",
     body:
       // Full name, as this email has always greeted people. {{firstName}} is
       // there in the token list if the shop prefers it.
       `Hi {{customerName}},\n\n` +
-      `Your quote {{quoteNumber}} from CJM Metals is ready. View it (and accept it online) here:\n\n` +
+      `Your quote {{quoteNumber}} from {{brand}} is ready. View it (and accept it online) here:\n\n` +
       `{{quoteUrl}}\n\n` +
       `Questions? Just reply to this email or give us a call.\n\n` +
       SIGNOFF,
@@ -116,11 +140,40 @@ export const BUILT_INS: BuiltIn[] = [
     canDisable: false,
   },
   {
+    // Sent by the intake endpoint for the concrete, insulation and trades
+    // sites. Those three deliver all their customer mail through a Google Apps
+    // Script webhook that has never been configured, so until now a customer
+    // who filled in their form got a thank-you page and then nothing at all —
+    // no reference, nothing to reply to, no proof they had made contact. The
+    // metals site's own script already sends this, which is why the intake
+    // skips metals rather than emailing those customers twice.
+    id: "lead.received",
+    name: "Enquiry received — confirmation",
+    audience: "customer",
+    trigger:
+      "When someone submits the quote form on the concrete, insulation or trades site.",
+    subject: "We got your request — {{brand}}",
+    body:
+      `Hi {{firstName}},\n\n` +
+      `Thanks for getting in touch — we have your request and we'll come back to ` +
+      `you within one business day.\n` +
+      `{{refLine}}\n` +
+      `What you asked about:\n{{service}}\n\n` +
+      `If anything changes, or you want to send photos, just reply to this email.\n\n` +
+      SIGNOFF,
+    vars: [
+      { token: "firstName", meaning: "Customer's first name (“there” if unknown)" },
+      { token: "service", meaning: "What they asked for" },
+      { token: "refLine", meaning: "Their project code, when the form carried one", optional: true },
+    ],
+    canDisable: true,
+  },
+  {
     id: "quote.accepted",
     name: "Quote accepted — confirmation",
     audience: "customer",
     trigger: "The moment a customer accepts their quote online.",
-    subject: "Quote {{quoteNumber}} accepted — CJM Metals",
+    subject: "Quote {{quoteNumber}} accepted — {{brand}}",
     body:
       `Hi {{customerName}},\n\n` +
       `Got it — your quote {{quoteNumber}} is locked in. We'll call you to go over ` +
@@ -161,7 +214,7 @@ export const BUILT_INS: BuiltIn[] = [
     name: "Quote follow-up — last note",
     audience: "customer",
     trigger: "7 days after a quote is sent, if they still haven't accepted.",
-    subject: "Last note on quote {{quoteNumber}} — CJM Metals",
+    subject: "Last note on quote {{quoteNumber}} — {{brand}}",
     body:
       `Hi {{firstName}},\n\n` +
       `Last note from us — happy to adjust the design or the price if the quote ` +
@@ -182,7 +235,7 @@ export const BUILT_INS: BuiltIn[] = [
     name: "Overdue invoice reminder",
     audience: "customer",
     trigger: "Once an invoice is past its due date, then every 7 days until paid.",
-    subject: "Friendly reminder — invoice {{invoiceNumber}} — CJM Metals",
+    subject: "Friendly reminder — invoice {{invoiceNumber}} — {{brand}}",
     body:
       `Hi {{firstName}},\n\n` +
       `Just a friendly reminder that invoice {{invoiceNumber}} has an outstanding ` +
@@ -203,10 +256,10 @@ export const BUILT_INS: BuiltIn[] = [
     name: "Review request",
     audience: "customer",
     trigger: "When an invoice is paid in full. Once per invoice, ever.",
-    subject: "How did we do? — CJM Metals",
+    subject: "How did we do? — {{brand}}",
     body:
       `Hi {{firstName}},\n\n` +
-      `Thanks for choosing CJM Metals for your project. If you have a minute, ` +
+      `Thanks for choosing {{brand}} for your project. If you have a minute, ` +
       `we'd really appreciate a quick review — it takes about 30 seconds:\n\n` +
       `{{reviewUrl}}\n\n` +
       `Thank you!\n\n` +
@@ -222,7 +275,7 @@ export const BUILT_INS: BuiltIn[] = [
     name: "Payment receipt — balance remaining",
     audience: "customer",
     trigger: "Every time you record a payment that doesn't clear the invoice.",
-    subject: "Received {{amount}} on {{invoiceNumber}} — CJM Metals",
+    subject: "Received {{amount}} on {{invoiceNumber}} — {{brand}}",
     body:
       `Hi {{firstName}},\n\n` +
       `We received your payment of {{amount}} on invoice {{invoiceNumber}}. ` +
@@ -241,7 +294,7 @@ export const BUILT_INS: BuiltIn[] = [
     name: "Payment receipt — paid in full",
     audience: "customer",
     trigger: "When a recorded payment clears the invoice.",
-    subject: "Received {{amount}} on {{invoiceNumber}} — CJM Metals",
+    subject: "Received {{amount}} on {{invoiceNumber}} — {{brand}}",
     body:
       `Hi {{firstName}},\n\n` +
       `We received your payment of {{amount}} on invoice {{invoiceNumber}}. ` +
@@ -320,9 +373,9 @@ export function renderTemplate(
   }
 
   const optional = new Set((def?.vars ?? []).filter((v) => v.optional).map((v) => v.token));
-  // {{signoff}} is auto-supplied (callers never pass it) — an explicit var of
-  // the same name would win, which is fine.
-  const allVars = { signoff: shopSignoff(), ...vars };
+  // {{signoff}} and {{brand}} are auto-supplied (callers never pass them) — an
+  // explicit var of the same name would win, which is fine.
+  const allVars = { signoff: shopSignoff(), brand: shopBrand(), ...vars };
   return {
     subject: render(subjectSrc, allVars, optional).trim(),
     text: render(bodySrc, allVars, optional),

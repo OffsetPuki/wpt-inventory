@@ -100,6 +100,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [source, setSource] = useState<LeadSource>("website");
+  const [site, setSite] = useState<LeadSite>("metals");
   const [serviceRequested, setServiceRequested] = useState("");
   const [serviceArea, setServiceArea] = useState("");
   const [estimatedValue, setEstimatedValue] = useState("");
@@ -114,6 +115,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
         source,
+        site,
         serviceRequested: serviceRequested.trim() || undefined,
         serviceArea: serviceArea.trim() || undefined,
         estimatedValueCents: estimatedValue ? parseMoney(estimatedValue) : undefined,
@@ -124,7 +126,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
     successTitle: "Lead created",
     errorTitle: "Could not create lead",
     onSuccess: () => {
-      setName(""); setPhone(""); setEmail(""); setSource("website");
+      setName(""); setPhone(""); setEmail(""); setSource("website"); setSite("metals");
       setServiceRequested(""); setServiceArea(""); setEstimatedValue(""); setNotes("");
       onClose();
     },
@@ -163,6 +165,18 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
             <select className={inputCls} value={source} onChange={(e) => setSource(e.target.value as LeadSource)}>
               {LEAD_SOURCES.map((s) => (
                 <option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>
+              ))}
+            </select>
+          </label>
+          {/* Which shop the job is for. The website intake was the only thing
+              that ever set this, so every phone-in, referral and offline sale
+              landed in the metals column — and the per-brand tile counted web
+              forms only. The server already accepts it here. */}
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Shop</span>
+            <select className={inputCls} value={site} onChange={(e) => setSite(e.target.value as LeadSite)}>
+              {LEAD_SITES.map((s) => (
+                <option key={s} value={s}>{leadSiteLabel[s]}</option>
               ))}
             </select>
           </label>
@@ -288,6 +302,7 @@ function LeadDetailModal({
   const [phone, setPhone] = useState(lead.phone ?? "");
   const [email, setEmail] = useState(lead.email ?? "");
   const [source, setSource] = useState<LeadSource>(lead.source);
+  const [site, setSite] = useState<LeadSite>(lead.site);
   const [stage, setStage] = useState<LeadStage>(lead.stage);
   const [winLossReason, setWinLossReason] = useState<WinLossReason | "">(lead.winLossReason ?? "");
   const [serviceRequested, setServiceRequested] = useState(lead.serviceRequested ?? "");
@@ -336,6 +351,7 @@ function LeadDetailModal({
           phone: phone.trim() || null,
           email: email.trim() || null,
           source,
+          site,
           stage,
           winLossReason: clearsClose ? null : winLossReason || undefined,
           serviceRequested: serviceRequested.trim() || null,
@@ -450,12 +466,18 @@ function LeadDetailModal({
                 ))}
               </select>
             </label>
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Site</span>
-              <span className="flex h-11 items-center">
-                <SiteChip site={lead.site} />
-              </span>
-            </div>
+            {/* Editable rather than a read-only chip: a lead filed under the
+                wrong shop — every phone-in and referral, which all defaulted to
+                metals — could never be corrected, so the per-brand split stayed
+                wrong forever. */}
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-foreground">Shop</span>
+              <select className={inputCls} value={site} onChange={(e) => setSite(e.target.value as LeadSite)}>
+                {LEAD_SITES.map((s) => (
+                  <option key={s} value={s}>{leadSiteLabel[s]}</option>
+                ))}
+              </select>
+            </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-foreground">Stage</span>
               <select className={inputCls} value={stage} onChange={(e) => setStage(e.target.value as LeadStage)}>

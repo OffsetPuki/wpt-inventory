@@ -23,14 +23,15 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist", "public"),
     emptyOutDir: true,
     // Split vendor deps into stable chunks so they survive app-code updates in
-    // the browser cache. Recharts and Radix ship a lot of code that almost
-    // never changes between releases — pull them out of the main bundle.
+    // the browser cache. Recharts ships a lot of code that almost never changes
+    // between releases — pull it out of the main bundle. (There was a "radix"
+    // chunk here too; no @radix-ui package has ever been installed, so it only
+    // ever produced an empty rule.)
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           if (id.includes("recharts") || id.includes("/d3-")) return "recharts";
-          if (id.includes("@radix-ui")) return "radix";
           if (id.includes("lucide-react")) return "icons";
           if (
             id.includes("/react/") ||
