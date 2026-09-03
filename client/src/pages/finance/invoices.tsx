@@ -24,6 +24,9 @@ import {
 import type { Client } from "@shared/crm-schema";
 import type { Project } from "@shared/schema";
 import { parseLineItems, type LineItem } from "@shared/biz-common";
+// The shop's standard invoice terms (Price Book → Shop details) seed the
+// per-invoice terms box when the owner asks for them.
+import { DEFAULT_SHOP, invoiceTermLines } from "@/quote/lib/store";
 import {
   FileText,
   Loader2,
@@ -77,6 +80,17 @@ const INVOICE_KEYS = [
   ["finance-stats"],
   ["finance-reports"],
 ];
+
+// What the customer's page prints on its own under the line items of a deposit
+// or progress bill (the website's wording, English). "Insert standard wording"
+// drops it into the box so the owner can edit from there; the tokens are
+// filled with the amounts by the page.
+const STANDARD_CUSTOMER_NOTE =
+  "Progress payment against the total contract price of {contract}. The remaining {later} is billed "
+  + "at installation. Materials, fabrication, powder coating and installation are billed against the "
+  + "total contract price; sales tax is included in that total.";
+// The line the website adds under the shop's terms while the Pay button is there.
+const STRIPE_TERM = "Online payments are processed securely by Stripe.";
 
 // ─── Line-items editor ────────────────────────────────────────────────────────
 
@@ -290,6 +304,9 @@ function InvoiceFormModal({
   const [discountPct, setDiscountPct] = useState("");
   const [discountAmt, setDiscountAmt] = useState("");
   const [notes, setNotes] = useState("");
+  // The customer's wording for this bill — blank keeps the page's own.
+  const [customerNote, setCustomerNote] = useState("");
+  const [terms, setTerms] = useState("");
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
   // Progress-billing helper inputs (Phase G #2).
   const [progressPct, setProgressPct] = useState("");
@@ -330,6 +347,8 @@ function InvoiceFormModal({
       setDiscountPct("");
       setDiscountAmt(invoice.discountCents ? (invoice.discountCents / 100).toFixed(2) : "");
       setNotes(invoice.notes ?? "");
+      setCustomerNote(invoice.customerNote ?? "");
+      setTerms(invoice.terms ?? "");
       setAttachments(parseAttachments(invoice));
       setQuoteId(invoice.quoteId ?? null);
     } else {
@@ -349,6 +368,8 @@ function InvoiceFormModal({
       setDiscountPct("");
       setDiscountAmt("");
       setNotes("");
+      setCustomerNote("");
+      setTerms("");
       setAttachments([]);
       setQuoteId(null);
     }
@@ -367,6 +388,18 @@ function InvoiceFormModal({
     queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
     enabled: open,
   });
+  // The shop's standard invoice terms, for "Insert standard terms": the saved
+  // shop over the defaults (same merge the customer's page gets), plus the
+  // Stripe line the page appends — so the box starts as exactly what prints.
+  const { data: shopSettings } = useQuery<{ shop: Record<string, unknown> }>({
+    queryKey: ["quote-settings"],
+    queryFn: async () => (await apiRequest("GET", "/api/quotes/settings")).json(),
+    enabled: open,
+  });
+  const standardTerms = [
+    ...invoiceTermLines({ ...DEFAULT_SHOP, ...(shopSettings?.shop ?? {}) }),
+    STRIPE_TERM,
+  ].join("\n");
 
   // Phase G #2: progress billing — the job's effective contract total and
   // billed-to-date, straight from the project financial summary the job hub
@@ -501,6 +534,8 @@ function InvoiceFormModal({
         discountPct: discountPctNum > 0 ? discountPctNum : undefined,
         discountCents: discountPctNum > 0 ? undefined : discountCents,
         notes: notes.trim() || null,
+        customerNote: customerNote.trim() || null,
+        terms: terms.trim() || null,
         attachments,
         quoteId,
       };
@@ -776,6 +811,57 @@ function InvoiceFormModal({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
+          </label>
+        </div>
+
+        {/* What the customer reads, in the owner's words. Blank keeps the
+            page's own wording, so nothing changes until the owner wants it to. */}
+        <div className="rounded-lg border border-border bg-muted/40 p-3">
+          <p className="text-sm font-semibold text-foreground">Customer wording (optional)</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            What prints on the customer's invoice. Leave a box blank to keep the standard wording.
+          </p>
+          <label className="mt-3 flex flex-col gap-1.5">
+            <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
+              Note under the line items
+              <button
+                type="button"
+                onClick={() => setCustomerNote(STANDARD_CUSTOMER_NOTE)}
+                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Insert standard wording
+              </button>
+            </span>
+            <textarea
+              className={cn(inputCls, "min-h-[5.5rem] py-2 leading-snug")}
+              rows={3}
+              placeholder="Blank = the progress-payment wording on a deposit or balance invoice, nothing on an ordinary one"
+              value={customerNote}
+              onChange={(e) => setCustomerNote(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">
+              {"{contract}"}, {"{later}"} and {"{prior}"} fill in with the amounts.
+            </span>
+          </label>
+          <label className="mt-3 flex flex-col gap-1.5">
+            <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
+              Terms
+              <button
+                type="button"
+                onClick={() => setTerms(standardTerms)}
+                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Insert standard terms
+              </button>
+            </span>
+            <textarea
+              className={cn(inputCls, "min-h-[5.5rem] py-2 leading-snug")}
+              rows={3}
+              placeholder="Blank = the shop's standard terms (Price Book → Shop details)"
+              value={terms}
+              onChange={(e) => setTerms(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">One term per line, printed exactly as written.</span>
           </label>
         </div>
 
@@ -1092,6 +1178,19 @@ function InvoiceDetailModal({
 
           {inv.notes && (
             <p className="whitespace-pre-line text-sm text-muted-foreground">{inv.notes}</p>
+          )}
+          {/* The owner's own customer wording, when there is any. */}
+          {inv.customerNote && (
+            <p className="whitespace-pre-line text-sm text-foreground">
+              <span className="text-muted-foreground">Note to customer: </span>
+              {inv.customerNote}
+            </p>
+          )}
+          {inv.terms && (
+            <p className="whitespace-pre-line text-xs text-muted-foreground">
+              <span className="font-medium">Terms: </span>
+              {inv.terms}
+            </p>
           )}
 
           {/* Attachments — what the customer gets alongside the bill. A voided
