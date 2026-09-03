@@ -1,8 +1,10 @@
-import type { Express, Request } from "express";
+import type { Express, Request, Response } from "express";
 import type { z } from "zod";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
-import { sqlite, db } from "./storage";
+import { sqlite, db, uploadsDir } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, isOptedOut } from "./mailer";
@@ -13,8 +15,9 @@ import {
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
   insertPurchaseOrderSchema,
   updateFinSettingsSchema, pullUnbilledSchema, retainagePctSchema,
+  discountInputSchema, attachmentsSchema,
   EXPENSE_CATEGORY_LABELS,
-  type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder,
+  type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder, type InvoiceAttachment,
 } from "../shared/finance-schema";
 import { clients } from "../shared/crm-schema";
 import { projects } from "../shared/schema";
@@ -31,7 +34,10 @@ import { contracts, changeOrders, pmTasks } from "../shared/pm-schema";
 // mk_settings is owned by the marketing module's DDL; every touch below is
 // deferred + try/catch'd so a marketing hiccup can't break payment recording.
 import { marketingSettings } from "../shared/marketing-schema";
-import { parseLineItems, computeDocTotals } from "../shared/biz-common";
+// Invoice attachments ride on pm's document uploader — same DATA_DIR/uploads
+// dir, same allowlist. pm.ts imports nothing from here, so no cycle.
+import { docUpload, DOC_EXT_TO_MIME } from "./pm";
+import { parseLineItems, computeDocTotals, lineItemsTotalCents } from "../shared/biz-common";
 import { pid, qstr, todayLocal, ymdLocal, usd, registerSoftDelete, registerCreate } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
@@ -139,6 +145,8 @@ for (const ddl of [
   "ALTER TABLE fin_invoices ADD COLUMN quote_id INTEGER",
   "ALTER TABLE fin_invoices ADD COLUMN restated_from TEXT",
   "CREATE INDEX IF NOT EXISTS idx_fin_invoices_quote ON fin_invoices(quote_id)",
+  // Files on the bill (a signed contract, a drawing) — see shared/finance-schema.ts.
+  "ALTER TABLE fin_invoices ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
   // NOTE: fin_settings is created BELOW, so its own migration lives after it —
   // an ALTER here would silently no-op on a fresh install and the column would
   // never exist.
@@ -194,9 +202,43 @@ function monthKey(d: Date): string {
 
 // Server-computed totals (shared/biz-common). `clampTax` floors a negative tax
 // rate at zero — a negative rate would refund tax against the subtotal — as a
-// backstop even though the schema also rejects it now.
-function computeTotals(itemsJson: string, taxRateBp: number) {
-  return computeDocTotals(itemsJson, taxRateBp, { clampTax: true });
+// backstop even though the schema also rejects it now. `discountCents` comes
+// off the subtotal before tax; it maps to null when 0 because the column
+// convention is null = no discount (pay.ts reads non-null as "already granted").
+function computeTotals(itemsJson: string, taxRateBp: number, discountCents = 0) {
+  const t = computeDocTotals(itemsJson, taxRateBp, { clampTax: true, discountCents });
+  return { ...t, discountCents: t.discountCents > 0 ? t.discountCents : null };
+}
+
+// The owner's discount input: a percent of the line items wins over a dollar
+// figure; neither present keeps whatever the row already carries.
+function discountFor(
+  itemsJson: string,
+  d: z.infer<typeof discountInputSchema>,
+  current: number | null,
+): number {
+  if (d.discountPct != null) {
+    return Math.round((lineItemsTotalCents(parseLineItems(itemsJson)) * d.discountPct) / 100);
+  }
+  if (d.discountCents != null) return d.discountCents;
+  return current ?? 0;
+}
+
+// What the OTHER issued invoices against the same quote add up to — a deposit
+// already billed, or the deposit this balance invoice follows. 0 when the
+// invoice isn't tied to a quote. A draft is not a bill: the balance invoice
+// the owner drafts while the deposit is still out mustn't take the deposit
+// page's pay-in-full offer away until it's actually sent. pay.ts uses this to
+// take that offer off the table; the customer's page nets it out of the
+// contract price — `onlyEarlier` there, so a deposit's page doesn't restate
+// itself as the final bill once the balance invoice goes out.
+export function otherInvoicedCents(inv: Invoice, onlyEarlier = false): number {
+  if (inv.quoteId == null) return 0;
+  return (sqlite.prepare(`
+    SELECT COALESCE(SUM(total_cents), 0) AS s FROM fin_invoices
+    WHERE quote_id = ? AND ${onlyEarlier ? "id < ?" : "id != ?"}
+      AND deleted_at IS NULL AND status NOT IN ('void', 'draft')
+  `).get(inv.quoteId, inv.id) as { s: number }).s;
 }
 
 // "overdue" is derived, never stored: a sent/partial invoice past its due date
@@ -506,8 +548,21 @@ function queueInvoiceEmail(inv: Invoice): void {
       // incentive nobody is told about doesn't incentivise anything — this is
       // the one place the customer reliably reads before deciding how to pay.
       const discountBp = payUrl ? payInFullDiscountBp() : 0;
+      // …and only while the page will actually offer it: a discount already on
+      // the bill, or a sibling invoice on the same quote (a deposit billed
+      // separately, or this being that deposit's balance), takes it off.
+      // On a deposit the page's offer settles the whole contract at the quote
+      // price, not this invoice — same figures as pay.ts payInFull, read here
+      // directly because pay.ts imports from this file.
+      const quoteTotal = inv.quoteId != null
+        ? (sqlite.prepare("SELECT total_cents AS t FROM quotes WHERE id = ? AND deleted_at IS NULL")
+            .get(inv.quoteId) as { t: number } | undefined)?.t ?? 0
+        : 0;
+      const wholeJob = quoteTotal > inv.totalCents;
+      const grossCents = wholeJob ? quoteTotal : inv.totalCents;
       const savesCents = discountBp > 0 && inv.paidCents === 0 && retainageOf(inv) === 0
-        ? Math.round((inv.totalCents * discountBp) / 10_000)
+        && inv.discountCents == null && otherInvoicedCents(inv) === 0
+        ? Math.round((grossCents * discountBp) / 10_000)
         : 0;
 
       const ok = await sendMail({
@@ -517,6 +572,7 @@ function queueInvoiceEmail(inv: Invoice): void {
           `Hi ${first},\n\n` +
           `Here's your invoice ${inv.number}:\n\n` +
           (lines.length ? `${lines.join("\n")}\n\n` : "") +
+          ((inv.discountCents ?? 0) > 0 ? `Discount:    -${usd(inv.discountCents!)}\n` : "") +
           `Total:       ${usd(inv.totalCents)}\n` +
           (retainageOf(inv) > 0 ? `Retainage withheld: -${usd(retainageOf(inv))}\n` : "") +
           (inv.paidCents > 0 ? `Paid so far: ${usd(inv.paidCents)}\n` : "") +
@@ -525,8 +581,8 @@ function queueInvoiceEmail(inv: Invoice): void {
           (inv.dueDate ? `Due date:    ${inv.dueDate}\n` : "") +
           (payUrl ? `\nView it online and pay by card, Apple Pay or Google Pay:\n${payUrl}\n` : "") +
           (savesCents > 0
-            ? `\nPay the whole invoice online in one payment and take ${discountBp / 100}% off — `
-              + `${usd(inv.totalCents - savesCents)} instead of ${usd(inv.totalCents)}, `
+            ? `\n${wholeJob ? "Settle the whole job" : "Pay the whole invoice"} online in one payment and take ${discountBp / 100}% off — `
+              + `${usd(grossCents - savesCents)} instead of ${usd(grossCents)}, `
               + `a saving of ${usd(savesCents)}.\n`
             : "") +
           `\nQuestions? Just reply to this email or give us a call.\n\n` +
@@ -721,6 +777,47 @@ export function recordInvoicePayment(
     },
   });
   return { payment, invoice };
+}
+
+// ─── Attachments ─────────────────────────────────────────────────────────────
+// { name, file }[] JSON on the row; `file` is the multer filename inside
+// uploadsDir (pm's docUpload). Files are never unlinked — same stance as pm
+// documents. ponytail: an upload abandoned before the form saves leaves an
+// orphan on disk; add a sweep if the dir ever matters.
+
+export function invoiceAttachments(inv: Invoice): InvoiceAttachment[] {
+  try {
+    const v = JSON.parse(inv.attachments);
+    return Array.isArray(v) ? v.filter((a) => typeof a?.file === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+// One sender for the owner's route and the customer's public one: safe
+// Content-Type from the stored extension, nosniff, the owner's name as the
+// download name. PDFs and images open in the tab; anything else downloads.
+export function sendInvoiceAttachment(res: Response, inv: Invoice, index: number): void {
+  const a = invoiceAttachments(inv)[index];
+  if (!a) {
+    res.status(404).json({ message: "Attachment not found" });
+    return;
+  }
+  const safeName = path.basename(a.file); // strips any traversal
+  const ext = path.extname(safeName).toLowerCase();
+  const mime = DOC_EXT_TO_MIME[ext];
+  const filePath = path.join(uploadsDir, safeName);
+  if (!mime || !fs.existsSync(filePath)) {
+    res.status(404).json({ message: "File missing from storage" });
+    return;
+  }
+  const inline = mime === "application/pdf" || mime.startsWith("image/");
+  const base = String(a.name ?? "").replace(/[^\w .-]+/g, "_") || "attachment";
+  const dlName = base.toLowerCase().endsWith(ext) ? base : `${base}${ext}`;
+  res.setHeader("Content-Type", mime);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${dlName}"`);
+  res.sendFile(filePath);
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -973,6 +1070,25 @@ export function registerFinanceRoutes(app: Express): void {
 
   // ─── Invoices ─────────────────────────────────────────────────────────────
 
+  // Upload one file for an invoice. Nothing is written to the DB — the form
+  // carries the { name, file } list and saves it with the invoice, so a file
+  // is only "on" a bill once the bill is. Same shape as POST /api/pm/documents.
+  app.post(
+    "/api/finance/attachments",
+    requireElevated,
+    (req, res, next) => {
+      docUpload.single("file")(req, res, (err: any) => {
+        if (err) return res.status(400).json({ message: err.message || "Upload rejected" });
+        next();
+      });
+    },
+    (req, res) => {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const name = req.file.originalname.trim().slice(0, 120) || "Attachment";
+      res.status(201).json({ file: req.file.filename, name, size: req.file.size });
+    },
+  );
+
   app.get("/api/finance/invoices", requireElevated, (req, res) => {
     const status = qstr(req.query.status);
     const clientId = qstr(req.query.clientId);
@@ -1005,7 +1121,7 @@ export function registerFinanceRoutes(app: Express): void {
   });
 
   app.post("/api/finance/invoices", requireElevated, (req, res) => {
-    let body, itemsJson, totals, retainagePct;
+    let body, itemsJson, totals, retainagePct, attachments;
     try {
       // Items arrive as a JSON string (the column shape) or a raw array —
       // same tolerance as the CRM estimate endpoints.
@@ -1013,8 +1129,12 @@ export function registerFinanceRoutes(app: Express): void {
       if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
       body = insertInvoiceSchema.parse(raw);
       retainagePct = retainagePctSchema.parse(raw.retainagePct);
+      const discount = discountInputSchema.parse(raw);
+      attachments = raw.attachments !== undefined
+        ? JSON.stringify(attachmentsSchema.parse(raw.attachments))
+        : undefined;
       itemsJson = body.items ?? "[]";
-      totals = computeTotals(itemsJson, body.taxRateBp ?? 0);
+      totals = computeTotals(itemsJson, body.taxRateBp ?? 0, discountFor(itemsJson, discount, null));
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
@@ -1029,7 +1149,10 @@ export function registerFinanceRoutes(app: Express): void {
 
     const row = insertNumbered("fin_invoices", "INV", (num) =>
       db.insert(invoices)
-        .values({ ...body, number: num, items: itemsJson, clientName, retainageCents, ...totals })
+        .values({
+          ...body, number: num, items: itemsJson, clientName, retainageCents, ...totals,
+          ...(attachments !== undefined ? { attachments } : {}),
+        })
         .returning()
         .get()
     );
@@ -1048,6 +1171,14 @@ export function registerFinanceRoutes(app: Express): void {
       .orderBy(desc(invoicePayments.createdAt), desc(invoicePayments.id))
       .all();
     res.json({ invoice: presentInvoice(inv, todayLocal()), payments });
+  });
+
+  // The owner's download of attachment i. The customer's copy is the public
+  // /api/public/invoice/:token/file/:i in pay.ts — same sender.
+  app.get("/api/finance/invoices/:id/file/:i", requireElevated, (req, res) => {
+    const inv = getInvoice(pid(req.params.id));
+    if (!inv) return res.status(404).json({ message: "Invoice not found" });
+    sendInvoiceAttachment(res, inv, pid(req.params.i));
   });
 
   // Proof the customer's page before it's the customer's page. Mints the share
@@ -1070,12 +1201,16 @@ export function registerFinanceRoutes(app: Express): void {
   app.patch("/api/finance/invoices/:id", requireElevated, (req, res) => {
     const inv = getInvoice(pid(req.params.id));
     if (!inv) return res.status(404).json({ message: "Invoice not found" });
-    let body, retainagePct;
+    let body, retainagePct, discount, attachments;
     try {
       const raw = { ...req.body };
       if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
       body = insertInvoiceSchema.partial().parse(raw);
       retainagePct = retainagePctSchema.parse(raw.retainagePct);
+      discount = discountInputSchema.parse(raw);
+      attachments = raw.attachments !== undefined
+        ? JSON.stringify(attachmentsSchema.parse(raw.attachments))
+        : undefined;
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
@@ -1083,9 +1218,11 @@ export function registerFinanceRoutes(app: Express): void {
     // Once money has been recorded against an invoice its line items and
     // totals are immutable — editing them would silently corrupt paid/balance
     // math. The escape hatch is voiding and reissuing. (Totals themselves are
-    // schema-stripped, so items/taxRateBp/retainagePct are the only money inputs.)
+    // schema-stripped, so items/taxRateBp/retainagePct/discount are the only
+    // money inputs.)
     const touchesMoney =
-      body.items !== undefined || body.taxRateBp !== undefined || retainagePct !== undefined;
+      body.items !== undefined || body.taxRateBp !== undefined || retainagePct !== undefined
+      || discount.discountPct !== undefined || discount.discountCents !== undefined;
     if (touchesMoney && paymentCountFor(inv.id) > 0) {
       return res.status(400).json({
         message: "Invoice has recorded payments — items and totals are locked. Void it and issue a new one.",
@@ -1093,11 +1230,15 @@ export function registerFinanceRoutes(app: Express): void {
     }
 
     const updates: Partial<typeof invoices.$inferInsert> = { ...body };
+    // Attachments aren't money: a signed contract often arrives after the bill
+    // went out, so they're editable on any status — no payment lock.
+    if (attachments !== undefined) updates.attachments = attachments;
     if (touchesMoney) {
       try {
+        const items = body.items ?? inv.items;
         Object.assign(
           updates,
-          computeTotals(body.items ?? inv.items, body.taxRateBp ?? inv.taxRateBp)
+          computeTotals(items, body.taxRateBp ?? inv.taxRateBp, discountFor(items, discount, inv.discountCents))
         );
       } catch (e: any) {
         return res.status(400).json({ message: e.message });
@@ -1382,7 +1523,8 @@ export function registerFinanceRoutes(app: Express): void {
     const itemsJson = JSON.stringify([...parseLineItems(inv.items), ...newItems]);
     let totals;
     try {
-      totals = computeTotals(itemsJson, inv.taxRateBp);
+      // An owner discount already on the draft survives the added lines.
+      totals = computeTotals(itemsJson, inv.taxRateBp, inv.discountCents ?? 0);
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }

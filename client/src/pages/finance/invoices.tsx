@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { useApiMutation } from "@/hooks/useApiMutation";
 import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
@@ -16,6 +16,7 @@ import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   type Invoice,
+  type InvoiceAttachment,
   type InvoicePayment,
   type InvoiceStatus,
   type PaymentMethod,
@@ -39,11 +40,23 @@ import {
   Copy,
   Eye,
   Banknote,
+  Paperclip,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
 type InvoiceRow = Invoice & { balanceCents: number; payUrl: string | null };
+
+// The `attachments` column is JSON text; a row from before the column may
+// carry nothing usable.
+function parseAttachments(inv: Invoice | null | undefined): InvoiceAttachment[] {
+  try {
+    const v = JSON.parse(inv?.attachments ?? "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
 
 const STATUS_TONE: Record<InvoiceStatus, ChipTone> = {
   draft: "zinc",
@@ -156,6 +169,102 @@ function LineItemsEditor({
   );
 }
 
+// ─── Attachments editor ───────────────────────────────────────────────────────
+// Files upload straight away (the server hands back its own filename); the
+// list itself is saved with the invoice. Same authed multipart fetch as
+// DocumentsCard — apiRequest would JSON-encode the body.
+
+function AttachmentsEditor({
+  value,
+  onChange,
+  disabled,
+  onOpen,
+}: {
+  value: InvoiceAttachment[];
+  onChange: (next: InvoiceAttachment[]) => void;
+  disabled?: boolean;
+  /** When set, each name is a button that opens the file (the detail modal). */
+  onOpen?: (i: number) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+
+  async function upload(files: FileList) {
+    setUploading(true);
+    const added: InvoiceAttachment[] = [];
+    try {
+      for (const file of Array.from(files)) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const token = getAuthToken();
+        const res = await fetch("/api/finance/attachments", {
+          method: "POST",
+          headers: token ? { "X-Auth": token } : {},
+          body: fd,
+        });
+        if (!res.ok) {
+          throw new Error((await res.json().catch(() => null))?.message ?? "Upload failed");
+        }
+        const d = await res.json();
+        added.push({ name: d.name, file: d.file });
+      }
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Upload failed", description: e?.message });
+    } finally {
+      setUploading(false);
+    }
+    if (added.length) onChange([...value, ...added]);
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {value.map((a, i) => (
+        <div key={`${a.file}-${i}`} className="flex items-center gap-2 text-sm">
+          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={() => onOpen(i)}
+              className="min-w-0 flex-1 truncate text-left text-foreground hover:underline"
+            >
+              {a.name}
+            </button>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-foreground">{a.name}</span>
+          )}
+          {!disabled && (
+            <button
+              type="button"
+              aria-label="Remove attachment"
+              onClick={() => onChange(value.filter((_, idx) => idx !== i))}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ))}
+      {!disabled && (
+        <label className={cn(secondaryBtn, "w-fit cursor-pointer", uploading && "opacity-60")}>
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+          Attach file
+          <input
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,image/*"
+            className="hidden"
+            disabled={uploading}
+            onChange={(e) => {
+              if (e.target.files?.length) void upload(e.target.files);
+              // Same file picked twice in a row must still fire onChange.
+              e.target.value = "";
+            }}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
 // ─── Create / edit invoice ────────────────────────────────────────────────────
 
 function InvoiceFormModal({
@@ -177,7 +286,11 @@ function InvoiceFormModal({
   const [drafts, setDrafts] = useState<ItemDraft[]>([{ ...EMPTY_ITEM }]);
   const [taxPct, setTaxPct] = useState("0");
   const [retainagePct, setRetainagePct] = useState("");
+  // Owner discount — a % or a $ figure; typing in one clears the other.
+  const [discountPct, setDiscountPct] = useState("");
+  const [discountAmt, setDiscountAmt] = useState("");
   const [notes, setNotes] = useState("");
+  const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
   // Progress-billing helper inputs (Phase G #2).
   const [progressPct, setProgressPct] = useState("");
   const [progressAmount, setProgressAmount] = useState("");
@@ -213,7 +326,11 @@ function InvoiceFormModal({
           ? String(Math.round((invoice.retainageCents! / invoice.totalCents) * 10000) / 100)
           : ""
       );
+      // ponytail: cents only are stored — a % is re-entered on edit.
+      setDiscountPct("");
+      setDiscountAmt(invoice.discountCents ? (invoice.discountCents / 100).toFixed(2) : "");
       setNotes(invoice.notes ?? "");
+      setAttachments(parseAttachments(invoice));
       setQuoteId(invoice.quoteId ?? null);
     } else {
       setClientId("");
@@ -229,7 +346,10 @@ function InvoiceFormModal({
       setDrafts([{ ...EMPTY_ITEM }]);
       setTaxPct("0");
       setRetainagePct("");
+      setDiscountPct("");
+      setDiscountAmt("");
       setNotes("");
+      setAttachments([]);
       setQuoteId(null);
     }
     setProgressPct("");
@@ -277,8 +397,9 @@ function InvoiceFormModal({
   const billable = quotesList.filter((q) => q.status === "sent" || q.status === "accepted");
 
   // Pull the quote's own numbers into the form. `mode` picks WHAT to bill:
-  // the deposit the customer already agreed to, or the whole job.
-  const fillFromQuote = async (mode: "deposit" | "full") => {
+  // the deposit the customer already agreed to, the whole job, or what is
+  // left once the deposit is taken off.
+  const fillFromQuote = async (mode: "deposit" | "full" | "balance") => {
     const id = Number(pickQuote);
     if (!id) return;
     let d: any;
@@ -288,7 +409,7 @@ function InvoiceFormModal({
       toast({ variant: "destructive", title: "Could not read that quote", description: e?.message });
       return;
     }
-    const src = mode === "deposit" ? d.deposit : d.full;
+    const src = d[mode];
     if (!src) {
       toast({ variant: "destructive", title: "That quote has no deposit on it" });
       return;
@@ -317,7 +438,9 @@ function InvoiceFormModal({
     toast({
       title: mode === "deposit"
         ? `Deposit from ${d.quoteNumber} — ${formatMoney(src.items[0].unitPriceCents)}`
-        : `Filled from ${d.quoteNumber}`,
+        : mode === "balance"
+          ? `Balance from ${d.quoteNumber} — ${formatMoney(src.items[0].unitPriceCents)}`
+          : `Filled from ${d.quoteNumber}`,
     });
   };
 
@@ -347,8 +470,16 @@ function InvoiceFormModal({
 
   const taxRateBp = Math.round((parseFloat(taxPct) || 0) * 100);
   const subtotalCents = draftSubtotalCents(drafts);
-  const taxCents = Math.round((subtotalCents * taxRateBp) / 10000);
-  const totalCents = subtotalCents + taxCents;
+  // Same arithmetic as computeDocTotals: discount comes off before tax.
+  // Clamped the way the server clamps (pct ≤ 100, cents within [0, subtotal])
+  // so the live ladder and the saved row agree to the cent.
+  const discountPctNum = Math.min(parseFloat(discountPct) || 0, 100);
+  const discountCents = Math.min(
+    Math.max(0, discountPctNum > 0 ? Math.round((subtotalCents * discountPctNum) / 100) : parseMoney(discountAmt)),
+    subtotalCents,
+  );
+  const taxCents = Math.round(((subtotalCents - discountCents) * taxRateBp) / 10000);
+  const totalCents = subtotalCents - discountCents + taxCents;
   const retainageCents = projectId
     ? Math.round((totalCents * (parseFloat(retainagePct) || 0)) / 100)
     : 0;
@@ -365,7 +496,12 @@ function InvoiceFormModal({
         taxRateBp,
         // Server derives retainage_cents = round(total × pct); 0 clears it.
         retainagePct: projectId ? parseFloat(retainagePct) || 0 : undefined,
+        // Server derives discount_cents from whichever is sent; empty inputs
+        // send discountCents: 0, which clears an old one.
+        discountPct: discountPctNum > 0 ? discountPctNum : undefined,
+        discountCents: discountPctNum > 0 ? undefined : discountCents,
         notes: notes.trim() || null,
+        attachments,
         quoteId,
       };
       return invoice
@@ -440,6 +576,14 @@ function InvoiceFormModal({
                 className={cn(secondaryBtn, "disabled:opacity-50")}
               >
                 Bill in full
+              </button>
+              <button
+                type="button"
+                disabled={!pickQuote}
+                onClick={() => fillFromQuote("balance")}
+                className={cn(secondaryBtn, "disabled:opacity-50")}
+              >
+                Bill the balance
               </button>
             </div>
           </div>
@@ -600,6 +744,26 @@ function InvoiceFormModal({
             </label>
           )}
           <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Discount %</span>
+            <input
+              className={inputCls}
+              inputMode="decimal"
+              placeholder="0"
+              value={discountPct}
+              onChange={(e) => { setDiscountPct(e.target.value); setDiscountAmt(""); }}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground">Discount $</span>
+            <input
+              className={inputCls}
+              inputMode="decimal"
+              placeholder="0.00"
+              value={discountAmt}
+              onChange={(e) => { setDiscountAmt(e.target.value); setDiscountPct(""); }}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Notes (optional)</span>
             <input
               className={inputCls}
@@ -609,11 +773,27 @@ function InvoiceFormModal({
           </label>
         </div>
 
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Attachments (optional)</span>
+          <p className="text-xs text-muted-foreground">
+            A signed contract, a drawing — anything the customer should get with this invoice.
+          </p>
+          <AttachmentsEditor value={attachments} onChange={setAttachments} />
+        </div>
+
         <div className="rounded-lg border border-border bg-background p-3 text-sm">
           <div className="flex justify-between py-0.5">
             <span className="text-muted-foreground">Subtotal</span>
             <span className="tabular-nums text-foreground">{formatMoney(subtotalCents)}</span>
           </div>
+          {discountCents > 0 && (
+            <div className="flex justify-between py-0.5">
+              <span className="text-emerald-700 dark:text-emerald-400">Discount</span>
+              <span className="tabular-nums text-emerald-700 dark:text-emerald-400">
+                −{formatMoney(discountCents)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between py-0.5">
             <span className="text-muted-foreground">Tax ({formatBp(taxRateBp)})</span>
             <span className="tabular-nums text-foreground">{formatMoney(taxCents)}</span>
@@ -840,9 +1020,42 @@ function InvoiceDetailModal({
     errorTitle: "Could not open the preview",
   });
 
+  // Attachments are not money — editable on any live status, since a signed
+  // contract often arrives after the bill went out.
+  const saveAttachments = useApiMutation<unknown, InvoiceAttachment[]>({
+    request: (attachments) => ({
+      method: "PATCH",
+      url: `/api/finance/invoices/${id}`,
+      body: { attachments },
+    }),
+    invalidate: INVOICE_KEYS,
+    successTitle: "Attachments updated",
+    errorTitle: "Could not update attachments",
+  });
+
+  // Authed endpoint, so fetch + blob rather than a plain <a href> (see
+  // DocumentsCard.download).
+  async function downloadAttachment(i: number, fallbackName: string) {
+    try {
+      const res = await apiRequest("GET", `/api/finance/invoices/${id}/file/${i}`);
+      const blob = await res.blob();
+      const name =
+        res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ?? fallbackName;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Download failed", description: e?.message });
+    }
+  }
+
   const inv = data?.invoice;
   const payments = data?.payments ?? [];
   const items = inv ? parseLineItems(inv.items) : [];
+  const attachments = parseAttachments(inv);
   const receivable = inv && (inv.status === "sent" || inv.status === "partial" || inv.status === "overdue");
 
   return (
@@ -872,6 +1085,22 @@ function InvoiceDetailModal({
           </div>
 
           {inv.notes && <p className="text-sm text-muted-foreground">{inv.notes}</p>}
+
+          {/* Attachments — what the customer gets alongside the bill. A voided
+              invoice with none has nothing to show. */}
+          {(inv.status !== "void" || attachments.length > 0) && (
+            <div>
+              <p className="mb-2 text-sm font-semibold text-foreground">Attachments</p>
+              {/* One row per file: the name downloads, the × removes. A void
+                  invoice is read-only — names only. */}
+              <AttachmentsEditor
+                value={attachments}
+                onChange={(next) => saveAttachments.mutate(next)}
+                disabled={inv.status === "void" || saveAttachments.isPending}
+                onOpen={(i) => downloadAttachment(i, attachments[i].name)}
+              />
+            </div>
+          )}
 
           {/* Line items */}
           <div className="overflow-x-auto rounded-lg border border-border">
@@ -917,13 +1146,14 @@ function InvoiceDetailModal({
               <span className="text-muted-foreground">Subtotal</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.subtotalCents)}</span>
             </div>
-            {/* Granted when the customer cleared the whole invoice online in
-                one payment (server/pay.ts). Unlike retainage this money is
-                never collected, so subtotal − discount + restated tax IS the
-                total — which is why it sits above the Total line. */}
+            {/* Either an owner discount entered on the form or the pay-in-full
+                one granted by server/pay.ts — both land in discountCents and
+                print the same. Unlike retainage this money is never collected,
+                so subtotal − discount + restated tax IS the total — which is
+                why it sits above the Total line. */}
             {(inv.discountCents ?? 0) > 0 && (
               <div className="flex justify-between py-0.5">
-                <span className="text-emerald-700 dark:text-emerald-400">Paid-in-full discount</span>
+                <span className="text-emerald-700 dark:text-emerald-400">Discount</span>
                 <span className="tabular-nums text-emerald-700 dark:text-emerald-400">
                   −{formatMoney(inv.discountCents!)}
                 </span>

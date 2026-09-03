@@ -11,7 +11,7 @@ import { parseJson } from "./quotes";
 import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
 import { reviews, marketingSettings } from "../shared/marketing-schema";
 import { pmTasks } from "../shared/pm-schema"; // Package C: tasks live on the pm board
-import { todayLocal, pid } from "./http-util";
+import { todayLocal, pid, usd } from "./http-util";
 import { requireElevated } from "./auth";
 import { clients } from "../shared/crm-schema";
 import { invoices } from "../shared/finance-schema";
@@ -441,6 +441,19 @@ export function registerPublicPortalRoutes(app: Express): void {
             }],
             taxPct: 0,
             balanceCents: quote.totalCents - depositCents,
+          }
+        : null,
+      // The other half of a deposit bill: the contract price less what the
+      // deposit invoice asked for. Tax is already inside quote.totalCents,
+      // exactly like the deposit line, so this invoice adds none of its own.
+      balance: depositCents > 0
+        ? {
+            items: [{
+              description: `Balance of contract — less ${depositPct}% deposit of ${usd(depositCents)}`,
+              qty: 1,
+              unitPriceCents: quote.totalCents - depositCents,
+            }],
+            taxPct: 0,
           }
         : null,
     });
