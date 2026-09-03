@@ -670,6 +670,9 @@ function InvoiceFormModal({
         <div>
           <p className="mb-2 text-sm font-medium text-foreground">Line items</p>
           <LineItemsEditor drafts={drafts} onChange={setDrafts} />
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            A negative unit price (−300) works as a discount or credit line.
+          </p>
         </div>
 
         {/* Phase G #2: progress billing against the job's effective contract
@@ -765,8 +768,11 @@ function InvoiceFormModal({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Notes (optional)</span>
-            <input
-              className={inputCls}
+            {/* Multi-line: the owner keeps a running note per bill. Internal —
+                the customer's copy never prints it (server/pay.ts). */}
+            <textarea
+              className={cn(inputCls, "min-h-[5.5rem] py-2 leading-snug")}
+              rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
@@ -1084,7 +1090,9 @@ function InvoiceDetailModal({
             )}
           </div>
 
-          {inv.notes && <p className="text-sm text-muted-foreground">{inv.notes}</p>}
+          {inv.notes && (
+            <p className="whitespace-pre-line text-sm text-muted-foreground">{inv.notes}</p>
+          )}
 
           {/* Attachments — what the customer gets alongside the bill. A voided
               invoice with none has nothing to show. */}
