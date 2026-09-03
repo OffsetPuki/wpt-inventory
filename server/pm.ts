@@ -214,17 +214,21 @@ try {
 
 // ─── Document uploads (Phase G #4) ───────────────────────────────────────────
 // Same DATA_DIR/uploads dir + timestamp-random filename style as the multer
-// photo flow in routes.ts, extended to accept PDFs (COIs/W-9s are PDFs). PDFs
-// are deliberately NOT servable via the public /uploads static handler (it
-// only serves image extensions), so document files are only reachable through
-// the authed GET /api/pm/documents/:id/file below — a W-9 carries an EIN/SSN
-// and must not sit behind an unauthenticated URL.
+// photo flow in routes.ts, extended to accept PDFs (COIs/W-9s are PDFs) and
+// Word files. PDFs are deliberately NOT servable via the public /uploads
+// static handler (it only serves image extensions), so document files are only
+// reachable through the authed GET /api/pm/documents/:id/file below — a W-9
+// carries an EIN/SSN and must not sit behind an unauthenticated URL.
+// Also backs invoice attachments (finance.ts) — same dir, same allowlist, so
+// both are exported. Nothing here imports finance, so no cycle.
 // (`uploadsDir` — DATA_DIR/uploads, created at boot — lives in ./storage.)
 
 // Extension → safe Content-Type, doubling as the accept allowlist (same
 // stance as routes.ts EXT_TO_MIME: never let the browser sniff HTML/JS).
-const DOC_EXT_TO_MIME: Record<string, string> = {
+export const DOC_EXT_TO_MIME: Record<string, string> = {
   ".pdf": "application/pdf",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
@@ -234,7 +238,7 @@ const DOC_EXT_TO_MIME: Record<string, string> = {
 };
 const DOC_ALLOWED_MIME = new Set(Object.values(DOC_EXT_TO_MIME));
 
-const docUpload = multer({
+export const docUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, uploadsDir),
     filename: (_req, file, cb) => {
@@ -246,7 +250,7 @@ const docUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB, same as photos
   fileFilter: (_req, file, cb) => {
     if (DOC_ALLOWED_MIME.has(file.mimetype.toLowerCase())) return cb(null, true);
-    cb(new Error("Only PDF or image uploads are allowed"));
+    cb(new Error("Only PDF, Word or image uploads are allowed"));
   },
 });
 

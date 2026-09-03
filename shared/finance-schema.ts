@@ -79,12 +79,14 @@ export const invoices = sqliteTable("fin_invoices", {
   // "Bill retainage" release invoice, which stamps retainage_released_at.
   retainageCents: integer("retainage_cents"),
   retainageReleasedAt: integer("retainage_released_at"), // unix ms
-  // Prompt-payment discount actually GRANTED when the customer cleared the
-  // whole invoice online in one go (server/pay.ts). Unlike retainage this is
-  // money never collected, so it is subtracted from subtotal_cents and
-  // tax/total are restated — every "total − retainage − paid" balance query in
-  // the app then reads correctly with no change. Kept here only so the
-  // document can show the ladder honestly. Nullable, ALTER'd in finance.ts.
+  // Discount off the subtotal — the owner's (typed on the invoice form as a
+  // percent or dollars, server-derived via discountInputSchema) or the
+  // prompt-payment one GRANTED when the customer cleared the whole invoice
+  // online in one go (server/pay.ts). Either way it is money never collected,
+  // so it comes off subtotal_cents and tax/total are computed on what's left —
+  // every "total − retainage − paid" balance query in the app then reads
+  // correctly with no change. Null = no discount (pay.ts reads non-null as
+  // already granted). Nullable, ALTER'd in finance.ts.
   discountCents: integer("discount_cents"),
   // Soft ref to crm_leads (no FK — cross-module). Stamped by the quote-accept
   // hook so a fully paid invoice can push realized revenue back onto the lead.
@@ -107,6 +109,11 @@ export const invoices = sqliteTable("fin_invoices", {
   // forever after, so a link already in an inbox never goes dead. Nullable,
   // ALTER'd in finance.ts — same shape as quotes.share_token.
   shareToken: text("share_token"),
+  // Files the owner put on the bill — a signed contract, a drawing. JSON
+  // { name, file }[]; `file` is the multer filename inside uploadsDir (pm's
+  // docUpload). Parsed separately from the insert schema (attachmentsSchema),
+  // like retainagePct. NOT NULL DEFAULT '[]', ALTER'd in finance.ts.
+  attachments: text("attachments").notNull().default("[]"),
   sentAt: integer("sent_at"), // unix ms
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -211,9 +218,11 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   // cents directly could desync the balance math from the stored total.
   retainageCents: true,
   retainageReleasedAt: true,
-  // Granted by the Stripe webhook alone (server/pay.ts) when a customer clears
-  // the whole invoice online. A client writing it would print a discount nobody
-  // gave and break subtotal − discount + tax = total on the document.
+  // Server-derived from the discountPct / discountCents payload fields
+  // (discountInputSchema), or granted by the Stripe webhook (server/pay.ts)
+  // when a customer clears the whole invoice online. Never client-writable
+  // directly: the cents must agree with subtotal − discount + tax = total on
+  // the document, so the server does that math.
   discountCents: true,
   restatedFrom: true,
   createdAt: true,
@@ -223,11 +232,29 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   subtotalCents: true,
   taxCents: true,
   totalCents: true,
+  // Parsed separately (attachmentsSchema) — the list needs its own validation.
+  attachments: true,
 });
 
 // Phase G #3: "Retainage withheld %" from the invoice editor. Not a column —
 // the server derives retainage_cents = round(total × pct) from it on save.
 export const retainagePctSchema = z.number().min(0).max(100).nullable().optional();
+
+// The owner's discount from the invoice editor: a percent of the line items OR
+// a dollar figure. Not columns — the server derives discount_cents from
+// whichever is set, same idea as retainagePct.
+export const discountInputSchema = z.object({
+  discountPct: z.number().min(0).max(100).nullable().optional(),
+  discountCents: z.number().int().min(0).nullable().optional(),
+});
+
+// Attachments on an invoice. `file` must look exactly like a docUpload
+// filename — anything else can't be a file the uploader wrote.
+export const attachmentsSchema = z.array(z.object({
+  name: z.string().trim().min(1).max(120),
+  file: z.string().regex(/^\d+-[0-9a-f]{32}\.(pdf|jpe?g|png|webp|heic|heif|docx?)$/i),
+})).max(20);
+export type InvoiceAttachment = z.infer<typeof attachmentsSchema>[number];
 
 export const insertInvoicePaymentSchema = z.object({
   amountCents: z.number().int().positive(),

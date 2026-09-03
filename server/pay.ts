@@ -10,7 +10,10 @@ import { clients } from "../shared/crm-schema";
 import { contracts } from "../shared/pm-schema";
 // payInFullDiscountBp: the owner-editable rate (Finance → Billing markups),
 // shared with the invoice email that advertises the offer.
-import { presentInvoice, recordInvoicePayment, payInFullDiscountBp as discountBp } from "./finance";
+import {
+  presentInvoice, recordInvoicePayment, payInFullDiscountBp as discountBp,
+  otherInvoicedCents, invoiceAttachments, sendInvoiceAttachment,
+} from "./finance";
 import { invoices, type Invoice } from "../shared/finance-schema";
 import { parseLineItems, lineItemsTotalCents } from "../shared/biz-common";
 import { parseJson } from "./quotes";
@@ -107,6 +110,10 @@ function payInFull(inv: Invoice): PayInFull | null {
   if (inv.paidCents !== 0) return null;
   if ((inv.retainageCents ?? 0) !== 0) return null;
   if (inv.discountCents != null) return null; // already granted
+  // A deposit billed separately, or this being that deposit's balance: "the
+  // whole job" is no longer this invoice's to settle, and the customer already
+  // passed on the pay-upfront offer when the deposit invoice went out.
+  if (otherInvoicedCents(inv) > 0) return null;
 
   // What "in full" MEANS depends on the invoice. On an ordinary one it's this
   // bill. On a deposit — a slice of a bigger contract — paying this invoice in
@@ -214,6 +221,10 @@ function fromQuote(inv: Invoice) {
     designRef: quote.designRef,
     contractTitle: contract?.title ?? null,
     contractCents: quote.totalCents,
+    // What the other invoices on this quote already billed (the deposit, when
+    // this is the balance) — the page nets it out of the contract price.
+    // Earlier siblings only: the balance invoice mustn't rewrite the deposit's page.
+    priorCents: otherInvoicedCents(inv, true),
     project: {
       label: doc?.project.label ?? "",
       summary: doc?.project.summary ?? "",
@@ -377,10 +388,22 @@ export function registerPayRoutes(app: Express): void {
         // Null when the invoice wasn't raised from a quote — the document
         // simply drops the project block and the contract-price ladder.
         quote: fromQuote(inv),
+        // Names only — the disk filename stays the server's. The site fetches
+        // each by index through the /file/:i route below.
+        attachments: invoiceAttachments(inv).map((a, index) => ({ name: a.name, index })),
         createdAt: inv.createdAt.getTime(),
         sentAt: inv.sentAt,
       },
     });
+  });
+
+  // An attachment the owner put on the bill — a signed contract, a drawing.
+  // Same draft rule as the document: only the owner's ?preview=1 sees a draft's.
+  app.get("/api/public/invoice/:token/file/:i", publicLimiter(60), (req, res) => {
+    const inv = findInvoice(String(req.params.token), req.query.preview === "1");
+    if (!inv) return res.status(404).json({ ok: false });
+    res.setHeader("Cache-Control", "private, max-age=0");
+    sendInvoiceAttachment(res, inv, Number(req.params.i));
   });
 
   // Start a payment. The body chooses BETWEEN the amounts this invoice offers;
