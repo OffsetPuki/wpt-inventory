@@ -391,6 +391,13 @@ export function registerPayRoutes(app: Express): void {
         // Names only — the disk filename stays the server's. The site fetches
         // each by index through the /file/:i route below.
         attachments: invoiceAttachments(inv).map((a, index) => ({ name: a.name, index })),
+        // The owner's own wording for this bill, or null for the page's default.
+        // Same line/length caps as the shop terms (currentShopInvoice).
+        customerNote: (inv.customerNote ?? "").trim().slice(0, 2000) || null,
+        terms: (() => {
+          const lines = (inv.terms ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+          return lines.length ? lines.slice(0, 12).map((l) => l.slice(0, 300)) : null;
+        })(),
         createdAt: inv.createdAt.getTime(),
         sentAt: inv.sentAt,
       },

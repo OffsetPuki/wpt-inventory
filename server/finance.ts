@@ -147,6 +147,9 @@ for (const ddl of [
   "CREATE INDEX IF NOT EXISTS idx_fin_invoices_quote ON fin_invoices(quote_id)",
   // Files on the bill (a signed contract, a drawing) — see shared/finance-schema.ts.
   "ALTER TABLE fin_invoices ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
+  // Per-invoice customer wording — see shared/finance-schema.ts.
+  "ALTER TABLE fin_invoices ADD COLUMN customer_note TEXT",
+  "ALTER TABLE fin_invoices ADD COLUMN terms TEXT",
   // NOTE: fin_settings is created BELOW, so its own migration lives after it —
   // an ALTER here would silently no-op on a fresh install and the column would
   // never exist.

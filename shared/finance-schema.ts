@@ -114,6 +114,14 @@ export const invoices = sqliteTable("fin_invoices", {
   // docUpload). Parsed separately from the insert schema (attachmentsSchema),
   // like retainagePct. NOT NULL DEFAULT '[]', ALTER'd in finance.ts.
   attachments: text("attachments").notNull().default("[]"),
+  // Two pieces of the customer's document the owner can reword per invoice.
+  // Both print exactly as written; NULL means the website's own wording (the
+  // progress-payment paragraph under the line items, and the shop's standard
+  // invoice terms from Price Book → Shop details). customer_note may carry
+  // {contract}, {later} and {prior}, which the page fills with the amounts.
+  // Nullable, ALTER'd in finance.ts.
+  customerNote: text("customer_note"),
+  terms: text("terms"), // one term per line
   sentAt: integer("sent_at"), // unix ms
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })

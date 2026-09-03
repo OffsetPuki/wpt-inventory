@@ -563,6 +563,23 @@ await check("a draft's attachment is only reachable with the preview flag", asyn
   db.prepare("UPDATE fin_invoices SET status = 'sent' WHERE id = ?").run(discId);
 });
 
+await check("the owner's own wording reaches the customer, and blank means the default", async () => {
+  let res = await ownerJson("PATCH", `/api/finance/invoices/${discId}`, {
+    customerNote: "  Half now, half at install — {contract} total.  ",
+    terms: "Line A\n\n  Line B  \n",
+  });
+  assert.equal(res.status, 200, await res.text());
+  let { invoice } = await (await fetch(`${BASE}/api/public/invoice/${discToken}`)).json();
+  assert.equal(invoice.customerNote, "Half now, half at install — {contract} total.");
+  assert.deepEqual(invoice.terms, ["Line A", "Line B"], "one term per line, blanks dropped");
+
+  res = await ownerJson("PATCH", `/api/finance/invoices/${discId}`, { customerNote: null, terms: "" });
+  assert.equal(res.status, 200, await res.text());
+  ({ invoice } = await (await fetch(`${BASE}/api/public/invoice/${discToken}`)).json());
+  assert.equal(invoice.customerNote, null, "blank = the page's own wording");
+  assert.equal(invoice.terms, null);
+});
+
 // ─── The owner's pre-send preview ────────────────────────────────────────────
 // A draft carries a share token only because the owner asked to proof it. It
 // must stay invisible without ?preview=1, and must never be chargeable — the
