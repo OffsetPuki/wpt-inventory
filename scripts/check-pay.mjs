@@ -480,6 +480,37 @@ await check("the owner can give a percentage discount and the ladder adds up", a
   assert.equal(res.status, 400, "more than 100% off is not a discount");
 });
 
+await check("a negative line is a discount, and a bill can't go below zero", async () => {
+  // The owner's other way to write a discount: a "-300" line among the others.
+  let res = await ownerJson("PATCH", `/api/finance/invoices/${discId}`, {
+    items: [
+      { description: "Gate", qty: 1, unitPriceCents: 100_000 },
+      { description: "Discount — referral", qty: 1, unitPriceCents: -30_000 },
+    ],
+  });
+  assert.equal(res.status, 200, await res.text());
+  let inv = invoiceRow(discId);
+  assert.equal(inv.subtotal_cents, 70_000, "the credit nets against the other lines");
+  assert.equal(inv.tax_cents, 5_775, "tax on what's left: 8.25% of 700.00");
+  assert.equal(inv.total_cents, 75_775);
+
+  // A credit bigger than the bill is a refund, not an invoice.
+  res = await ownerJson("PATCH", `/api/finance/invoices/${discId}`, {
+    items: [
+      { description: "Gate", qty: 1, unitPriceCents: 100_000 },
+      { description: "Credit", qty: 1, unitPriceCents: -200_000 },
+    ],
+  });
+  assert.equal(res.status, 400, "lines netting below zero must be refused");
+  assert.equal(invoiceRow(discId).total_cents, 75_775, "a refused edit changes nothing");
+
+  res = await ownerJson("PATCH", `/api/finance/invoices/${discId}`, {
+    items: [{ description: "Gate", qty: 1, unitPriceCents: 100_000 }],
+  });
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(invoiceRow(discId).total_cents, 108_250);
+});
+
 // ─── Attachments ─────────────────────────────────────────────────────────────
 const discToken = crypto.randomBytes(24).toString("hex");
 

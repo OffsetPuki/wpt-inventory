@@ -19,7 +19,10 @@ export interface LineItem {
 export const lineItemSchema = z.object({
   description: z.string().min(1),
   qty: z.number().positive(),
-  unitPriceCents: z.number().int().nonnegative(),
+  // Negative is allowed on purpose: a "-300" line IS how the owner writes a
+  // discount or a credit against the other lines. computeDocTotals refuses a
+  // document whose lines add up below zero, so a credit can't outrun the bill.
+  unitPriceCents: z.number().int(),
   unit: z.string().optional(),
   productId: z.number().int().optional(),
   materialKey: z.string().optional(),
@@ -62,6 +65,9 @@ export function computeDocTotals(
 ): { subtotalCents: number; discountCents: number; taxCents: number; totalCents: number } {
   const items = lineItemsSchema.parse(parseLineItems(itemsJson));
   const subtotalCents = lineItemsTotalCents(items);
+  // Credit lines may net against the others, never past zero — a negative
+  // document is a refund, and this app records those as payments reversed.
+  if (subtotalCents < 0) throw new Error("Line items add up below zero");
   const discountCents = Math.min(Math.max(0, Math.round(opts.discountCents ?? 0)), subtotalCents);
   const bp = opts.clampTax ? Math.max(0, taxRateBp) : taxRateBp;
   const taxCents = Math.round(((subtotalCents - discountCents) * bp) / 10000);
