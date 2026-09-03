@@ -426,8 +426,8 @@ const balNum = `TEST-BAL-${Date.now()}`;
 db.prepare(`
   INSERT INTO fin_invoices
     (number, client_name, status, items, subtotal_cents, tax_rate_bp, tax_cents,
-     total_cents, paid_cents, quote_id, share_token, sent_at)
-  VALUES (?, 'Test Customer', 'sent', ?, 800000, 0, 0, 800000, 0, ?, ?, ?)
+     total_cents, paid_cents, quote_id, share_token, sent_at, kind)
+  VALUES (?, 'Test Customer', 'sent', ?, 800000, 0, 0, 800000, 0, ?, ?, ?, 'balance')
 `).run(balNum, JSON.stringify([{ description: "Balance of contract — less 20% deposit of $2000.00", qty: 1, unitPriceCents: 800000 }]),
   depQuote.lastInsertRowid, balToken, Date.now());
 const balId = db.prepare("SELECT id FROM fin_invoices WHERE number = ?").get(balNum).id;
@@ -440,6 +440,17 @@ await check("the balance invoice after a deposit offers no pay-in-full and repor
   // The deposit invoice (back to 'sent' after the reversal) loses the offer too.
   const dep = (await (await fetch(`${BASE}/api/public/invoice/${depToken}`)).json()).invoice;
   assert.equal(dep.payInFull, null, "another invoice bills the same quote");
+});
+
+await check("a balance invoice stays a balance invoice even when the deposit was never issued here", async () => {
+  // The deposit taken in cash, or its invoice still a draft: the balance bill
+  // still says what it is, so no "settle the whole job" and the deposit is
+  // still netted out of the contract price on the page.
+  db.prepare("UPDATE fin_invoices SET status = 'draft' WHERE id = ?").run(depId);
+  const { invoice } = await (await fetch(`${BASE}/api/public/invoice/${balToken}`)).json();
+  assert.equal(invoice.payInFull, null, "kind = balance is enough on its own");
+  assert.equal(invoice.quote.priorCents, 200_000, "contract less this bill = the deposit");
+  db.prepare("UPDATE fin_invoices SET status = 'sent' WHERE id = ?").run(depId);
 });
 
 // ─── Owner discounts ─────────────────────────────────────────────────────────

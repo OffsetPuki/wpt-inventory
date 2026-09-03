@@ -112,8 +112,10 @@ function payInFull(inv: Invoice): PayInFull | null {
   if (inv.discountCents != null) return null; // already granted
   // A deposit billed separately, or this being that deposit's balance: "the
   // whole job" is no longer this invoice's to settle, and the customer already
-  // passed on the pay-upfront offer when the deposit invoice went out.
-  if (otherInvoicedCents(inv) > 0) return null;
+  // passed on the pay-upfront offer when the deposit invoice went out. The
+  // balance invoice says so itself (kind) — the deposit may have been taken
+  // outside the suite, so the sibling check alone can't be relied on.
+  if (inv.kind === "balance" || otherInvoicedCents(inv) > 0) return null;
 
   // What "in full" MEANS depends on the invoice. On an ordinary one it's this
   // bill. On a deposit — a slice of a bigger contract — paying this invoice in
@@ -221,10 +223,14 @@ function fromQuote(inv: Invoice) {
     designRef: quote.designRef,
     contractTitle: contract?.title ?? null,
     contractCents: quote.totalCents,
-    // What the other invoices on this quote already billed (the deposit, when
-    // this is the balance) — the page nets it out of the contract price.
-    // Earlier siblings only: the balance invoice mustn't rewrite the deposit's page.
-    priorCents: otherInvoicedCents(inv, true),
+    // What was already billed on this job before this invoice (the deposit,
+    // when this is the balance) — the page nets it out of the contract price.
+    // A balance invoice is, by construction, the contract less the deposit,
+    // so it says so even when the deposit was never invoiced here. Otherwise
+    // earlier siblings only: the balance invoice mustn't rewrite the deposit's page.
+    priorCents: inv.kind === "balance"
+      ? Math.max(otherInvoicedCents(inv, true), quote.totalCents - inv.totalCents, 0)
+      : otherInvoicedCents(inv, true),
     project: {
       label: doc?.project.label ?? "",
       summary: doc?.project.summary ?? "",

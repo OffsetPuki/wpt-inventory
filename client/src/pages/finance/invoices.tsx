@@ -315,6 +315,9 @@ function InvoiceFormModal({
   // carried to the server so the customer's document can print the project
   // block, the quote/contract refs and the full contract price.
   const [quoteId, setQuoteId] = useState<number | null>(null);
+  // Which quote button filled the form — the server keeps it as the invoice's
+  // kind, so a balance invoice is never offered "settle the whole job".
+  const [kind, setKind] = useState<Invoice["kind"]>(null);
   const [pickQuote, setPickQuote] = useState("");
 
   useEffect(() => {
@@ -351,6 +354,7 @@ function InvoiceFormModal({
       setTerms(invoice.terms ?? "");
       setAttachments(parseAttachments(invoice));
       setQuoteId(invoice.quoteId ?? null);
+      setKind(invoice.kind ?? null);
     } else {
       setClientId("");
       setClientName("");
@@ -372,6 +376,7 @@ function InvoiceFormModal({
       setTerms("");
       setAttachments([]);
       setQuoteId(null);
+      setKind(null);
     }
     setProgressPct("");
     setProgressAmount("");
@@ -463,6 +468,7 @@ function InvoiceFormModal({
     })));
     setTaxPct(String(src.taxPct ?? 0));
     setQuoteId(d.quoteId);
+    setKind(mode);
     // The project block prints from the quote, so notes stay free for anything
     // the owner wants to add — seeded with the job's own summary line.
     if (!notes.trim()) {
@@ -538,6 +544,7 @@ function InvoiceFormModal({
         terms: terms.trim() || null,
         attachments,
         quoteId,
+        kind,
       };
       return invoice
         ? { method: "PATCH", url: `/api/finance/invoices/${invoice.id}`, body }
