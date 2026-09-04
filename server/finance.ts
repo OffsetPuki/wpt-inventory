@@ -150,6 +150,8 @@ for (const ddl of [
   // Per-invoice customer wording — see shared/finance-schema.ts.
   "ALTER TABLE fin_invoices ADD COLUMN customer_note TEXT",
   "ALTER TABLE fin_invoices ADD COLUMN terms TEXT",
+  // Which quote button made the invoice — see shared/finance-schema.ts.
+  "ALTER TABLE fin_invoices ADD COLUMN kind TEXT",
   // NOTE: fin_settings is created BELOW, so its own migration lives after it —
   // an ALTER here would silently no-op on a fresh install and the column would
   // never exist.
@@ -563,8 +565,10 @@ function queueInvoiceEmail(inv: Invoice): void {
         : 0;
       const wholeJob = quoteTotal > inv.totalCents;
       const grossCents = wholeJob ? quoteTotal : inv.totalCents;
+      // A balance invoice never carries the offer — the owner's rule: only a
+      // deposit or a whole-job bill does (same test as pay.ts payInFull).
       const savesCents = discountBp > 0 && inv.paidCents === 0 && retainageOf(inv) === 0
-        && inv.discountCents == null && otherInvoicedCents(inv) === 0
+        && inv.discountCents == null && inv.kind !== "balance" && otherInvoicedCents(inv) === 0
         ? Math.round((grossCents * discountBp) / 10_000)
         : 0;
 

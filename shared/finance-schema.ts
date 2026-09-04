@@ -122,6 +122,12 @@ export const invoices = sqliteTable("fin_invoices", {
   // Nullable, ALTER'd in finance.ts.
   customerNote: text("customer_note"),
   terms: text("terms"), // one term per line
+  // Which "Bill against a quote" button made this invoice — the deposit, the
+  // whole job, or the balance after a deposit. NULL for a hand-typed bill.
+  // The balance invoice must never be offered "settle the whole job", in the
+  // email or on the page, whether or not the deposit was ever invoiced here;
+  // sibling detection alone missed that. Nullable, ALTER'd in finance.ts.
+  kind: text("kind", { enum: ["deposit", "full", "balance"] }),
   sentAt: integer("sent_at"), // unix ms
   notes: text("notes"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
