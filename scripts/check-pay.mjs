@@ -437,6 +437,7 @@ await check("the balance invoice after a deposit offers no pay-in-full and repor
   assert.equal(invoice.payInFull, null, "the balance is not the whole job");
   assert.equal(invoice.quote.priorCents, 200_000, "the deposit is what was billed before");
   assert.equal(invoice.balanceCents, 800_000);
+  assert.equal(invoice.kind, "balance", "the page is told which button made the bill");
   // The deposit invoice (back to 'sent' after the reversal) loses the offer too.
   const dep = (await (await fetch(`${BASE}/api/public/invoice/${depToken}`)).json()).invoice;
   assert.equal(dep.payInFull, null, "another invoice bills the same quote");

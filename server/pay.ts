@@ -400,6 +400,10 @@ export function registerPayRoutes(app: Express): void {
         // The owner's own wording for this bill, or null for the page's default.
         // Same line/length caps as the shop terms (currentShopInvoice).
         customerNote: (inv.customerNote ?? "").trim().slice(0, 2000) || null,
+        // Which quote button made the bill — the page uses it to rule a
+        // whole-job invoice out of the progress-bill ladder no matter what a
+        // credit line does to the total. Null on a hand-typed bill.
+        kind: inv.kind ?? null,
         terms: (() => {
           const lines = (inv.terms ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
           return lines.length ? lines.slice(0, 12).map((l) => l.slice(0, 300)) : null;
