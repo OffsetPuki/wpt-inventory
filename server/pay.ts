@@ -12,7 +12,7 @@ import { contracts } from "../shared/pm-schema";
 // shared with the invoice email that advertises the offer.
 import {
   presentInvoice, recordInvoicePayment, payInFullDiscountBp as discountBp,
-  otherInvoicedCents, invoiceAttachments, sendInvoiceAttachment,
+  otherInvoicedCents, creditsGrossOf, invoiceAttachments, sendInvoiceAttachment,
 } from "./finance";
 import { invoices, type Invoice } from "../shared/finance-schema";
 import { parseLineItems, lineItemsTotalCents } from "../shared/biz-common";
@@ -127,13 +127,20 @@ function payInFull(inv: Invoice): PayInFull | null {
   let taxRateBp = inv.taxRateBp;
   let itemLabel = "";
 
-  if (inv.quoteId != null) {
+  // Whether this bill is a slice of the job is judged on what it covers BEFORE
+  // its credit lines — a whole-job invoice with a "-300" credit is not a
+  // deposit, and a whole-job bill (kind full) never is. A credit already given
+  // stays given: the whole job is then the contract less that credit, so the
+  // balance line the settlement appends comes out at exactly the deposit's
+  // complement and the credit line survives the restatement.
+  const creditsGross = creditsGrossOf(inv);
+  if (inv.quoteId != null && inv.kind !== "full") {
     const quote = db.select().from(quotes)
       .where(and(eq(quotes.id, inv.quoteId), isNull(quotes.deletedAt)))
       .get();
-    if (quote && quote.totalCents > inv.totalCents) {
+    if (quote && quote.totalCents - (inv.totalCents + creditsGross) >= 100) {
       scope = "contract";
-      grossCents = quote.totalCents;
+      grossCents = quote.totalCents - creditsGross;
       itemLabel = `Balance of contract — settled with the deposit (quote ${quote.number})`;
       // A deposit line is a percentage of the TAX-INCLUSIVE contract price, so
       // the restated invoice stays on those terms: subtotal is the contract

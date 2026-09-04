@@ -454,6 +454,85 @@ await check("a balance invoice stays a balance invoice even when the deposit was
   db.prepare("UPDATE fin_invoices SET status = 'sent' WHERE id = ?").run(depId);
 });
 
+// ─── Credit lines vs "settle the whole job" ─────────────────────────────────
+// A "-300" line lowers the total without making the bill a slice of the job.
+// Judged on the total the way it was, a credited whole-job invoice was offered
+// 94% of the UN-credited contract, and paying it appended a +$300 line that
+// took the credit back.
+
+const creditQuote = db.prepare(
+  "INSERT INTO quotes (number, type, customer_name, status, total_cents, payload, created_at) " +
+  "VALUES (?, 'fence', 'Test Customer', 'accepted', 500000, ?, ?)",
+).run(`Q-CREDIT-${Date.now()}`, JSON.stringify({ taxPct: 0 }), Date.now());
+const creditFullToken = crypto.randomBytes(24).toString("hex");
+const creditFullNum = `TEST-CREDITFULL-${Date.now()}`;
+db.prepare(`
+  INSERT INTO fin_invoices
+    (number, client_name, status, items, subtotal_cents, tax_rate_bp, tax_cents,
+     total_cents, paid_cents, quote_id, share_token, sent_at)
+  VALUES (?, 'Test Customer', 'sent', ?, 470000, 0, 0, 470000, 0, ?, ?, ?)
+`).run(creditFullNum, JSON.stringify([
+  { description: "Gate — whole job", qty: 1, unitPriceCents: 500000 },
+  { description: "Credit — late delivery", qty: 1, unitPriceCents: -30000 },
+]), creditQuote.lastInsertRowid, creditFullToken, Date.now());
+const creditFullId = db.prepare("SELECT id FROM fin_invoices WHERE number = ?").get(creditFullNum).id;
+
+await check("a credited whole-job invoice is offered 6% off THIS bill, not the contract", async () => {
+  const { invoice } = await (await fetch(`${BASE}/api/public/invoice/${creditFullToken}`)).json();
+  assert.ok(invoice.payInFull, "a fresh unpaid invoice still gets the offer");
+  assert.equal(invoice.payInFull.scope, "invoice", "the whole job IS this bill");
+  assert.equal(invoice.payInFull.wasCents, 470_000);
+  assert.equal(invoice.payInFull.totalCents, Math.round(470_000 * 0.94));
+});
+
+// A deposit carrying the same credit: the offer is the whole job LESS the
+// credit, and settling keeps the credit line on the paper.
+const creditDepQuote = db.prepare(
+  "INSERT INTO quotes (number, type, customer_name, status, total_cents, payload, created_at) " +
+  "VALUES (?, 'fence', 'Test Customer', 'accepted', 1000000, ?, ?)",
+).run(`Q-CREDITDEP-${Date.now()}`, JSON.stringify({ taxPct: 0 }), Date.now());
+const creditDepToken = crypto.randomBytes(24).toString("hex");
+const creditDepNum = `TEST-CREDITDEP-${Date.now()}`;
+db.prepare(`
+  INSERT INTO fin_invoices
+    (number, client_name, status, items, subtotal_cents, tax_rate_bp, tax_cents,
+     total_cents, paid_cents, quote_id, share_token, sent_at, kind)
+  VALUES (?, 'Test Customer', 'sent', ?, 170000, 0, 0, 170000, 0, ?, ?, ?, 'deposit')
+`).run(creditDepNum, JSON.stringify([
+  { description: "Deposit — 20% of contract price", qty: 1, unitPriceCents: 200000 },
+  { description: "Credit — late delivery", qty: 1, unitPriceCents: -30000 },
+]), creditDepQuote.lastInsertRowid, creditDepToken, Date.now());
+const creditDepId = db.prepare("SELECT id FROM fin_invoices WHERE number = ?").get(creditDepNum).id;
+
+await check("a credited deposit invoice offers the whole job less the credit, and keeps the credit when settled", async () => {
+  const { invoice } = await (await fetch(`${BASE}/api/public/invoice/${creditDepToken}`)).json();
+  assert.ok(invoice.payInFull, "a deposit still offers settling the job");
+  assert.equal(invoice.payInFull.scope, "contract");
+  assert.equal(invoice.payInFull.wasCents, 970_000, "the job, less the credit already given");
+  assert.equal(invoice.payInFull.totalCents, 911_800);
+
+  const body = JSON.stringify({
+    id: "evt_creditdep", type: "checkout.session.completed",
+    data: { object: {
+      id: "cs_creditdep", payment_intent: "pi_creditdep", payment_status: "paid",
+      amount_total: 911_800,
+      metadata: { invoiceId: String(creditDepId), which: "full" },
+    } },
+  });
+  const res = await postWebhook(body, signed(body));
+  assert.equal(res.status, 200);
+  const inv = invoiceRow(creditDepId);
+  assert.equal(inv.status, "paid");
+  assert.equal(inv.total_cents, 911_800);
+  assert.equal(inv.subtotal_cents, 970_000);
+  const items = JSON.parse(inv.items);
+  assert.equal(items.length, 3);
+  assert.equal(items[1].unitPriceCents, -30_000, "the credit line must survive");
+  assert.equal(items[2].unitPriceCents, 800_000, "the balance line is the deposit's complement");
+  assert.equal(items.reduce((s, it) => s + it.unitPriceCents, 0), inv.subtotal_cents);
+  assert.equal(inv.subtotal_cents - inv.discount_cents + inv.tax_cents, inv.total_cents, "the ladder adds up");
+});
+
 // ─── Owner discounts ─────────────────────────────────────────────────────────
 let discId = null;
 let uploaded = null;
@@ -643,6 +722,11 @@ for (const id of [invoice2Id, depId, balId, discId]) {
   db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(id);
 }
 db.prepare("DELETE FROM quotes WHERE id = ?").run(depQuote.lastInsertRowid);
+for (const id of [creditFullId, creditDepId]) {
+  db.prepare("DELETE FROM fin_invoice_payments WHERE invoice_id = ?").run(id);
+  db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(id);
+}
+for (const q of [creditQuote, creditDepQuote]) db.prepare("DELETE FROM quotes WHERE id = ?").run(q.lastInsertRowid);
 // The suite leaves attachment files on disk when an invoice is deleted; the
 // test's upload is ours to remove.
 if (uploaded) fs.rmSync(path.join(DATA_DIR, "uploads", path.basename(uploaded)), { force: true });

@@ -246,6 +246,20 @@ export function otherInvoicedCents(inv: Invoice, onlyEarlier = false): number {
   `).get(inv.quoteId, inv.id) as { s: number }).s;
 }
 
+// What the invoice's credit lines (a "-300" for a late delivery) took off it,
+// tax included — the tax on a credited amount came off with it, since tax is
+// figured on what's left (computeDocTotals). Adding this back to the total
+// gives what the bill covers of the job BEFORE the credit: that, not the
+// total, is what says whether the invoice is a slice of the contract or the
+// whole of it. Zero when there are no credit lines.
+export function creditsGrossOf(inv: Invoice): number {
+  const credits = parseLineItems(inv.items).reduce((s, it) => {
+    const a = Math.round(it.qty * it.unitPriceCents);
+    return a < 0 ? s - a : s;
+  }, 0);
+  return Math.round(credits * (1 + Math.max(0, inv.taxRateBp) / 10_000));
+}
+
 // "overdue" is derived, never stored: a sent/partial invoice past its due date
 // reports as overdue, but the stored status stays untouched so a payment (or a
 // due-date extension) snaps it back without any sweep job.
@@ -563,8 +577,13 @@ function queueInvoiceEmail(inv: Invoice): void {
         ? (sqlite.prepare("SELECT total_cents AS t FROM quotes WHERE id = ? AND deleted_at IS NULL")
             .get(inv.quoteId) as { t: number } | undefined)?.t ?? 0
         : 0;
-      const wholeJob = quoteTotal > inv.totalCents;
-      const grossCents = wholeJob ? quoteTotal : inv.totalCents;
+      // "Whole job" is judged on what the bill covers BEFORE its credit lines,
+      // never on a whole-job bill (kind full): a credited whole-job invoice is
+      // not a deposit. A credit already given stays given when the job is
+      // settled — the offer is priced off the contract less the credit.
+      const creditsGross = creditsGrossOf(inv);
+      const wholeJob = inv.kind !== "full" && quoteTotal - (inv.totalCents + creditsGross) >= 100;
+      const grossCents = wholeJob ? quoteTotal - creditsGross : inv.totalCents;
       // A balance invoice never carries the offer — the owner's rule: only a
       // deposit or a whole-job bill does (same test as pay.ts payInFull).
       const savesCents = discountBp > 0 && inv.paidCents === 0 && retainageOf(inv) === 0
