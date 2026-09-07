@@ -562,7 +562,10 @@ function PortfolioTab() {
                   <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
                   {it.category && <p className="text-xs text-muted-foreground">{it.category}</p>}
                 </div>
-                <div className="flex items-center justify-between gap-2">
+                {/* flex-wrap: in the phone's two-column grid the three buttons
+                    are wider than the card, and overflow-hidden would clip the
+                    Delete button. The icon pair drops to its own line instead. */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
                     onClick={() => togglePublished.mutate(it)}
                     disabled={togglePublished.isPending}
@@ -575,7 +578,7 @@ function PortfolioTab() {
                     <Globe className="h-3.5 w-3.5" />
                     {it.published ? "Live" : "Hidden"}
                   </button>
-                  <div className="flex items-center gap-1.5">
+                  <div className="ml-auto flex items-center gap-1.5">
                     <button
                       onClick={() => setEditing(it)}
                       className={smallBtn}
