@@ -6,7 +6,7 @@
 
 import { DEFAULT_PRICE_BOOK } from '../client/src/quote/data/priceBook.js';
 import {
-  deriveItems, buildLineState, deriveWarnings, materialTotals, materialLibrary, lineCost, matRate,
+  deriveItems, buildLineState, deriveWarnings, materialTotals, materialLibrary, lineCost, matRate, foldGroups,
 } from '../client/src/quote/lib/estimate.js';
 import { computeTotals } from '../client/src/quote/lib/quote.js';
 import { defaultState, summaryLine, specRows } from '../client/src/quote/data/configurators.js';
@@ -347,6 +347,34 @@ console.log('\nLine order:');
   // Order survives an option change, exactly like a rename does.
   const resized = buildLineState('fence', { ...s, totalLengthFt: 80 }, pb, { order: moved });
   check('order survives an option change', resized.items[0].key === moved[0]);
+}
+
+// ── 14b. Fused lines — several pieces print as one customer row ──────────────
+console.log('\nFused lines:');
+{
+  const s = defaultState('fence');
+  const plain = buildLineState('fence', s, pb, {});
+  const ov = { items: { posts: { group: 'Steel frame' }, concrete: { group: ' Steel frame ' }, slats: { group: '' } } };
+  const ls = buildLineState('fence', s, pb, ov);
+  check('the fuse label rides on the line', item(ls.items, 'posts').group === 'Steel frame');
+  check('fusing is not an edit', item(ls.items, 'posts').edited !== true);
+  const money = (x) => computeTotals(x, { materialMarkupPct: 35, laborMarkupPct: 35, taxPct: 8.25 }).total;
+  check('fusing does not move the total', approx(money(ls), money(plain)));
+
+  const rows = ls.items.map((it) => ({ name: it.name, group: it.group, amountCents: Math.round(lineCost(it) * 100) }));
+  const folded = foldGroups(rows);
+  const frame = folded.filter((r) => r.name === 'Steel frame');
+  check('same label (trimmed) → one customer row', frame.length === 1, folded.map((r) => r.name).join(','));
+  const members = Math.round((lineCost(item(ls.items, 'posts')) + lineCost(item(ls.items, 'concrete'))) * 100);
+  check('the row adds up its members', frame[0] && frame[0].amountCents === members, `${frame[0]?.amountCents} vs ${members}`);
+  check('the fused row sits where its first member sat', folded[0].name === 'Steel frame', folded.map((r) => r.name).join(','));
+  const sum = (xs) => xs.reduce((a, r) => a + r.amountCents, 0);
+  check('the other lines are untouched', folded.length === rows.length - 1 && sum(folded) === sum(rows));
+  // A blank label means "its own line", not a group called "".
+  check('a blank label prints on its own', folded.some((r) => r.name === item(ls.items, 'slats').name));
+  // Keyed by role, so it survives a design change exactly like a rename does.
+  const resized = buildLineState('fence', { ...s, totalLengthFt: 80 }, pb, ov);
+  check('fusing survives an option change', item(resized.items, 'posts').group === 'Steel frame');
 }
 
 // ── 15. Duplicating a saved quote ─────────────────────────────────────────────
