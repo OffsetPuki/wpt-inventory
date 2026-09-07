@@ -964,6 +964,9 @@ export function buildLineState(type, state, priceBook, overrides) {
     return {
       ...it,
       name: renamed ? o.name : it.name,
+      // `group`: lines sharing one print as ONE row on the customer's quote
+      // (see foldGroups). Presentation only — never touches the price.
+      group: o.group,
       qty: o.qty != null ? o.qty : it.qty,
       rate: nextRate,
       edited: o.qty != null || o.rate != null || renamed,
@@ -980,7 +983,7 @@ export function buildLineState(type, state, priceBook, overrides) {
     // materialId/unit ride along when the line was added off the material
     // library, so a hand-added length of angle iron lands in the buy list too.
     merged.push({
-      key, name: o.name || 'Custom line', kind: o.kind || 'flat',
+      key, name: o.name || 'Custom line', kind: o.kind || 'flat', group: o.group,
       qty: o.qty ?? 1, rate: o.rate ?? 0, edited: true, custom: true,
       ...(o.materialId ? { materialId: o.materialId, unit: o.unit || '' } : {}),
     });
@@ -1060,6 +1063,26 @@ export function buildLineState(type, state, priceBook, overrides) {
   };
 
   return { items: merged, removedItems, labor, install, reordered: !!(order && order.length) };
+}
+
+/**
+ * Fold the priced lines into what the CUSTOMER reads. Rows with the same
+ * `group` label become one row named after the group, amounts summed, sitting
+ * where the first member sat — so "Post + Rafter + Purlin" can print as a
+ * single "Steel frame" line while the builder still shows every piece.
+ * rows = [{ name, group?, amountCents }] → [{ name, amountCents }].
+ */
+export function foldGroups(rows) {
+  const out = [];
+  const byGroup = new Map();
+  for (const r of rows) {
+    const group = typeof r.group === 'string' ? r.group.trim() : '';
+    if (!group) { out.push({ name: r.name, amountCents: r.amountCents }); continue; }
+    const row = byGroup.get(group);
+    if (row) row.amountCents += r.amountCents;
+    else { const fresh = { name: group, amountCents: r.amountCents }; byGroup.set(group, fresh); out.push(fresh); }
+  }
+  return out;
 }
 
 // -----------------------------------------------------------------------------

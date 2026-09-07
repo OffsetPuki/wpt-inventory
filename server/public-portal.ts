@@ -21,7 +21,7 @@ import { insertNumbered } from "./finance";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
-import { deriveItems, lineCost, buildLineState, materialTotals } from "../client/src/quote/lib/estimate.js";
+import { deriveItems, lineCost, buildLineState, materialTotals, foldGroups } from "../client/src/quote/lib/estimate.js";
 import { computeTotals } from "../client/src/quote/lib/quote.js";
 import { distributeToTotal } from "../client/src/quote/lib/calc.js";
 // The same three helpers the builder uses to describe the design, so the
@@ -190,9 +190,11 @@ export function quoteDocument(quote: Quote): QuoteDoc | null {
     // total across the items so the parts sum exactly to the material line.
     const items: any[] = lineState.items || [];
     const prices = distributeToTotal(items.map((it) => lineCost(it)), totals.lines.material.total);
-    const materials = items
-      .map((it, i) => ({ name: str(String(it.name)), amountCents: cents(prices[i]) }))
-      .filter((l) => l.amountCents > 0);
+    // Lines the owner fused under one label print as a single row — the
+    // builder keeps every piece, the customer reads "Steel frame".
+    const materials: { name: string; amountCents: number }[] = foldGroups(
+      items.map((it, i) => ({ name: str(String(it.name)), group: str(it.group), amountCents: cents(prices[i]) })),
+    ).filter((l: { amountCents: number }) => l.amountCents > 0);
 
     const services: { name: string; amountCents: number }[] = [];
     if (totals.lines.labor.total > 0) {

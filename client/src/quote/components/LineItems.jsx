@@ -101,6 +101,21 @@ function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
             </span>
           </>
         )}
+        {/* Lines fused under the same name print as ONE row on the customer's
+            quote (amounts added up). You still see every piece here, and the
+            buy list is untouched. Blank = the line prints on its own. */}
+        <span className="line-field">
+          <label>Fuse into</label>
+          <input
+            className="cell"
+            style={{ width: '11rem' }}
+            list="line-groups"
+            placeholder="(its own line)"
+            value={item.group || ''}
+            title="Type the same name on several lines and the customer sees them as one line, amounts added up. Blank = prints on its own."
+            onChange={(e) => onEdit(item.key, 'group', e.target.value)}
+          />
+        </span>
       </div>
     </div>
   );
@@ -253,6 +268,13 @@ export default function LineItems({
       )}
 
       <div className="lines">
+        {/* The fuse names already used on this quote, so the second line picks
+            the same spelling instead of starting a group of its own. */}
+        <datalist id="line-groups">
+          {[...new Set(items.map((it) => (it.group || '').trim()).filter(Boolean))].map((g) => (
+            <option key={g} value={g} />
+          ))}
+        </datalist>
         {items.map((item, i) => (
           <ItemRow
             key={item.key}
