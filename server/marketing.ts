@@ -605,6 +605,17 @@ export function registerMarketingRoutes(app: Express): void {
         details: { published: body.published },
       });
     }
+    // What the website shows changed — log old and new, like create/delete
+    // already do, so a bad edit can be traced and undone.
+    const changed = (["title", "category", "photoUrl"] as const).filter(
+      (k) => body[k] !== undefined && body[k] !== before[k],
+    );
+    if (changed.length) {
+      audit(req, "marketing.portfolio_update", {
+        targetType: "portfolio", targetId: id, targetName: row.title,
+        details: Object.fromEntries(changed.map((k) => [k, { from: before[k], to: row[k] }])),
+      });
+    }
     res.json(row);
   });
 
