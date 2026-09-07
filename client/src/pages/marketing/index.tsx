@@ -25,6 +25,7 @@ import {
   Globe,
   Image as ImageIcon,
   Loader2,
+  Pencil,
   Plus,
   Star,
   Trash2,
@@ -399,26 +400,37 @@ function ReviewsTab() {
 // ─── Portfolio tab ────────────────────────────────────────────────────────────
 // "Recent work" photos published to the cjmmetals.com gallery feed.
 
-function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+// One dialog for both: pass `item` to edit an existing photo's title, category
+// or picture (PATCH); leave it out to add a new one (POST).
+function PortfolioDialog({
+  open,
+  onClose,
+  item,
+}: {
+  open: boolean;
+  onClose: () => void;
+  item?: PortfolioItem;
+}) {
+  const [title, setTitle] = useState(item?.title ?? "");
+  const [category, setCategory] = useState(item?.category ?? "");
+  const [photoUrl, setPhotoUrl] = useState<string | null>(item?.photoUrl ?? null);
   const [uploading, setUploading] = useState(false);
 
   const create = useApiMutation({
     request: () => ({
-      method: "POST",
-      url: "/api/marketing/portfolio",
+      method: item ? "PATCH" : "POST",
+      url: item ? `/api/marketing/portfolio/${item.id}` : "/api/marketing/portfolio",
       body: {
         title: title.trim(),
         category: category.trim() || null,
         photoUrl,
-        published: true,
+        // Editing leaves Live/Hidden exactly as the owner set it.
+        ...(item ? {} : { published: true }),
       },
     }),
     invalidate: [["marketing", "portfolio"]],
-    successTitle: "Added to the portfolio",
-    errorTitle: "Could not add photo",
+    successTitle: item ? "Photo updated — the site picks it up within ~5 minutes" : "Added to the portfolio",
+    errorTitle: item ? "Could not save changes" : "Could not add photo",
     onSuccess: onClose,
   });
 
@@ -434,7 +446,7 @@ function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add work photo">
+    <Modal open={open} onClose={onClose} title={item ? "Edit work photo" : "Add work photo"}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -485,7 +497,7 @@ function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
         <button type="submit" disabled={create.isPending || uploading} className={cn(primaryBtn, "mt-1 justify-center")}>
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Add to portfolio
+          {item ? "Save changes" : "Add to portfolio"}
         </button>
       </form>
     </Modal>
@@ -494,6 +506,7 @@ function PortfolioDialog({ open, onClose }: { open: boolean; onClose: () => void
 
 function PortfolioTab() {
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<PortfolioItem | null>(null);
 
   const { data: items = [], isLoading } = useQuery<PortfolioItem[]>({
     queryKey: ["marketing", "portfolio"],
@@ -549,7 +562,10 @@ function PortfolioTab() {
                   <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
                   {it.category && <p className="text-xs text-muted-foreground">{it.category}</p>}
                 </div>
-                <div className="flex items-center justify-between gap-2">
+                {/* flex-wrap: in the phone's two-column grid the three buttons
+                    are wider than the card, and overflow-hidden would clip the
+                    Delete button. The icon pair drops to its own line instead. */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
                     onClick={() => togglePublished.mutate(it)}
                     disabled={togglePublished.isPending}
@@ -562,15 +578,25 @@ function PortfolioTab() {
                     <Globe className="h-3.5 w-3.5" />
                     {it.published ? "Live" : "Hidden"}
                   </button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Remove "${it.title}" from the portfolio?`)) remove.mutate(it);
-                    }}
-                    className={cn(smallBtn, "text-destructive hover:border-destructive")}
-                    aria-label="Delete"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      onClick={() => setEditing(it)}
+                      className={smallBtn}
+                      aria-label="Edit"
+                      title="Edit title, category or photo"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Remove "${it.title}" from the portfolio?`)) remove.mutate(it);
+                      }}
+                      className={cn(smallBtn, "text-destructive hover:border-destructive")}
+                      aria-label="Delete"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -579,6 +605,10 @@ function PortfolioTab() {
       )}
 
       {addOpen && <PortfolioDialog open={addOpen} onClose={() => setAddOpen(false)} />}
+      {/* Keyed by id so switching photos remounts the dialog with fresh fields. */}
+      {editing && (
+        <PortfolioDialog key={editing.id} open item={editing} onClose={() => setEditing(null)} />
+      )}
     </div>
   );
 }
