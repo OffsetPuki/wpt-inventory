@@ -494,6 +494,14 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .lead-ref.none { color: var(--steel); font-size: 1.05rem; font-style: italic; }
 .qa .lead-service { margin-left: 14px; font-size: 0.62rem; letter-spacing: 0.24em; text-transform: uppercase; color: var(--steel); }
 .qa .lead-time { font-size: 0.8rem; color: var(--steel); white-space: nowrap; }
+.qa .lead-head-right { display: flex; align-items: baseline; gap: 14px; }
+/* Same quiet control as the attachment list's Remove — the card's one big
+   button stays "start a quote". */
+.qa .lead-delete {
+  background: transparent; border: 1px solid var(--line-strong); color: #d24d3e;
+  font-size: 0.72rem; padding: 3px 8px; cursor: pointer;
+}
+.qa .lead-delete:hover { border-color: #d24d3e; }
 .qa .lead-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 28px; align-items: start; }
 .qa .lead-body:has(> .lead-info:only-child) { grid-template-columns: 1fr; }
 .qa .lead-customer { font-size: 1.05rem; font-weight: 500; }

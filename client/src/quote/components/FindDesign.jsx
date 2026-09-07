@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { fetchLeads, normalizeRef } from '../lib/leads.js';
+import { toast } from '@/components/ui/toaster';
+import { deleteLead, fetchLeads, normalizeRef } from '../lib/leads.js';
 import { parseLead } from '../lib/designSpec.js';
 import { typeLabel } from '../data/configurators.js';
 import Preview from './Preview.jsx';
@@ -12,7 +13,7 @@ function fmtTime(iso) {
   });
 }
 
-function LeadCard({ lead, onStart }) {
+function LeadCard({ lead, onStart, onDelete }) {
   const parsed = parseLead(lead);
   const contactBits = [
     lead.phone, lead.email,
@@ -29,7 +30,12 @@ function LeadCard({ lead, onStart }) {
             : <span className="lead-ref none">No design code</span>}
           <span className="lead-service">{lead.service}{lead.type === 'alert' ? ' · delivery-alert copy' : ''}</span>
         </div>
-        <span className="lead-time">{fmtTime(lead.time)}</span>
+        <div className="lead-head-right">
+          <span className="lead-time">{fmtTime(lead.time)}</span>
+          {lead.ref && onDelete && (
+            <button type="button" className="lead-delete" onClick={() => onDelete(lead)}>Delete</button>
+          )}
+        </div>
       </div>
 
       <div className="lead-body">
@@ -115,6 +121,20 @@ export default function FindDesign({ onStartQuote }) {
 
   const showRecent = () => run({ recent: 25 }, 'Latest website leads');
 
+  // Drops the row from the list in place — no refetch, so the owner clearing
+  // several test designs in a row isn't bounced back to the top each time.
+  const remove = async (lead) => {
+    const who = lead.name ? ` (${lead.name})` : '';
+    if (!window.confirm(`Delete design ${lead.ref}${who}? The lead in the CRM, if there is one, stays.`)) return;
+    try {
+      await deleteLead(lead.ref);
+      setLeads((rows) => (rows || []).filter((l) => l.ref !== lead.ref));
+      toast({ variant: 'success', title: `Design ${lead.ref} deleted` });
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Could not delete design', description: err.message || String(err) });
+    }
+  };
+
   // The most common visit is "who wrote in?" — load the recent list right away.
   useEffect(() => { showRecent(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -158,7 +178,7 @@ export default function FindDesign({ onStartQuote }) {
             )}
             <div className="lead-list">
               {leads.map((lead, i) => (
-                <LeadCard key={`${lead.ref}-${lead.time}-${i}`} lead={lead} onStart={onStartQuote} />
+                <LeadCard key={`${lead.ref}-${lead.time}-${i}`} lead={lead} onStart={onStartQuote} onDelete={remove} />
               ))}
             </div>
           </>

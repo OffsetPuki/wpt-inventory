@@ -263,6 +263,25 @@ export function registerQuoteRoutes(app: Express): void {
     res.json({ ok: true, leads: rows.map(webDesignRowToLead) });
   });
 
+  // Remove a website design from the lookup — mostly the test submissions the
+  // owner makes while checking the site. Hard delete: web_designs has no
+  // soft-delete column and nothing else keys on the row. The CRM lead (if the
+  // form made one) stays; its design panel simply goes blank. The PNG snapshot
+  // stays on disk, like every upload. Owner-only, like the other deletes that
+  // touch customer records.
+  app.delete("/api/quotes/designs/:ref", requireElevated, (req, res) => {
+    const ref = String(req.params.ref).trim().toUpperCase();
+    const row = sqlite.prepare("SELECT id, ref, name FROM web_designs WHERE upper(ref) = ?")
+      .get(ref) as { id: number; ref: string; name: string | null } | undefined;
+    if (!row) return res.status(404).json({ message: "Design not found" });
+    sqlite.prepare("DELETE FROM web_designs WHERE id = ?").run(row.id);
+    audit(req, "quote.design_delete", {
+      targetType: "design", targetId: row.id, targetName: row.ref,
+      details: { name: row.name },
+    });
+    res.status(204).end();
+  });
+
   // ─── Costing report (literal path — registered before /:id) ───────────────
   // Quoted vs actual, per accepted quote. The quoted side re-derives from the
   // stored session (against its price-book snapshot). The actual side reads

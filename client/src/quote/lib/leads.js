@@ -83,3 +83,23 @@ export async function fetchLeads({ ref, recent } = {}) {
   }
   return (Array.isArray(data.leads) ? data.leads : []).map(normalizeLead);
 }
+
+/**
+ * Delete a website design by its code. Resolves on success; throws an Error
+ * with an owner-readable message otherwise.
+ */
+export async function deleteLead(ref) {
+  const headers = {};
+  const token = getAuthToken();
+  if (token) headers['X-Auth'] = token;
+  let res;
+  try {
+    res = await fetch(`/api/quotes/designs/${encodeURIComponent(ref)}`, { method: 'DELETE', headers });
+  } catch {
+    throw new Error('Could not reach the suite. Check your connection and try again.');
+  }
+  if (res.status === 401) throw new Error('Your session expired — sign in again.');
+  if (res.status === 403) throw new Error('Only the owner can delete a design.');
+  if (res.status === 404) throw new Error('That design is already gone.');
+  if (!res.ok) throw new Error(`Could not delete the design (HTTP ${res.status}).`);
+}
