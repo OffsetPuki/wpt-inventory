@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import { useApiMutation } from "@/hooks/useApiMutation";
@@ -21,9 +21,25 @@ import {
   type ContractKind,
   type ContractStatus,
 } from "@shared/pm-schema";
-import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download, Eye } from "lucide-react";
+import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download, Eye, Paperclip, Upload } from "lucide-react";
 
 type ContractRow = Contract & { projectName: string | null };
+
+// Multipart, so not apiRequest — same shape as the compliance-document upload.
+async function uploadSignedCopy(contractId: number, file: File): Promise<Contract> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const token = getAuthToken();
+  const res = await fetch(`/api/pm/contracts/${contractId}/file`, {
+    method: "POST",
+    headers: token ? { "X-Auth": token } : {},
+    body: fd,
+  });
+  if (!res.ok) {
+    throw new Error((await res.json().catch(() => null))?.message ?? "Upload failed");
+  }
+  return res.json();
+}
 
 // A fence shop papers job contracts and SOWs, not NDAs/MSAs — those kinds are
 // retired from the UI but kept in CONTRACT_KINDS (column type + zod) so
@@ -345,9 +361,18 @@ function ContractDialog({
   // across kind switches (shared keys like paymentTerms carry over); only the
   // current kind's keys are saved.
   const [fieldVals, setFieldVals] = useState<Record<string, string>>({});
+  // The owner's own contract file (or the countersigned copy of one written
+  // here). `hasFile` mirrors the stored row and flips on upload/remove, since
+  // the `contract` prop doesn't refetch while the dialog is open.
+  const [file, setFile] = useState<File | null>(null);
+  const [hasFile, setHasFile] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const qc = useQueryClient();
 
   useEffect(() => {
     if (!open) return;
+    setFile(null);
+    setHasFile(!!contract?.fileUrl);
     // Prefill only seeds a NEW contract; editing always shows the stored row.
     const pre = contract ? null : prefill;
     setTitle(contract?.title ?? pre?.title ?? "");
@@ -409,10 +434,29 @@ function ContractDialog({
     invalidate: [["pm-contracts"]],
     successTitle: contract ? "Contract updated" : "Contract created",
     errorTitle: "Could not save",
-    onSuccess: (row) => {
+    onSuccess: async (row) => {
+      let final = row;
+      if (file) {
+        setUploading(true);
+        try {
+          final = await uploadSignedCopy(row.id, file);
+          toast({ variant: "success", title: "Signed copy attached" });
+        } catch (e: any) {
+          // The contract itself is saved — say so, and leave it for a retry
+          // from Edit rather than losing what was typed.
+          toast({
+            variant: "destructive",
+            title: "Contract saved, but the file didn't upload",
+            description: e?.message,
+          });
+        } finally {
+          setUploading(false);
+          qc.invalidateQueries({ queryKey: ["pm-contracts"] });
+        }
+      }
       onClose();
       // New contract → open it right away so Download / Print is one click.
-      if (!contract) onCreated?.(row);
+      if (!contract) onCreated?.(final);
     },
   });
 
@@ -422,6 +466,15 @@ function ContractDialog({
     successTitle: "Contract deleted",
     errorTitle: "Could not delete",
     onSuccess: onClose,
+  });
+
+  // `hasFile` is only ever true for a stored contract, so `contract!` holds.
+  const removeFile = useApiMutation({
+    request: () => ({ method: "DELETE", url: `/api/pm/contracts/${contract!.id}/file` }),
+    invalidate: [["pm-contracts"]],
+    successTitle: "Signed copy removed",
+    errorTitle: "Could not remove the file",
+    onSuccess: () => setHasFile(false),
   });
 
   return (
@@ -440,10 +493,13 @@ function ContractDialog({
           }
           // Per-kind required fields — a job contract without a scope or
           // payment terms isn't a document worth sending.
+          // …unless the owner is attaching their own file: that document
+          // carries its own scope and terms, the sections are for the one the
+          // suite writes.
           const missing = (KIND_FIELDS[kind] ?? []).filter(
             (f) => f.required && !(fieldVals[f.key] ?? "").trim(),
           );
-          if (missing.length > 0) {
+          if (missing.length > 0 && !file && !hasFile) {
             toast({
               variant: "destructive",
               title: `${CONTRACT_KIND_LABELS[kind]} needs: ${missing.map((f) => f.label).join(", ")}`,
@@ -645,6 +701,46 @@ function ContractDialog({
           <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
 
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Signed copy (PDF or Word, optional)</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground hover:border-primary">
+              <Upload className="h-4 w-4" />
+              {file ? "Change file" : hasFile ? "Replace file" : "Choose file"}
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,image/*"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {file ? (
+              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Paperclip className="h-4 w-4" />
+                {file.name}
+              </span>
+            ) : hasFile ? (
+              <>
+                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Paperclip className="h-4 w-4" />
+                  A signed copy is attached
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeFile.mutate()}
+                  disabled={removeFile.isPending}
+                  className="text-sm text-red-600 hover:underline disabled:opacity-60 dark:text-red-400"
+                >
+                  Remove
+                </button>
+              </>
+            ) : null}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            A contract drawn up outside the suite goes here, on the job it belongs to. With a file attached, the sections above are optional.
+          </span>
+        </div>
+
         <div className="mt-1 flex items-center gap-2">
           {contract && (
             <button
@@ -661,11 +757,11 @@ function ContractDialog({
           )}
           <button
             type="submit"
-            disabled={save.isPending}
+            disabled={save.isPending || uploading}
             className="ml-auto flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
           >
-            {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {contract ? "Save changes" : "Create contract"}
+            {(save.isPending || uploading) && <Loader2 className="h-4 w-4 animate-spin" />}
+            {uploading ? "Uploading…" : contract ? "Save changes" : "Create contract"}
           </button>
         </div>
       </form>
@@ -689,7 +785,30 @@ function ContractViewModal({
   shop: ShopInfo;
 }) {
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [fileBusy, setFileBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // The uploaded signed copy — fetched with the session header, so a plain
+  // <a href> won't do; same blob-and-click as the compliance documents.
+  const downloadSigned = async () => {
+    if (!contract) return;
+    setFileBusy(true);
+    try {
+      const res = await apiRequest("GET", `/api/pm/contracts/${contract.id}/file`);
+      const blob = await res.blob();
+      const name =
+        res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ?? contract.title;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not download the signed copy", description: e?.message });
+    } finally {
+      setFileBusy(false);
+    }
+  };
   // Revoke the previous blob URL whenever it's replaced or the modal unmounts.
   useEffect(() => {
     return () => {
@@ -797,6 +916,17 @@ function ContractViewModal({
               >
                 <Pencil className="h-4 w-4" />
                 Edit
+              </button>
+            )}
+            {contract.fileUrl && (
+              <button
+                onClick={downloadSigned}
+                disabled={fileBusy}
+                className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60"
+                title="The uploaded signed copy"
+              >
+                {fileBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                Signed copy
               </button>
             )}
             <button
@@ -1027,7 +1157,14 @@ export default function PmContractsPage() {
                   onClick={() => setViewing(c)}
                   className="cursor-pointer transition-colors hover:bg-accent/50"
                 >
-                  <td className="px-4 py-3 font-medium text-foreground">{c.title}</td>
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    <span className="flex items-center gap-1.5">
+                      {c.title}
+                      {c.fileUrl && (
+                        <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Signed copy attached" />
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <Chip tone={KIND_TONE[c.kind] ?? "zinc"}>{CONTRACT_KIND_LABELS[c.kind]}</Chip>
                   </td>
