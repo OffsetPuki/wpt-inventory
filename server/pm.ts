@@ -687,7 +687,9 @@ export function registerPmRoutes(app: Express): void {
     if (!existing) return res.status(404).json({ message: "Contract not found" });
     let patch;
     try {
-      patch = insertContractSchema.partial().parse(req.body);
+      // The signed copy is set only by the upload route below — a JSON patch
+      // can't point the record at some other file in the uploads dir.
+      patch = insertContractSchema.partial().omit({ fileUrl: true }).parse(req.body);
     } catch (e: any) {
       return res.status(400).json({ message: e.message || "Invalid request" });
     }
@@ -699,6 +701,70 @@ export function registerPmRoutes(app: Express): void {
     }
     const updated = db.update(contracts).set(patch).where(eq(contracts.id, id)).returning().get();
     res.json(updated);
+  });
+
+  // ── Signed copy ────────────────────────────────────────────────────────────
+  // The owner's own contract file — one drawn up outside the suite, or the
+  // countersigned PDF of one written here — attached to the record on its job.
+  // Same multer allowlist and uploads dir as the compliance documents, and the
+  // same rule: a PDF is never reachable through the public /uploads, only
+  // through the authed GET below. The file stays on disk when replaced or
+  // removed, like every other upload.
+
+  const liveContract = (id: number) => db.select().from(contracts)
+    .where(and(eq(contracts.id, id), isNull(contracts.deletedAt))).get();
+
+  app.post(
+    "/api/pm/contracts/:id/file",
+    requireElevated,
+    // Existence first, so a bad id doesn't leave an orphan file behind.
+    (req, res, next) => (liveContract(pid(req.params.id)) ? next() : res.status(404).json({ message: "Contract not found" })),
+    (req, res, next) => {
+      docUpload.single("file")(req, res, (err: any) => {
+        if (err) return res.status(400).json({ message: err.message || "Upload rejected" });
+        next();
+      });
+    },
+    (req, res) => {
+      const id = pid(req.params.id);
+      const existing = liveContract(id)!;
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      const updated = db.update(contracts).set({ fileUrl: req.file.filename })
+        .where(eq(contracts.id, id)).returning().get();
+      audit(req, "pm.contract_file", {
+        targetType: "pm_contract", targetId: id, targetName: existing.title,
+        details: { file: req.file.originalname, replaced: !!existing.fileUrl },
+      });
+      res.json(updated);
+    },
+  );
+
+  app.get("/api/pm/contracts/:id/file", requireAuth, (req, res) => {
+    const row = liveContract(pid(req.params.id));
+    if (!row?.fileUrl) return res.status(404).json({ message: "No signed copy on this contract" });
+    const safeName = path.basename(row.fileUrl); // strips any traversal
+    const ext = path.extname(safeName).toLowerCase();
+    const mime = DOC_EXT_TO_MIME[ext];
+    const filePath = path.join(uploadsDir, safeName);
+    if (!mime || !fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "File missing from storage" });
+    }
+    res.setHeader("Content-Type", mime);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const dlName = `${row.title.replace(/[^\w .-]+/g, "_")}${ext}`;
+    res.setHeader("Content-Disposition", `attachment; filename="${dlName}"`);
+    res.sendFile(filePath);
+  });
+
+  app.delete("/api/pm/contracts/:id/file", requireElevated, (req, res) => {
+    const id = pid(req.params.id);
+    const existing = liveContract(id);
+    if (!existing) return res.status(404).json({ message: "Contract not found" });
+    db.update(contracts).set({ fileUrl: null }).where(eq(contracts.id, id)).run();
+    audit(req, "pm.contract_file_remove", {
+      targetType: "pm_contract", targetId: id, targetName: existing.title,
+    });
+    res.json({ ok: true });
   });
 
   registerSoftDelete(app, "/api/pm/contracts/:id", requireElevated, {
