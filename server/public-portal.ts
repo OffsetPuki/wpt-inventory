@@ -8,12 +8,15 @@ import { mailEnabled, sendMail, sendOwnerMail, optOutEmail } from "./mailer";
 import { renderTemplate, firstNameOf } from "./email-templates";
 import { renderPublicPage } from "./legal";
 import { parseJson } from "./quotes";
-import { quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, type Quote } from "../shared/quote-schema";
+import {
+  quotes, QUOTE_TYPES, QUOTE_TYPE_LABELS, QUOTE_DECLINE_REASONS,
+  type Quote, type QuoteDeclineReason,
+} from "../shared/quote-schema";
 import { reviews, marketingSettings } from "../shared/marketing-schema";
 import { pmTasks } from "../shared/pm-schema"; // Package C: tasks live on the pm board
 import { todayLocal, pid, usd } from "./http-util";
 import { requireElevated } from "./auth";
-import { clients } from "../shared/crm-schema";
+import { clients, WIN_LOSS_REASON_LABELS } from "../shared/crm-schema";
 import { invoices } from "../shared/finance-schema";
 import { projects } from "../shared/schema";
 import { onQuoteEvent, findOrCreateClientByContact, logEmailActivity } from "./crm";
@@ -495,6 +498,7 @@ export function registerPublicPortalRoutes(app: Express): void {
         createdAt: iso(quote.createdAt.getTime()),
         sentAt: iso(quote.sentAt),
         acceptedAt: iso(quote.acceptedAt),
+        declinedAt: iso(quote.declinedAt),
         shop: currentShop(),
         lines: bestEffortLines(doc),
         // The whole printed document — spec, grouped rows, totals ladder — so
@@ -889,6 +893,79 @@ export function registerPublicPortalRoutes(app: Express): void {
     }
 
     res.json({ ok: true, status: "accepted" });
+  });
+
+  // Customer declines online, saying why (one of QUOTE_DECLINE_REASONS — junk
+  // lands as "other", a public form must not 400). The matching lead goes
+  // lost with the same reason, and the owner gets one email. An accepted
+  // quote can't be undone from the link — that is a phone call; the page
+  // never shows the button once accepted, so 409 only meets a stale tab.
+  app.post("/api/public/quote/:token/decline", publicLimiter(30), (req, res) => {
+    const quote = findSharedQuote(String(req.params.token));
+    if (!quote) return res.status(404).json({ ok: false });
+    if (quote.status === "accepted") return res.status(409).json({ ok: false, reason: "accepted" });
+    if (quote.status === "declined") {
+      return res.json({ ok: true, status: "declined", alreadyDeclined: true });
+    }
+
+    const reason: QuoteDeclineReason = (QUOTE_DECLINE_REASONS as readonly string[]).includes(req.body?.reason)
+      ? req.body.reason
+      : "other";
+    const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) : "";
+    const ip = req.ip ?? null;
+    db.update(quotes).set({
+      status: "declined",
+      declinedAt: Date.now(),
+      declineReason: reason,
+      declineNote: note || null,
+    }).where(eq(quotes.id, quote.id)).run();
+
+    setImmediate(() => {
+      try {
+        storage.appendAudit({
+          userId: null,
+          userName: "cjmmetals.com",
+          role: null,
+          action: "quote.declined",
+          targetType: "quote",
+          targetId: quote.id,
+          targetName: quote.number,
+          ip,
+          details: { totalCents: quote.totalCents, reason, hasNote: !!note },
+        });
+      } catch {
+        /* audit is best-effort */
+      }
+    });
+
+    const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
+      quote.payload, {},
+    ).customer ?? {};
+    onQuoteEvent("declined", {
+      quoteNumber: quote.number,
+      name: quote.customerName,
+      email: cust.email,
+      phone: cust.phone,
+      designRef: quote.designRef,
+      totalCents: quote.totalCents,
+      reason,
+    });
+
+    if (mailEnabled()) {
+      const text =
+        `Quote ${quote.number} was declined on cjmmetals.com.\n\n` +
+        `Customer:  ${quote.customerName || "(no name on quote)"}\n` +
+        `Project:   ${QUOTE_TYPE_LABELS[quote.type]}\n` +
+        `Total:     $${(quote.totalCents / 100).toFixed(2)}\n` +
+        `Reason:    ${WIN_LOSS_REASON_LABELS[reason]}\n` +
+        (note ? `\nCustomer note:\n${note}\n` : "") +
+        `\nThe lead is marked lost in CRM with that reason.`;
+      setImmediate(() => {
+        void sendOwnerMail({ subject: `[CJM Suite] Quote declined — ${quote.number}`, text });
+      });
+    }
+
+    res.json({ ok: true, status: "declined" });
   });
 
   // ─── Review invitations ───────────────────────────────────────────────────

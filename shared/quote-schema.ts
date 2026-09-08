@@ -23,6 +23,13 @@ export type QuoteType = (typeof QUOTE_TYPES)[number];
 export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined"] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 
+// Why a customer declined online — the subset of CRM's WIN_LOSS_REASONS a
+// customer can pick for themselves. Same keys on purpose: the matching lead
+// is marked lost with the reason as-is, so the close-rate report needs no
+// mapping. Labels come from WIN_LOSS_REASON_LABELS (crm-schema).
+export const QUOTE_DECLINE_REASONS = ["price", "lost_to_competitor", "timing", "scope_changed", "other"] as const;
+export type QuoteDeclineReason = (typeof QUOTE_DECLINE_REASONS)[number];
+
 export const quotes = sqliteTable("quotes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: text("number").notNull().unique(), // "Q-2026-0001", server-assigned
@@ -42,6 +49,9 @@ export const quotes = sqliteTable("quotes", {
   acceptedAt: integer("accepted_at"), // unix ms — customer accepted via the link
   acceptNote: text("accept_note"), // optional message left when accepting
   acceptIp: text("accept_ip"), // where the acceptance came from (dispute trail)
+  declinedAt: integer("declined_at"), // unix ms — customer declined via the link
+  declineReason: text("decline_reason", { enum: QUOTE_DECLINE_REASONS }),
+  declineNote: text("decline_note"), // optional message left when declining
   // Phase F follow-up ladder stamps (sweep-managed, server/automations.ts).
   // fu1 reuses the pre-Phase-F one-shot "nudge" column — already-nudged quotes
   // skip straight to follow-up #2.
@@ -78,6 +88,9 @@ export const insertQuoteSchema = createInsertSchema(quotes).omit({
   acceptedAt: true,
   acceptNote: true,
   acceptIp: true,
+  declinedAt: true,
+  declineReason: true,
+  declineNote: true,
   fu1SentAt: true, // sweep-managed (Phase F ladder)
   fu2SentAt: true,
   createdAt: true,
