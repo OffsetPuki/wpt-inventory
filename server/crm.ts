@@ -8,8 +8,8 @@ import { requireAuth, requireElevated } from "./auth";
 import {
   clients, leads, crmActivities,
   insertClientSchema, insertLeadSchema, insertCrmActivitySchema,
-  LEAD_SOURCES, LEAD_STAGES, LEAD_SITES, CLIENT_STATUSES,
-  type Lead, type LeadStage, type LeadSource, type LeadSite, type ClientStatus,
+  LEAD_SOURCES, LEAD_STAGES, LEAD_SITES, CLIENT_STATUSES, WIN_LOSS_REASON_LABELS,
+  type Lead, type LeadStage, type LeadSource, type LeadSite, type ClientStatus, type WinLossReason,
 } from "../shared/crm-schema";
 // Cross-module automation hooks. These TABLE OBJECTS are safe to import (pure
 // schema definitions); the underlying tables are created by the owning
@@ -393,10 +393,11 @@ export function logEmailActivity(info: {
 }
 
 export function onQuoteEvent(
-  evt: "sent" | "accepted",
+  evt: "sent" | "accepted" | "declined",
   info: QuoteContactInfo & {
     quoteNumber: string;
     totalCents?: number;
+    reason?: WinLossReason; // declined: what the customer picked
   },
 ): void {
   setImmediate(() => {
@@ -421,6 +422,9 @@ export function onQuoteEvent(
       // Fix 3: unknown contact — CREATE the CRM records instead of dropping
       // the event. Before this, a stranger accepting a quote left no client,
       // no lead, nothing.
+      const declineNote = `Declined quote ${info.quoteNumber} on cjmmetals.com — ${
+        WIN_LOSS_REASON_LABELS[info.reason ?? "other"]
+      }`;
       if (!lead) {
         const clientId = evt === "accepted" ? findOrCreateClientByContact(info) : null;
         const created = db.insert(leads).values({
@@ -428,13 +432,15 @@ export function onQuoteEvent(
           email: (info.email ?? "").trim() || (emailNorm || null),
           phone: (info.phone ?? "").trim() || null,
           source: info.designRef ? "website" : "other",
-          stage: evt === "accepted" ? "won" : "quote_sent",
+          stage: evt === "accepted" ? "won" : evt === "declined" ? "lost" : "quote_sent",
           clientId,
           lastContactAt: now,
           estimatedValueCents: info.totalCents || 0,
           ...(evt === "accepted"
             ? { winLossReason: "good_fit" as const, revenueClosedCents: info.totalCents || 0 }
-            : {}),
+            : evt === "declined"
+              ? { winLossReason: info.reason ?? "other" }
+              : {}),
           notes: `Created from quote ${info.quoteNumber}`,
         }).returning().get();
         db.insert(crmActivities).values({
@@ -444,15 +450,55 @@ export function onQuoteEvent(
           notes: evt === "accepted"
             ? `Accepted quote ${info.quoteNumber} on cjmmetals.com`
               + (info.totalCents ? ` — $${(info.totalCents / 100).toFixed(2)}` : "")
-            : `Quote ${info.quoteNumber} shared with this contact`,
+            : evt === "declined"
+              ? declineNote
+              : `Quote ${info.quoteNumber} shared with this contact`,
         }).run();
         if (evt === "sent") ensureQuoteReminder(created, now);
-        else stampInvoiceLead(info.quoteNumber, created.id);
+        else if (evt === "accepted") stampInvoiceLead(info.quoteNumber, created.id);
         return;
       }
 
       if (evt === "sent") {
         bumpLeadForQuote(lead.id, now);
+        return;
+      }
+
+      // Declined → lose the lead with the customer's own reason. A won lead
+      // stays won (they already bought something else); a second decline of
+      // the same quote adds nothing.
+      if (evt === "declined") {
+        const already = db.select({ id: crmActivities.id }).from(crmActivities)
+          .where(and(
+            eq(crmActivities.entityType, "lead"),
+            eq(crmActivities.entityId, lead.id),
+            like(crmActivities.notes, `Declined quote ${info.quoteNumber} on cjmmetals.com%`),
+          ))
+          .get();
+        if (already) return;
+        if (lead.stage !== "won") {
+          db.update(leads).set({
+            stage: "lost",
+            winLossReason: info.reason ?? "other",
+            lastContactAt: now,
+            stale: false,
+          }).where(eq(leads.id, lead.id)).run();
+        }
+        db.insert(crmActivities).values({
+          entityType: "lead", entityId: lead.id, kind: "note", notes: declineNote,
+        }).run();
+        // The share put a "Follow up on quote" card on the board; the
+        // customer just answered it. Best-effort, like ensureQuoteReminder.
+        try {
+          db.update(pmTasks).set({ status: "done", completedAt: now }).where(and(
+            eq(pmTasks.leadId, lead.id),
+            eq(pmTasks.kind, "quote_reminder"),
+            sql`${pmTasks.status} != 'done'`,
+            isNull(pmTasks.deletedAt),
+          )).run();
+        } catch {
+          /* pm_tasks absent — never block the decline */
+        }
         return;
       }
 

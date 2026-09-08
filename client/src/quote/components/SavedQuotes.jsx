@@ -5,6 +5,7 @@ import { toast } from '@/components/ui/toaster';
 import { typeLabel } from '../data/configurators.js';
 import { fmtMoney } from '../lib/format.js';
 import ShareQuote from './ShareQuote.jsx';
+import { WIN_LOSS_REASON_LABELS } from '@shared/crm-schema';
 
 function fmtDate(iso) {
   const d = new Date(iso);
@@ -12,9 +13,9 @@ function fmtDate(iso) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Share lifecycle: draft (never shared) → sent (link created) → accepted
-// (customer clicked accept on the website).
-const STATUS_LABEL = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted' };
+// Share lifecycle: draft (never shared) → sent (link created) → accepted /
+// declined (customer clicked one or the other on the website).
+const STATUS_LABEL = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' };
 
 /**
  * Combined buy list across the checked quotes: one supplier order — total ft
@@ -220,6 +221,12 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                     />
                     <span className="sq-number">{q.number}</span>
                     <span className={`sq-status ${q.status || 'draft'}`}>{STATUS_LABEL[q.status] || 'Draft'}</span>
+                    {/* Why the customer said no — their note, if any, on hover. */}
+                    {q.status === 'declined' && q.declineReason && (
+                      <span className="sq-meta" title={q.declineNote || undefined}>
+                        {WIN_LOSS_REASON_LABELS[q.declineReason] || q.declineReason}{q.declineNote ? ' · “' + q.declineNote + '”' : ''}
+                      </span>
+                    )}
                     {/* Automated follow-up ladder state (Phase F) — the hourly
                         sweep emails sent quotes at 2 and 7 days unless the
                         customer unsubscribed. */}

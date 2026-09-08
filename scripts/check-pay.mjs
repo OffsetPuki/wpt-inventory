@@ -635,7 +635,50 @@ await check("a draft cannot be charged for, preview flag or not", async () => {
   }
 });
 
+// ─── Customer declines a quote online ────────────────────────────────────
+// The site's Decline button: reason recorded (junk → "other"), idempotent,
+// and an accepted quote can't be flipped from the link.
+
+const decToken = crypto.randomBytes(24).toString("hex");
+const decQuote = db.prepare(
+  "INSERT INTO quotes (number, type, customer_name, status, total_cents, payload, share_token, sent_at, created_at) " +
+  "VALUES (?, 'fence', 'Test Customer', 'sent', 500000, '{}', ?, ?, ?)",
+).run(`Q-DEC-${Date.now()}`, decToken, Date.now(), Date.now());
+const decline = (token, body) =>
+  fetch(`${BASE}/api/public/quote/${token}/decline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+const quoteRow = (id) => db.prepare("SELECT * FROM quotes WHERE id = ?").get(id);
+
+await check("declining records the reason and note; a junk reason lands as 'other'", async () => {
+  const res = await decline(decToken, { reason: "zzz", note: "  Going another way  " });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, "declined");
+  const row = quoteRow(decQuote.lastInsertRowid);
+  assert.equal(row.status, "declined");
+  assert.equal(row.decline_reason, "other");
+  assert.equal(row.decline_note, "Going another way");
+  assert.ok(row.declined_at > 0);
+});
+
+await check("a second decline is a no-op", async () => {
+  const res = await decline(decToken, { reason: "price" });
+  assert.equal((await res.json()).alreadyDeclined, true);
+  assert.equal(quoteRow(decQuote.lastInsertRowid).decline_reason, "other", "the first answer stands");
+});
+
+await check("an accepted quote cannot be declined from the link", async () => {
+  const accToken = crypto.randomBytes(24).toString("hex");
+  db.prepare("UPDATE quotes SET share_token = ? WHERE id = ?").run(accToken, depQuote.lastInsertRowid);
+  const res = await decline(accToken, { reason: "price" });
+  assert.equal(res.status, 409);
+  assert.equal(quoteRow(depQuote.lastInsertRowid).status, "accepted");
+});
+
 cleanup();
+db.prepare("DELETE FROM quotes WHERE id = ?").run(decQuote.lastInsertRowid);
 db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(draftId);
 for (const id of [invoice2Id, depId, balId, discId]) {
   db.prepare("DELETE FROM fin_invoice_payments WHERE invoice_id = ?").run(id);

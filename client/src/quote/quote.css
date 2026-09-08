@@ -537,6 +537,7 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 }
 .qa .sq-status.sent { background: #f6e0a8; border-color: #f6e0a8; color: #6a4a00; }
 .qa .sq-status.accepted { background: #dcead9; border-color: #dcead9; color: #2f5d31; }
+.qa .sq-status.declined { background: #f1dcd9; border-color: #f1dcd9; color: #7a2e2a; }
 
 /* Send-to-customer panel (Saved list rows + the details step) */
 .qa .share-panel {
