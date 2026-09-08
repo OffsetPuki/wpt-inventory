@@ -642,8 +642,17 @@ await check("a draft cannot be charged for, preview flag or not", async () => {
 const decToken = crypto.randomBytes(24).toString("hex");
 const decQuote = db.prepare(
   "INSERT INTO quotes (number, type, customer_name, status, total_cents, payload, share_token, sent_at, created_at) " +
-  "VALUES (?, 'fence', 'Test Customer', 'sent', 500000, '{}', ?, ?, ?)",
+  "VALUES (?, 'fence', 'Test Customer', 'sent', 500000, '{\"customer\":{\"phone\":\"(512) 555-0199\"}}', ?, ?, ?)",
 ).run(`Q-DEC-${Date.now()}`, decToken, Date.now(), Date.now());
+// The CRM lead this quote's phone number resolves to — every open lands on
+// its Activity timeline (and the decline below marks it lost).
+const decLead = db.prepare(
+  "INSERT INTO crm_leads (name, phone, stage, created_at) VALUES ('Test Customer', '512-555-0199', 'quote_sent', ?)",
+).run(Date.now());
+const openings = () => db.prepare(
+  "SELECT count(*) AS n FROM crm_activities WHERE entity_type = 'lead' AND entity_id = ? AND notes LIKE 'Opened quote %'",
+).get(decLead.lastInsertRowid).n;
+const settle = () => new Promise((r) => setTimeout(r, 200)); // the CRM hook runs after the response
 const decline = (token, body) =>
   fetch(`${BASE}/api/public/quote/${token}/decline`, {
     method: "POST",
@@ -660,12 +669,17 @@ await check("opening the quote page stamps a view; the image relay and the owner
   let row = quoteRow(decQuote.lastInsertRowid);
   assert.equal(row.view_count, 1);
   assert.ok(row.viewed_at > 0 && row.last_viewed_at === row.viewed_at);
+  await settle();
+  assert.equal(openings(), 1, "the open is on the lead's timeline");
   await get("?view=1&preview=1");
   assert.equal(quoteRow(decQuote.lastInsertRowid).view_count, 1, "the owner's preview is not an open");
   await get("?view=1");
   row = quoteRow(decQuote.lastInsertRowid);
   assert.equal(row.view_count, 2);
   assert.ok(row.last_viewed_at >= row.viewed_at, "first open stays put, latest moves");
+  await settle();
+  assert.equal(openings(), 2, "every open is logged, not just the first");
+  assert.equal(db.prepare("SELECT stage FROM crm_leads WHERE id = ?").get(decLead.lastInsertRowid).stage, "quote_sent", "an open moves no stage");
 });
 
 await check("declining records the reason and note; a junk reason lands as 'other'", async () => {
@@ -695,6 +709,9 @@ await check("an accepted quote cannot be declined from the link", async () => {
 
 cleanup();
 db.prepare("DELETE FROM quotes WHERE id = ?").run(decQuote.lastInsertRowid);
+db.prepare("DELETE FROM crm_activities WHERE entity_type = 'lead' AND entity_id = ?").run(decLead.lastInsertRowid);
+db.prepare("DELETE FROM pm_tasks WHERE lead_id = ?").run(decLead.lastInsertRowid);
+db.prepare("DELETE FROM crm_leads WHERE id = ?").run(decLead.lastInsertRowid);
 db.prepare("DELETE FROM fin_invoices WHERE id = ?").run(draftId);
 for (const id of [invoice2Id, depId, balId, discId]) {
   db.prepare("DELETE FROM fin_invoice_payments WHERE invoice_id = ?").run(id);

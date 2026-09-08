@@ -393,7 +393,7 @@ export function logEmailActivity(info: {
 }
 
 export function onQuoteEvent(
-  evt: "sent" | "accepted" | "declined",
+  evt: "sent" | "viewed" | "accepted" | "declined",
   info: QuoteContactInfo & {
     quoteNumber: string;
     totalCents?: number;
@@ -422,6 +422,19 @@ export function onQuoteEvent(
       // Fix 3: unknown contact — CREATE the CRM records instead of dropping
       // the event. Before this, a stranger accepting a quote left no client,
       // no lead, nothing.
+      // Opened the link → one line on the lead's timeline per open, nothing
+      // else moves: no stage change, and no lead created for a stranger — a
+      // view is not a conversation.
+      if (evt === "viewed") {
+        if (lead) {
+          db.insert(crmActivities).values({
+            entityType: "lead", entityId: lead.id, kind: "note",
+            notes: `Opened quote ${info.quoteNumber} on cjmmetals.com`,
+          }).run();
+        }
+        return;
+      }
+
       const declineNote = `Declined quote ${info.quoteNumber} on cjmmetals.com — ${
         WIN_LOSS_REASON_LABELS[info.reason ?? "other"]
       }`;
