@@ -72,11 +72,15 @@ const STAGE_TONE: Record<LeadStage, ChipTone> = {
 // Every lead mutation refreshes the same set of dependent queries. Winning/
 // converting a lead feeds the marketing overview/attribution, so the prefix
 // "marketing" match keeps those tabs fresh instead of showing stale numbers.
+// Closing a lead also closes its open quotes server-side (crm.ts,
+// closeQuotesForLead), so the Saved list and the dashboard tile go with it.
 const LEAD_KEYS: QueryKey[] = [
   ["crm-leads"],
   ["crm-stats"],
   ["crm-reports"],
   ["marketing"],
+  ["quotes"],
+  ["quotes-stats"],
 ];
 
 function daysSince(v: string | number | Date | null | undefined): number | null {

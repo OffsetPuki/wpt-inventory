@@ -462,6 +462,55 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 }
 .qa .pb-input:focus { outline: none; border-bottom-color: var(--ink); }
 
+/* ---- Price book · material library ---------------------------------------
+   The library is the longest list on the page and the one the owner scans for
+   a single item, so it gets the full width and a table's alignment: one row
+   per material, captions once per shelf (not once per row), and the rate a
+   quote actually charges shown next to the cost it comes from. */
+
+.qa .pb-group-wide { grid-column: 1 / -1; }
+.qa .pb-mat-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.qa .pb-mat-head > div { flex: 1 1 26rem; }
+.qa .pb-mat-search { display: flex; align-items: baseline; gap: 10px; }
+.qa .pb-mat-search .pb-input { width: 12rem; text-align: left; }
+.qa .pb-mat-cap {
+  font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--steel); white-space: nowrap;
+}
+.qa .pb-shelf { margin-top: 26px; }
+.qa .pb-shelf-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line-strong);
+}
+.qa .pb-mat {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 11rem 6rem 8rem 1.5rem;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.qa .pb-mat-cols { padding: 8px 0 4px; border-bottom: 0; }
+.qa .pb-mat-name { font-size: 0.92rem; color: var(--ink); }
+.qa .pb-mat-age { display: block; font-size: 0.68rem; color: var(--steel); opacity: 0.75; }
+.qa .pb-mat-age.stale { color: #d24d3e; opacity: 1; }
+.qa .pb-mat-rate { font-size: 0.92rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qa .pb-mat-del {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--steel); font-size: 0.8rem; line-height: 1; opacity: 0.45;
+}
+.qa .pb-mat-del:hover { color: #d24d3e; opacity: 1; }
+.qa .pb-chips { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
+.qa .pb-chip {
+  background: none; border: 1px solid var(--line-strong); cursor: pointer;
+  color: var(--steel); font-size: 0.75rem; padding: 4px 10px;
+}
+.qa .pb-chip:hover { color: var(--ink); border-color: var(--ink); }
+.qa .pb-mat-add {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
+  padding-top: 20px; border-top: 1px solid var(--line-strong);
+}
+
 /* ---- Find design (design-code lookup) -------------------------------------- */
 
 .qa .home-find-link {
@@ -581,6 +630,20 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   .qa .pb-grid { grid-template-columns: minmax(0, 1fr); }
   .qa .fields.two { grid-template-columns: 1fr; }
   .qa .lead-body { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  /* Material rows stop being a table: name on its own line, the three numbers
+     under it with their captions back on each cell. */
+  .qa .pb-mat { grid-template-columns: 1fr 1fr auto; gap: 8px 14px; }
+  .qa .pb-mat-name { grid-column: 1 / -1; }
+  .qa .pb-mat-cols { display: none; }
+  /* The header row is gone, and "$11.74 / ft" twice on one line is a riddle —
+     the derived number says what it is. */
+  .qa .pb-mat-rate::before {
+    content: 'Quoted at ';
+    font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--steel);
+  }
 }
 
 @media (max-width: 560px) {

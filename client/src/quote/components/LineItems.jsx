@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { fmtMoney, round2 } from '../lib/format.js';
-import { lineCost, matRate, materialLibrary, MAT_KIND, MAT_QTY_UNIT } from '../lib/estimate.js';
+import { lineCost, matRate, materialShelves, MAT_KIND, MAT_QTY_UNIT } from '../lib/estimate.js';
+import { MATERIAL_UNITS } from '../data/priceBook.js';
 
 // Field labels per generic item kind.
 const KIND_FIELDS = {
@@ -170,10 +171,21 @@ function AddLineForm({ priceBook, onAdd, onCancel }) {
       <div className="line-controls">
         <span className="line-field">
           <label>Material</label>
-          <select className="cell" style={{ width: '13rem' }} value={materialId} onChange={(e) => pickMaterial(e.target.value)}>
+          {/* Same shelves as the price book (unit = how the shop buys it), and
+              each option carries today's rate with waste blended in — so the
+              picker answers "which one, and what does it cost" without a trip
+              to Settings. Native select: optgroups, keyboard type-ahead, and
+              the phone's own picker, for free. */}
+          <select className="cell" style={{ width: '17rem' }} value={materialId} onChange={(e) => pickMaterial(e.target.value)}>
             <option value="">— none (price it yourself) —</option>
-            {materialLibrary(priceBook).map((id) => (
-              <option key={id} value={id}>{materials[id].name}</option>
+            {materialShelves(priceBook).map(([unit, ids]) => (
+              <optgroup key={unit} label={MATERIAL_UNITS[unit].group}>
+                {ids.map((id) => (
+                  <option key={id} value={id}>
+                    {materials[id].name} — ${fmtMoney(matRate(priceBook, id))} {MATERIAL_UNITS[unit].suffix}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </span>
