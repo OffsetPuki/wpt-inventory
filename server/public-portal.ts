@@ -487,6 +487,7 @@ export function registerPublicPortalRoutes(app: Express): void {
     // image relay reads this same route once per render and must not count.
     // Never on the owner's preview. ponytail: a link scanner or the owner
     // clicking the sent link counts as an open too — that ceiling is accepted.
+    const sess = parseJson<any>(quote.payload, {});
     if (req.query.view === "1" && req.query.preview !== "1" && quote.status !== "draft") {
       const now = Date.now();
       db.update(quotes).set({
@@ -494,9 +495,16 @@ export function registerPublicPortalRoutes(app: Express): void {
         lastViewedAt: now,
         viewCount: sql`${quotes.viewCount} + 1`,
       }).where(eq(quotes.id, quote.id)).run();
+      // …and a line on the matching lead's Activity timeline, every open.
+      onQuoteEvent("viewed", {
+        quoteNumber: quote.number,
+        name: quote.customerName,
+        email: sess?.customer?.email,
+        phone: sess?.customer?.phone,
+        designRef: quote.designRef,
+      });
     }
 
-    const sess = parseJson<any>(quote.payload, {});
     const taxPct = Number(sess?.taxPct);
     const doc = quoteDocument(quote);
     res.json({
