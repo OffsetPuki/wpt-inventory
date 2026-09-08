@@ -84,6 +84,24 @@ export function matRate(pb, id) {
 export const MAT_KIND = { ft: 'length', sqft: 'area', piece: 'unit', bag: 'unit', set: 'unit' };
 export const MAT_QTY_UNIT = { ft: 'ft', sqft: 'sq ft', piece: 'pieces', bag: 'bags', set: 'sets' };
 
+/**
+ * The library grouped onto shelves by the unit a material is bought in —
+ * [['ft', ids], ['sqft', ids], ...] in MAT_KIND order, empty shelves dropped.
+ * How the shop buys a thing is how it looks for it, so the price book and the
+ * quote's material picker both list it this way. Pass `ids` to shelve a
+ * filtered subset (the price book's search box). Shelf LABELS live with the
+ * units in data/priceBook.js — this module stays free of display strings.
+ */
+export function materialShelves(pb, ids) {
+  const all = (pb && pb.materials) || {};
+  const list = ids || materialLibrary(pb);
+  // An unknown unit (hand-edited book) still has to land on a shelf.
+  const unitOf = (id) => (MAT_KIND[(all[id] || {}).unit] ? all[id].unit : 'piece');
+  return Object.keys(MAT_KIND)
+    .map((u) => [u, list.filter((id) => unitOf(id) === u)])
+    .filter(([, group]) => group.length > 0);
+}
+
 /** Build a line item priced from the material library. */
 function matItem(pb, { key, materialId, qty, name }) {
   const m = matDef(pb, materialId);

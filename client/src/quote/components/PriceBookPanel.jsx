@@ -1,7 +1,28 @@
 import { useState } from 'react';
 import { DEFAULT_PRICE_BOOK, PRICE_BOOK_SCHEMA, MATERIAL_UNITS } from '../data/priceBook.js';
-import { materialLibrary } from '../lib/estimate.js';
+import { materialLibrary, materialShelves, matRate } from '../lib/estimate.js';
+import { fmtMoney } from '../lib/format.js';
 import { DEFAULT_SHOP, getPath } from '../lib/store.js';
+
+/** The one number input every rate in this panel is typed into. */
+function NumInput({ path, value, onChange, step = 0.5, width }) {
+  return (
+    <input
+      type="number"
+      className="pb-input"
+      min="0"
+      step={step}
+      style={width ? { width } : undefined}
+      value={value ?? ''}
+      onChange={(e) => {
+        const raw = e.target.value;
+        const n = raw === '' ? 0 : Number(raw);
+        if (Number.isNaN(n)) return;
+        onChange(path, n);
+      }}
+    />
+  );
+}
 
 function Field({ field, value, onChange }) {
   return (
@@ -9,19 +30,7 @@ function Field({ field, value, onChange }) {
       <span className="pb-label">{field.label}</span>
       <span className="pb-input-wrap">
         {field.prefix && <span className="aff">{field.prefix}</span>}
-        <input
-          type="number"
-          className="pb-input"
-          min="0"
-          step={field.step || 0.5}
-          value={value ?? ''}
-          onChange={(e) => {
-            const raw = e.target.value;
-            const n = raw === '' ? 0 : Number(raw);
-            if (Number.isNaN(n)) return;
-            onChange(field.path, n);
-          }}
-        />
+        <NumInput path={field.path} value={value} onChange={onChange} step={field.step || 0.5} />
         {field.suffix && <span className="aff">{field.suffix}</span>}
       </span>
     </div>
@@ -33,15 +42,13 @@ const STALE_MS = 90 * 24 * 60 * 60 * 1000;
 /** "seed price" / "updated N days ago" freshness tag for a material. */
 function Freshness({ updatedAt }) {
   const at = Number(updatedAt) || null;
-  if (at == null) {
-    return <p className="note" style={{ margin: '0 0 6px', color: '#d24d3e' }}>⚠ seed price — set yours</p>;
-  }
+  if (at == null) return <span className="pb-mat-age stale">⚠ seed price — set yours</span>;
   const days = Math.floor((Date.now() - at) / (24 * 60 * 60 * 1000));
   const stale = Date.now() - at > STALE_MS;
   return (
-    <p className="note" style={{ margin: '0 0 6px', ...(stale ? { color: '#d24d3e' } : { opacity: 0.6 }) }}>
+    <span className={`pb-mat-age${stale ? ' stale' : ''}`}>
       {stale ? '⚠ ' : ''}updated {days === 0 ? 'today' : `${days}d ago`}
-    </p>
+    </span>
   );
 }
 
@@ -52,13 +59,23 @@ function Freshness({ updatedAt }) {
  * Editing a cost stamps `updatedAt` (via QuoteBuilder.updatePriceBook) — that
  * drives the freshness tags and the server's stale-price reminder task.
  */
-function MaterialsGroup({ priceBook, onChange }) {
+function MaterialsGroup({ priceBook, onChange, readOnly }) {
   const materials = priceBook.materials || {};
   const removed = Array.isArray(priceBook.removedMaterials) ? priceBook.removedMaterials : [];
   const visible = materialLibrary(priceBook);
+  const [query, setQuery] = useState('');
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('ft');
   const [cost, setCost] = useState('');
+
+  // Shelved by the unit the material is bought in — the same grouping the
+  // quote's "+ Add line" picker uses, so a material sits in the same place in
+  // both lists. The search box just narrows what gets shelved.
+  const needle = query.trim().toLowerCase();
+  const matches = needle
+    ? visible.filter((id) => `${(materials[id] || {}).name || ''} ${id}`.toLowerCase().includes(needle))
+    : visible;
+  const shelves = materialShelves(priceBook, matches);
 
   const addMaterial = (e) => {
     e.preventDefault();
@@ -94,63 +111,129 @@ function MaterialsGroup({ priceBook, onChange }) {
   const restoreMaterial = (id) => onChange('removedMaterials', removed.filter((r) => r !== id));
 
   return (
-    <div className="pb-group">
-      <h3>Materials — shared library</h3>
-      <p className="note">
-        One price per material, entered once. Every product that uses it — and the
-        website ballpark — reprices automatically. Waste % is blended into the rate.
-        Add your own here; they show up in the quote's "+ Add line" picker.
-      </p>
-      {visible.map((id) => {
-        const def = materials[id];
-        const suffix = (MATERIAL_UNITS[def.unit] || {}).suffix || '';
-        return (
-          <div key={id}>
-            <Field
-              field={{ path: `materials.${id}.cost`, label: def.name, prefix: '$', suffix, step: 0.25 }}
-              value={getPath(priceBook, `materials.${id}.cost`)}
-              onChange={onChange}
+    <div className="pb-group pb-group-wide">
+      <div className="pb-mat-head">
+        <div>
+          <h3>Materials — shared library</h3>
+          <p className="note" style={{ marginBottom: 0 }}>
+            One price per material, entered once. Every product that uses it — and the
+            website ballpark — reprices automatically. Waste % is blended into the rate
+            you quote at. Add your own here; they show up in the quote's "+ Add line" picker.
+          </p>
+        </div>
+        {/* Not rendered for workers: the whole panel sits inside a disabled
+            fieldset, and a search box they can't type in reads as broken. */}
+        {!readOnly && (
+          <label className="pb-mat-search">
+            <span className="pb-mat-cap">Find</span>
+            <input
+              className="pb-input"
+              type="search"
+              placeholder="tubing, mesh, hardware…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
-            <Freshness updatedAt={getPath(priceBook, `materials.${id}.updatedAt`)} />
-            <Field
-              field={{ path: `materials.${id}.wastePct`, label: '↳ waste', suffix: '%', step: 1 }}
-              value={getPath(priceBook, `materials.${id}.wastePct`)}
-              onChange={onChange}
-            />
-            <button type="button" className="estimate-reset" onClick={() => removeMaterial(id)}>
-              ✕ delete material
-            </button>
+          </label>
+        )}
+      </div>
+
+      {shelves.length === 0 && (
+        <p className="note" style={{ margin: '18px 0 0' }}>
+          Nothing matches “{query}”. {visible.length} material{visible.length === 1 ? '' : 's'} in the library.
+        </p>
+      )}
+
+      {shelves.map(([u, ids]) => (
+        <div key={u} className="pb-shelf">
+          <div className="pb-shelf-head">
+            <span className="pb-mat-cap">{MATERIAL_UNITS[u].group}</span>
+            <span className="pb-mat-cap">{ids.length}</span>
           </div>
-        );
-      })}
+          {/* Column captions once per shelf, not once per row. */}
+          <div className="pb-mat pb-mat-cols">
+            <span className="pb-mat-cap">Material</span>
+            <span className="pb-mat-cap">You pay</span>
+            <span className="pb-mat-cap">Waste</span>
+            <span className="pb-mat-cap">Quoted at</span>
+            <span />
+          </div>
+          {ids.map((id) => {
+            const def = materials[id];
+            const suffix = MATERIAL_UNITS[u].suffix;
+            return (
+              <div key={id} className="pb-mat">
+                <span className="pb-mat-name">
+                  {def.name}
+                  <Freshness updatedAt={getPath(priceBook, `materials.${id}.updatedAt`)} />
+                </span>
+                <span className="pb-input-wrap">
+                  <span className="aff">$</span>
+                  <NumInput
+                    path={`materials.${id}.cost`}
+                    value={getPath(priceBook, `materials.${id}.cost`)}
+                    onChange={onChange}
+                    step={0.25}
+                    width="4.5rem"
+                  />
+                  <span className="aff">{suffix}</span>
+                </span>
+                <span className="pb-input-wrap">
+                  <NumInput
+                    path={`materials.${id}.wastePct`}
+                    value={getPath(priceBook, `materials.${id}.wastePct`)}
+                    onChange={onChange}
+                    step={1}
+                    width="3rem"
+                  />
+                  <span className="aff">%</span>
+                </span>
+                {/* What a quote actually charges per unit — cost + waste. The
+                    number the owner is really setting, so it is shown, not
+                    left to be worked out. */}
+                <span className="pb-mat-rate">${fmtMoney(matRate(priceBook, id))} <span className="aff">{suffix}</span></span>
+                <button
+                  type="button"
+                  className="pb-mat-del"
+                  title={`Delete ${def.name}`}
+                  aria-label={`Delete ${def.name}`}
+                  onClick={() => removeMaterial(id)}
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
 
       {removed.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <p className="note" style={{ margin: '0 0 6px' }}>Deleted — not priced on any quote:</p>
-          {removed.map((id) => (
-            <div key={id} className="pb-field">
-              <span className="pb-label" style={{ textDecoration: 'line-through', opacity: 0.6 }}>
-                {(materials[id] || {}).name || id}
-              </span>
-              <button type="button" className="estimate-reset" onClick={() => restoreMaterial(id)}>
-                ↩ restore
+        <div className="pb-shelf">
+          <div className="pb-shelf-head">
+            <span className="pb-mat-cap">Deleted — not priced on any quote</span>
+            <span className="pb-mat-cap">{removed.length}</span>
+          </div>
+          <div className="pb-chips">
+            {removed.map((id) => (
+              <button key={id} type="button" className="pb-chip" onClick={() => restoreMaterial(id)}>
+                <s>{(materials[id] || {}).name || id}</s> ↩ restore
               </button>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
-      <form className="pb-field" style={{ flexWrap: 'wrap', gap: 8, paddingTop: 18 }} onSubmit={addMaterial}>
+      <form className="pb-shelf pb-mat-add" onSubmit={addMaterial}>
+        <span className="pb-mat-cap">Add a material</span>
         <input
           className="pb-input"
-          style={{ width: '11rem', textAlign: 'left' }}
-          placeholder="New material — e.g. 3×2 angle iron"
+          style={{ width: '15rem', textAlign: 'left' }}
+          placeholder="e.g. 3×2 angle iron"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-        <select className="pb-input" style={{ width: '6rem', textAlign: 'left' }} value={unit} onChange={(e) => setUnit(e.target.value)}>
+        <select className="pb-input" style={{ width: '7.5rem', textAlign: 'left' }} value={unit} onChange={(e) => setUnit(e.target.value)}>
           {Object.keys(MATERIAL_UNITS).map((u) => (
-            <option key={u} value={u}>{MATERIAL_UNITS[u].suffix}</option>
+            <option key={u} value={u}>{MATERIAL_UNITS[u].label}</option>
           ))}
         </select>
         <span className="pb-input-wrap">
@@ -202,7 +285,7 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
           being added below. Unstyled so the layout is unchanged. */}
       <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="pb-grid">
-          <MaterialsGroup priceBook={priceBook} onChange={onChange} />
+          <MaterialsGroup priceBook={priceBook} onChange={onChange} readOnly={readOnly} />
 
           {PRICE_BOOK_SCHEMA.map((group) => (
             <div key={group.title} className="pb-group">
