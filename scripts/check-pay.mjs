@@ -652,6 +652,22 @@ const decline = (token, body) =>
   });
 const quoteRow = (id) => db.prepare("SELECT * FROM quotes WHERE id = ?").get(id);
 
+await check("opening the quote page stamps a view; the image relay and the owner's preview do not", async () => {
+  const get = (qs) => fetch(`${BASE}/api/public/quote/${decToken}${qs}`);
+  assert.equal((await get("")).status, 200, "plain GET (the image relay) renders");
+  assert.equal(quoteRow(decQuote.lastInsertRowid).view_count, 0, "…but is not an open");
+  assert.equal((await get("?view=1")).status, 200);
+  let row = quoteRow(decQuote.lastInsertRowid);
+  assert.equal(row.view_count, 1);
+  assert.ok(row.viewed_at > 0 && row.last_viewed_at === row.viewed_at);
+  await get("?view=1&preview=1");
+  assert.equal(quoteRow(decQuote.lastInsertRowid).view_count, 1, "the owner's preview is not an open");
+  await get("?view=1");
+  row = quoteRow(decQuote.lastInsertRowid);
+  assert.equal(row.view_count, 2);
+  assert.ok(row.last_viewed_at >= row.viewed_at, "first open stays put, latest moves");
+});
+
 await check("declining records the reason and note; a junk reason lands as 'other'", async () => {
   const res = await decline(decToken, { reason: "zzz", note: "  Going another way  " });
   assert.equal(res.status, 200);

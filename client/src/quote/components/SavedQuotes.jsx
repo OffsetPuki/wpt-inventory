@@ -221,6 +221,14 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                     />
                     <span className="sq-number">{q.number}</span>
                     <span className={`sq-status ${q.status || 'draft'}`}>{STATUS_LABEL[q.status] || 'Draft'}</span>
+                    {/* Did they open the link? Stamped by the website's quote page. */}
+                    {q.status !== 'draft' && (
+                      <span className="sq-meta" title={q.viewedAt ? `First opened ${fmtDate(q.viewedAt)}` : 'The customer has not opened the link yet'}>
+                        {q.viewedAt
+                          ? `Opened ${fmtDate(q.lastViewedAt || q.viewedAt)}${q.viewCount > 1 ? ` · ${q.viewCount}×` : ''}`
+                          : 'Not opened yet'}
+                      </span>
+                    )}
                     {/* Why the customer said no — their note, if any, on hover. */}
                     {q.status === 'declined' && q.declineReason && (
                       <span className="sq-meta" title={q.declineNote || undefined}>
