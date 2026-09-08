@@ -22,12 +22,15 @@
 // =============================================================================
 
 // Pricing methods a material can use. `kind` maps to the estimate line kinds.
+// `group` heads the shelf a material sits on in the price book and in the
+// quote's material picker; `label` names the unit in words where a bare "/ ft"
+// reads as noise (the add-material unit dropdown).
 export const MATERIAL_UNITS = {
-  ft:    { kind: 'length', suffix: '/ ft' },      // price per linear foot
-  sqft:  { kind: 'area',   suffix: '/ sq ft' },   // price per square foot
-  piece: { kind: 'unit',   suffix: '/ piece' },   // price per piece
-  bag:   { kind: 'unit',   suffix: '/ bag' },     // price per bag
-  set:   { kind: 'unit',   suffix: '/ set' },     // price per hardware set
+  ft:    { kind: 'length', suffix: '/ ft',     group: 'Bought by the foot',        label: 'per foot' },
+  sqft:  { kind: 'area',   suffix: '/ sq ft',  group: 'Bought by the square foot', label: 'per sq ft' },
+  piece: { kind: 'unit',   suffix: '/ piece',  group: 'Bought by the piece',       label: 'per piece' },
+  bag:   { kind: 'unit',   suffix: '/ bag',    group: 'Bought by the bag',         label: 'per bag' },
+  set:   { kind: 'unit',   suffix: '/ set',    group: 'Hardware sets',             label: 'per set' },
 };
 
 export const DEFAULT_PRICE_BOOK = {
