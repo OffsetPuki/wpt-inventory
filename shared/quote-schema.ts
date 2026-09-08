@@ -52,6 +52,12 @@ export const quotes = sqliteTable("quotes", {
   declinedAt: integer("declined_at"), // unix ms — customer declined via the link
   declineReason: text("decline_reason", { enum: QUOTE_DECLINE_REASONS }),
   declineNote: text("decline_note"), // optional message left when declining
+  // "Did they open it?" — stamped by the public GET when the website's quote
+  // PAGE renders (not its image relay, which reads the same route). An owner
+  // clicking the sent link counts too; there is no telling them apart.
+  viewedAt: integer("viewed_at"), // unix ms — first open
+  lastViewedAt: integer("last_viewed_at"), // unix ms — latest open
+  viewCount: integer("view_count").notNull().default(0),
   // Phase F follow-up ladder stamps (sweep-managed, server/automations.ts).
   // fu1 reuses the pre-Phase-F one-shot "nudge" column — already-nudged quotes
   // skip straight to follow-up #2.
@@ -88,6 +94,9 @@ export const insertQuoteSchema = createInsertSchema(quotes).omit({
   acceptedAt: true,
   acceptNote: true,
   acceptIp: true,
+  viewedAt: true,
+  lastViewedAt: true,
+  viewCount: true,
   declinedAt: true,
   declineReason: true,
   declineNote: true,

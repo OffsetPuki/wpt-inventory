@@ -69,6 +69,9 @@ for (const col of [
   "declined_at INTEGER",
   "decline_reason TEXT",
   "decline_note TEXT",
+  "viewed_at INTEGER",
+  "last_viewed_at INTEGER",
+  "view_count INTEGER NOT NULL DEFAULT 0",
 ]) {
   try {
     sqlite.exec(`ALTER TABLE quotes ADD COLUMN ${col}`);
@@ -448,6 +451,9 @@ export function registerQuoteRoutes(app: Express): void {
         acceptedAt: quotes.acceptedAt,
         declineReason: quotes.declineReason,
         declineNote: quotes.declineNote,
+        viewedAt: quotes.viewedAt,
+        lastViewedAt: quotes.lastViewedAt,
+        viewCount: quotes.viewCount,
         fu1SentAt: quotes.fu1SentAt,
         fu2SentAt: quotes.fu2SentAt,
         createdAt: quotes.createdAt,

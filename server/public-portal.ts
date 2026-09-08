@@ -483,6 +483,19 @@ export function registerPublicPortalRoutes(app: Express): void {
     const quote = findSharedQuote(String(req.params.token), req.query.preview === "1");
     if (!quote) return res.status(404).json({ ok: false });
 
+    // "Did they open it?" — only the website's quote PAGE sends view=1; its
+    // image relay reads this same route once per render and must not count.
+    // Never on the owner's preview. ponytail: a link scanner or the owner
+    // clicking the sent link counts as an open too — that ceiling is accepted.
+    if (req.query.view === "1" && req.query.preview !== "1" && quote.status !== "draft") {
+      const now = Date.now();
+      db.update(quotes).set({
+        viewedAt: quote.viewedAt ?? now,
+        lastViewedAt: now,
+        viewCount: sql`${quotes.viewCount} + 1`,
+      }).where(eq(quotes.id, quote.id)).run();
+    }
+
     const sess = parseJson<any>(quote.payload, {});
     const taxPct = Number(sess?.taxPct);
     const doc = quoteDocument(quote);
