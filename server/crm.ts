@@ -21,6 +21,9 @@ import { pmTasks } from "../shared/pm-schema";
 // Wiring plan, Fix 2 — projects carry a soft clientId ref; the client detail
 // view lists the jobs behind it. Core table, always present.
 import { projects } from "../shared/schema";
+// Quote statuses the customer can pick when declining — the subset of
+// WIN_LOSS_REASONS a closed lead's reason can carry onto its quotes.
+import { QUOTE_DECLINE_REASONS } from "../shared/quote-schema";
 import {
   pid, qstr, todayLocal, ymdLocal, isElevated,
   registerSoftDelete, registerGetById, registerCreate,
@@ -419,9 +422,6 @@ export function onQuoteEvent(
 
       const now = Date.now();
 
-      // Fix 3: unknown contact — CREATE the CRM records instead of dropping
-      // the event. Before this, a stranger accepting a quote left no client,
-      // no lead, nothing.
       // Opened the link → one line on the lead's timeline per open, nothing
       // else moves: no stage change, and no lead created for a stranger — a
       // view is not a conversation.
@@ -435,7 +435,10 @@ export function onQuoteEvent(
         return;
       }
 
-      const declineNote = `Declined quote ${info.quoteNumber} on cjmmetals.com — ${
+      // Fix 3: unknown contact — CREATE the CRM records instead of dropping
+      // the event. Before this, a stranger accepting a quote left no client,
+      // no lead, nothing.
+      const declineNote =`Declined quote ${info.quoteNumber} on cjmmetals.com — ${
         WIN_LOSS_REASON_LABELS[info.reason ?? "other"]
       }`;
       if (!lead) {
@@ -532,6 +535,89 @@ export function onQuoteEvent(
       console.error("[crm] quote lifecycle hook failed", e);
     }
   });
+}
+
+// ─── Lead → quote bridge (onQuoteEvent in reverse) ───────────────────────────
+// Closing a lead closes its quotes. The wiring only ran one way before this: a
+// customer accepting or declining online moved the lead, but a lead the OWNER
+// closed on the board left its quotes sitting at "sent" forever — still in the
+// dashboard's open pipeline (draft + sent), and still being chased by the
+// automated follow-up ladder, which fires on status = 'sent' (automations.ts).
+//
+// Matching is onQuoteEvent's rule read backwards: normalized email or
+// digits-only phone off the builder's customer card, falling back to the linked
+// website design's contact. Name is deliberately NOT a channel — too collidable
+// to close money records on.
+//
+// Won accepts exactly ONE quote: the newest open one. Sibling revisions of the
+// same job are normal (a re-quote supersedes last week's), and accepting both
+// would double-book the job in every accepted-quote report — monthly revenue,
+// revenue closed (30d), the costing report. The older siblings are declined as
+// superseded so the pipeline still clears.
+// ponytail: newest-wins is a heuristic — the owner has no per-quote control to
+// say which one sold, and the note on each card says what happened to it.
+// Exported for scripts/check-lead-quote-close.mjs, which drives it directly.
+export function closeQuotesForLead(
+  lead: Lead,
+  outcome: "won" | "lost",
+  reason: WinLossReason | null,
+  now: number,
+): string[] {
+  const emailNorm = (lead.email ?? "").trim().toLowerCase();
+  const phoneDigits = contactDigits(lead.phone);
+  if (!emailNorm && !phoneDigits) return [];
+  try {
+    // Open quotes with their resolved contact, newest first. Same coalesce
+    // chain as the opt-out flags in quotes.ts: payload customer card, else the
+    // website design the quote was started from.
+    const open = sqlite.prepare(`
+      SELECT q.id, q.number,
+             lower(trim(coalesce(nullif(json_extract(q.payload, '$.customer.email'), ''), d.email, ''))) AS email,
+             coalesce(nullif(json_extract(q.payload, '$.customer.phone'), ''), d.phone, '') AS phone
+      FROM quotes q
+      LEFT JOIN web_designs d ON upper(d.ref) = upper(q.design_ref)
+      WHERE q.deleted_at IS NULL AND q.status IN ('draft', 'sent')
+      ORDER BY coalesce(q.sent_at, q.updated_at, q.created_at) DESC, q.id DESC
+    `).all() as { id: number; number: string; email: string; phone: string }[];
+
+    const mine = open.filter((q) => {
+      const qPhone = contactDigits(q.phone);
+      return (!!emailNorm && !!q.email && q.email === emailNorm)
+        || (!!phoneDigits && !!qPhone && qPhone === phoneDigits);
+    });
+    if (!mine.length) return [];
+
+    // The lead's loss reason carries straight over when the customer could have
+    // picked it themselves — QUOTE_DECLINE_REASONS is a subset of
+    // WIN_LOSS_REASONS on purpose. "no_response" and the win reasons have no
+    // customer-facing equivalent, so they land on "other".
+    const declineReason =
+      (QUOTE_DECLINE_REASONS as readonly string[]).includes(reason ?? "")
+        ? reason : "other";
+    const decline = sqlite.prepare(`
+      UPDATE quotes SET status = 'declined', declined_at = ?, decline_reason = ?,
+                        decline_note = ?, updated_at = ? WHERE id = ?
+    `);
+    const accept = sqlite.prepare(
+      "UPDATE quotes SET status = 'accepted', accepted_at = ?, accept_note = ?, updated_at = ? WHERE id = ?",
+    );
+    mine.forEach((q, i) => {
+      if (outcome === "lost") {
+        decline.run(now, declineReason, "Marked lost in the CRM", now, q.id);
+      } else if (i === 0) {
+        accept.run(now, "Marked won in the CRM", now, q.id);
+      } else {
+        decline.run(now, "scope_changed",
+          `Superseded by ${mine[0].number} — lead marked won`, now, q.id);
+      }
+    });
+    return mine.map((q) => q.number);
+  } catch (e) {
+    // quotes/web_designs belong to the quote module — absent (or mid-migration)
+    // must never fail the owner's stage change.
+    console.error("[crm] lead → quote close failed", e);
+    return [];
+  }
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -884,9 +970,17 @@ export function registerCrmRoutes(app: Express): void {
     if (stageChanged) {
       // (b) / (c) marketing-side automation hooks — best-effort.
       if (row.stage === "quote_sent") ensureQuoteReminder(row, now);
+      // (e) Closing the lead closes its open quotes (see closeQuotesForLead) —
+      // synchronously, so the Saved list agrees the moment the board does.
+      const closedQuotes = (row.stage === "won" || row.stage === "lost")
+        ? closeQuotesForLead(row, row.stage, row.winLossReason ?? null, now)
+        : [];
       audit(req, "crm.lead_stage", {
         targetType: "lead", targetId: row.id, targetName: row.name,
-        details: { from: existing.stage, to: row.stage },
+        details: {
+          from: existing.stage, to: row.stage,
+          ...(closedQuotes.length ? { quotes: closedQuotes } : {}),
+        },
       });
     }
     res.json(row);
