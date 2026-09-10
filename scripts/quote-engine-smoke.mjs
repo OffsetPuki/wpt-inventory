@@ -450,7 +450,7 @@ console.log('\nOptional tabletop pricing and scope:');
   }
   const specs = specRows('table', included);
   check('customer specs include material and scope but no cost basis', specs.some(r => r.value === 'Finished white oak') && specs.some(r => r.value === 'Steel frame and tabletop included') && !JSON.stringify(specs).includes('450.25'));
-  check('frame-only specs omit retained material and show exclusion', !specRows('table', off).some(r => r.label === 'Tabletop material') && specRows('table', off).some(r => /customer supplies the tabletop/.test(r.value)));
+  check('frame-only specs omit retained tabletop details and show exclusion', !specRows('table', off).some(r => ['Tabletop material', 'Overall height'].includes(r.label)) && specRows('table', off).some(r => /customer supplies the tabletop/.test(r.value)));
   check('preview and summary distinguish included top', renderTable(included).includes('TABLETOP INCLUDED') && !renderTable(included).includes('TOP BY CUSTOMER') && summaryLine('table', included).includes('Frame + tabletop'));
   check('frame-only preview shows top as excluded', renderTable(off).includes('TOP BY CUSTOMER — NOT INCLUDED') && summaryLine('table', off).includes('Frame only'));
 }

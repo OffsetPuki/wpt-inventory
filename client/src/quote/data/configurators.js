@@ -557,7 +557,7 @@ export const CONFIG = {
       { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', positive: true, exact: true },
       { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', positive: true, exact: true },
       { kind: 'number', name: 'frameHeightIn', label: 'Frame height', unit: 'in', positive: true, exact: true },
-      { kind: 'number', name: 'topThicknessIn', label: 'Tabletop thickness', unit: 'in', positive: true, exact: true },
+      { kind: 'number', name: 'topThicknessIn', label: 'Tabletop thickness', unit: 'in', positive: true, exact: true, visibleWhen: (s) => s.includeTop === 'yes' },
       {
         kind: 'segment', name: 'footrest', label: 'Foot rest', cols: 2,
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }],
@@ -894,7 +894,7 @@ export function specRows(type, s) {
     rows.push(['Top size', `${FT(s.lengthFt, true)} × ${IN(s.widthIn, true)}`]);
     rows.push(['Steel base', `${FT(base.lengthFt, true)} × ${IN(base.widthIn, true)}`]);
     rows.push(['Frame height', IN(s.frameHeightIn, true)]);
-    rows.push(['Overall height', `${IN(overall, true)} with a ${IN(thick, true)} top`]);
+    if (s.includeTop === 'yes') rows.push(['Overall height', `${IN(overall, true)} with a ${IN(thick, true)} top`]);
     rows.push(['Foot rest', s.footrest === 'no' ? 'No' : 'Yes']);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('table', 'coating', s.coating)]);
     rows.push(['Finish', fin]);
