@@ -130,8 +130,9 @@ export async function testApp({ serve = false } = {}) {
     object,
     type = "checkout.session.completed",
     eventId = crypto.randomUUID(),
+    livemode = false,
   ) {
-    const body = JSON.stringify({ id: eventId, type, data: { object } });
+    const body = JSON.stringify({ id: eventId, type, livemode, data: { object } });
     const t = String(Math.floor(Date.now() / 1000));
     const signature = crypto
       .createHmac("sha256", process.env.STRIPE_WEBHOOK_SECRET)

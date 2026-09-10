@@ -29,6 +29,8 @@ const paid = (inv, ref, amount = 10000) => ({
 });
 try {
   const inv = invoice("ATOMIC");
+  assert.equal((await event(paid(inv, "wrong_mode"), "checkout.session.completed", "evt_live_in_test", true)).status, 400);
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM fin_invoice_payments WHERE invoice_id=?").get(inv.id).n, 0);
   sqlite.exec(
     `CREATE TEMP TRIGGER fail_payment BEFORE UPDATE OF paid_cents ON fin_invoices WHEN NEW.id=${inv.id} BEGIN SELECT RAISE(ABORT,'Injected failure'); END;`,
   );

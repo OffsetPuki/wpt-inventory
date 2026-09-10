@@ -604,6 +604,10 @@ export function registerPayRoutes(app: Express): void {
       console.warn("[pay] webhook rejected — bad or missing signature");
       return res.status(400).json({ ok: false });
     }
+    if (typeof event.livemode === "boolean" && event.livemode !== stripeKey().startsWith("sk_live_")) {
+      console.warn("[pay] webhook rejected — test/live mode mismatch");
+      return res.status(400).json({ ok: false });
+    }
     if (["charge.refunded", "charge.dispute.created", "charge.dispute.closed", "checkout.session.async_payment_failed"].includes(event.type)) {
       const object = event.data?.object ?? {};
       const ref = String(object.payment_intent || "");
