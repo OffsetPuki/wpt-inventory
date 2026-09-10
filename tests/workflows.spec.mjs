@@ -2,7 +2,9 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import { TOTP } from "otpauth";
 import { testApp } from "../scripts/test-app.mjs";
+import { inventoryWorkflow } from "./inventory-workflow.mjs";
 let app;
+
 test.beforeAll(async () => {
   app = await testApp({ serve: true });
 });
@@ -12,6 +14,10 @@ test.afterAll(async () => {
 test("Owner enrollment, dashboard recovery, dialog access, drafts and task navigation on mobile", async ({
   page,
 }) => {
+  test.setTimeout(120000);
+  // Customer preview comes from the public site. Route it to a synthetic
+  // document; all pricing assertions still use the fixture's real API.
+  await page.route('https://www.cjmmetals.com/**', route => route.fulfill({contentType:'text/html',body:'<html><body><h1>Synthetic customer preview</h1><p>Local test document</p></body></html>'}));
   const errors = [];
   page.on("pageerror", (e) => {
     errors.push(e.message);
@@ -99,19 +105,8 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
     .getByRole("button", { name: /Concrete/ })
     .first()
     .click();
-  await expect(
-    page.getByRole("button", { name: "Save to suite", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Save to suite", exact: true })
-    .click();
-  await expect(
-    page
-      .getByRole("status")
-      .filter({
-        has: page.getByRole("button", { name: "Save to suite", exact: true }),
-      }),
-  ).toContainText("Saved to suite");
+  await expect.poll(() => app.sqlite.prepare('SELECT count(*) n FROM quotes').get().n).toBeGreaterThan(0);
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
   const draft = app.sqlite
     .prepare("SELECT * FROM quotes ORDER BY id DESC LIMIT 1")
     .get();
@@ -122,17 +117,19 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   ).toBeVisible();
   await page.getByRole("button", { name: /Continue draft/ }).click();
   await page
-    .getByRole("button", { name: /Continue to customer details/ })
+    .getByRole("button", { name: /Review quote/ })
     .click();
   await page
     .getByLabel("Customer name", { exact: true })
     .fill("Latest customer edit");
+  await page.getByText("Notes, deposit & attachments", {exact:true}).click();
   await page
     .getByLabel("Notes for the customer (optional)", { exact: true })
     .fill("Latest scope must be saved before issuing.");
   await page
-    .getByRole("button", { name: "Create share link", exact: true })
+    .getByRole("button", { name: "Copy link", exact: true })
     .click();
+  await page.getByRole("button", {name:"Done",exact:true}).click();
   await expect(
     page.getByRole("button", { name: "Revise", exact: true }),
   ).toBeVisible();
@@ -146,7 +143,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Revise", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Save to suite", exact: true }),
+    page.getByRole("button", { name: "Review quote", exact: false }),
   ).toBeVisible();
   const revision = app.sqlite
     .prepare("SELECT * FROM quotes ORDER BY id DESC LIMIT 1")
@@ -219,7 +216,6 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
     ),
   );
   await page.goto(app.base + "/#/crm/quotes");
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button").filter({ has: page.getByRole("heading", { name: "Table", exact: true }) }).click();
   await expect(page.getByRole("heading", { name: "Table", exact: true })).toBeVisible();
   for (const [label, input, shown] of [
@@ -237,9 +233,8 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
     await field.press("Tab");
     await expect(field).toHaveValue(shown);
   }
-  const tableSaved = page.waitForResponse((r) => r.url().endsWith("/api/quotes") && r.request().method() === "POST");
-  await page.getByRole("button", { name: "Save to suite", exact: true }).click();
-  expect((await tableSaved).ok()).toBe(true);
+  await expect.poll(() => JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes ORDER BY id DESC LIMIT 1').get().payload).state?.frameWidthIn).toBe(16.75);
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
   const frameRow = app.sqlite.prepare("SELECT id, payload FROM quotes ORDER BY id DESC LIMIT 1").get();
   const tableDraft = JSON.parse(frameRow.payload);
   expect(tableDraft.type).toBe("table");
@@ -274,7 +269,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await page.getByLabel("Top width", { exact: true }).fill("20 in");
   await page.getByLabel("Top width", { exact: true }).press("Tab");
   await expect(page.getByText(/Enter the included tabletop material\./)).toBeVisible();
-  await expect(page.getByText(/Tabletop included but no cost charged — enter the cost per top\./)).toBeVisible();
+  await expect(page.getByText(/Enter the cost per top\./)).toBeVisible();
   await page.getByLabel("Tabletop material", { exact: true }).fill("Finished white oak");
   await page.getByLabel("Tabletop cost ($ each)", { exact: true }).fill("450.25");
   for (const [input, shown] of [["6 in", "6 in"], ["1/32 in", "0.03125 in"]]) {
@@ -284,6 +279,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
     await expect(thickness).toHaveValue(shown);
   }
   await page.getByLabel("How many", { exact: true }).fill("3");
+  await page.getByText("Edit pricing", {exact:false}).first().click();
   const topLine = page.locator(".line").filter({ has: page.locator('input[value="Tabletop — Finished white oak"]') });
   await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
   await expect(page.locator("svg").filter({ hasText: "TABLETOP INCLUDED" })).toBeVisible();
@@ -307,9 +303,8 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("500");
   await page.getByLabel("Tabletop cost ($ each)", { exact: true }).fill("450.25");
   await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
-  const includedSaved = page.waitForResponse((r) => /\/api\/quotes\/\d+$/.test(r.url()) && r.request().method() === "PATCH");
-  await page.getByRole("button", { name: "Save to suite", exact: true }).click();
-  expect((await includedSaved).ok()).toBe(true);
+  await expect.poll(() => JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes ORDER BY id DESC LIMIT 1').get().payload).state?.topCost).toBe('450.25');
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
   const includedRow = app.sqlite.prepare("SELECT id, payload FROM quotes ORDER BY id DESC LIMIT 1").get();
   const includedDraft = JSON.parse(includedRow.payload);
   expect(includedDraft.state).toMatchObject({ includeTop: "yes", topMaterial: "Finished white oak", topCost: "450.25", qty: "3", frameLengthFt: 2.75, frameWidthIn: 16.75, frameHeightIn: 12.2, topThicknessIn: 0.03125, lengthFt: 3, widthIn: 20 });
@@ -335,5 +330,93 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("450.25");
   await page.getByLabel("Tabletop cost ($ each)", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ animations: "disabled", path: "test-results/tabletop-options-mobile.png" });
+  // The primary action stays within the phone viewport while scrolling.
+  const action = await page.getByRole('button',{name:/Review quote/}).boundingBox();
+  expect(action.y + action.height).toBeLessThanOrEqual(844);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.evaluate(() => window.scrollTo({top:0}));
+  await page.screenshot({path:'test-results/quote-workbench-mobile.png',animations:'disabled'});
+
+  // CRM search carries contact and language into the quote.
+  app.sqlite.prepare("INSERT INTO crm_clients(name,company,phone,email,preferred_language) VALUES ('UX Search Customer','Oak Works','555-0198','quote-ui@example.test','es')").run();
+  const customerSection = page.locator('.quote-workbench details').filter({has:page.locator('summary').filter({hasText:/^Customer/})});
+  if(!(await customerSection.getAttribute('open'))) { if(!(await page.getByLabel('Find customer',{exact:true}).isVisible())) await customerSection.locator('summary').click(); }
+  await page.getByLabel('Find customer',{exact:true}).fill('555-0198');
+  await page.getByRole('button').filter({has:page.getByText('UX Search Customer',{exact:true})}).click();
+  await expect(page.getByLabel('Customer name',{exact:true})).toHaveValue('UX Search Customer');
+  await expect(page.getByLabel('Customer language',{exact:true})).toHaveValue('es');
+  await expect(page.getByLabel('Email',{exact:true})).toHaveValue('quote-ui@example.test');
+
+  // A slow PATCH keeps a second edit and never overwrites its customer name.
+  let releaseSave; let held = false;
+  await page.route(/\/api\/quotes\/\d+$/, async route => {
+    if(route.request().method()==='PATCH' && !held) { held=true; await new Promise(r=>releaseSave=r); }
+    await route.continue();
+  });
+  await page.getByLabel('Customer name',{exact:true}).fill('First delayed edit');
+  await expect.poll(()=>held).toBe(true);
+  await page.getByLabel('Customer name',{exact:true}).fill('Latest delayed edit');
+  releaseSave();
+  await expect.poll(()=>JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(includedRow.id).payload).customer.name).toBe('Latest delayed edit');
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
+  await page.unroute(/\/api\/quotes\/\d+$/);
+
+  await page.context().setOffline(true);
+  await page.getByLabel('Customer name',{exact:true}).fill('Recovered offline edit');
+  await expect(page.locator('.draft-status')).toContainText('Offline');
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('cjm.session.v2.user.')))).customer.name)).toBe('Recovered offline edit');
+  await page.context().setOffline(false);
+  await expect.poll(()=>JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(includedRow.id).payload).customer.name).toBe('Recovered offline edit');
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
+  await page.getByRole('button',{name:/Review quote/}).click();
+  await expect(page.getByRole('heading',{name:'Review & send'})).toBeVisible();
+  await expect(page.locator('iframe[title="Customer quote"]')).toHaveAttribute('src',/preview=1.*embed=1/);
+  await expect(page.getByRole('button',{name:'Send email',exact:true})).toBeEnabled();
+  const sendBounds = await page.getByRole('button',{name:'Send email',exact:true}).boundingBox();
+  expect(sendBounds.y + sendBounds.height).toBeLessThanOrEqual(844);
+  await expect(page.getByRole('link',{name:'Print / PDF',exact:true})).toHaveAttribute('href',/print=1/);
+  expect(app.sqlite.prepare('SELECT status FROM quotes WHERE id=?').get(includedRow.id).status).toBe('draft');
+  await page.screenshot({path:'test-results/quote-review-mobile.png',animations:'disabled'});
+  await page.setViewportSize({width:1440,height:900});
+  await page.screenshot({path:'test-results/quote-review-desktop.png',animations:'disabled'});
+
+  // Saved search/filter/page endpoints replace an unbounded list. Selection
+  // for the combined buy list remains explicit across pages.
+  const insert = app.sqlite.prepare("INSERT INTO quotes(number,type,customer_name,total_cents,payload,status) VALUES (?,?,?,?,?,?)");
+  for(let i=0;i<26;i++) insert.run('Q-UX-'+i, i%2?'concrete':'table','UX Paging '+i,10000,'{}',i%2?'sent':'draft');
+  await page.getByRole('button',{name:'Saved',exact:true}).click();
+  await page.getByLabel('Search quotes',{exact:true}).fill('UX Paging');
+  await expect(page.getByText('Page 1 of 2',{exact:true})).toBeVisible();
+  await page.getByRole('checkbox',{name:/for buy list/}).first().check();
+  await page.getByRole('button',{name:'Next',exact:true}).click();
+  await expect(page.getByText('Page 2 of 2',{exact:true})).toBeVisible();
+  await expect(page.getByText('1 selected across pages (up to 50)',{exact:true})).toBeVisible();
+  await page.getByLabel('Trade',{exact:true}).selectOption('metals');
+  await page.getByLabel('Status',{exact:true}).selectOption('draft');
+  await expect(page.getByText('13 quotes',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Next',exact:true})).toBeDisabled();
+  await page.getByLabel('Search quotes',{exact:true}).fill('No such customer');
+  await expect(page.getByText(/No quotes match/)).toBeVisible();
+  // A second screen cannot be overwritten. The owner can retain local edits
+  // as a separate draft, at exactly the same locked rates.
+  await page.getByRole('button',{name:'New quote',exact:true}).click();
+  await page.getByRole('button',{name:/Continue draft/}).click();
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
+  app.sqlite.prepare('UPDATE quotes SET version=version+1 WHERE id=?').run(includedRow.id);
+  await page.getByLabel('Frame height',{exact:true}).fill('11.75 in');
+  await page.getByLabel('Frame height',{exact:true}).press('Tab');
+  await expect(page.locator('.draft-status')).toContainText('Conflict');
+  expect(JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(includedRow.id).payload).state.frameHeightIn).toBe(12.2);
+  page.once('dialog', dialog=>dialog.accept());
+  await page.getByRole('button',{name:'Keep edits as new quote',exact:true}).click();
+  await expect(page.locator('.draft-status')).toHaveText('Saved');
+  const retained=JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes ORDER BY id DESC LIMIT 1').get().payload);
+  expect(retained.state.frameHeightIn).toBe(11.75);
+  expect(retained.priceBookSnapshot).toEqual(includedDraft.priceBookSnapshot);
   expect(errors).toEqual([]);
+});
+
+test("Inventory search, QR, drafts, stock counts, reservations and partial receiving on mobile", async ({ page }) => {
+  test.setTimeout(120000);
+  await inventoryWorkflow(page,app,expect);
 });

@@ -1,291 +1,349 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
-import { useApiMutation } from "@/hooks/useApiMutation";
-import type { Item, Adjustment } from "@shared/schema";
+import { itemPhotos, locationString, formatDateTime } from "@/lib/format";
 import {
-  itemPhotos,
-  locationString,
-  isLowStock,
-  ITEM_TYPE_LABELS,
-  ADJUSTMENT_REASON_LABELS,
-  formatDateTime,
-} from "@/lib/format";
+  availableStock,
+  isTool,
+  invalidateInventory,
+  inventoryReturnPath,
+  stockLabel,
+} from "@/lib/inventory";
+import { primaryBtn, secondaryBtn } from "@/lib/ui-styles";
+import type { Item } from "@shared/schema";
+import type { InventoryLoan, InventoryReservation } from "@shared/inventory";
 import PhotoGallery from "@/components/PhotoGallery";
-import CategoryBadge from "@/components/CategoryBadge";
 import EquipmentAttrsCard from "@/components/EquipmentAttrsCard";
-import ItemLocationMap from "@/components/ItemLocationMap";
+import CategoryBadge from "@/components/CategoryBadge";
 import CheckDialog from "@/components/CheckDialog";
 import AdjustDialog from "@/components/AdjustDialog";
 import QRDialog from "@/components/QRDialog";
 import Modal from "@/components/Modal";
-import {
-  PackageMinus,
-  PackagePlus,
-  Sliders,
-  QrCode,
-  Pencil,
-  Trash2,
-  ArrowLeft,
-  AlertTriangle,
-  Loader2,
-} from "lucide-react";
-
-type TxnRow = {
-  id: number;
-  type: "check_out" | "check_in";
-  quantity: number;
-  notes: string | null;
-  created_at: number;
-  user_name?: string;
-  project_id?: number | null;
-};
-
+import StockHistory from "@/components/inventory/StockHistory";
+import ReserveDialog from "@/components/inventory/ReserveDialog";
+const ItemLocationMap = lazy(() => import("@/components/ItemLocationMap"));
+const RestockDialog = lazy(
+  () => import("@/components/inventory/RestockDialog"),
+);
 export default function ItemDetailPage({ id }: { id: string }) {
-  const itemId = Number(id);
-  const { isElevated } = useAuth();
-  const [, setLocation] = useLocation();
-
-  const [checkMode, setCheckMode] = useState<null | "check_out" | "check_in">(null);
-  const [adjustOpen, setAdjustOpen] = useState(false);
-  const [qrOpen, setQrOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  // One combined fetch: item + recent transactions + adjustments. Saves two
-  // round-trips per page load (which matters most on slow connections).
-  const { data: detail, isLoading } = useQuery<{
+  const itemId = Number(id),
+    { isElevated } = useAuth(),
+    [, navigate] = useLocation(),
+    qc = useQueryClient();
+  const [checkMode, setCheckMode] = useState<
+      "check_out" | "check_in" | "receive" | null
+    >(null),
+    [adjust, setAdjust] = useState(false),
+    [qr, setQr] = useState(false),
+    [reserve, setReserve] = useState(false),
+    [legacyReview, setLegacyReview] = useState(false),
+    [restock, setRestock] = useState(false),
+    [map, setMap] = useState(false),
+    [remove, setRemove] = useState(false);
+  const detail = useQuery<{
     item: Item;
-    transactions: TxnRow[];
-    adjustments: Adjustment[];
+    reservations: InventoryReservation[];
+    loans: InventoryLoan[];
   }>({
     queryKey: ["item-detail", itemId],
-    queryFn: async () => (await apiRequest("GET", `/api/items/${itemId}/detail`)).json(),
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/items/${itemId}/detail`)).json(),
   });
-  const item = detail?.item;
-  const txns = detail?.transactions ?? [];
-  const adjustments = detail?.adjustments ?? [];
-
-  const del = useApiMutation({
-    request: () => ({ method: "DELETE", url: `/api/items/${itemId}` }),
-    invalidate: [["items"]],
-    successTitle: "Item deleted",
-    errorTitle: "Could not delete",
-    onSuccess: () => setLocation("/home"),
+  const release = useMutation({
+    mutationFn: (reservationId: number) =>
+      apiRequest(
+        "DELETE",
+        `/api/items/${itemId}/reservations/${reservationId}`,
+      ),
+    onSuccess: () => {
+      void invalidateInventory(qc);
+    },
   });
-
-  if (isLoading) {
+  const del = useMutation({
+    mutationFn: () => apiRequest("DELETE", `/api/items/${itemId}`),
+    onSuccess: () => {
+      void invalidateInventory(qc);
+      navigate(inventoryReturnPath());
+    },
+  });
+  if (detail.isLoading)
     return (
-      <div className="flex justify-center py-20 text-muted-foreground">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
+      <p role="status" className="py-12 text-center">
+        Loading item…
+      </p>
     );
-  }
-  if (!item) {
+  if (detail.error || !detail.data)
     return (
-      <div className="mx-auto max-w-3xl py-16 text-center text-muted-foreground">
-        <p>Item not found.</p>
-        <Link href="/home" className="mt-2 inline-block font-medium text-primary hover:underline">
-          Back to items
+      <div role="alert" className="py-12">
+        <p>{detail.error?.message || "Item not found."}</p>
+        <button className={secondaryBtn} onClick={() => void detail.refetch()}>
+          Retry
+        </button>
+        <Link className={secondaryBtn} href={inventoryReturnPath()}>
+          Back to inventory
         </Link>
       </div>
     );
-  }
-
-  const low = isLowStock(item);
-  const photos = itemPhotos(item);
-
-  const ActionBtn = ({
-    onClick,
-    icon: Icon,
-    label,
-    danger,
-  }: {
-    onClick: () => void;
-    icon: typeof QrCode;
-    label: string;
-    danger?: boolean;
-  }) => (
-    <button
-      onClick={onClick}
-      className={
-        "flex flex-1 min-w-[88px] flex-col items-center gap-1.5 rounded-xl border border-border p-3 text-sm font-medium transition-colors " +
-        (danger
-          ? "text-destructive hover:border-destructive hover:bg-destructive/10"
-          : "text-foreground hover:border-primary hover:bg-primary/5")
-      }
-    >
-      <Icon className="h-5 w-5" />
-      {label}
-    </button>
+  const { item, reservations, loans } = detail.data,
+    tool = isTool(item),
+    available = availableStock(item);
+  const unattributed = Math.max(
+    0,
+    item.quantityReserved - reservations.reduce((n, r) => n + r.quantity, 0),
   );
-
   return (
-    <div className="mx-auto max-w-4xl">
-      <Link
-        href="/home"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to items
+    <div className="mx-auto max-w-4xl space-y-5 pb-6">
+      <Link className="text-sm text-primary" href={inventoryReturnPath()}>
+        ← Back to inventory
       </Link>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <PhotoGallery photos={photos} />
-
-        <div className="flex flex-col gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <CategoryBadge category={item.category} size="md" />
-              <span className="rounded-full bg-secondary px-3 py-1 text-sm text-secondary-foreground">
-                {ITEM_TYPE_LABELS[item.itemType]}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <CategoryBadge category={item.category} />
+          <h1 className="mt-2 text-2xl font-bold sm:text-3xl">{item.name}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {locationString(item)}
+          </p>
+          {item.partNumber && (
+            <p className="text-sm text-muted-foreground">
+              Part {item.partNumber}
+            </p>
+          )}
+        </div>
+        <details className="relative shrink-0">
+          <summary className={`${secondaryBtn} cursor-pointer`}>
+            More actions
+          </summary>
+          <div
+            onClick={(e) =>
+              e.currentTarget.closest("details")?.removeAttribute("open")
+            }
+            className="absolute right-0 z-20 mt-2 flex min-w-48 flex-col gap-1 rounded-xl border bg-card p-2 shadow-xl"
+          >
+            <Link className={secondaryBtn} href={`/item/${itemId}/edit`}>
+              Edit details
+            </Link>
+            <button className={secondaryBtn} onClick={() => setQr(true)}>
+              Print QR label
+            </button>
+            {isElevated && (
+              <>
+                <button
+                  className={secondaryBtn}
+                  onClick={() => setAdjust(true)}
+                >
+                  Count stock
+                </button>
+                <button
+                  className={secondaryBtn}
+                  onClick={() => setReserve(true)}
+                >
+                  Reserve for job
+                </button>
+                <button
+                  className={secondaryBtn}
+                  onClick={() => setRestock(true)}
+                >
+                  Restock
+                </button>
+                <button
+                  className={`${secondaryBtn} text-destructive`}
+                  onClick={() => setRemove(true)}
+                >
+                  Delete item
+                </button>
+              </>
+            )}
+          </div>
+        </details>
+      </div>
+      <div className="grid grid-cols-3 gap-2 rounded-xl border bg-card p-4">
+        <div>
+          <p className="text-xs text-muted-foreground">Available</p>
+          <p
+            className={`mt-1 text-2xl font-bold ${available === 0 ? "text-destructive" : ""}`}
+          >
+            {available}
+          </p>
+          <p className="text-xs">{item.unit}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">On hand</p>
+          <p className="mt-1 text-2xl font-semibold">{item.quantity}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Reserved</p>
+          <p className="mt-1 text-2xl font-semibold">{item.quantityReserved}</p>
+        </div>
+      </div>
+      {item.quantityReserved > item.quantity && (
+        <p role="alert" className="rounded-lg bg-amber-500/10 p-3 text-sm">
+          Reserved jobs are short by{" "}
+          {stockLabel(item.quantityReserved - item.quantity, item.unit)}. Review
+          reservations or restock.
+        </p>
+      )}
+      <div className="sticky top-0 z-10 flex flex-wrap gap-2 border-y bg-background py-3">
+        <button
+          className={primaryBtn}
+          onClick={() => setCheckMode("check_out")}
+        >
+          {tool ? "Check out" : "Use on job"}
+        </button>
+        <button
+          className={secondaryBtn}
+          onClick={() => setCheckMode("check_in")}
+        >
+          {tool ? "Return tool" : "Return unused"}
+        </button>
+        <button
+          className={secondaryBtn}
+          onClick={() => setCheckMode("receive")}
+        >
+          Receive stock
+        </button>
+      </div>
+      {(reservations.length > 0 || unattributed > 0) && (
+        <section className="rounded-xl border bg-card p-4">
+          <h2 className="mb-3 font-semibold">Reserved for jobs</h2>
+          {reservations.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center justify-between gap-3 border-t py-2 text-sm"
+            >
+              <span>
+                {r.jobNumber} · {r.projectName}
+                <strong className="ml-2">
+                  {r.quantity} {item.unit}
+                </strong>
               </span>
-              {low && (
-                <span className="flex items-center gap-1 rounded-full bg-orange-500/15 px-3 py-1 text-sm font-medium text-orange-700 dark:text-orange-400">
-                  <AlertTriangle className="h-4 w-4" />
-                  Low stock
-                </span>
+              {isElevated && (
+                <button
+                  className="text-primary underline"
+                  disabled={release.isPending}
+                  onClick={() => release.mutate(r.id)}
+                >
+                  Release
+                </button>
               )}
             </div>
-            <h1 className="mt-3 text-3xl font-bold tracking-tight text-foreground">{item.name}</h1>
-            <p className="mt-1 text-muted-foreground">{locationString(item)}</p>
-            {(item.partNumber || item.mfgPartNumber) && (
-              <p className="mt-1 text-sm text-muted-foreground">
-                {item.partNumber && <>Part: {item.partNumber} </>}
-                {item.mfgPartNumber && <>· Mfg: {item.mfgPartNumber}</>}
-              </p>
-            )}
-          </div>
-
-          <div className="flex items-baseline gap-2 rounded-xl border border-border bg-card p-4">
-            <span className={"text-4xl font-bold " + (low ? "text-orange-600 dark:text-orange-400" : "text-foreground")}>
-              {item.quantity}
-            </span>
-            <span className="text-muted-foreground">in stock</span>
-            <span className="ml-auto flex items-baseline gap-3 text-sm text-muted-foreground">
-              {item.quantityReserved > 0 && <span>{item.quantityReserved} reserved</span>}
-            </span>
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-wrap gap-2">
-            <ActionBtn onClick={() => setCheckMode("check_out")} icon={PackageMinus} label="Check out" />
-            <ActionBtn onClick={() => setCheckMode("check_in")} icon={PackagePlus} label="Check in" />
-            {isElevated && <ActionBtn onClick={() => setAdjustOpen(true)} icon={Sliders} label="Adjust" />}
-            <ActionBtn onClick={() => setQrOpen(true)} icon={QrCode} label="QR" />
-            <ActionBtn onClick={() => setLocation(`/item/${itemId}/edit`)} icon={Pencil} label="Edit" />
-            {isElevated && (
-              <ActionBtn onClick={() => setConfirmDelete(true)} icon={Trash2} label="Delete" danger />
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 flex flex-col gap-6">
-        <ItemLocationMap item={item} />
-
-        <EquipmentAttrsCard item={item} />
-
-        {item.notes && (
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-2 text-base font-semibold text-foreground">Notes</h2>
-            <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.notes}</p>
-          </div>
-        )}
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Transactions */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-3 text-base font-semibold text-foreground">Recent activity</h2>
-            {txns.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No check-ins or check-outs yet.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {txns.map((t) => (
-                  <li key={t.id} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      {t.type === "check_out" ? (
-                        <PackageMinus className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                      ) : (
-                        <PackagePlus className="h-4 w-4 text-green-600 dark:text-green-400" />
-                      )}
-                      <span className="text-foreground">
-                        {t.type === "check_out" ? "−" : "+"}
-                        {t.quantity}
-                      </span>
-                      <span className="text-muted-foreground">{t.user_name ?? ""}</span>
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {formatDateTime(t.created_at)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Adjustments */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-3 text-base font-semibold text-foreground">Stock adjustments</h2>
-            {adjustments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No adjustments recorded.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {adjustments.map((a) => (
-                  <li key={a.id} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={
-                          "font-medium " + (a.delta < 0 ? "text-destructive" : "text-green-600 dark:text-green-400")
-                        }
-                      >
-                        {a.delta > 0 ? "+" : ""}
-                        {a.delta}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {ADJUSTMENT_REASON_LABELS[a.reason]}
-                      </span>
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {formatDateTime(a.createdAt as unknown as string)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Dialogs */}
-      {checkMode && (
-        <CheckDialog item={item} mode={checkMode} open={true} onClose={() => setCheckMode(null)} />
+          ))}
+          {unattributed > 0 && (
+            <p className="text-sm text-amber-700">
+              {unattributed} reserved in older records without a confirmed job.
+              Review these reservations before using the stock.
+              {isElevated && (
+                <button
+                  className="ml-2 underline"
+                  onClick={() => setLegacyReview(true)}
+                >
+                  Review reservation
+                </button>
+              )}
+            </p>
+          )}
+          {release.error && <p role="alert">{release.error.message}</p>}
+        </section>
       )}
-      <AdjustDialog item={item} open={adjustOpen} onClose={() => setAdjustOpen(false)} />
-      <QRDialog item={item} open={qrOpen} onClose={() => setQrOpen(false)} />
-
-      <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete item?">
-        <p className="text-sm text-muted-foreground">
-          This permanently removes <span className="font-medium text-foreground">{item.name}</span>{" "}
-          and its history. This cannot be undone.
+      {tool && (
+        <section className="rounded-xl border bg-card p-4">
+          <h2 className="mb-2 font-semibold">Who has this tool?</h2>
+          {loans.length ? (
+            loans.map((l) => (
+              <div key={l.id} className="border-t py-2 text-sm">
+                <strong>{l.borrowerName}</strong> · {l.remaining} out
+                {l.jobNumber ? ` · ${l.jobNumber}` : ""}
+                <p className="text-xs text-muted-foreground">
+                  Checked out {formatDateTime(l.createdAt)}
+                </p>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No tracked checkouts. Earlier movements remain in history.
+            </p>
+          )}
+        </section>
+      )}
+      {itemPhotos(item).length > 0 && (
+        <details className="rounded-xl border bg-card p-4">
+          <summary className="cursor-pointer font-medium">Photos</summary>
+          <div className="mt-3 max-w-md">
+            <PhotoGallery photos={itemPhotos(item)} />
+          </div>
+        </details>
+      )}
+      {item.area && (
+        <>
+          <button
+            className="text-sm text-primary underline"
+            onClick={() => setMap((v) => !v)}
+          >
+            {map ? "Hide map" : "Show on shop map"}
+          </button>
+          {map && (
+            <Suspense fallback={<p>Loading map…</p>}>
+              <ItemLocationMap item={item} />
+            </Suspense>
+          )}
+        </>
+      )}
+      {item.notes && (
+        <p className="whitespace-pre-wrap rounded-xl border p-4 text-sm">
+          {item.notes}
         </p>
-        <div className="mt-5 flex justify-end gap-3">
-          <button
-            onClick={() => setConfirmDelete(false)}
-            className="h-11 rounded-xl border border-border px-5 font-medium text-foreground hover:bg-accent"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => del.mutate()}
-            disabled={del.isPending}
-            className="flex h-11 items-center gap-2 rounded-xl bg-destructive px-5 font-semibold text-destructive-foreground hover:opacity-90 disabled:opacity-60"
-          >
-            {del.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Delete
-          </button>
-        </div>
+      )}
+      <EquipmentAttrsCard item={item} />
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Stock history</h2>
+        <StockHistory itemId={item.id} />
+      </div>
+      {checkMode && (
+        <CheckDialog
+          item={item}
+          mode={checkMode}
+          open
+          onClose={() => setCheckMode(null)}
+        />
+      )}
+      <AdjustDialog
+        item={item}
+        open={adjust}
+        onClose={() => setAdjust(false)}
+      />
+      <QRDialog item={item} open={qr} onClose={() => setQr(false)} />
+      {legacyReview && (
+        <ReserveDialog
+          item={item}
+          legacy={unattributed}
+          onClose={() => setLegacyReview(false)}
+        />
+      )}{" "}
+      {reserve && (
+        <ReserveDialog item={item} onClose={() => setReserve(false)} />
+      )}
+      <Suspense fallback={<p>Opening…</p>}>
+        {restock && (
+          <RestockDialog items={[item]} onClose={() => setRestock(false)} />
+        )}
+      </Suspense>
+      <Modal
+        open={remove}
+        onClose={() => setRemove(false)}
+        title="Delete item?"
+      >
+        <p className="text-sm">
+          {item.name} will move to the trash. It can be restored for 30 days.
+        </p>
+        {del.error && <p role="alert">{del.error.message}</p>}
+        <button
+          className={`${primaryBtn} mt-4`}
+          disabled={del.isPending}
+          onClick={() => del.mutate()}
+        >
+          Delete item
+        </button>
       </Modal>
     </div>
   );

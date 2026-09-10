@@ -1,4 +1,12 @@
-import { useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type ReactElement,
+  cloneElement,
+} from "react";
+import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
   CATEGORIES,
@@ -8,46 +16,14 @@ import {
   type Area,
   type ItemType,
 } from "@shared/schema";
-import { CATEGORY_LABELS, AREA_LABELS, ITEM_TYPE_LABELS, itemAttrs } from "@/lib/format";
+import { STOCK_UNITS, UNIT_LABELS, fractionalUnit } from "@shared/inventory";
+import { CATEGORY_LABELS, AREA_LABELS, ITEM_TYPE_LABELS } from "@/lib/format";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
-// The quote price book's shared material library — one physical steel, priced
-// in quotes AND stocked here; materialKey is the bridge (Phase C #15).
-import { DEFAULT_PRICE_BOOK } from "@/quote/data/priceBook.js";
+import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
 import PhotoSlots from "./PhotoSlots";
-import { cn } from "@/lib/utils";
-import { Zap, Flame, Cpu, Package, Wrench, Loader2, ChevronDown } from "lucide-react";
-
-const CATEGORY_ICON: Record<Category, typeof Zap> = {
-  electric: Zap,
-  welder: Flame,
-  it: Cpu,
-  raw_materials: Package,
-  tools: Wrench,
-};
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring";
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-foreground">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <h2 className="mb-4 text-base font-semibold text-foreground">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
 export interface ItemFormSeed {
+  id?: number;
   name?: string;
   partNumber?: string | null;
   mfgPartNumber?: string | null;
@@ -68,398 +44,508 @@ export interface ItemFormSeed {
   quantityReserved?: number;
   materialKey?: string | null;
   notes?: string | null;
+  unit?: string;
+  reorderTarget?: number;
+  supplier?: string | null;
+  lastCostCents?: number;
+  detailVersion?: number;
 }
-
-interface ItemFormProps {
+interface Props {
   mode: "create" | "edit";
   initial?: ItemFormSeed;
+  suggestion?: ItemFormSeed;
   submitting?: boolean;
-  onSubmit: (payload: Record<string, any>) => void | Promise<void>;
+  onSubmit: (
+    payload: Record<string, any>,
+    addAnother?: boolean,
+  ) => Promise<unknown> | unknown;
 }
-
-export default function ItemForm({ mode, initial, submitting, onSubmit }: ItemFormProps) {
-  const seed = initial ?? {};
-  const { isElevated } = useAuth();
-
-  // Equipment-type details are no longer edited in this form, but we preserve any
-  // existing values so editing an item never wipes them.
-  const initialEquipmentType = seed.equipmentType ?? null;
-  const initialAttrs =
-    typeof seed.customAttrs === "string"
-      ? itemAttrs({ customAttrs: seed.customAttrs })
-      : (seed.customAttrs as Record<string, any>) ?? {};
-
-  const [name, setName] = useState(seed.name ?? "");
-  const [partNumber, setPartNumber] = useState(seed.partNumber ?? "");
-  const [mfgPartNumber, setMfgPartNumber] = useState(seed.mfgPartNumber ?? "");
-  const [category, setCategory] = useState<Category>(seed.category ?? "tools");
-
-  const [photos, setPhotos] = useState<string[]>(() => {
-    let arr: string[] = [];
-    if (Array.isArray(seed.photos)) {
-      arr = seed.photos.slice();
-    } else if (typeof seed.photos === "string" && seed.photos) {
-      try {
-        const p = JSON.parse(seed.photos);
-        if (Array.isArray(p)) arr = p;
-      } catch {
-        /* ignore malformed */
-      }
-    }
-    if (arr.length === 0 && seed.photoUrl) arr = [seed.photoUrl];
-    while (arr.length < 5) arr.push("");
-    return arr.slice(0, 5);
-  });
-
-  const [area, setArea] = useState<Area | "">(seed.area ?? "");
-  const [rackLetter, setRackLetter] = useState(seed.rackLetter ?? "");
-  const [rackLevel, setRackLevel] = useState<string>(
-    seed.rackLevel != null ? String(seed.rackLevel) : ""
-  );
-  const [subLocation, setSubLocation] = useState(seed.subLocation ?? "");
-  const [shelf, setShelf] = useState(seed.shelf ?? "");
-
-  // Containers use Front/Middle/Back + Left/Right instead of rack letter/level,
-  // stored together in subLocation as e.g. "Front Left".
-  const seedIsContainer =
-    seed.area === "shipping_container_1" || seed.area === "shipping_container_2";
-  const seedTokens = seedIsContainer
-    ? (seed.subLocation ?? "").split(/[^a-zA-Z0-9]+/).filter(Boolean)
-    : [];
-  const findToken = (opts: string[]) =>
-    opts.find((o) => seedTokens.some((t) => t.toLowerCase() === o.toLowerCase())) ?? "";
-  const [containerPos, setContainerPos] = useState(findToken(["Front", "Middle", "Back"]));
-  const [containerSide, setContainerSide] = useState(findToken(["Left", "Right"]));
-
-  const [quantity, setQuantity] = useState<string>(String(seed.quantity ?? 0));
-  const [lowStockThreshold, setLowStockThreshold] = useState<string>(
-    String(seed.lowStockThreshold ?? 0)
-  );
-  const [itemType, setItemType] = useState<ItemType>(seed.itemType ?? "stock");
-  const [quantityReserved, setQuantityReserved] = useState<string>(
-    String(seed.quantityReserved ?? 0)
-  );
-  const [materialKey, setMaterialKey] = useState(seed.materialKey ?? "");
-  const [notes, setNotes] = useState(seed.notes ?? "");
-
-  // The daily flow is photos + name + category + location + quantity; the
-  // rest hides behind "More details". Editing an item that already uses any
-  // of those fields opens the panel so nothing looks lost.
-  const [moreOpen, setMoreOpen] = useState(
-    () =>
-      mode === "edit" &&
-      Boolean(
-        seed.partNumber ||
-          seed.mfgPartNumber ||
-          (seed.lowStockThreshold ?? 0) > 0 ||
-          (seed.itemType != null && seed.itemType !== "stock") ||
-          (seed.quantityReserved ?? 0) > 0 ||
-          seed.materialKey ||
-          seed.notes
-      )
-  );
-
-  // Price-book materials for the "Quote material" mapping: owner's saved
-  // overrides merged over the defaults, same as the quote builder.
-  const { data: quoteSettings } = useQuery<{ priceBook?: { materials?: Record<string, any> } }>({
-    queryKey: ["quote-settings"],
-    queryFn: async () => (await apiRequest("GET", "/api/quotes/settings")).json(),
-  });
-  const materials: Record<string, { name?: string }> = { ...DEFAULT_PRICE_BOOK.materials };
-  for (const [k, v] of Object.entries(quoteSettings?.priceBook?.materials ?? {})) {
-    materials[k] = { ...(materials as any)[k], ...(v as object) };
-  }
-
-  // Every area gets full location detail (rack / level / sub-location / shelf).
-  const showLocation = area !== "";
-  const isContainer = area === "shipping_container_1" || area === "shipping_container_2";
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const payload: Record<string, any> = {
-      name: name.trim(),
-      partNumber: partNumber.trim() || null,
-      mfgPartNumber: mfgPartNumber.trim() || null,
-      category,
-      equipmentType: initialEquipmentType,
-      customAttrs: initialAttrs,
-      photos,
-      photoUrl: photos.find(Boolean) ?? null,
-      area: area || null,
-      rackLetter: showLocation && !isContainer ? rackLetter.trim() || null : null,
-      rackLevel: showLocation && !isContainer && rackLevel ? Number(rackLevel) : null,
-      subLocation: showLocation
-        ? isContainer
-          ? [containerPos, containerSide].filter(Boolean).join(" ") || null
-          : subLocation.trim() || null
-        : null,
-      shelf: showLocation && !isContainer ? shelf.trim() || null : null,
-      quantity: Number(quantity) || 0,
-      lowStockThreshold: Number(lowStockThreshold) || 0,
-      itemType,
-      quantityReserved: Number(quantityReserved) || 0,
-      materialKey: materialKey || null,
-      notes: notes.trim() || null,
-    };
-    onSubmit(payload);
-  }
-
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-      {/* Photos */}
-      <Section title="Photos">
-        <p className="mb-3 text-sm text-muted-foreground">
-          Take the same five shots every time so anyone can find and identify the part.
-        </p>
-        <PhotoSlots photos={photos} onChange={setPhotos} />
-      </Section>
+    <label className="flex flex-col gap-1 text-sm font-medium">
+      {label}
+      {cloneElement(children as ReactElement<any>, { "aria-label": label })}
+    </label>
+  );
+}
+function photoArray(seed: ItemFormSeed) {
+  try {
+    const arr = Array.isArray(seed.photos)
+      ? seed.photos
+      : JSON.parse(seed.photos || "[]");
+    return arr.length ? arr : [seed.photoUrl || ""];
+  } catch {
+    return [seed.photoUrl || ""];
+  }
+}
+function initialFields(seed: ItemFormSeed = {}) {
+  return {
+    name: seed.name || "",
+    category: seed.category || "raw_materials",
+    itemType: seed.itemType || "raw_material",
+    quantity: String(seed.quantity ?? 0),
+    unit: seed.unit || "each",
+    area: seed.area || "",
+    rackLetter: seed.rackLetter || "",
+    rackLevel: String(seed.rackLevel || ""),
+    subLocation: seed.subLocation || "",
+    shelf: seed.shelf || "",
+    bin: seed.bin || "",
+    partNumber: seed.partNumber || "",
+    mfgPartNumber: seed.mfgPartNumber || "",
+    notes: seed.notes || "",
+    photos: photoArray(seed),
+    lowStockThreshold: String(seed.lowStockThreshold ?? 0),
+    reorderTarget: String(seed.reorderTarget ?? 0),
+    supplier: seed.supplier || "",
+    cost: seed.lastCostCents ? String(seed.lastCostCents / 100) : "",
+    materialKey: seed.materialKey || "",
+  };
+}
+export default function ItemForm({
+  mode,
+  initial = {},
+  suggestion,
+  submitting,
+  onSubmit,
+}: Props) {
+  const { user, isElevated } = useAuth(),
+    key = `cjm.inventory.draft.${user?.id}.${mode}.${initial.id || "new"}`;
+  const defaults = () => {
+    let recent = {};
+    try {
+      recent = JSON.parse(
+        sessionStorage.getItem(`cjm.inventory.last.${user?.id}`) || "{}",
+      );
+    } catch {}
+    return initialFields(
+      mode === "create" ? { ...recent, ...initial } : initial,
+    );
+  };
+  const [fields, setFields] = useState<ReturnType<typeof initialFields>>(() => {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(key) || "null");
+      if (draft && draft.version === initial.detailVersion)
+        return { ...defaults(), ...draft.fields };
+    } catch {}
+    return defaults();
+  });
+  const draftRequestKey = useRef<string | null>(null);
+  if (!draftRequestKey.current) {
+    try {
+      draftRequestKey.current =
+        JSON.parse(sessionStorage.getItem(key) || "null")?.requestKey ||
+        crypto.randomUUID();
+    } catch {
+      draftRequestKey.current = crypto.randomUUID();
+    }
+  }
+  const [more, setMore] = useState(false),
+    [error, setError] = useState("");
+  const addAnother = useRef(false),
+    categoryTouched = useRef(false);
+  const patch = (values: Partial<typeof fields>) =>
+    setFields((previous) => ({ ...previous, ...values }));
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        key,
+        JSON.stringify({
+          version: initial.detailVersion,
+          requestKey: draftRequestKey.current,
+          fields,
+        }),
+      );
+    } catch {}
+  }, [fields, key]);
+  useEffect(() => {
+    if (!suggestion) return;
+    setFields((previous) => ({
+      ...previous,
+      name: previous.name || suggestion.name || "",
+      notes: previous.notes || suggestion.notes || "",
+      category: categoryTouched.current
+        ? previous.category
+        : suggestion.category || previous.category,
+      photos: [
+        ...previous.photos.filter(Boolean),
+        ...photoArray(suggestion).filter(Boolean),
+      ].slice(0, 5),
+    }));
+  }, [suggestion]);
+  const [duplicateQuery, setDuplicateQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(
+      () =>
+        setDuplicateQuery(
+          new URLSearchParams({
+            name: fields.name,
+            partNumber: fields.partNumber,
+            excludeId: String(initial.id || 0),
+          }).toString(),
+        ),
+      350,
+    );
+    return () => clearTimeout(timer);
+  }, [fields.name, fields.partNumber, initial.id]);
+  const duplicates = useQuery<
+    { id: number; name: string; area: Area | null; rackLetter: string | null }[]
+  >({
+    queryKey: ["inventory", "duplicates", duplicateQuery],
+    enabled:
+      !!duplicateQuery && !!(fields.name.trim() || fields.partNumber.trim()),
+    queryFn: async ({ signal }) =>
+      (
+        await apiRequest(
+          "GET",
+          `/api/inventory/duplicates?${duplicateQuery}`,
+          undefined,
+          { signal },
+        )
+      ).json(),
+  });
+  const materials = useQuery<Record<string, { name?: string }>>({
+    queryKey: ["inventory", "materials"],
+    enabled: more && isElevated,
+    queryFn: async () => {
+      const [defaults, response] = await Promise.all([
+        import("@/quote/data/priceBook.js"),
+        apiRequest("GET", "/api/quotes/settings"),
+      ]);
+      const settings = await response.json();
+      return {
+        ...defaults.DEFAULT_PRICE_BOOK.materials,
+        ...settings.priceBook?.materials,
+      };
+    },
+  });
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    const payload: Record<string, any> = {
+      name: fields.name.trim(),
+      category: fields.category,
+      itemType: fields.itemType,
+      unit: fields.unit,
+      area: fields.area || null,
+      rackLetter: fields.rackLetter.trim() || null,
+      rackLevel: fields.rackLevel ? Number(fields.rackLevel) : null,
+      subLocation: fields.subLocation.trim() || null,
+      shelf: fields.shelf.trim() || null,
+      bin: fields.bin.trim() || null,
+      partNumber: fields.partNumber.trim() || null,
+      mfgPartNumber: fields.mfgPartNumber.trim() || null,
+      notes: fields.notes.trim() || null,
+      photos: fields.photos,
+      photoUrl: fields.photos.find(Boolean) || null,
+      materialKey: fields.materialKey || null,
+      detailVersion: initial.detailVersion,
+    };
+    if (mode === "create") {
+      payload.quantity = Number(fields.quantity);
+      payload.requestKey = draftRequestKey.current;
+    }
+    if (isElevated) {
+      payload.lowStockThreshold = Number(fields.lowStockThreshold);
+      payload.reorderTarget = Number(fields.reorderTarget);
+      payload.supplier = fields.supplier.trim() || null;
+      payload.lastCostCents = Math.round(Number(fields.cost) * 100);
+    }
+    try {
+      await onSubmit(payload, addAnother.current);
 
-      {/* Identity */}
-      <Section title="Details">
+      draftRequestKey.current = crypto.randomUUID();
+      try {
+        sessionStorage.removeItem(key);
+        sessionStorage.setItem(
+          `cjm.inventory.last.${user?.id}`,
+          JSON.stringify({
+            category: fields.category,
+            itemType: fields.itemType,
+            area: fields.area,
+            rackLetter: fields.rackLetter,
+            rackLevel: fields.rackLevel,
+            subLocation: fields.subLocation,
+            shelf: fields.shelf,
+            bin: fields.bin,
+            unit: fields.unit,
+          }),
+        );
+      } catch {}
+      if (addAnother.current)
+        setFields(
+          initialFields({
+            category: fields.category,
+            itemType: fields.itemType,
+            unit: fields.unit,
+            area: (fields.area || undefined) as Area | undefined,
+            rackLetter: fields.rackLetter,
+            rackLevel: Number(fields.rackLevel) || undefined,
+            subLocation: fields.subLocation,
+            shelf: fields.shelf,
+            bin: fields.bin,
+          }),
+        );
+    } catch (e: any) {
+      setError(
+        e.message || "Could not save. Your draft is kept on this device.",
+      );
+    }
+  }
+  const text = (name: keyof typeof fields, label: string) => (
+    <Field label={label}>
+      <input
+        className={inputCls}
+        value={String(fields[name])}
+        onChange={(e) => patch({ [name]: e.target.value })}
+      />
+    </Field>
+  );
+  return (
+    <form onSubmit={submit} className="space-y-5">
+      <section className="space-y-4 rounded-xl border bg-card p-4">
         <Field label="Name">
           <input
-            className={inputCls}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Door seal, silicone"
             required
+            maxLength={240}
+            className={inputCls}
+            value={fields.name}
+            onChange={(e) => patch({ name: e.target.value })}
+            placeholder="Example: 2-inch square tube"
           />
         </Field>
-      </Section>
-
-      {/* Category */}
-      <Section title="Category">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {CATEGORIES.map((c) => {
-            const Icon = CATEGORY_ICON[c];
-            const selected = category === c;
-            return (
-              <button
-                type="button"
-                key={c}
-                onClick={() => setCategory(c)}
-                className={cn(
-                  "flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-colors",
-                  selected
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border text-muted-foreground hover:border-primary/40"
-                )}
-              >
-                <Icon className="h-6 w-6" />
-                <span className="text-sm font-medium">{CATEGORY_LABELS[c]}</span>
-              </button>
-            );
-          })}
-        </div>
-      </Section>
-
-      {/* Location */}
-      <Section title="Location">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Area">
+        {!!duplicates.data?.length && (
+          <div className="rounded-lg bg-amber-500/10 p-3 text-sm">
+            <p className="font-medium">Similar items already exist</p>
+            {duplicates.data.map((i) => (
+              <p key={i.id}>
+                <Link className="underline" href={`/item/${i.id}`}>
+                  {i.name}
+                </Link>{" "}
+                · {i.area ? AREA_LABELS[i.area] : "No location"}
+                {i.rackLetter ? ` · Rack ${i.rackLetter}` : ""}
+              </p>
+            ))}
+            <p className="mt-1">
+              Use an existing item for more stock, or save a separate item for
+              another location.
+            </p>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Track as">
             <select
               className={inputCls}
-              value={area}
-              onChange={(e) => setArea(e.target.value as Area)}
+              value={fields.itemType === "tool" ? "tool" : "material"}
+              onChange={(e) => {
+                categoryTouched.current = true;
+                patch({
+                  itemType: e.target.value === "tool" ? "tool" : "raw_material",
+                  category:
+                    e.target.value === "tool" ? "tools" : "raw_materials",
+                  unit: e.target.value === "tool" ? "each" : fields.unit,
+                });
+              }}
             >
-              <option value="">— Select area —</option>
-              {AREAS.map((a) => (
-                <option key={a} value={a}>
-                  {AREA_LABELS[a]}
+              <option value="material">Material / supplies</option>
+              <option value="tool">Reusable tool</option>
+            </select>
+          </Field>
+          <Field label="Category">
+            <select
+              className={inputCls}
+              value={fields.category}
+              onChange={(e) => {
+                categoryTouched.current = true;
+                patch({ category: e.target.value as Category });
+              }}
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {CATEGORY_LABELS[c]}
                 </option>
               ))}
             </select>
           </Field>
         </div>
-
-        {showLocation && isContainer && (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Field label="Position in container">
-              <select
-                className={inputCls}
-                value={containerPos}
-                onChange={(e) => setContainerPos(e.target.value)}
-              >
-                <option value="">— Select —</option>
-                <option value="Front">Front</option>
-                <option value="Middle">Middle</option>
-                <option value="Back">Back</option>
-              </select>
-            </Field>
-            {containerPos && (
-              <Field label="Side of container">
-                <select
-                  className={inputCls}
-                  value={containerSide}
-                  onChange={(e) => setContainerSide(e.target.value)}
-                >
-                  <option value="">— Select —</option>
-                  <option value="Left">Left</option>
-                  <option value="Right">Right</option>
-                </select>
-              </Field>
-            )}
-          </div>
-        )}
-
-        {showLocation && !isContainer && (
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            <Field label="Rack letter">
+        <div className="grid grid-cols-2 gap-3">
+          {mode === "create" ? (
+            <Field label="Starting quantity">
               <input
+                required
+                min="0"
+                type="number"
+                step={fractionalUnit(fields.unit) ? "0.0001" : "1"}
                 className={inputCls}
-                maxLength={1}
-                value={rackLetter}
-                onChange={(e) => setRackLetter(e.target.value.toUpperCase().slice(0, 1))}
-                placeholder="A–Z"
+                value={fields.quantity}
+                onChange={(e) => patch({ quantity: e.target.value })}
               />
             </Field>
-            <Field label="Rack level">
-              <select
-                className={inputCls}
-                value={rackLevel}
-                onChange={(e) => setRackLevel(e.target.value)}
-              >
-                <option value="">—</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-              </select>
-            </Field>
-            <Field label="Sub-location">
-              <input
-                className={inputCls}
-                value={subLocation}
-                onChange={(e) => setSubLocation(e.target.value)}
-                placeholder="e.g. North wall"
-              />
-            </Field>
-            <Field label="Shelf">
-              <input className={inputCls} value={shelf} onChange={(e) => setShelf(e.target.value)} />
-            </Field>
-          </div>
-        )}
-      </Section>
-
-      {/* Stock */}
-      <Section title="Stock">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Quantity">
-            <input
+          ) : (
+            <div className="text-sm">
+              <p className="font-medium">On hand</p>
+              <p className="mt-2">
+                {initial.quantity} {initial.unit}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Use stock actions to change this count.
+              </p>
+            </div>
+          )}
+          <Field label="Stock unit">
+            <select
               className={inputCls}
-              type="number"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
+              value={fields.unit}
+              onChange={(e) => patch({ unit: e.target.value })}
+            >
+              {STOCK_UNITS.filter(
+                (u) => fields.itemType !== "tool" || u === "each",
+              ).map((u) => (
+                <option key={u} value={u}>
+                  {UNIT_LABELS[u]}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
-      </Section>
-
-      {/* Everything the daily flow doesn't need, behind one toggle. All the
-          state stays mounted, so a collapsed panel still submits its values. */}
+        {mode === "edit" && fields.unit !== initial.unit && (
+          <p className="text-sm text-amber-700">
+            Changing the unit label does not convert the existing quantity.
+          </p>
+        )}
+      </section>
+      <section className="space-y-3 rounded-xl border bg-card p-4">
+        <Field label="Location">
+          <select
+            className={inputCls}
+            value={fields.area}
+            onChange={(e) => patch({ area: e.target.value as Area })}
+          >
+            <option value="">Choose location</option>
+            {AREAS.map((a) => (
+              <option key={a} value={a}>
+                {AREA_LABELS[a]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {fields.area && (
+          <div className="grid grid-cols-2 gap-3">
+            {text("rackLetter", "Rack")}
+            {text("shelf", "Shelf")}
+            {text("bin", "Bin")}
+            {text("subLocation", "Position / notes")}
+          </div>
+        )}
+      </section>
+      <section className="rounded-xl border bg-card p-4">
+        <p className="mb-2 text-sm font-medium">Photo (optional)</p>
+        <PhotoSlots
+          photos={fields.photos}
+          onChange={(photos) => patch({ photos })}
+          compact={!more}
+        />
+      </section>
       <button
         type="button"
-        onClick={() => setMoreOpen((o) => !o)}
-        className="flex w-fit items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+        className="text-sm text-primary underline"
+        aria-expanded={more}
+        onClick={() => setMore((v) => !v)}
       >
-        <ChevronDown
-          className={cn("h-4 w-4 transition-transform", !moreOpen && "-rotate-90")}
-        />
-        More details
+        {more ? "Hide details" : "More details"}
       </button>
-
-      {moreOpen && (
-        <Section title="More details">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Part number">
-              <input
-                className={inputCls}
-                value={partNumber}
-                onChange={(e) => setPartNumber(e.target.value)}
-              />
-            </Field>
-            <Field label="Mfg part number">
-              <input
-                className={inputCls}
-                value={mfgPartNumber}
-                onChange={(e) => setMfgPartNumber(e.target.value)}
-              />
-            </Field>
-            {isElevated && (
-              <Field label="Low-stock threshold">
-                <input
-                  className={inputCls}
-                  type="number"
-                  value={lowStockThreshold}
-                  onChange={(e) => setLowStockThreshold(e.target.value)}
-                />
-              </Field>
-            )}
-            <Field label="Item type">
-              <select
-                className={inputCls}
-                value={itemType}
-                onChange={(e) => setItemType(e.target.value as ItemType)}
-              >
-                {ITEM_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {ITEM_TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {isElevated && (
-              <Field label="Reserved quantity">
-                <input
-                  className={inputCls}
-                  type="number"
-                  value={quantityReserved}
-                  onChange={(e) => setQuantityReserved(e.target.value)}
-                />
-              </Field>
-            )}
-            <div className="sm:col-span-2">
-              <Field label="Quote material (optional)">
+      {more && (
+        <section className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2">
+          {text("partNumber", "Part number")}
+          {text("mfgPartNumber", "Manufacturer part number")}
+          {text("rackLevel", "Rack level")}
+          <Field label="Item type">
+            <select
+              className={inputCls}
+              value={fields.itemType}
+              onChange={(e) => patch({ itemType: e.target.value as ItemType })}
+            >
+              {ITEM_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {ITEM_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {isElevated && (
+            <>
+              {text("lowStockThreshold", "Low-stock alert at")}
+              {text("reorderTarget", "Restock target")}
+              {text("supplier", "Preferred supplier")}
+              {text("cost", `Last cost per ${fields.unit} ($)`)}
+              <Field label="Quote material">
                 <select
                   className={inputCls}
-                  value={materialKey}
-                  onChange={(e) => setMaterialKey(e.target.value)}
+                  value={fields.materialKey}
+                  onChange={(e) => patch({ materialKey: e.target.value })}
                 >
-                  <option value="">— Not a quoted material —</option>
-                  {Object.entries(materials).map(([key, m]) => (
-                    <option key={key} value={key}>
-                      {m?.name || key}
+                  <option value="">No quote material</option>
+                  {fields.materialKey &&
+                    !materials.data?.[fields.materialKey] && (
+                      <option value={fields.materialKey}>
+                        {fields.materialKey}
+                      </option>
+                    )}
+                  {Object.entries(materials.data || {}).map(([id, m]) => (
+                    <option key={id} value={id}>
+                      {m.name || id}
                     </option>
                   ))}
                 </select>
               </Field>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Link this item to the quote price book so accepted quotes reserve it
-                and received purchase orders stock it in.
-              </p>
-            </div>
-            <div className="sm:col-span-2 lg:col-span-4">
-              <Field label="Notes">
-                <textarea
-                  className={cn(inputCls, "h-24 resize-y py-2")}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Anything workers should know about this item…"
-                />
-              </Field>
-            </div>
+            </>
+          )}
+          <div className="sm:col-span-2">
+            <Field label="Notes">
+              <textarea
+                className={`${inputCls} h-24 py-2`}
+                value={fields.notes}
+                onChange={(e) => patch({ notes: e.target.value })}
+              />
+            </Field>
           </div>
-        </Section>
+        </section>
       )}
-
-      <div className="sticky bottom-0 flex justify-end gap-3 border-t border-border bg-background/80 py-4 backdrop-blur">
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <div className="sticky bottom-0 flex flex-wrap gap-2 border-t bg-background py-3">
         <button
           type="submit"
           disabled={submitting}
-          className="flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-8 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          onClick={() => {
+            addAnother.current = false;
+          }}
+          className={primaryBtn}
         >
-          {submitting && <Loader2 className="h-5 w-5 animate-spin" />}
-          {mode === "create" ? "Add item" : "Save changes"}
+          {submitting
+            ? "Saving…"
+            : mode === "create"
+              ? "Save item"
+              : "Save changes"}
         </button>
+        {mode === "create" && (
+          <button
+            type="submit"
+            disabled={submitting}
+            className={secondaryBtn}
+            onClick={() => {
+              addAnother.current = true;
+            }}
+          >
+            Save and add another
+          </button>
+        )}
+        <span className="self-center text-xs text-muted-foreground">
+          Draft kept on this device
+        </span>
       </div>
     </form>
   );

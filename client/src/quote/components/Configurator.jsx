@@ -1,7 +1,9 @@
 import { visibleControls, typeLabel } from '../data/configurators.js';
 import Control from './Controls.jsx';
 import Preview from './Preview.jsx';
-import LineItems from './LineItems.jsx';
+import { lazy, Suspense, useState } from 'react';
+import CustomerFields from './CustomerFields.jsx';
+const LineItems = lazy(() => import('./LineItems.jsx'));
 
 /**
  * The hybrid configurator: option pickers (mirroring the website) on the left,
@@ -14,30 +16,54 @@ export default function Configurator({
   onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onMoveLine, onUnlockPrices, onResetOverrides,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
+  customer, onChangeCustomer,
 }) {
-  const controls = visibleControls(type, state);
+  const controls = visibleControls(type, state).filter(c => c.kind !== 'segment' || c.options.length > 1);
+  const [pricingOpen, setPricingOpen] = useState(type === 'custom');
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const finish = controls.filter(c => ['coating', 'color'].includes(c.name));
+  const basics = controls.filter(c => !finish.includes(c));
+  const frameControls = basics.filter(c => ['frameLengthFt','frameWidthIn','frameHeightIn'].includes(c.name));
+  const topControls = basics.filter(c => ['topMaterial','topCost','lengthFt','widthIn','topThicknessIn'].includes(c.name));
+  const missing = lineState.items.filter(it => it.unpriced || !(Number(it.rate) > 0));
+  const renderControl = (c) => {
+    const error = c.name === 'topMaterial' && !String(state.topMaterial || '').trim() ? 'Enter the included tabletop material.'
+      : c.name === 'topCost' && !(Number(state.topCost) > 0) ? 'Enter the cost per top.' : null;
+    return <div key={c.name} id={`quote-option-${c.name}`} className={`control-wrap ${['segment','swatch','text'].includes(c.kind) || c.name === 'topCost' ? 'wide' : ''}`}>
+      <Control control={c} value={typeof c.value === 'function' ? c.value(state) : state[c.name]} onChange={onChangeOption} />
+      {error && <p className="field-error">{error}</p>}
+    </div>;
+  };
 
   return (
-    <div className="page">
+    <div className="page quote-workbench">
       <div className="container">
         <div className="page-head">
           <button className="back-link" onClick={onBack}>← Build type</button>
-          <p className="eyebrow" style={{ marginTop: 28 }}>
-            {type === 'custom' ? 'Build it line by line' : 'Design your own'}
-          </p>
           <h1 className="display">{typeLabel(type)}</h1>
         </div>
 
         <div className="cfg">
           <form className="cfg-controls" onSubmit={(e) => e.preventDefault()}>
-            {controls.map((c) => (
-              <Control key={c.name} control={c} value={typeof c.value === 'function' ? c.value(state) : state[c.name]} onChange={onChangeOption} />
-            ))}
+            <details className="quote-section" open={customerOpen} onToggle={e => setCustomerOpen(e.currentTarget.open)}>
+              <summary>Customer{customer?.name ? ` · ${customer.name}` : ''}</summary>
+              <CustomerFields customer={customer} onChange={onChangeCustomer} />
+            </details>
+            {type === 'table' ? <>
+              <div className="quote-control-grid">{basics.filter(c => ['qty','includeTop'].includes(c.name)).map(renderControl)}</div>
+              <section aria-label="Frame dimensions"><h2 className="dimension-title">Frame dimensions</h2><div className="quote-control-grid">{frameControls.map(renderControl)}</div></section>
+              {state.includeTop === 'yes' && <section aria-label="Tabletop"><h2 className="dimension-title">Tabletop</h2><div className="quote-control-grid">{topControls.map(renderControl)}</div></section>}
+              <div className="quote-control-grid">{basics.filter(c => !['qty','includeTop'].includes(c.name) && !frameControls.includes(c) && !topControls.includes(c)).map(renderControl)}</div>
+            </> : <div className="quote-control-grid">{basics.map(renderControl)}</div>}
+            {finish.length > 0 && <details className="quote-section"><summary>Finish &amp; coating</summary><div className="quote-control-grid">{finish.map(renderControl)}</div></details>}
           </form>
 
           <div className="cfg-right">
             <Preview type={type} state={state} />
-            <LineItems
+            {missing.length > 0 && <div className="pricing-attention"><strong>{missing.length} {missing.length === 1 ? 'cost needs' : 'costs need'} attention</strong><p>{missing.map(it => it.name).join(', ')}</p><button className="back-link" onClick={() => setPricingOpen(true)}>Edit missing costs</button></div>}
+            <details className="quote-section pricing-section" open={pricingOpen} onToggle={e => setPricingOpen(e.currentTarget.open)}>
+              <summary>Edit pricing <span>Materials, labor, delivery &amp; buy list</span></summary>
+            {pricingOpen && <Suspense fallback={<p className="hint">Loading pricing…</p>}><LineItems
               lineState={lineState}
               totals={totals}
               warnings={warnings}
@@ -65,10 +91,8 @@ export default function Configurator({
               onChangeDiscount={onChangeDiscount}
               onChangeDeliveryMiles={onChangeDeliveryMiles}
               onChangeDeliveryRate={onChangeDeliveryRate}
-            />
-            <button className="btn block" onClick={onContinue}>
-              Continue to customer details <span aria-hidden="true">→</span>
-            </button>
+            /></Suspense>}
+            </details>
           </div>
         </div>
       </div>

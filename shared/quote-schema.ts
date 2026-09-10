@@ -39,6 +39,7 @@ export const quotes = sqliteTable("quotes", {
   leadId: integer("lead_id"),
   revisionOf: integer("revision_of"),
   version: integer("version").notNull().default(1),
+  draftKey: text("draft_key"), // server-owned first-save idempotency key
   // Display metadata for the list view. Computed by the builder's pricing
   // engine, which lives client-side — unlike crm_estimates this is not a
   // server-verified financial total.
@@ -91,6 +92,7 @@ export const insertQuoteSchema = createInsertSchema(quotes).omit({
   number: true, // server-assigned
   revisionOf: true,
   version: true,
+  draftKey: true,
   // Share/accept lifecycle is server-managed (POST /:id/share + the public
   // accept endpoint) — a client write could forge an acceptance.
   shareToken: true,

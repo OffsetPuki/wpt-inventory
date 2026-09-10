@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { renderFence } from '../lib/preview/fence.js';
 import { renderGate } from '../lib/preview/gate.js';
 import { renderCarport } from '../lib/preview/carport.js';
@@ -13,7 +13,7 @@ const RENDERERS = { fence: renderFence, gate: renderGate, carport: renderCarport
 const ARIA = { fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview', table: 'Table preview', concrete: 'Slab plan preview', insulation: 'Insulation section preview' };
 
 /** Live SVG preview driven by the same config state as the price estimate. */
-export default function Preview({ type, state }) {
+function Preview({ type, state }) {
   const html = useMemo(() => {
     const fn = RENDERERS[type];
     try { return fn ? fn(state) : ''; }
@@ -45,3 +45,4 @@ export default function Preview({ type, state }) {
     </div>
   );
 }
+export default memo(Preview);

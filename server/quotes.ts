@@ -1,11 +1,11 @@
 import { communicationContext, localizedLink } from "./communication";
 import type { Express } from "express";
 import crypto from "crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
-import { quotes, insertQuoteSchema, quoteSettingsSchema } from "../shared/quote-schema";
+import { quotes, insertQuoteSchema, quoteSettingsSchema, QUOTE_STATUSES } from "../shared/quote-schema";
 import { webDesignRowToLead } from "./public-api";
 import { onQuoteEvent, logEmailActivity } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
@@ -65,6 +65,7 @@ for (const col of [
   "lead_id INTEGER",
   "revision_of INTEGER",
   "version INTEGER NOT NULL DEFAULT 1",
+  "draft_key TEXT",
   "share_token TEXT",
   "status TEXT NOT NULL DEFAULT 'draft'",
   "sent_at INTEGER",
@@ -84,6 +85,9 @@ for (const col of [
     /* column already exists */
   }
 }
+sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quotes_draft_key ON quotes(draft_key) WHERE draft_key IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_quotes_list ON quotes(deleted_at, created_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_quotes_status_list ON quotes(deleted_at, status, created_at DESC, id DESC);`);
 
 // Also used by public-portal.ts — the two modules parse the same stored
 // quote payload / settings JSON.
@@ -427,24 +431,30 @@ export function registerQuoteRoutes(app: Express): void {
 
   // List — payload excluded: it's the big JSON blob, and the Saved view only
   // needs the identity columns. GET /:id returns the full row.
-  app.get("/api/quotes", requireAuth, (_req, res) => {
-    // Phase F: which quotes' customers unsubscribed from automated follow-ups.
-    // Same email resolution as the sweep (payload customer card, else the
-    // linked website design), matched against the normalized opt-out list.
-    let optedOut = new Set<number>();
-    try {
-      optedOut = new Set((sqlite.prepare(`
-        SELECT q.id FROM quotes q
-        LEFT JOIN web_designs d ON upper(d.ref) = upper(q.design_ref)
-        JOIN email_optouts o ON o.email = lower(trim(
-          coalesce(nullif(json_extract(q.payload, '$.customer.email'), ''), d.email)))
-        WHERE q.deleted_at IS NULL
-      `).all() as { id: number }[]).map((r) => r.id));
-    } catch {
-      /* optouts/designs table absent — no flags */
+  app.get("/api/quotes", requireAuth, (req, res) => {
+    const paged = req.query.page !== undefined;
+    const page = Math.max(1, Math.min(1000000, Math.trunc(Number(req.query.page)) || 1));
+    const pageSize = Math.max(1, Math.min(50, Math.trunc(Number(req.query.pageSize)) || 20));
+    const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+    const status = typeof req.query.status === 'string' ? req.query.status : '';
+    const trade = typeof req.query.trade === 'string' ? req.query.trade : '';
+    const conditions = [isNull(quotes.deletedAt)];
+    if (search) {
+      const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
+      conditions.push(or(
+        sql`${quotes.customerName} LIKE ${pattern} ESCAPE '\\'`,
+        sql`${quotes.number} LIKE ${pattern} ESCAPE '\\'`,
+        sql`${quotes.designRef} LIKE ${pattern} ESCAPE '\\'`,
+        sql`json_extract(${quotes.payload}, '$.customer.company') LIKE ${pattern} ESCAPE '\\'`,
+      )!);
     }
-    res.json(
-      db.select({
+    if ((QUOTE_STATUSES as readonly string[]).includes(status)) conditions.push(eq(quotes.status, status as typeof QUOTE_STATUSES[number]));
+    if (trade === 'metals') conditions.push(inArray(quotes.type, ['fence','gate','carport','railing','pergola','table','custom']));
+    else if (trade === 'concrete' || trade === 'insulation') conditions.push(eq(quotes.type, trade));
+    const where = and(...conditions);
+    const total = paged ? db.select({ n: sql<number>`count(*)` }).from(quotes).where(where).get()!.n : 0;
+    const actualPage = paged ? Math.min(page, Math.max(1, Math.ceil(total / pageSize))) : 1;
+    let listing = db.select({
         id: quotes.id,
         number: quotes.number,
         type: quotes.type,
@@ -467,11 +477,24 @@ export function registerQuoteRoutes(app: Express): void {
         createdAt: quotes.createdAt,
         updatedAt: quotes.updatedAt,
       }).from(quotes)
-        .where(isNull(quotes.deletedAt))
+        .where(where)
         .orderBy(desc(quotes.createdAt), desc(quotes.id))
-        .all()
-        .map((r) => ({ ...r, optedOut: optedOut.has(r.id) })),
-    );
+        .$dynamic();
+    if (paged) listing = listing.limit(pageSize).offset((actualPage - 1) * pageSize);
+    const listed = listing.all();
+    let optedOut = new Set<number>();
+    if (listed.length) {
+      try {
+        const ids = listed.map(r => r.id);
+        optedOut = new Set((sqlite.prepare(`SELECT q.id FROM quotes q
+          LEFT JOIN web_designs d ON upper(d.ref) = upper(q.design_ref)
+          JOIN email_optouts o ON o.email = lower(trim(coalesce(nullif(json_extract(q.payload, '$.customer.email'), ''), d.email)))
+          WHERE q.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as {id:number}[]).map(r => r.id));
+      } catch { /* an older installation may not have opt-outs */ }
+    }
+    const rows = listed.map(r => ({...r, optedOut: optedOut.has(r.id)}));
+    // Legacy consumers (cost reports, CRM) continue to receive an array.
+    res.json(paged ? { rows, total, page: actualPage, pageSize } : rows);
   });
 
   app.get("/api/quotes/:id", requireAuth, (req, res) => {
@@ -487,13 +510,22 @@ export function registerQuoteRoutes(app: Express): void {
       const body = { ...req.body };
       normalizePayload(body);
       const data = insertQuoteSchema.parse(body);
+      const session = parseJson<{sid?: unknown}>(data.payload, {});
+      const draftKey = typeof session.sid === 'string' && session.sid.length > 0 && session.sid.length <= 100 ? `${req.user!.userId}:${session.sid}` : null;
+      if (draftKey) {
+        const prior = db.select().from(quotes).where(eq(quotes.draftKey, draftKey)).get();
+        if (prior) {
+          if (prior.deletedAt || prior.status !== 'draft') return res.status(409).json({ message: 'This draft was deleted or issued. Reopen the saved quote or start a new copy.' });
+          return res.json(prior);
+        }
+      }
       if (data.leadId == null && data.designRef) {
         data.leadId = (sqlite.prepare("SELECT lead_id FROM web_designs WHERE upper(ref) = upper(?)").get(data.designRef) as { lead_id: number } | undefined)?.lead_id ?? null;
       }
       if (data.leadId != null && !sqlite.prepare("SELECT id FROM crm_leads WHERE id = ? AND deleted_at IS NULL").get(data.leadId)) {
         return res.status(400).json({ message: "Choose an existing lead for this quote." });
       }
-      const row = insertQuoteWithNumber(data);
+      const row = insertQuoteWithNumber({ ...data, draftKey });
       audit(req, "quote.create", {
         targetType: "quote", targetId: row.id, targetName: row.number,
         details: { type: row.type, designRef: row.designRef },
@@ -577,6 +609,7 @@ export function registerQuoteRoutes(app: Express): void {
       .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
       .get();
     if (!quote) return res.status(404).json({ message: "Quote not found" });
+    if (req.body?.version !== undefined && req.body.version !== quote.version) return res.status(409).json({ message: 'This quote changed after your review. Reopen it before sending.' });
 
     const token = quote.shareToken ?? crypto.randomBytes(24).toString("hex");
 

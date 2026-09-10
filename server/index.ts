@@ -60,7 +60,7 @@ app.use(
             // 'self', which does NOT cover blob: — so that preview has been a blank
             // white box in production since it shipped. Same reason imgSrc has to
             // spell blob: out above.
-            frameSrc: ["'self'", "blob:"],
+            frameSrc: ["'self'", "blob:", new URL(process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com").origin],
             connectSrc: ["'self'"],
             fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
             objectSrc: ["'none'"],
@@ -82,15 +82,13 @@ app.use(
   })
 );
 
-// Permissions-Policy: deny powerful APIs the app never asks for. Anything
-// later that wants the camera (e.g. shop-floor photo capture works via
-// <input type="file" capture> which doesn't need this) can be re-enabled.
+// Allow camera access only for the suite's QR scanner. Other unused device APIs stay disabled.
 app.use((_req, res, next) => {
   res.setHeader(
     "Permissions-Policy",
     // geolocation=(): nothing asks for it — the GPS-stamped attendance clock
     // is gone (pm_time_entries is the one clock, no location capture).
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=(), interest-cohort=()"
+    "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), midi=(), interest-cohort=()"
   );
   next();
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { toast } from '@/components/ui/toaster';
@@ -129,16 +129,21 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
   const [checked, setChecked] = useState(() => new Set());
   const [showBuyList, setShowBuyList] = useState(false);
 
-  const { data: rows = [], isLoading, error } = useQuery({
-    queryKey: ['quotes'],
-    queryFn: async () => (await apiRequest('GET', '/api/quotes')).json(),
+  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({q:'',trade:'',status:'',page:1});
+  useEffect(() => { const timer = setTimeout(() => setFilters(f => ({...f,q:search.trim(),page:1})), 300); return () => clearTimeout(timer); }, [search]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['quotes', filters],
+    queryFn: async () => (await apiRequest('GET', '/api/quotes?' + new URLSearchParams({...filters,pageSize:20}))).json(),
   });
+  const rows = data?.rows || [];
+  const setFilter = (key, value) => { setShareId(null); setFilters(f => ({...f,[key]:value,page:1})); };
 
   const toggleChecked = (id) => {
     setShowBuyList(false);
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id); else if (next.size < 50) next.add(id);
       return next;
     });
   };
@@ -174,7 +179,8 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
   });
   const deleteQuote = useMutation({
     mutationFn: async (id) => apiRequest('DELETE', `/api/quotes/${id}`),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
+      setChecked(prev => { const next = new Set(prev); next.delete(id); return next; });
       qc.invalidateQueries({ queryKey: ['quotes'] });
       toast({ variant: 'success', title: 'Quote deleted' });
     },
@@ -185,22 +191,20 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
     <div className="page">
       <div className="container">
         <div className="page-head">
-          <p className="eyebrow">— Saved quotes</p>
-          <h1 className="display" style={{ marginTop: 14 }}>Every quote, one place</h1>
-          <p className="home-lede" style={{ marginTop: 18 }}>
-            Quotes save here automatically once you fill in the customer details —
-            from any device signed in to the suite. Open one to pick up where you left
-            off, or check a few and build one combined material buy list.
-          </p>
+          <h1 className="display">Saved quotes</h1>
         </div>
-
+        <div className="quote-filters">
+          <label className="field"><span>Search quotes</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Customer, company, quote or design code" /></label>
+          <label className="field"><span>Trade</span><select aria-label="Trade" value={filters.trade} onChange={e => setFilter('trade', e.target.value)}><option value="">All trades</option><option value="metals">Metals</option><option value="concrete">Concrete</option><option value="insulation">Insulation</option></select></label>
+          <label className="field"><span>Status</span><select aria-label="Status" value={filters.status} onChange={e => setFilter('status', e.target.value)}><option value="">All statuses</option>{Object.entries(STATUS_LABEL).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        </div>
+        {checked.size > 0 && <div className="quote-selection"><span>{checked.size} selected across pages (up to 50)</span><button className="btn ghost sq-btn" onClick={() => setShowBuyList(true)}>Buy list ({checked.size})</button><button className="back-link" onClick={() => { setChecked(new Set()); setShowBuyList(false); }}>Clear selection</button></div>}
         {isLoading && <p className="hint">Loading saved quotes…</p>}
-        {error && <p className="find-error">{error.message || 'Could not load saved quotes.'}</p>}
+        {error && <p className="find-error">{error.message || 'Could not load saved quotes.'} <button className="back-link" onClick={() => refetch()}>Retry</button></p>}
 
         {!isLoading && !error && rows.length === 0 && (
           <p className="hint">
-            Nothing saved yet. Start a new quote — it lands here on its own when you
-            reach the customer-details step.
+            No quotes match. Clear the filters or start a new quote; drafts save automatically.
           </p>
         )}
 
@@ -211,12 +215,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
         {rows.length > 0 && (
           <div className="estimate">
             <div className="estimate-head">
-              <span className="eyebrow">{rows.length} {rows.length === 1 ? 'quote' : 'quotes'}</span>
-              {checked.size > 0 && (
-                <button className="estimate-reset" onClick={() => setShowBuyList(true)}>
-                  Buy list ({checked.size})
-                </button>
-              )}
+              <span className="eyebrow">{data?.total || 0} quotes</span>
             </div>
             <div className="lines">
               {rows.map((q) => (
@@ -226,6 +225,8 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                       type="checkbox"
                       checked={checked.has(q.id)}
                       onChange={() => toggleChecked(q.id)}
+                      aria-label={`Select ${q.number} for buy list`}
+                      disabled={!checked.has(q.id) && checked.size >= 50}
                       title="Add to the combined buy list"
                       style={{ marginRight: 8 }}
                     />
@@ -292,6 +293,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
             </div>
           </div>
         )}
+        {data && data.total > 0 && <nav className="quote-pagination" aria-label="Quote pages"><button className="btn ghost sq-btn" disabled={data.page <= 1} onClick={() => setFilters(f => ({...f,page:data.page-1}))}>Previous</button><span>Page {data.page} of {Math.max(1,Math.ceil(data.total/data.pageSize))}</span><button className="btn ghost sq-btn" disabled={data.page * data.pageSize >= data.total} onClick={() => setFilters(f => ({...f,page:data.page+1}))}>Next</button></nav>}
       </div>
     </div>
   );

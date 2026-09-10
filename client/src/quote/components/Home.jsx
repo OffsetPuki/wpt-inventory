@@ -1,3 +1,4 @@
+import CustomerFields from "./CustomerFields.jsx";
 import { TYPES } from "../data/configurators.js";
 
 const ICONS = {
@@ -249,41 +250,14 @@ const ICONS = {
   ),
 };
 
-export default function Home({ onPick, onFind, onContinue, draftName }) {
+export default function Home({ onPick, onFind, onContinue, draftName, customer, onChangeCustomer }) {
   return (
-    <div className="page">
+    <div className="page quote-home">
       <div className="container">
-        <div
-          className="page-head"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr",
-            gap: 24,
-            marginBottom: 56,
-          }}
-        >
-          <div>
-            <p className="eyebrow">— New quote</p>
-            <h1 className="display" style={{ marginTop: 14 }}>
-              Build it. Price it. Send it.
-            </h1>
-          </div>
-          <p className="home-lede">
-            Pick a build, configure it exactly like the customer would on the
-            site, and a priced, itemized quote falls out — every number
-            editable.
-            {onFind && (
-              <>
-                {" "}
-                Customer has a design code from the website?{" "}
-                <button className="home-find-link" onClick={onFind}>
-                  Look it up →
-                </button>
-              </>
-            )}
-          </p>
+        <div className="page-head"><h1 className="display">New quote</h1><p className="hint">Choose a customer and build type, then review and send.</p></div>
+        <div className="quote-start"><CustomerFields compact customer={customer} onChange={onChangeCustomer} />
+          <button className="btn ghost" onClick={onFind}>Find a website design →</button>
         </div>
-
         {onContinue && (
           <button
             className="btn"
@@ -317,7 +291,7 @@ export default function Home({ onPick, onFind, onContinue, draftName }) {
                   <div>
                     <h2 className="display">{t.label}</h2>
                     <p>{t.tagline}</p>
-                    <span className="go">Start designing →</span>
+                    <span className="go">Start quote →</span>
                   </div>
                 </button>
               ))}

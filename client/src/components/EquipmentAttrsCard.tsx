@@ -13,6 +13,7 @@ export default function EquipmentAttrsCard({ item }: { item: Item }) {
     },
     // Admin-managed config — basically never changes during a user's session.
     staleTime: 5 * 60_000,
+    enabled: !!item.equipmentType,
     refetchInterval: false,
   });
 

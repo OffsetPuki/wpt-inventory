@@ -84,8 +84,9 @@ export function locationString(item: Item): string {
 
 // ─── Low stock ─────────────────────────────────────────────────────────────────
 
-export function isLowStock(item: Pick<Item, "lowStockThreshold" | "quantity">): boolean {
-  return item.lowStockThreshold > 0 && item.quantity <= item.lowStockThreshold;
+export function isLowStock(item: Pick<Item, "lowStockThreshold" | "quantity"> & {quantityReserved?:number}): boolean {
+  const available=item.quantity-(item.quantityReserved||0);
+  return available<=0 || (item.lowStockThreshold>0 && available<=item.lowStockThreshold);
 }
 
 // ─── Date formatting ───────────────────────────────────────────────────────────

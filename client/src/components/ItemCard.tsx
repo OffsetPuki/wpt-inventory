@@ -1,3 +1,4 @@
+import { availableStock } from "@/lib/inventory";
 import { memo } from "react";
 import { Link } from "wouter";
 import type { Item } from "@shared/schema";
@@ -52,7 +53,7 @@ function ItemCard({ item }: { item: Item }) {
               : "bg-emerald-100/90 text-emerald-800 ring-emerald-900/10"
           )}
         >
-          {low ? "Low" : "In stock"} ×{item.quantity}
+          {availableStock(item)===0?"Out of stock":low ? "Low" : "Available"} · {availableStock(item)} {item.unit}
         </span>
       </div>
 

@@ -14,6 +14,7 @@ export interface LineItem {
   // line that carries one auto-stocks the matching inventory item (by
   // items.material_key) when the PO is received.
   materialKey?: string;
+  inventoryItemId?: number;
 }
 
 export const lineItemSchema = z.object({
@@ -26,6 +27,7 @@ export const lineItemSchema = z.object({
   unit: z.string().optional(),
   productId: z.number().int().optional(),
   materialKey: z.string().optional(),
+  inventoryItemId: z.number().int().positive().optional(),
 });
 
 export const lineItemsSchema = z.array(lineItemSchema);

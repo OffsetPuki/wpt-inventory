@@ -1,8 +1,8 @@
+import { invalidateInventory } from "@/lib/inventory";
 import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import { downscaleImage, uploadPhoto } from "@/lib/uploadPhoto";
 import type { Item } from "@shared/schema";
@@ -21,23 +21,21 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export default function AddItemPage() {
   const [, setLocation] = useLocation();
-  const { isElevated } = useAuth();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [identifying, setIdentifying] = useState(false);
   const [seed, setSeed] = useState<ItemFormSeed>({ equipmentType: null, customAttrs: {} });
-  const [formKey, setFormKey] = useState(0);
+
 
   const create = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
       const res = await apiRequest("POST", "/api/items", payload);
       return (await res.json()) as Item;
     },
-    onSuccess: (item) => {
-      qc.invalidateQueries({ queryKey: ["items"] });
-      toast({ variant: "success", title: "Item added" });
-      // The owner lands on the edit screen to fine-tune location/details right away.
-      setLocation(isElevated ? `/item/${item.id}/edit` : `/item/${item.id}`);
+    onSuccess: () => {
+
+      void invalidateInventory(qc);
+      toast({variant:"success",title:"Item added"});
     },
     onError: (e: any) =>
       toast({ variant: "destructive", title: "Could not add item", description: e?.message }),
@@ -49,7 +47,7 @@ export default function AddItemPage() {
     try {
       // Send a downscaled copy to the AI (cheaper); fall back to the original if
       // the browser can't process the image (e.g. some HEIC files). Only the AI
-      // copy is shrunk; the photo stored on the item stays full-res.
+      // copy uses 768px; the saved photo uses the normal inventory size.
       const small = await downscaleImage(file, 768, 0.8).catch(() => file);
       const dataUrl = await fileToDataUrl(small);
       // Strip the data-URL prefix — the AI route accepts raw base64 and it
@@ -61,7 +59,7 @@ export default function AddItemPage() {
       const identifyP = apiRequest("POST", "/api/ai/identify-item", { photoBase64: rawBase64 })
         .then((r) => r.json());
 
-      const uploadP: Promise<string | null> = uploadPhoto(file).catch(() => null);
+      const uploadP: Promise<string | null> = downscaleImage(file).then(uploadPhoto).catch(() => null);
 
       const [data, photoUrl] = await Promise.all([identifyP, uploadP]);
 
@@ -73,7 +71,7 @@ export default function AddItemPage() {
         customAttrs: {},
         photos: photoUrl ? [photoUrl] : [],
       });
-      setFormKey((k) => k + 1);
+
       toast({ variant: "success", title: "Prefilled from photo", description: "Review and save." });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Identify failed", description: e?.message });
@@ -109,11 +107,10 @@ export default function AddItemPage() {
       </Header>
 
       <ItemForm
-        key={formKey}
         mode="create"
-        initial={seed}
+        suggestion={seed}
         submitting={create.isPending}
-        onSubmit={(payload) => create.mutate(payload)}
+        onSubmit={async (payload, another) => {const item=await create.mutateAsync(payload);if(!another)setLocation(`/item/${item.id}`);}}
       />
     </div>
   );

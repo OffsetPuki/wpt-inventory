@@ -23,9 +23,11 @@ const SLOTS = [
 export default function PhotoSlots({
   photos,
   onChange,
+  compact = false,
 }: {
   photos: string[];
   onChange: (photos: string[]) => void;
+  compact?: boolean;
 }) {
   const [uploading, setUploading] = useState<Set<number>>(new Set());
   const refs = useRef<(HTMLInputElement | null)[]>([]);
@@ -115,7 +117,7 @@ export default function PhotoSlots({
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-      {SLOTS.map((slot, i) => {
+      {(compact ? SLOTS.slice(0, 1) : SLOTS).map((slot, i) => {
         const serverUrl = photos[i];
         const previewUrl = serverUrl || localUrls.current.get(i) || "";
         const isUploading = uploading.has(i);

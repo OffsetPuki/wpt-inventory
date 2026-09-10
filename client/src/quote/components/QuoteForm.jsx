@@ -1,142 +1,59 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { apiRequest } from '@/lib/queryClient';
-import { summaryLine, typeLabel } from '../data/configurators.js';
-import { fmtMoney } from '../lib/format.js';
+import CustomerFields from './CustomerFields.jsx';
 import ShareQuote from './ShareQuote.jsx';
 import Attachments from './Attachments.jsx';
 
 export default function QuoteForm({
-  type, state, totals, designRef, customer, notes, depositPct, quoteId, features, attachments,
-  onChangeCustomer, onChangeNotes, onChangeFeatures, onChangeAttachments, onChangeDeposit, onBack, onPreview, onPersist, onIssued,
+  customer, notes, depositPct, quoteId, version, features, attachments, saveStatus, warnings, lineState, quoteStatus,
+  onChangeCustomer, onChangeNotes, onChangeFeatures, onChangeAttachments, onChangeDeposit, onBack, onPersist, onIssued, onShared,
 }) {
-  const field = (key, label, props = {}) => (
-    <label className="field">
-      <span>{label}</span>
-      <input value={customer[key] || ''} onChange={(e) => onChangeCustomer(key, e.target.value)} {...props} />
-    </label>
-  );
-
-  // CRM clients for the "use existing" shortcut — picking one fills the
-  // fields below (they stay editable; nothing is linked, just prefilled).
-  const { data: clients = [] } = useQuery({
-    queryKey: ['crm-clients'],
-    queryFn: async () => (await apiRequest('GET', '/api/crm/clients')).json(),
+  const [customerOpen, setCustomerOpen] = useState(!customer.name?.trim());
+  const [sharing, setSharing] = useState(false);
+  // Use the actual customer document, including its language and attachments.
+  // Preview tokens never issue the draft or start customer follow-up emails.
+  const preview = useQuery({
+    queryKey: ['quote-preview', quoteId, version],
+    queryFn: async () => (await apiRequest('POST', `/api/quotes/${quoteId}/share`, { preview: true, version })).json(),
+    enabled: !!quoteId && saveStatus === 'Saved',
+    staleTime: Infinity,
   });
-  const pickClient = (id) => {
-    const c = clients.find((x) => String(x.id) === id);
-    if (!c) return;
-    onChangeCustomer('name', c.name || '');
-    onChangeCustomer('company', c.company || '');
-    onChangeCustomer('phone', c.phone || '');
-    onChangeCustomer('email', c.email || '');
-    onChangeCustomer('preferredLanguage', c.preferredLanguage || 'en');
-  };
-
-  return (
-    <div className="page">
-      <div className="container">
-        <div className="page-head">
-          <button className="back-link" onClick={onBack}>← Edit design</button>
-          <p className="eyebrow" style={{ marginTop: 28 }}>— Customer &amp; quote</p>
-          <h1 className="display" style={{ marginTop: 14 }}>Quote details</h1>
-        </div>
-
-        <div className="cfg">
-          <div className="cfg-controls" style={{ position: 'static' }}>
-            {clients.length > 0 && (
-              <label className="field">
-                <span>Use existing client (optional)</span>
-                <select value="" onChange={(e) => pickClient(e.target.value)}>
-                  <option value="">— Pick from CRM clients —</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}{c.company ? ` (${c.company})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className="fields two">
-              {field('name', 'Customer name', { required: true })}
-              {field('company', 'Company (optional)')}
-              {field('phone', 'Phone', { type: 'tel' })}
-              {field('email', 'Email', { type: 'email' })}
-            </div>
-            <label className="field">
-              <span>Customer language</span>
-              <select value={customer.preferredLanguage || 'en'} onChange={e=>onChangeCustomer('preferredLanguage',e.target.value)}><option value="en">English</option><option value="es">Español</option></select>
-            </label>
-            <label className="field">
-              <span>Project location</span>
-              <input value={customer.location || ''} placeholder="Arlington, TX" onChange={(e) => onChangeCustomer('location', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Notes for the customer (optional)</span>
-              <textarea rows="4" value={notes} onChange={(e) => onChangeNotes(e.target.value)} />
-            </label>
-            <label className="field" style={{ maxWidth: '12rem' }}>
-              <span>Deposit %</span>
-              <input type="number" min="0" max="100" step="5" value={depositPct} onChange={(e) => onChangeDeposit(e.target.value)} />
-            </label>
-            <div className="feats">
-              <div className="feats-head"><span>Design features</span></div>
-              <p className="feats-hint">
-                What you built into this one, one per line — they print on the quote as
-                bullets so the customer sees the work behind the number.
-              </p>
-              <textarea
-                rows="5"
-                className="feats-input"
-                value={features || ''}
-                placeholder={[
-                  'Fully welded, ground smooth and sealed',
-                  'Reinforced center stretcher for a 300 lb top load',
-                  'Adjustable levelers for uneven floors',
-                ].join('\n')}
-                onChange={(e) => onChangeFeatures(e.target.value)}
-              />
-            </div>
-            <Attachments items={attachments} onChange={onChangeAttachments} />
-          </div>
-
-          <div className="cfg-right">
-            <div className="estimate">
-              <div className="estimate-head"><span className="eyebrow">Quote recap</span></div>
-              <div className="lines">
-                <div className="line">
-                  <div className="line-name">{typeLabel(type)}</div>
-                  <div className="line-cost" style={{ fontSize: '0.85rem', fontFamily: 'inherit', color: 'var(--steel)' }} />
-                </div>
-                <div className="line" style={{ paddingTop: 4 }}>
-                  <div className="line-name muted" style={{ fontSize: '0.85rem' }}>{summaryLine(type, state)}</div>
-                  <div className="line-cost" />
-                </div>
-                {designRef && (
-                  <div className="line" style={{ paddingTop: 4 }}>
-                    <div className="line-name muted" style={{ fontSize: '0.85rem' }}>Design code: {designRef}</div>
-                    <div className="line-cost" />
-                  </div>
-                )}
-              </div>
-              <div className="totals">
-                <div className="totals-row grand"><span className="k">Total</span><span className="v">${fmtMoney(totals.total)}</span></div>
-              </div>
-            </div>
-            <button className="btn block" onClick={onPreview}>
-              Preview the customer&apos;s page <span aria-hidden="true">→</span>
-            </button>
-            <p className="hint">Opens the quote exactly as the customer will see it (print / Save as PDF from there) — priced line items, subtotal, tax and total, never your cost basis or markup.</p>
-            {/* quoteId exists once the auto-save returns — that's when there's
-                a row for the website link to point at. */}
-            {quoteId && (
-              <div>
-                <p className="section-title">Send to customer</p>
-                <ShareQuote quoteId={quoteId} customerEmail={customer.email || ''} onBeforeShare={onPersist} onIssued={onIssued} />
-              </div>
-            )}
-          </div>
+  const ready = saveStatus === 'Saved' && !!preview.data;
+  const previewUrl = preview.data ? `${preview.data.url}&v=${version}` : null;
+  const missing = lineState.items.filter(it => it.unpriced || !(Number(it.rate) > 0));
+  const checks = [...warnings.filter(w => w.level === 'warn').map(w => w.msg), ...missing.map(it => `${it.name}: check the missing cost.`)];
+  return <div className="page quote-review"><div className="container">
+    <div className="page-head">{(!quoteStatus || quoteStatus === 'draft') && <button className="back-link" onClick={onBack}>← Edit design</button>}<h1 className="display">Review &amp; send</h1></div>
+    <div className="review-layout">
+      <div className="review-settings">
+        <fieldset className="review-fields" disabled={sharing || (!!quoteStatus && quoteStatus !== 'draft')}>
+        <details className="quote-section" open={customerOpen} onToggle={e => setCustomerOpen(e.currentTarget.open)}><summary>Customer{customer.name ? ` · ${customer.name}` : ''}</summary><CustomerFields customer={customer} onChange={onChangeCustomer} /></details>
+        {!customer.name?.trim() && <p className="field-error">Enter a customer name before sending.</p>}
+        <details className="quote-section"><summary>Notes, deposit &amp; attachments</summary>
+          <label className="field"><span>Notes for the customer (optional)</span><textarea rows="3" value={notes} onChange={e => onChangeNotes(e.target.value)} /></label>
+          <label className="field"><span>Deposit %</span><input type="number" min="0" max="100" value={depositPct} onChange={e => onChangeDeposit(Math.max(0, Math.min(100, Number(e.target.value))))} /></label>
+          <label className="field"><span>Design features</span><textarea rows="3" value={features || ''} placeholder="One feature per line" onChange={e => onChangeFeatures(e.target.value)} /></label>
+          <Attachments items={attachments} onChange={onChangeAttachments} />
+        </details>
+        </fieldset>
+        {checks.length > 0 && <details className="quote-section pricing-attention" open><summary>Check pricing ({checks.length})</summary><ul>{checks.map((text,i) => <li key={i}>{text}</li>)}</ul><button className="back-link" onClick={onBack}>Return to dimensions &amp; pricing</button></details>}
+        <div className="review-actions">
+          <ShareQuote quoteId={quoteId} customerEmail={customer.email || ''} onBeforeShare={onPersist} onIssued={onIssued} onShared={onShared}
+            actionsId="quote-send-actions"
+            onBusy={setSharing}
+            disabled={!ready || !customer.name?.trim()} />
+          {previewUrl && <div className="btn-row"><a className={`btn ghost ${!ready ? 'disabled' : ''}`} aria-disabled={!ready} tabIndex={ready ? undefined : -1} href={`${previewUrl}&print=1`} target="_blank" rel="noopener noreferrer">Print / PDF</a>
+            <a className={`back-link ${!ready ? 'disabled' : ''}`} aria-disabled={!ready} tabIndex={ready ? undefined : -1} href={previewUrl} target="_blank" rel="noopener noreferrer">Open full preview ↗</a></div>}
+          <p className="hint">Send email and Copy link issue this quote and lock its prices. Preview and Print / PDF keep it as a draft.</p>
         </div>
       </div>
+      <section className="customer-preview" aria-label="Customer quote preview">
+        <h2>Customer preview</h2>
+        {!ready && !preview.error && <p role="status">Saving the latest changes and updating the preview…</p>}
+        {preview.error && <div role="alert"><p>{preview.error.message}</p><button className="btn ghost" onClick={() => preview.refetch()}>Retry preview</button></div>}
+        {ready && <iframe key={previewUrl} title="Customer quote" src={`${previewUrl}&embed=1`} referrerPolicy="no-referrer" />}
+      </section>
     </div>
-  );
+  </div></div>;
 }

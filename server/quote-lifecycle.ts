@@ -1,3 +1,5 @@
+import { reserveStock } from "./inventory-core";
+import { normalizeStockUnit, fractionalUnit, stockRound } from "../shared/inventory";
 import { eq } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { quotes, QUOTE_TYPE_LABELS } from "../shared/quote-schema";
@@ -240,22 +242,24 @@ export function acceptQuote(
       );
       const materials: any[] = materialTotals(line.items, book);
       for (const [index, material] of materials.entries()) {
-        const qty = Math.ceil(
+        const rawQty = (
           (Number(material.qty) || 0) *
             (1 +
               Math.max(
                 0,
                 Number(book.materials?.[material.id]?.wastePct) || 0,
               ) /
-                100),
+                100)
         );
+        const qty = fractionalUnit(normalizeStockUnit(material.unit)) ? stockRound(rawQty) : Math.ceil(rawQty);
         if (qty <= 0) continue;
         const item = sqlite
           .prepare(
-            "SELECT id FROM items WHERE material_key = ? AND deleted_at IS NULL",
+            "SELECT id,unit FROM items WHERE material_key = ? AND deleted_at IS NULL LIMIT 2",
           )
-          .get(material.id) as any;
-        sqlite
+          .all(material.id) as any[];
+        const linked = item.length === 1 && normalizeStockUnit(material.unit) === item[0].unit ? item[0] : null;
+        const checklist = sqlite
           .prepare(
             `INSERT INTO project_checklist (project_id, label, qty, unit, category, item_id, status, notes, order_index)
           VALUES (?, ?, ?, ?, 'raw_materials', ?, 'pending', ?, ?)`,
@@ -265,16 +269,11 @@ export function acceptQuote(
             material.name,
             String(qty),
             material.unit || null,
-            item?.id ?? null,
+            linked?.id ?? null,
             `auto:quote-seed:${quote.number}`,
             index,
           );
-        if (item)
-          sqlite
-            .prepare(
-              "UPDATE items SET quantity_reserved = quantity_reserved + ? WHERE id = ?",
-            )
-            .run(qty, item.id);
+        if (linked) reserveStock(sqlite, linked.id, projectId, qty, Number(checklist.lastInsertRowid), true);
       }
     }
     const title = `Schedule the job — quote ${quote.number} accepted${quote.customerName ? ` by ${quote.customerName}` : ""}`;

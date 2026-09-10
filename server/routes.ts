@@ -1,3 +1,5 @@
+import { registerInventoryRoutes } from "./inventory";
+import { inventoryOnce, reservationRows, loanRows } from "./inventory-core";
 import { setMediaCookie } from "./media";
 import { registerSecurityRoutes, verifySecondFactor, strongPassword } from "./security";
 import type { Express } from "express";
@@ -111,6 +113,7 @@ const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
   registerSecurityRoutes(app);
+  registerInventoryRoutes(app);
   // ─── Auth ────────────────────────────────────────────────────────────────
 
   // Express types `req.params.*` as `string | string[]`; narrow to string.
@@ -295,6 +298,8 @@ export function registerRoutes(app: Express): void {
       item,
       transactions: storage.getTransactions({ itemId: id, limit: 10 }),
       adjustments: storage.getAdjustments(id),
+      reservations: reservationRows(sqlite, id),
+      loans: loanRows(sqlite, id),
     });
   });
 
@@ -311,8 +316,15 @@ export function registerRoutes(app: Express): void {
       if (!isElevated(req)) {
         delete body.lowStockThreshold;
         delete body.quantityReserved;
+      delete body.reorderTarget;
+      delete body.supplier;
+      delete body.lastCostCents;
       }
-      const item = storage.createItem(body);
+      const item = inventoryOnce(sqlite, req.user!.userId, body.requestKey, {action:"create-item", ...body}, () => {
+        const created = storage.createItem({...body, quantityReserved: 0});
+        if (created.quantity > 0) sqlite.prepare("INSERT INTO adjustments(item_id,user_id,delta,reason,notes) VALUES(?,?,?,'count_correction','Opening stock')").run(created.id,req.user!.userId,created.quantity);
+        return created;
+      });
       audit(req, "item.create", {
         targetType: "item", targetId: item.id, targetName: item.name,
       });
@@ -323,6 +335,7 @@ export function registerRoutes(app: Express): void {
   });
 
   app.patch("/api/items/:id", requireAuth, (req, res) => {
+    try {
     const body = { ...req.body };
     // Only the owner may set stock levels, the low-stock threshold and the
     // reserved quantity — mirror the create handler so a worker can't quietly
@@ -331,6 +344,9 @@ export function registerRoutes(app: Express): void {
       delete body.quantity;
       delete body.lowStockThreshold;
       delete body.quantityReserved;
+      delete body.reorderTarget;
+      delete body.supplier;
+      delete body.lastCostCents;
     }
     const item = storage.updateItem(pid(req.params.id), body);
     if (!item) return res.status(404).json({ message: "Item not found" });
@@ -338,6 +354,7 @@ export function registerRoutes(app: Express): void {
       targetType: "item", targetId: item.id, targetName: item.name,
     });
     res.json(item);
+    } catch(e: any) { res.status(409).json({message:e.message}); }
   });
 
   app.delete("/api/items/:id", requireElevated, (req, res) => {

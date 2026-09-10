@@ -335,6 +335,33 @@ try {
     "Conflicting draft saves are rejected, issued content is immutable, and Spanish revisions preserve the original",
   );
 
+  const draftBody = {type:'table', customerName:'UX search 100%_literal', totalCents:12000, payload:{sid:'retry-first-save', type:'table',state:{},customer:{company:'UX company'}}};
+  const firstDraft = await api('/api/quotes','POST',draftBody,owner);
+  const retryDraft = await api('/api/quotes','POST',{...draftBody,totalCents:13000},owner);
+  assert.equal(firstDraft.status,201); assert.equal(retryDraft.status,200);
+  assert.equal(firstDraft.data.id,retryDraft.data.id); assert.equal(retryDraft.data.totalCents,12000);
+  assert.equal(sqlite.prepare('SELECT count(*) n FROM quotes WHERE draft_key IS NOT NULL').get().n,1);
+  const changed = await api(`/api/quotes/${firstDraft.data.id}`,'PATCH',{...draftBody,version:1,totalCents:13000},owner);
+  assert.equal(changed.status,200);
+  assert.equal((await api(`/api/quotes/${firstDraft.data.id}/share`,'POST',{version:1},owner)).status,409);
+  assert.equal((await api(`/api/quotes/${firstDraft.data.id}/share`,'POST',{version:2,preview:true},owner)).status,200);
+  assert.equal(sqlite.prepare('SELECT status FROM quotes WHERE id=?').get(firstDraft.data.id).status,'draft');
+  for(let i=0;i<24;i++) await api('/api/quotes','POST',{...draftBody,customerName:'UX paged '+i,type:i%2?'concrete':'table',payload:{}},owner);
+  const page1 = (await api('/api/quotes?page=1&pageSize=10&q=UX%20paged','GET',undefined,owner)).data;
+  const page2 = (await api('/api/quotes?page=2&pageSize=10&q=UX%20paged','GET',undefined,owner)).data;
+  assert.equal(page1.total,24); assert.equal(page1.rows.length,10); assert.equal(page2.rows.length,10);
+  assert.equal(page1.rows.some(a=>page2.rows.some(b=>b.id===a.id)),false);
+  assert.equal('payload' in page1.rows[0],false);
+  const filtered = (await api('/api/quotes?page=1&trade=metals&status=draft&q=UX%20paged','GET',undefined,owner)).data;
+  assert.equal(filtered.total,12); assert.ok(filtered.rows.every(q=>q.type==='table'&&q.status==='draft'));
+  const literal = (await api('/api/quotes?page=1&q='+encodeURIComponent('100%_literal'),'GET',undefined,owner)).data;
+  assert.equal(literal.total,1);
+  const last = (await api('/api/quotes?page=999&q=UX%20paged','GET',undefined,owner)).data;
+  assert.equal(last.page,2); assert.equal(last.rows.length,4);
+  assert.ok(Array.isArray((await api('/api/quotes','GET',undefined,owner)).data));
+  assert.equal((await api('/api/quotes?page=1','GET')).status,401);
+  check('Draft creation retries are idempotent, stale review cannot issue, and quote search/filter/pagination preserves legacy clients');
+
   const worker = (
     await api(
       "/api/users",
@@ -582,11 +609,14 @@ try {
     "Full backup restores actual invoices and uploaded photos, verifies checksums, and rejects overwriting a directory",
   );
 
-  const {setDraftUser,saveSession,loadSession,clearSession}=await import('../client/src/quote/lib/store.js');
+  const {setDraftUser,saveSession,loadSession,clearSession,captureDraftStorage}=await import('../client/src/quote/lib/store.js');
   const browserStore=new Map([['cjm.session.v1',JSON.stringify({private:'legacy'})]]);
   globalThis.localStorage={getItem:key=>browserStore.get(key)??null,setItem:(key,value)=>browserStore.set(key,value),removeItem:key=>browserStore.delete(key)};
   setDraftUser(100);assert.equal(loadSession(),null);saveSession({private:'first account draft'});
+  const delayedStorage = captureDraftStorage();
   setDraftUser(200);assert.equal(loadSession(),null);saveSession({private:'second account draft'});clearSession();
+  assert.equal(delayedStorage.save({private:'first account delayed write'}),false);
+  assert.equal(loadSession(),null);
   setDraftUser(100);assert.equal(loadSession().private,'first account draft');
   setDraftUser(null);assert.equal(loadSession(),null);assert.equal(saveSession({private:'signed out'}),false);delete globalThis.localStorage;
   check('A shared browser never loads another user’s draft or the unowned legacy draft');

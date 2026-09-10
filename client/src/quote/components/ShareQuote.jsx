@@ -1,99 +1,59 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { toast } from '@/components/ui/toaster';
 
-/**
- * Send-to-customer panel — mints the public cjmmetals.com/quote/<token> link
- * for a saved quote (the first share moves it from draft to sent) and can
- * email it straight to the customer. Rendered from the Saved list rows and
- * from the details step once the quote has saved.
- */
-export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIssued }) {
+export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIssued, onShared, onBusy, actionsId, disabled = false }) {
+  const [actionsTarget, setActionsTarget] = useState(null);
+  useEffect(() => { setActionsTarget(actionsId ? document.getElementById(actionsId) : null); }, [actionsId]);
+  const actions = node => actionsTarget ? createPortal(node, actionsTarget) : node;
   const qc = useQueryClient();
-
-  // The Saved list omits the payload (it's the big JSON blob), so a caller
-  // that doesn't know the customer's email leaves the prop undefined and the
-  // panel reads it from the full row instead.
-  const { data: row } = useQuery({
+  const { data: row, isFetching } = useQuery({
     queryKey: ['quote', quoteId],
     queryFn: async () => (await apiRequest('GET', `/api/quotes/${quoteId}`)).json(),
-    enabled: customerEmail === undefined,
+    enabled: customerEmail === undefined && !!quoteId,
   });
   let email = customerEmail;
-  if (email === undefined) {
-    try { email = JSON.parse(row?.payload || '{}')?.customer?.email || ''; } catch { email = ''; }
-  }
-
-  const [sendEmail, setSendEmail] = useState(true);
-  const [result, setResult] = useState(null); // { url, emailed, wantedEmail }
-
-  const share = useMutation({
-    mutationFn: async (body) => {
-      if (onBeforeShare) await onBeforeShare();
-      return (await apiRequest('POST', `/api/quotes/${quoteId}/share`, body)).json();
-    },
-    onSuccess: (res, body) => {
-      setResult({ url: res.url, emailed: res.emailed, wantedEmail: !!body.sendEmail });
-      // The first share moves the quote draft → sent — refresh the Saved list badge.
-      qc.invalidateQueries({ queryKey: ['quotes'] });
-      onIssued?.({ ...res, wantedEmail: !!body.sendEmail });
-      qc.invalidateQueries({ queryKey: ['quote', quoteId] });
-    },
-    onError: (e) => toast({ variant: 'destructive', title: 'Could not create the link', description: e?.message }),
-  });
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(result.url);
-      toast({ variant: 'success', title: 'Link copied' });
-    } catch {
-      toast({ variant: 'destructive', title: 'Copy failed', description: 'Select the link and copy it manually.' });
-    }
+  if (email === undefined) { try { email = JSON.parse(row?.payload || '{}').customer?.email || ''; } catch { email = ''; } }
+  email = String(email || '').trim();
+  const [result, setResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const copy = async url => {
+    try { await navigator.clipboard.writeText(url); setCopied(true); return true; }
+    catch { setCopied(false); return false; }
   };
-
-  return (
-    <div className="share-panel">
-      {!result ? (
-        <>
-          {email ? (
-            <label className="share-check">
-              <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} />
-              Email the link to {email}
-            </label>
-          ) : (
-            <p className="hint">No customer email on this quote — create the link and text it over.</p>
-          )}
-          <div className="btn-row">
-            <button
-              className="btn sq-btn"
-              onClick={() => {
-                // Details step: flush edits typed on this screen (customer
-                // name, notes) so the public page shows what's on screen.
-
-                share.mutate(email && sendEmail ? { sendEmail: true, email } : {});
-              }}
-              disabled={share.isPending}
-            >
-              {share.isPending ? 'Working…' : email && sendEmail ? 'Send to customer' : 'Create share link'}
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="share-row">
-            <input className="share-url" readOnly value={result.url} onFocus={(e) => e.target.select()} />
-            <button className="btn ghost sq-btn" onClick={copy}>Copy link</button>
-          </div>
-          <p className="hint">
-            {result.emailed
-              ? `Emailed to ${email}. The customer can view and accept the quote at that link.`
-              : result.wantedEmail
-                ? 'The email did not go out — copy the link and send it yourself.'
-                : 'Copy the link and text or email it to the customer — they can accept the quote right there.'}
-          </p>
-        </>
-      )}
-    </div>
-  );
+  const share = useMutation({
+    onMutate: () => onBusy?.(true),
+    mutationFn: async action => {
+      const saved = onBeforeShare ? await onBeforeShare() : { id: quoteId, version: row?.version };
+      const res = await (await apiRequest('POST', `/api/quotes/${saved?.id || quoteId}/share`, {
+        sendEmail: action === 'email', ...(action === 'email' ? { email } : {}), version: saved?.version,
+      })).json();
+      const copied = action === 'copy' && await copy(res.url);
+      return { ...res, wantedEmail: action === 'email', copied };
+    },
+    onSuccess: res => {
+      setResult(res);
+      onShared?.(res);
+      qc.invalidateQueries({queryKey:['quotes']});
+      qc.invalidateQueries({queryKey:['quote',quoteId]});
+      // Keep a selectable link visible even when clipboard access or mail fails.
+    },
+    onError: e => toast({variant:'destructive',title:'Quote could not be sent',description:e.message}),
+    onSettled: () => onBusy?.(false),
+  });
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
+  if (result) return <div className="share-panel" role="status">
+    <p>{result.wantedEmail ? result.emailed ? `Email sent to ${email}.` : 'Quote issued, but email was not delivered. Use the link below.' : copied ? 'Quote issued. Link copied.' : 'Quote issued. Select and copy the link below.'}</p>
+    <div className="share-row"><input aria-label="Quote share link" readOnly className="share-url" value={result.url} onFocus={e => e.target.select()} /><button className="btn ghost sq-btn" onClick={() => copy(result.url)}>Copy link</button></div>
+    {onIssued && actions(<button className="btn" onClick={() => onIssued(result)}>Done</button>)}
+  </div>;
+  return <div className="share-panel">
+    <p className="hint">{validEmail ? `Send to ${email}` : 'Add a valid customer email to send by email, or copy a link.'}</p>
+    {actions(<div className="btn-row">
+      <button className="btn" disabled={disabled || !validEmail || share.isPending || isFetching} onClick={() => share.mutate('email')}>{share.isPending && share.variables === 'email' ? 'Sending…' : 'Send email'}</button>
+      <button className="btn ghost" disabled={disabled || !quoteId || share.isPending || isFetching} onClick={() => share.mutate('copy')}>{share.isPending && share.variables === 'copy' ? 'Creating link…' : 'Copy link'}</button>
+    </div>)}
+  </div>;
 }

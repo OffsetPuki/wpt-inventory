@@ -13,6 +13,8 @@ import {
 } from "../shared/schema";
 import { TEMPLATE_CATALOG, TEMPLATE_CATALOG_VERSION } from "./template-catalog";
 import { escapeLike } from "./http-util";
+import { inventoryMigrate, validateItemData, moveStock, adjustStock, reserveStock, releaseReservation, activeItem, validateQuantity } from "./inventory-core";
+import { stockRound, normalizeStockUnit } from "../shared/inventory";
 
 // ─── Database initialization ─────────────────────────────────────────────────
 
@@ -271,6 +273,7 @@ addColumnIfMissing("adjustments", "project_id", "project_id INTEGER");
 // Phase D #22 — stamped when a job's status transitions to done; anchors the
 // warranty-window math in the automations sweep.
 addColumnIfMissing("projects", "completed_at", "completed_at INTEGER");
+inventoryMigrate(sqlite);
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_items_deleted ON items(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_deleted ON projects(deleted_at)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id)");
@@ -598,12 +601,18 @@ export const storage = {
   },
 
   createItem(data: any): Item {
+    const unit = validateItemData(data);
+    if (!data.name?.trim()) throw new Error("Enter an item name.");
     const vals: any = {
       name: data.name,
       category: data.category || "tools",
       photoUrl: data.photoUrl || null,
       photos: data.photos ? JSON.stringify(data.photos) : null,
       quantity: data.quantity ?? 0,
+      unit,
+      reorderTarget: data.reorderTarget ?? 0,
+      supplier: data.supplier || null,
+      lastCostCents: data.lastCostCents ?? 0,
       notes: data.notes || null,
       area: data.area || null,
       rackLetter: data.rackLetter || null,
@@ -624,12 +633,21 @@ export const storage = {
   },
 
   updateItem(id: number, data: any): Item | undefined {
+    const existing = this.getItemById(id);
+    if (!existing) return undefined;
+    const unit = validateItemData(data, existing);
+    if (data.detailVersion !== undefined && data.detailVersion !== existing.detailVersion) throw new Error("Item details changed elsewhere. Reload before saving.");
+    if (unit !== existing.unit) {
+      validateQuantity(existing.quantity, unit, true);
+      if (existing.quantityReserved > 0 || (sqlite.prepare("SELECT 1 FROM inventory_loans WHERE item_id=? AND quantity>returned_quantity").get(id))) throw new Error("Release reservations and return checked-out tools before changing the stock unit.");
+    }
+    if (data.itemType && data.itemType!==existing.itemType && sqlite.prepare("SELECT 1 FROM inventory_loans WHERE item_id=? AND quantity>returned_quantity").get(id)) throw new Error("Return checked-out tools before changing the item type.");
     const vals: any = {};
     const fields = [
-      "name", "category", "photoUrl", "quantity", "notes",
+      "name", "category", "photoUrl", "notes",
       "area", "rackLetter", "rackLevel", "subLocation", "shelf", "bin",
       "lowStockThreshold", "partNumber", "mfgPartNumber", "itemType",
-      "quantityReserved", "equipmentType", "materialKey",
+      "equipmentType", "materialKey", "reorderTarget", "supplier", "lastCostCents", "unit",
     ];
     for (const f of fields) {
       if (data[f] !== undefined) vals[f] = data[f];
@@ -641,6 +659,8 @@ export const storage = {
       vals.customAttrs = JSON.stringify(data.customAttrs);
     }
     if (Object.keys(vals).length === 0) return this.getItemById(id);
+    vals.unit = unit;
+    vals.detailVersion = existing.detailVersion + 1;
     const result = db.update(items).set(vals).where(eq(items.id, id)).returning().get();
     return result;
   },
@@ -661,32 +681,16 @@ export const storage = {
   },
 
   // ── Adjustments ──────────────────────────────────────────────────────────
-  createAdjustment(itemId: number, userId: number, data: { delta: number; reason: string; notes?: string; projectId?: number | null }): Adjustment {
-    // Stock mutation + ledger row must commit together or not at all — a failed
-    // INSERT must never leave the quantity changed with no adjustment record.
-    return db.transaction((tx) => {
-      // Verify the item exists AND is active before touching stock. Done inside
-      // the transaction so a concurrent soft-delete can't race the check.
-      const item = tx.select().from(items)
-        .where(and(eq(items.id, itemId), sql`${items.deletedAt} IS NULL`)).get();
-      if (!item) throw new Error("Item not found");
-      sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(data.delta, itemId);
-      return tx.insert(adjustments).values({
-        itemId,
-        userId,
-        delta: data.delta,
-        reason: data.reason as any,
-        notes: data.notes || null,
-        projectId: data.projectId ?? null,
-      }).returning().get();
-    });
+  createAdjustment(itemId: number, userId: number, data: { delta?: number; countedQuantity?: number; expectedVersion?: number; reason: string; notes?: string; projectId?: number | null; requestKey?: string }): Adjustment {
+    const id = adjustStock(sqlite, itemId, userId, data);
+    return db.select().from(adjustments).where(eq(adjustments.id, id)).get()!;
   },
 
   getAdjustments(itemId: number): Adjustment[] {
     return db.select().from(adjustments)
       .where(eq(adjustments.itemId, itemId))
-      .orderBy(desc(adjustments.createdAt))
-      .all();
+      .orderBy(desc(adjustments.createdAt), desc(adjustments.id))
+      .limit(20).all();
   },
 
   getRecentAdjustments(opts: { limit?: number; userId?: number; itemId?: number; q?: string } = {}):
@@ -712,35 +716,9 @@ export const storage = {
   },
 
   // ── Transactions ─────────────────────────────────────────────────────────
-  createTransaction(
-    itemId: number,
-    userId: number,
-    type: "check_out" | "check_in",
-    data: { quantity: number; notes?: string; projectId?: number }
-  ): Transaction {
-    const delta = type === "check_out" ? -data.quantity : data.quantity;
-    // Stock mutation + ledger row must commit together or not at all — a failed
-    // INSERT (e.g. a bad projectId FK with foreign_keys=ON) must never leave the
-    // quantity changed with no transaction record.
-    return db.transaction((tx) => {
-      // Verify the item exists AND is active before touching stock. Done inside
-      // the transaction so a concurrent soft-delete can't race the check.
-      const item = tx.select().from(items)
-        .where(and(eq(items.id, itemId), sql`${items.deletedAt} IS NULL`)).get();
-      if (!item) throw new Error("Item not found");
-      if (type === "check_out" && item.quantity < data.quantity) {
-        throw new Error(`Only ${Math.max(0, item.quantity)} left in stock. Refresh and choose a smaller quantity.`);
-      }
-      sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(delta, itemId);
-      return tx.insert(transactions).values({
-        itemId,
-        userId,
-        type,
-        quantity: data.quantity,
-        notes: data.notes || null,
-        projectId: data.projectId ?? null,
-      }).returning().get();
-    });
+  createTransaction(itemId: number, userId: number, type: "check_out" | "check_in", data: { quantity: number; notes?: string; projectId?: number; requestKey?: string; loanId?: number; action?: string }): Transaction {
+    const id = moveStock(sqlite, itemId, userId, type, data);
+    return db.select().from(transactions).where(eq(transactions.id, id)).get()!;
   },
 
   getTransactions(opts: {
@@ -846,11 +824,18 @@ export const storage = {
     if (data.notes !== undefined) vals.notes = data.notes;
     if (data.jobNumber !== undefined) vals.jobNumber = data.jobNumber;
     if (Object.keys(vals).length === 0) return this.getProjectById(id);
-    return db.update(projects).set(vals).where(eq(projects.id, id)).returning().get();
+    return sqlite.transaction(() => {
+      const row=db.update(projects).set(vals).where(eq(projects.id,id)).returning().get();
+      if(row?.status==="done")this.releaseProjectReservations(id);
+      return row;
+    })();
   },
 
   deleteProject(id: number): void {
-    sqlite.prepare("UPDATE projects SET deleted_at = ? WHERE id = ?").run(Date.now(), id);
+    sqlite.transaction(() => {
+      this.releaseProjectReservations(id);
+      sqlite.prepare("UPDATE projects SET deleted_at = ? WHERE id = ?").run(Date.now(),id);
+    })();
   },
 
   restoreProject(id: number): void {
@@ -1015,106 +1000,61 @@ export const storage = {
   },
 
   createChecklistRow(projectId: number, data: any): ProjectChecklistRow {
-    const maxOrder = sqlite.prepare(
-      "SELECT MAX(order_index) as m FROM project_checklist WHERE project_id = ?"
-    ).get(projectId) as any;
-
-    return db.insert(projectChecklist).values({
-      projectId,
-      label: data.label,
-      qty: String(data.qty ?? "1"),
-      unit: data.unit || null,
-      equipmentType: data.equipmentType || null,
-      category: data.category || null,
-      itemId: data.itemId || null,
-      status: data.status || "pending",
-      notes: data.notes || null,
-      orderIndex: data.orderIndex ?? ((maxOrder?.m ?? 0) + 1),
-    }).returning().get();
-  },
-
-  // Phase C #19: status transitions on an item-linked row move real stock.
-  //   → done    : quantity −qty, reservation released, install_on_job
-  //               adjustment stamped with the project.
-  //   → skipped : reservation released only.
-  // Only the TRANSITION acts (prior status is read in the same transaction),
-  // so re-saving an already-done row is a no-op; reservations are only
-  // released when the row still held one (prior status pending/ordered).
-  updateChecklistRow(id: number, data: any, actorUserId?: number): ProjectChecklistRow | undefined {
-    const vals: any = {};
-    if (data.status !== undefined) vals.status = data.status;
-    if (data.qty !== undefined) vals.qty = String(data.qty);
-    if (data.itemId !== undefined) vals.itemId = data.itemId;
-    if (data.label !== undefined) vals.label = data.label;
-    if (data.notes !== undefined) vals.notes = data.notes;
-    if (data.unit !== undefined) vals.unit = data.unit;
-    if (Object.keys(vals).length === 0) return undefined;
-    return db.transaction((tx) => {
-      const prev = tx.select().from(projectChecklist).where(eq(projectChecklist.id, id)).get();
-      if (!prev) return undefined;
-      const row = tx.update(projectChecklist).set(vals).where(eq(projectChecklist.id, id)).returning().get();
-
-      const to = vals.status;
-      if (!to || to === prev.status || !prev.itemId || actorUserId == null) return row;
-      const qty = Math.max(0, Math.ceil(Number(prev.qty) || 0));
-      const hadReservation = prev.status === "pending" || prev.status === "ordered";
-      if (qty === 0) return row;
-      // Item must still be live — a row pointing at a trashed item just flips
-      // its label, no stock move (matches createAdjustment's active check).
-      const item = tx.select().from(items)
-        .where(and(eq(items.id, prev.itemId), sql`${items.deletedAt} IS NULL`)).get();
-      if (!item) return row;
-
-      const releaseReservation = sqlite.prepare(
-        "UPDATE items SET quantity_reserved = quantity_reserved - MIN(?, quantity_reserved) WHERE id = ?",
-      );
-      if (to === "done") {
-        sqlite.prepare("UPDATE items SET quantity = quantity - ? WHERE id = ?").run(qty, prev.itemId);
-        if (hadReservation) releaseReservation.run(qty, prev.itemId);
-        tx.insert(adjustments).values({
-          itemId: prev.itemId,
-          userId: actorUserId,
-          delta: -qty,
-          reason: "install_on_job",
-          notes: `auto:checklist-done:${prev.id}; — ${prev.label}`,
-          projectId: prev.projectId,
-        }).run();
-      } else if (to === "skipped" && hadReservation) {
-        releaseReservation.run(qty, prev.itemId);
-      }
-      // ponytail: un-doing a done row (done → pending) does not restore stock —
-      // add a reverse adjustment here if mis-ticks turn out to be common.
+    return sqlite.transaction(() => {
+      const maxOrder = sqlite.prepare("SELECT MAX(order_index) AS m FROM project_checklist WHERE project_id=?").get(projectId) as any;
+      const row = db.insert(projectChecklist).values({ projectId, label: data.label, qty: String(data.qty ?? "1"), unit: data.unit || null,
+        equipmentType: data.equipmentType || null, category: data.category || null, itemId: data.itemId || null,
+        status: data.status || "pending", notes: data.notes || null, orderIndex: data.orderIndex ?? ((maxOrder?.m ?? 0) + 1) }).returning().get();
+      this.refreshChecklistReservation(row.id);
       return row;
-    });
+    })();
   },
 
-  // Phase C #19d: a job that closes or gets trashed lets go of the stock its
-  // open checklist rows were holding. min() clamps so reserved never goes
-  // negative. ponytail: rows keep their status, so re-opening the project (or
-  // later ticking one of these rows done) won't re-take / may over-release a
-  // reservation — track a per-row reserved flag if that ever bites.
-  releaseProjectReservations(projectId: number): void {
-    const rows = sqlite.prepare(`
-      SELECT item_id AS itemId, qty FROM project_checklist
-      WHERE project_id = ? AND item_id IS NOT NULL AND status IN ('pending', 'ordered')
-    `).all(projectId) as { itemId: number; qty: string }[];
-    if (rows.length === 0) return;
-    const release = sqlite.prepare(
-      "UPDATE items SET quantity_reserved = quantity_reserved - MIN(?, quantity_reserved) WHERE id = ?",
-    );
-    sqlite.transaction(() => {
-      for (const r of rows) {
-        const qty = Math.max(0, Math.ceil(Number(r.qty) || 0));
-        if (qty > 0) release.run(qty, r.itemId);
+  refreshChecklistReservation(id: number): void {
+    const row = sqlite.prepare("SELECT * FROM project_checklist WHERE id=?").get(id) as any;
+    const prior = sqlite.prepare("SELECT id FROM inventory_reservations WHERE checklist_id=?").get(id) as any;
+    if (prior) releaseReservation(sqlite, prior.id);
+    if (!row?.item_id || !["pending", "ordered"].includes(row.status)) return;
+    const item = activeItem(sqlite, row.item_id);
+    if (normalizeStockUnit(row.unit) !== item.unit) throw new Error(`Checklist uses ${row.unit || 'each'}; inventory uses ${item.unit}. Convert the quantity before linking this item.`);
+    const qty = stockRound(Number(row.qty) - row.stock_used);
+    if (qty > 0 && sqlite.prepare("SELECT 1 FROM projects WHERE id=? AND status!='done' AND deleted_at IS NULL").get(row.project_id)) reserveStock(sqlite, row.item_id, row.project_id, qty, row.id, true);
+  },
+
+  updateChecklistRow(id: number, data: any, actorUserId?: number): ProjectChecklistRow | undefined {
+    return sqlite.transaction(() => {
+      const prev = sqlite.prepare("SELECT * FROM project_checklist WHERE id=?").get(id) as any;
+      if (!prev) return undefined;
+      if (data.itemId !== undefined && data.itemId !== prev.item_id && prev.stock_used > 0) throw new Error("This row has already used stock. Add a separate row for another item.");
+      if (data.qty !== undefined && (!Number.isFinite(Number(data.qty)) || Number(data.qty) < prev.stock_used || Number(data.qty) < 0)) throw new Error("Quantity cannot be less than stock already used.");
+      const vals: any = {};
+      for (const key of ["status", "itemId", "label", "notes", "unit"]) if (data[key] !== undefined) vals[key] = data[key];
+      if (data.qty !== undefined) vals.qty = String(data.qty);
+      if (Object.keys(vals).length) db.update(projectChecklist).set(vals).where(eq(projectChecklist.id, id)).run();
+      const row = sqlite.prepare("SELECT * FROM project_checklist WHERE id=?").get(id) as any;
+      if (row.item_id && row.status === "done" && prev.status !== "done") {
+        if (actorUserId == null) throw new Error("A user is required to record stock usage.");
+        const item = activeItem(sqlite, row.item_id);
+        if (normalizeStockUnit(row.unit) !== item.unit) throw new Error("Convert the checklist quantity to the inventory unit first.");
+        const qty = stockRound(Number(row.qty) - row.stock_used);
+        if (qty > 0) {
+          moveStock(sqlite, row.item_id, actorUserId, "check_out", { quantity: qty, projectId: row.project_id, checklistId: id, notes: `Checklist completed: ${row.label}` });
+          sqlite.prepare("UPDATE project_checklist SET stock_used=? WHERE id=?").run(Number(row.qty), id);
+        }
       }
+      this.refreshChecklistReservation(id);
+      return db.select().from(projectChecklist).where(eq(projectChecklist.id, id)).get();
     })();
+  },
+
+  releaseProjectReservations(projectId: number): void {
+    sqlite.transaction(() => { sqlite.prepare("DELETE FROM inventory_reservations WHERE project_id=?").run(projectId); })();
   },
 
   deleteChecklistRow(id: number): void {
     db.delete(projectChecklist).where(eq(projectChecklist.id, id)).run();
   },
 
-  // ── Stats ────────────────────────────────────────────────────────────────
   getStats() {
     const now = Date.now();
     const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
@@ -1130,7 +1070,7 @@ export const storage = {
       SELECT
         (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL) as totalItems,
         (SELECT COALESCE(SUM(quantity),0) FROM items WHERE deleted_at IS NULL) as totalQty,
-        (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold) as lowStock,
+        (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND (quantity - quantity_reserved <= 0 OR (low_stock_threshold > 0 AND quantity - quantity_reserved <= low_stock_threshold))) as lowStock,
         (SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL AND status = 'active') as activeProjects,
         (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND created_at >= ?) as itemsAdded7d,
         (SELECT COALESCE(SUM(quantity),0) FROM transactions WHERE type = 'check_out' AND created_at >= ?) as checkouts7d,
@@ -1183,7 +1123,7 @@ export const storage = {
 
     // Low stock items for reorder list
     const lowStockItems = sqlite.prepare(
-      "SELECT id, name, quantity, low_stock_threshold, category FROM items WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold ORDER BY (quantity - low_stock_threshold) ASC LIMIT 20"
+      "SELECT id, name, quantity, low_stock_threshold, category FROM items WHERE deleted_at IS NULL AND (quantity - quantity_reserved <= 0 OR (low_stock_threshold > 0 AND quantity - quantity_reserved <= low_stock_threshold)) ORDER BY (quantity - low_stock_threshold) ASC LIMIT 20"
     ).all() as any[];
 
     return {

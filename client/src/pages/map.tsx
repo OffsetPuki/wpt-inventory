@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -222,11 +222,20 @@ export default function MapPage() {
     queryFn: async () => (await apiRequest("GET", "/api/map-layouts")).json(),
   });
   const { data: items = [] } = useQuery<Item[]>({
-    queryKey: ["items", {}],
-    queryFn: async () => (await apiRequest("GET", "/api/items")).json(),
+    queryKey: ["inventory", "map-items"],
+    queryFn: async () => (await apiRequest("GET", "/api/inventory/map-items")).json(),
   });
 
   const active = layouts.find((l) => l.key === activeKey) ?? layouts[0];
+  const nodeItems = useMemo(() => {
+    const byRack=new Map<string,Item[]>(),byPosition=new Map<string,Item[]>();
+    for(const item of items) {
+      if(item.area!==active?.area)continue;
+      if(item.rackLetter){const group=byRack.get(item.rackLetter)||[];group.push(item);byRack.set(item.rackLetter,group);}
+      if(item.subLocation){const key=normLoc(item.subLocation);const group=byPosition.get(key)||[];group.push(item);byPosition.set(key,group);}
+    }
+    return new Map(nodes.map(node=>[node.id,Array.from(new Map([...(byRack.get(node.matchRack||"")||[]),...(byPosition.get(normLoc(node.matchSubLocation||""))||[])].map(i=>[i.id,i])).values())]));
+  },[items,nodes,active?.area]);
 
   useEffect(() => {
     if (active) {
@@ -504,10 +513,8 @@ export default function MapPage() {
             <rect x={0} y={0} width={VW} height={VH} fill="url(#mapGrid)" />
 
             {nodes.map((n) => {
-              const matched = active
-                ? items.filter((i) => i.area === active.area && nodeMatches(n, i))
-                : [];
-              const units = matched.reduce((s, i) => s + i.quantity, 0);
+              const matched = nodeItems.get(n.id)||[];
+              const units = matched.length;
               const low = matched.some((i) => isLowStock(i));
               const hasItems = matched.length > 0;
 
@@ -523,7 +530,7 @@ export default function MapPage() {
                     ? n.matchSubLocation
                     : "(no match)";
               } else if (hasItems) {
-                countLine = `${units} units`;
+                countLine = `${units} items`;
               } else if (n.matchSubLocation) {
                 countLine = n.matchSubLocation;
               } else if (n.matchRack) {
@@ -688,9 +695,7 @@ export default function MapPage() {
       >
         {(() => {
           if (!viewNode) return null;
-          const matched = active
-            ? items.filter((i) => i.area === active.area && nodeMatches(viewNode, i))
-            : [];
+          const matched = nodeItems.get(viewNode.id)||[];
           const sub = viewNode.matchRack
             ? `Rack ${viewNode.matchRack}`
             : viewNode.matchSubLocation ?? "";

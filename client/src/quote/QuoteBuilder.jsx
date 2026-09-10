@@ -4,15 +4,15 @@
 //  What changed from the .exe version:
 //    · Price book + shop identity live in the suite DB (/api/quotes/settings),
 //      shared by every device. Edits save back automatically (debounced).
-//    · Quotes auto-save to the suite (/api/quotes) when you reach the details
-//      step — the quote number is assigned by the server, and the Saved view
+//    · Drafts auto-save to the suite after an editing pause.
+//      The quote number is assigned by the server, and the Saved view
 //      lists every quote from any device.
 //    · "Find design" reads the suite's own web_designs table (no URL/key).
 //  Everything else — pricing math, configurators, previews, the printable
 //  quote — is the original code, untouched.
 // =============================================================================
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { defaultState } from "./data/configurators.js";
@@ -30,17 +30,17 @@ import {
   DEFAULT_SHOP,
   duplicateSession,
   loadSession,
-  saveSession,
-  clearSession,
   setPath,
 } from "./lib/store.js";
+import useDraftSave from "./lib/useDraftSave.js";
+import { fmtMoney } from "./lib/format.js";
 import Home from "./components/Home.jsx";
 import Configurator from "./components/Configurator.jsx";
-import QuoteForm from "./components/QuoteForm.jsx";
-import PriceBookPanel from "./components/PriceBookPanel.jsx";
-import FindDesign from "./components/FindDesign.jsx";
-import SavedQuotes from "./components/SavedQuotes.jsx";
-import Costing from "./components/Costing.jsx";
+const QuoteForm = lazy(() => import("./components/QuoteForm.jsx"));
+const PriceBookPanel = lazy(() => import("./components/PriceBookPanel.jsx"));
+const FindDesign = lazy(() => import("./components/FindDesign.jsx"));
+const SavedQuotes = lazy(() => import("./components/SavedQuotes.jsx"));
+const Costing = lazy(() => import("./components/Costing.jsx"));
 // Client-side session identity — correlates async save responses with the
 // session that started them, so a slow POST can't stamp its quoteId/number
 // onto a different quote the user has since switched to.
@@ -133,34 +133,6 @@ export default function QuoteBuilder({ initialSettings }) {
     ),
   );
   const [view, setView] = useState("home");
-  const [localSaved, setLocalSaved] = useState(true);
-  const [savedSignature, setSavedSignature] = useState(null);
-  const saveFailed = useRef(false);
-  const signature = (s) =>
-    JSON.stringify(
-      s &&
-        Object.fromEntries(
-          Object.entries(s).filter(
-            ([key]) =>
-              ![
-                "sid",
-                "quoteId",
-                "number",
-                "version",
-                "quoteStatus",
-                "priceBookSnapshot",
-                "priceBookSnapshotAt",
-              ].includes(key),
-          ),
-        ),
-    );
-  // ── Persistence ────────────────────────────────────────────────────────────
-  // The in-progress session stays in localStorage (scoped to the signed-in user) —
-  // it's a scratchpad. Rates + shop identity save to the suite, debounced so
-  // dragging a slider in the price book doesn't fire a request per tick.
-  useEffect(() => {
-    if (session) setLocalSaved(saveSession(session));
-  }, [session]);
   // settingsDirty is set only by the explicit edit paths (updatePriceBook /
   // updateShop / resetPriceBook) — not by an effect watching state — so a
   // StrictMode double-mount or remount never writes untouched settings back.
@@ -215,87 +187,6 @@ export default function QuoteBuilder({ initialSettings }) {
       document.body.classList.remove("qa-page");
     };
   }, []);
-  // ── Auto-save to the suite ──────────────────────────────────────────────────
-  // First save (entering details) creates the row and brings back the server-
-  // assigned number; later transitions update the same row.
-  const resaveQueued = useRef(false);
-  const persistQuoteRef = useRef(() => {});
-  // Mirrors saveQuote.isPending in a ref: an async caller (Preview) that awaits
-  // must read the CURRENT state, not the value its render closed over.
-  const savingRef = useRef(false);
-  const lastSave = useRef(null);
-  // Same reason for the saved row's id: it only exists after the first POST
-  // returns, which is exactly what Preview waits for.
-  const persistedIdRef = useRef(null);
-  const saveQuote = useMutation({
-    onMutate: () => {
-      savingRef.current = true;
-      saveFailed.current = false;
-    },
-    mutationFn: async ({ sess, totalCents }) => {
-      const body = {
-        type: sess.type,
-        customerName: sess.customer?.name || null,
-        designRef: sess.designRef || null,
-        leadId: sess.leadId || null,
-        version: sess.version ?? 1,
-        totalCents,
-        payload: sess,
-      };
-      const res = sess.quoteId
-        ? await apiRequest("PATCH", `/api/quotes/${sess.quoteId}`, body)
-        : await apiRequest("POST", "/api/quotes", body);
-      return res.json();
-    },
-    onSuccess: (row, { sess }) => {
-      lastSave.current = { sid: sess.sid, id: row.id, version: row.version };
-      setSavedSignature(signature(sess));
-      // Only stamp the response onto the session that started this save — the
-      // user may have opened a different quote while the request was in flight.
-      setSession((s) => {
-        if (!s || s.sid !== sess.sid) return s;
-        persistedIdRef.current = row.id;
-        return {
-          ...s,
-          quoteId: row.id,
-          number: row.number,
-          version: row.version,
-          leadId: row.leadId,
-          quoteStatus: row.status,
-          priceBookSnapshot: s.priceBookSnapshot || sess.priceBookSnapshot,
-          priceBookSnapshotAt:
-            s.priceBookSnapshotAt || sess.priceBookSnapshotAt,
-        };
-      });
-      qc.invalidateQueries({ queryKey: ["quotes"] });
-    },
-    onError: (e, { sess }) => {
-      saveFailed.current = true;
-      const msg = String(e?.message || "");
-      // The row was deleted from the Saved list while this session pointed at
-      // it — forget the stale id so the next save creates a fresh quote.
-      if (msg.toLowerCase().includes("not found")) {
-        setSession((s) =>
-          s && s.sid === sess.sid ? { ...s, quoteId: null } : s,
-        );
-      }
-      toast({
-        variant: "destructive",
-        title: "Quote not saved",
-        description: msg || "Could not reach the suite.",
-      });
-    },
-    onSettled: () => {
-      savingRef.current = false;
-      // A transition that arrived while this save was in flight was skipped by
-      // the isPending guard — replay it once so the row never misses the last
-      // step's data (e.g. customer details entered during a slow first POST).
-      if (resaveQueued.current) {
-        resaveQueued.current = false;
-        setTimeout(() => persistQuoteRef.current(), 0);
-      }
-    },
-  });
   // ── Derived pricing — only meaningful when a session exists ────────────────
   // A reopened quote carries a snapshot of the price book from when it was
   // saved; it prices against THAT book (old quotes don't move when rates
@@ -317,7 +208,7 @@ export default function QuoteBuilder({ initialSettings }) {
             session.overrides,
           )
         : null,
-    [session, effectiveBook],
+    [session?.type, session?.state, session?.overrides, effectiveBook],
   );
   const totals = useMemo(
     () =>
@@ -332,7 +223,7 @@ export default function QuoteBuilder({ initialSettings }) {
             minJobCharge: effectiveBook.minJobCharge,
           })
         : null,
-    [lineState, session, effectiveBook],
+    [lineState, session?.materialMarkupPct, session?.laborMarkupPct, session?.taxPct, session?.deliveryMiles, session?.deliveryPerMile, session?.discountPct, effectiveBook.minJobCharge],
   );
   // "Did you forget?" checklist + the per-material purchase totals (cut list).
   const warnings = useMemo(
@@ -346,111 +237,45 @@ export default function QuoteBuilder({ initialSettings }) {
             discountPct: session.discountPct,
           })
         : [],
-    [session, lineState],
+    [session?.type, session?.state, lineState, session?.materialMarkupPct, session?.laborMarkupPct, session?.taxPct, session?.deliveryMiles, session?.discountPct],
   );
   const materialsSummary = useMemo(
     () => (lineState ? materialTotals(lineState.items, effectiveBook) : []),
     [lineState, effectiveBook],
   );
-  // Keep the id mirror in step with the session (reopening a saved quote,
-  // starting a new one). onSuccess also stamps it, for the await-ing caller.
-  persistedIdRef.current = session?.quoteId ?? null;
-  const persistQuote = () => {
-    if (!session || (session.quoteStatus && session.quoteStatus !== "draft"))
-      return;
-    // One save in flight at a time — a quick configure → details → print run
-    // must not fire a second POST before the first returns the quote id. The
-    // skipped save is queued and replayed from onSettled.
-    if (savingRef.current) {
-      resaveQueued.current = true;
-      return;
-    }
-    // Stamp the book this quote was priced with into the payload (rate
-    // versioning). A locked quote keeps its own snapshot; a live one freezes
-    // the current book as of this save.
-    const sess = {
-      ...session,
-      ...(lastSave.current?.sid === session.sid
-        ? { quoteId: lastSave.current.id, version: lastSave.current.version }
-        : {}),
-      priceBookSnapshot: session.priceBookSnapshot || priceBook,
-      priceBookSnapshotAt: session.priceBookSnapshot
-        ? session.priceBookSnapshotAt || session.createdAt
-        : new Date().toISOString(),
-    };
-    savingRef.current = true;
-    saveQuote.mutate({
-      sess,
-      totalCents: Math.round((totals?.total ?? 0) * 100),
-    });
-  };
-  persistQuoteRef.current = persistQuote;
-  const flushQuote = async () => {
-    persistQuote();
-    for (let i = 0; (savingRef.current || resaveQueued.current) && i < 200; i++)
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    if (
-      savingRef.current ||
-      resaveQueued.current ||
-      saveFailed.current ||
-      !persistedIdRef.current
-    )
-      throw new Error(
-        "The latest changes have not saved. Try Save again before sending.",
-      );
+  const draft = useDraftSave(session, setSession, effectiveBook, totals);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const flushQuote = () => draft.flush();
+  const showSaveError = (error) => toast({ variant: "destructive", title: "Keep this draft open", description: error.message });
+  const reviewQuote = async () => {
+    setReviewBusy(true);
+    try { await flushQuote(); setView("details"); window.scrollTo({ top: 0 }); }
+    catch (error) { showSaveError(error); }
+    finally { setReviewBusy(false); }
   };
   const issued = (result) => {
+    draft.clear();
     setSession(null);
-    clearSession();
     setView("saved");
-    toast({
-      variant:
-        result?.wantedEmail && !result?.emailed ? "destructive" : "success",
-      title:
-        result?.wantedEmail && !result?.emailed
-          ? "Quote issued, but email failed"
-          : "Quote issued",
-      description: result?.emailed
-        ? "The customer email was sent. The issued copy is locked."
-        : "Open Send / link on the saved quote to copy its link. The issued copy is locked.",
-    });
+    toast({ variant: result?.wantedEmail && !result?.emailed ? "destructive" : "success",
+      title: result?.wantedEmail && !result?.emailed ? "Quote issued, but email failed" : "Quote issued",
+      description: result?.emailed ? "The customer email was sent. The issued copy is locked."
+        : "The issued copy is locked. Its link is available under Send on the saved quote." });
   };
-  // The customer's page on cjmmetals.com is the ONE rendering of the quote
-  // document (print/PDF included). Preview mints the share token WITHOUT the
-  // send side effects (?preview=1 lets the site show a still-draft quote);
-  // actually sending it stays in the Share panel.
-  const openCustomerPage = async () => {
-    try {
-      await flushQuote();
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Preview needs a saved quote",
-        description: error.message,
-      });
-      return;
+  // Switching drafts waits for the current draft. A failed/offline save leaves
+  // the recovery copy intact instead of replacing it with a different quote.
+  const replaceDraft = async (next, saved = false) => {
+    if (session) { try { await flushQuote(); } catch (error) { showSaveError(error); return; } }
+    draft.reset();
+    setSession(next);
+    if (saved) {
+      const book = next.priceBookSnapshot ? deepMerge(DEFAULT_PRICE_BOOK, next.priceBookSnapshot) : priceBook;
+      const lines = buildLineState(next.type, next.state, book, next.overrides);
+      const amount = computeTotals(lines, { ...next, minJobCharge: book.minJobCharge }).total;
+      draft.markSaved({ session: next, book, totalCents: Math.round(amount * 100) });
     }
-    const id = persistedIdRef.current;
-    if (!id) {
-      toast({
-        title: "Saving the quote…",
-        description:
-          "One second — try Preview again once the quote number appears.",
-      });
-      return;
-    }
-    try {
-      const res = await (
-        await apiRequest("POST", `/api/quotes/${id}/share`, { preview: true })
-      ).json();
-      window.open(res.url, "_blank", "noopener");
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "Could not open the preview",
-        description: e?.message,
-      });
-    }
+    setView("configure");
+    window.scrollTo({ top: 0 });
   };
   // ── Session mutators ────────────────────────────────────────────────────────
   const patchSession = (patch) => setSession((s) => ({ ...s, ...patch }));
@@ -560,25 +385,18 @@ export default function QuoteBuilder({ initialSettings }) {
   // Customer waiting to be stamped onto the next new quote — set by the
   // "Quote this lead" handoff below when the lead has no website design.
   const pendingCustomer = useRef(null);
+  const [startingCustomer, setStartingCustomer] = useState({});
   const pendingLead = useRef(null);
   const startConfig = (type) => {
-    if (
-      session &&
-      signature(session) !== savedSignature &&
-      !window.confirm(
-        "Start a new quote? Save your current draft to the suite first if you want to keep it.",
-      )
-    )
-      return;
     const sess = newSession(type, priceBook);
+    sess.customer = { ...sess.customer, ...startingCustomer };
     sess.leadId = pendingLead.current;
     pendingLead.current = null;
     if (pendingCustomer.current) {
       sess.customer = { ...sess.customer, ...pendingCustomer.current };
       pendingCustomer.current = null;
     }
-    setSession(sess);
-    setView("configure");
+    replaceDraft(sess);
   };
   const goHome = () => setView("home");
   // A looked-up website design becomes a quote: the customer's options overlay
@@ -600,8 +418,7 @@ export default function QuoteBuilder({ initialSettings }) {
     // A trades-planner lead carries its multi-trade scope as prose — parseLead
     // hands it back as `notes` so the plan lands on the quote screen.
     if (parsed.notes) sess.notes = parsed.notes;
-    setSession(sess);
-    setView("configure");
+    replaceDraft(sess);
   };
   // "Quote this lead" handoff from the CRM (pages/crm/leads.tsx): the lead
   // modal stores { name, phone, email, designRef } under this key and
@@ -631,6 +448,7 @@ export default function QuoteBuilder({ initialSettings }) {
       location: "",
     };
     pendingCustomer.current = customer;
+    setStartingCustomer(customer);
     pendingLead.current = lead.leadId || null;
     setView("home");
     if (!lead.designRef) return;
@@ -654,23 +472,8 @@ export default function QuoteBuilder({ initialSettings }) {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Reopen a saved quote from the suite — edits keep saving to the same number.
-  const openSaved = (sess) => {
-    setSession(migrateSession(sess, priceBook));
-    setSavedSignature(signature(migrateSession(sess, priceBook)));
-    setView("configure");
-  };
-  // Start a NEW quote from a saved one — the second grill, the next fence on
-  // the same street. It has no number until it reaches the details step, so
-  // nothing can write back over the quote it was copied from.
-  const duplicateSaved = (sess) => {
-    setSession(duplicateSession(migrateSession(sess, priceBook), newSid()));
-    setView("configure");
-    toast({
-      title: "Copy started",
-      description:
-        "Lines and rates came along; the customer is blank and it gets its own number when you reach the details step.",
-    });
-  };
+  const openSaved = (sess) => replaceDraft(migrateSession(sess, priceBook), true);
+  const duplicateSaved = (sess) => replaceDraft(duplicateSession(migrateSession(sess, priceBook), newSid()));
   // ── Price book ──────────────────────────────────────────────────────────────
   // Editing a material's COST also stamps materials.<id>.updatedAt — that
   // feeds the staleness badges here and the hourly "review material prices"
@@ -703,7 +506,8 @@ export default function QuoteBuilder({ initialSettings }) {
   const inQuoteFlow =
     view === "home" || view === "configure" || view === "details";
   // Guard: flow views need a session.
-  const activeView = inQuoteFlow && view !== "home" && !session ? "home" : view;
+  const activeView = inQuoteFlow && view !== "home" && !session ? "home"
+    : view === 'configure' && session?.quoteStatus && session.quoteStatus !== 'draft' ? 'details' : view;
   return (
     <div className="qa">
       <div className="app">
@@ -738,34 +542,11 @@ export default function QuoteBuilder({ initialSettings }) {
             </button>
           </nav>
         </header>
-        {session && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="container"
-            style={{ paddingBlock: 12 }}
-          >
-            {saveQuote.isPending
-              ? "Saving to suite…"
-              : saveQuote.isError
-                ? "Not saved to suite — try again."
-                : savedSignature === signature(session)
-                  ? "Saved to suite"
-                  : localSaved
-                    ? "Draft saved on this device — save to suite to use it elsewhere."
-                    : "Draft could not save on this device. Save to suite before leaving."}
-            <button
-              className="btn ghost"
-              style={{ marginLeft: 12 }}
-              disabled={saveQuote.isPending}
-              onClick={persistQuote}
-            >
-              Save to suite
-            </button>
-          </div>
-        )}
+        <Suspense fallback={<p className="container hint" role="status">Loading…</p>}>
         {activeView === "home" && (
           <Home
+            customer={startingCustomer}
+            onChangeCustomer={(field, value) => { pendingCustomer.current = null; setStartingCustomer(c => ({ ...c, [field]: value })); }}
             onPick={startConfig}
             onFind={() => setView("find")}
             onContinue={session ? () => setView("configure") : null}
@@ -783,6 +564,9 @@ export default function QuoteBuilder({ initialSettings }) {
         )}
         {activeView === "configure" && session && (
           <Configurator
+            key={session.sid}
+            customer={session.customer}
+            onChangeCustomer={setCustomer}
             type={session.type}
             state={session.state}
             lineState={lineState}
@@ -820,14 +604,12 @@ export default function QuoteBuilder({ initialSettings }) {
             onChangeDeliveryMiles={(v) => patchSession({ deliveryMiles: v })}
             onChangeDeliveryRate={(v) => patchSession({ deliveryPerMile: v })}
             onBack={goHome}
-            onContinue={() => {
-              setView("details");
-              persistQuote();
-            }}
+            onContinue={reviewQuote}
           />
         )}
         {activeView === "details" && session && (
           <QuoteForm
+            key={session.sid}
             type={session.type}
             state={session.state}
             totals={totals}
@@ -838,15 +620,20 @@ export default function QuoteBuilder({ initialSettings }) {
             features={session.features}
             attachments={session.attachments}
             quoteId={session.quoteId}
+            quoteStatus={session.quoteStatus}
             onChangeCustomer={setCustomer}
             onChangeNotes={(v) => patchSession({ notes: v })}
             onChangeFeatures={(v) => patchSession({ features: v })}
             onChangeAttachments={(v) => patchSession({ attachments: v })}
             onChangeDeposit={(v) => patchSession({ depositPct: v })}
             onBack={() => setView("configure")}
-            onPreview={openCustomerPage}
+            version={session.version}
+            saveStatus={draft.status}
+            warnings={warnings}
+            lineState={lineState}
             onPersist={flushQuote}
             onIssued={issued}
+            onShared={() => { setSession(s => s?.sid === session.sid ? {...s,quoteStatus:'sent'} : s); document.querySelector('.review-actions')?.scrollIntoView({block:'center'}); }}
           />
         )}
         {activeView === "pricebook" && (
@@ -858,6 +645,26 @@ export default function QuoteBuilder({ initialSettings }) {
             onReset={resetPriceBook}
             readOnly={!canEditRates}
           />
+        )}
+        </Suspense>
+        {session && (activeView === "configure" || activeView === "details") && (
+          <div className="quote-actionbar">
+            <div><span className="hint">Total</span><strong>${fmtMoney(totals?.total || 0)}</strong></div>
+            <div className="draft-status" role="status" aria-live="polite">
+              <span>{draft.status}{draft.status === 'Saving' ? '…' : ''}</span>
+              {!draft.localSaved && <small>Device backup unavailable. Keep this page open until saved.</small>}
+              {draft.status === 'Offline' && <small>Sync resumes when connected</small>}
+              {draft.error && draft.status !== 'Offline' && <small>{draft.error.message}</small>}
+              {['Not saved', 'Offline'].includes(draft.status) && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
+              {(draft.status === 'Conflict' || draft.error?.status === 404) && <button className="back-link" onClick={() => {
+                if (!window.confirm('Keep these edits as a new draft? The other saved version will stay unchanged.')) return;
+                const copy = { ...session, sid: newSid(), quoteId: null, number: null, version: 1, quoteStatus: 'draft', createdAt: new Date().toISOString() };
+                draft.reset(); setSession(copy);
+              }}>Keep edits as new quote</button>}
+            </div>
+            {activeView === "configure" ? <button className="btn" disabled={reviewBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
+              : <div id="quote-send-actions" />}
+          </div>
         )}
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { registerReceivingRoutes, receivePoRemaining } from "./inventory-receiving";
 import { insertNumbered } from "./numbering";
 import { communicationContext, localizedLink } from "./communication";
 import type { Express, Request, Response } from "express";
@@ -598,91 +599,6 @@ function queueInvoiceEmail(inv: Invoice): void {
 // already prices the materials, and billable=1 would double-bill via
 // pull-unbilled. Deduped by the auto: key in notes (postPayrollExpense style).
 
-function queuePoExpense(req: Request, po: PurchaseOrder): void {
-  setImmediate(() => {
-    try {
-      if (po.totalCents <= 0) return;
-      const dupe = sqlite.prepare(
-        "SELECT id FROM fin_expenses WHERE deleted_at IS NULL AND notes LIKE ?",
-      ).get(`%auto:po:${po.id};%`);
-      if (dupe) return;
-      const row = db.insert(expenses).values({
-        date: todayLocal(),
-        vendor: po.vendor,
-        category: "materials",
-        amountCents: po.totalCents,
-        paymentMethod: "other",
-        projectId: po.projectId,
-        billable: false,
-        notes: `auto:po:${po.id}; — ${po.number} received from ${po.vendor}`,
-      }).returning().get();
-      audit(req, "finance.po_expense_post", {
-        targetType: "expense", targetId: row.id, targetName: po.number,
-        details: { poId: po.id, amountCents: po.totalCents },
-      });
-    } catch (e) {
-      console.error("[finance] po→expense hook failed", e);
-    }
-  });
-}
-
-// ─── PO received → stock in (Phase C #18) ────────────────────────────────────
-// PO lines that carry a materialKey (stamped by the buy-list → PO flow) raise
-// the matching inventory item's quantity via a proper 'purchased' adjustment,
-// so receiving a PO books the expense (above) AND puts the steel on the shelf.
-// Adjustments belong to the core inventory module → raw SQL, house style.
-// Deduped by the auto:po-stockin:<id> key in adjustment notes so a replayed
-// receive can't double-add.
-
-function queuePoStockIn(req: Request, po: PurchaseOrder): void {
-  const actorUserId = req.user?.userId;
-  if (actorUserId == null) return; // adjustments.user_id is NOT NULL
-  setImmediate(() => {
-    try {
-      const lines = parseLineItems(po.items).filter(
-        (l) => l.materialKey && Math.ceil(Number(l.qty) || 0) > 0,
-      );
-      if (lines.length === 0) return;
-      const dupe = sqlite.prepare(
-        "SELECT id FROM adjustments WHERE notes LIKE ?",
-      ).get(`auto:po-stockin:${po.id};%`);
-      if (dupe) return;
-
-      const findItem = sqlite.prepare(
-        "SELECT id FROM items WHERE material_key = ? AND deleted_at IS NULL",
-      );
-      const bump = sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?");
-      const ledger = sqlite.prepare(`
-        INSERT INTO adjustments (item_id, user_id, delta, reason, notes, project_id)
-        VALUES (?, ?, ?, 'purchased', ?, ?)
-      `);
-      const stocked: { itemId: number; qty: number }[] = [];
-      sqlite.transaction(() => {
-        for (const l of lines) {
-          const item = findItem.get(l.materialKey) as { id: number } | undefined;
-          if (!item) continue;
-          const qty = Math.ceil(Number(l.qty) || 0);
-          bump.run(qty, item.id);
-          ledger.run(
-            item.id, actorUserId, qty,
-            `auto:po-stockin:${po.id}; — ${po.number} received${po.vendor ? ` from ${po.vendor}` : ""}`,
-            po.projectId,
-          );
-          stocked.push({ itemId: item.id, qty });
-        }
-      })();
-      if (stocked.length > 0) {
-        audit(req, "finance.po_stock_in", {
-          targetType: "purchase_order", targetId: po.id, targetName: po.number,
-          details: { items: stocked },
-        });
-      }
-    } catch (e) {
-      console.error("[finance] po→stock-in hook failed", e);
-    }
-  });
-}
-
 // ─── Fully paid → close the loop (Phase A #6) ────────────────────────────────
 // A settled invoice pushes realized revenue back onto its CRM lead (stamped by
 // the quote-accept hook — only ever RAISED, a partial refund story must not
@@ -935,6 +851,7 @@ function unreleaseRetainage(inv: Invoice): void {
 }
 
 export function registerFinanceRoutes(app: Express): void {
+  registerReceivingRoutes(app);
   app.get("/api/finance/payment-exceptions", requireElevated, (_req, res) => {
     res.json(sqlite.prepare(`SELECT e.*, i.number AS invoice_number FROM fin_payment_exceptions e
       LEFT JOIN fin_invoices i ON i.id = e.invoice_id WHERE e.resolved_at IS NULL ORDER BY e.created_at DESC`).all());
@@ -1832,7 +1749,8 @@ export function registerFinanceRoutes(app: Express): void {
       const needle = q.toLowerCase();
       rows = rows.filter((r) => r.vendor.toLowerCase().includes(needle));
     }
-    res.json(rows);
+    const receivedOrders=new Set((sqlite.prepare("SELECT DISTINCT po_id FROM inventory_receipts").all() as {po_id:number}[]).map(r=>r.po_id));
+    res.json(rows.map(row=>({...row,partiallyReceived:row.status==="open"&&receivedOrders.has(row.id)})));
   });
 
   app.post("/api/finance/purchase-orders", requireElevated, (req, res) => {
@@ -1861,52 +1779,30 @@ export function registerFinanceRoutes(app: Express): void {
   });
 
   app.patch("/api/finance/purchase-orders/:id", requireElevated, (req, res) => {
-    const existing = db.select().from(purchaseOrders)
-      .where(and(eq(purchaseOrders.id, pid(req.params.id)), isNull(purchaseOrders.deletedAt)))
-      .get();
-    if (!existing) return res.status(404).json({ message: "Purchase order not found" });
-    let body;
     try {
-      const raw = { ...req.body };
-      if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
-      body = insertPurchaseOrderSchema.partial().parse(raw);
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-
-    // Only two transitions exist: open → received (books the expense and
-    // stocks materials in) and open → cancelled. Both ends are terminal.
-    if (body.status && body.status !== existing.status && existing.status !== "open") {
-      return res.status(400).json({
-        message: `A ${existing.status} purchase order can't change status`,
-      });
-    }
-
-    const updates: Partial<typeof purchaseOrders.$inferInsert> = { ...body };
-    if (body.items !== undefined) {
-      try {
-        updates.totalCents = computeTotals(body.items, 0).totalCents;
-      } catch (e: any) {
-        return res.status(400).json({ message: e.message });
-      }
-    }
-    if (Object.keys(updates).length === 0) return res.json(existing);
-
-    const row = db.update(purchaseOrders).set(updates).where(eq(purchaseOrders.id, existing.id)).returning().get();
-    if (body.status && body.status !== existing.status) {
-      audit(req, "finance.po_status", {
-        targetType: "purchase_order", targetId: existing.id, targetName: existing.number,
-        details: { from: existing.status, to: body.status },
-      });
-      // Phase A #4: materials landing at the shop are money spent — book the
-      // expense (deduped by the auto: notes key).
-      // Phase C #18: and material lines put stock on the shelf (deduped too).
-      if (body.status === "received") {
-        queuePoExpense(req, row);
-        queuePoStockIn(req, row);
-      }
-    }
-    res.json(row);
+      const row = sqlite.transaction(() => {
+        const existing = db.select().from(purchaseOrders).where(and(eq(purchaseOrders.id,pid(req.params.id)),isNull(purchaseOrders.deletedAt))).get();
+        if (!existing) throw new Error("Purchase order not found");
+        const raw={...req.body};
+        if(Array.isArray(raw.items)) raw.items=JSON.stringify(raw.items);
+        const body=insertPurchaseOrderSchema.partial().parse(raw);
+        if(existing.status!=="open") {
+          if(Object.keys(body).length===1 && body.status===existing.status) return existing;
+          throw new Error("This purchase order is closed and cannot be edited.");
+        }
+        const hasReceipts=sqlite.prepare("SELECT 1 FROM inventory_receipts WHERE po_id=?").get(existing.id);
+        if(hasReceipts && Object.keys(body).some(k=>k!=="status")) throw new Error("A partially received order cannot be edited. Create another order for additional items.");
+        const updates:any={...body};
+        delete updates.status;
+        if(body.items!==undefined) updates.totalCents=computeTotals(body.items,0).totalCents;
+        if(Object.keys(updates).length) db.update(purchaseOrders).set(updates).where(eq(purchaseOrders.id,existing.id)).run();
+        if(body.status==="received") receivePoRemaining(existing.id,req.user!.userId);
+        else if(body.status==="cancelled") db.update(purchaseOrders).set({status:"cancelled"}).where(eq(purchaseOrders.id,existing.id)).run();
+        return db.select().from(purchaseOrders).where(eq(purchaseOrders.id,existing.id)).get()!;
+      })();
+      audit(req,"finance.po_update",{targetType:"purchase_order",targetId:row.id,targetName:row.number});
+      res.json(row);
+    } catch(e:any) {res.status(409).json({message:e.message});}
   });
 
   registerSoftDelete(app, "/api/finance/purchase-orders/:id", requireElevated, {

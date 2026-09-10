@@ -25,6 +25,7 @@ export async function apiRequest(
   method: string,
   url: string,
   body?: unknown,
+  options?: { signal?: AbortSignal },
 ): Promise<Response> {
   const headers: Record<string, string> = {};
 
@@ -37,6 +38,7 @@ export async function apiRequest(
   }
 
   const res = await fetch(url, {
+    signal: options?.signal,
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -59,7 +61,7 @@ export async function apiRequest(
     } catch {
       // response wasn't JSON, keep statusText
     }
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: res.status });
   }
 
   return res;

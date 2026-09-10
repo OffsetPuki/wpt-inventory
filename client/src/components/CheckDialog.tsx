@@ -1,135 +1,233 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import {
+  availableStock,
+  isTool,
+  fractionalUnit,
+  invalidateInventory,
+  stockLabel,
+} from "@/lib/inventory";
+import { inputCls, primaryBtn } from "@/lib/ui-styles";
 import { toast } from "@/components/ui/toaster";
 import type { Item, Project } from "@shared/schema";
+import type { InventoryLoan, InventoryReservation } from "@shared/inventory";
 import Modal from "./Modal";
-import { Loader2, PackageMinus, PackagePlus } from "lucide-react";
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-interface CheckDialogProps {
+export default function CheckDialog({
+  item,
+  mode,
+  open,
+  onClose,
+}: {
   item: Item;
-  mode: "check_out" | "check_in";
+  mode: "check_out" | "check_in" | "receive";
   open: boolean;
   onClose: () => void;
-}
-
-export default function CheckDialog({ item, mode, open, onClose }: CheckDialogProps) {
-  const qc = useQueryClient();
-  const [quantity, setQuantity] = useState("1");
-  const [projectId, setProjectId] = useState("");
-  const [notes, setNotes] = useState("");
-
+}) {
+  const qc = useQueryClient(),
+    key = useRef(crypto.randomUUID());
+  const [quantity, setQuantity] = useState("1"),
+    [projectId, setProjectId] = useState(""),
+    [loanId, setLoanId] = useState(""),
+    [notes, setNotes] = useState(""),
+    [search, setSearch] = useState(""),
+    [jobSearch, setJobSearch] = useState("");
+  const tool = isTool(item),
+    out = mode === "check_out";
+  const title = out
+    ? tool
+      ? "Check out"
+      : "Use on job"
+    : mode === "receive"
+      ? "Receive stock"
+      : tool
+        ? "Return tool"
+        : "Return unused";
   useEffect(() => {
     if (open) {
       setQuantity("1");
       setProjectId("");
+      setLoanId("");
       setNotes("");
+      key.current = crypto.randomUUID();
     }
-  }, [open]);
-
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
-    enabled: open,
+  }, [open, item.id, mode]);
+  useEffect(() => {
+    const timer = setTimeout(() => setJobSearch(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const jobs = useQuery<Project[]>({
+    queryKey: ["inventory", "jobs", jobSearch],
+    enabled: open && (out || (!tool && mode === "check_in")),
+    queryFn: async ({ signal }) =>
+      (
+        await apiRequest(
+          "GET",
+          `/api/inventory/jobs?q=${encodeURIComponent(jobSearch)}`,
+          undefined,
+          { signal },
+        )
+      ).json(),
   });
-
-  const isOut = mode === "check_out";
-
-  const mut = useMutation({
+  const availability = useQuery<{
+    loans: InventoryLoan[];
+    reservations: InventoryReservation[];
+  }>({
+    queryKey: ["inventory", "availability", item.id],
+    enabled: open,
+    queryFn: async () =>
+      (await apiRequest("GET", `/api/items/${item.id}/availability`)).json(),
+  });
+  const own = (availability.data?.reservations || [])
+    .filter((r) => r.projectId === Number(projectId))
+    .reduce((sum, r) => sum + r.quantity, 0);
+  const max = Math.min(item.quantity, availableStock(item) + own);
+  const save = useMutation({
     mutationFn: async () => {
-      const path = isOut ? "checkout" : "checkin";
-      await apiRequest("POST", `/api/items/${item.id}/${path}`, {
-        quantity: Number(quantity),
-        projectId: projectId ? Number(projectId) : undefined,
-        notes: notes.trim() || undefined,
-      });
+      await apiRequest(
+        "POST",
+        `/api/items/${item.id}/${out ? "checkout" : "checkin"}`,
+        {
+          quantity: Number(quantity),
+          projectId: projectId ? Number(projectId) : undefined,
+          loanId: loanId ? Number(loanId) : undefined,
+          action: mode === "receive" ? "receive" : undefined,
+          notes: notes.trim() || undefined,
+          requestKey: key.current,
+        },
+      );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["item", item.id] });
-      qc.invalidateQueries({ queryKey: ["item-detail", item.id] });
-      qc.invalidateQueries({ queryKey: ["items"] });
-      qc.invalidateQueries({ queryKey: ["transactions"] });
-      toast({ variant: "success", title: isOut ? "Checked out" : "Checked in" });
+      void invalidateInventory(qc);
+      toast({ variant: "success", title: "Stock updated" });
       onClose();
     },
-    onError: (e: any) => {
-      qc.invalidateQueries({ queryKey: ["item", item.id] });
-      qc.invalidateQueries({ queryKey: ["item-detail", item.id] });
-      qc.invalidateQueries({ queryKey: ["items"] });
-      toast({ variant: "destructive", title: "Could not save", description: e?.message });
+    onError: () => {
+      void invalidateInventory(qc);
     },
   });
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const q = Number(quantity);
-    if (!q || q < 1) {
-      toast({ variant: "destructive", title: "Enter a quantity of at least 1" });
-      return;
-    }
-    if (isOut && q > item.quantity) {
-      toast({ variant: "destructive", title: `Only ${item.quantity} in stock` });
-      return;
-    }
-    mut.mutate();
-  }
-
   return (
-    <Modal open={open} onClose={onClose} title={isOut ? "Check out" : "Check in"}>
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <p className="text-sm text-muted-foreground">
-          {item.name} — <span className="font-medium text-foreground">{item.quantity}</span> in
-          stock
+    <Modal
+      open={open}
+      onClose={save.isPending ? () => {} : onClose}
+      title={title}
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <p className="text-sm">
+          {item.name} · {stockLabel(item.quantity, item.unit)} on hand
         </p>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Quantity</span>
+        {tool && mode === "check_in" && (
+          <label className="block text-sm">
+            Checkout being returned
+            <select
+              aria-label="Checkout being returned"
+              required
+              className={inputCls}
+              value={loanId}
+              onChange={(e) => setLoanId(e.target.value)}
+            >
+              <option value="">Choose checkout</option>
+              {availability.data?.loans.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.borrowerName} · {l.remaining} out
+                  {l.jobNumber ? ` · ${l.jobNumber}` : ""}
+                </option>
+              ))}
+            </select>
+            {availability.data?.loans.length === 0 && (
+              <p className="mt-2 text-muted-foreground">
+                No tracked checkouts. Use Count stock to reconcile older tool
+                records, or Receive stock for new purchases.
+              </p>
+            )}
+          </label>
+        )}
+        {(out || (!tool && mode === "check_in")) && (
+          <div className="space-y-2">
+            <label className="block text-sm">
+              Find job
+              <input
+                className={inputCls}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Job number or name"
+              />
+            </label>
+            <label className="block text-sm">
+              Job
+              <select
+                aria-label="Job"
+                className={inputCls}
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+              >
+                <option value="">Shop use (no job)</option>
+                {jobs.data?.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.jobNumber} — {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-sm text-muted-foreground">
+              {stockLabel(max, item.unit)} available for this selection
+              {own > 0 ? ` (${own} reserved for this job)` : ""}.
+            </p>
+            {jobs.error && <p role="alert">Could not load jobs. Try again.</p>}
+          </div>
+        )}
+        <label className="block text-sm">
+          Quantity ({item.unit})
           <input
+            required
             className={inputCls}
             type="number"
-            min={1}
+            min={fractionalUnit(item.unit) && !tool ? 0.0001 : 1}
+            step={fractionalUnit(item.unit) && !tool ? 0.0001 : 1}
+            max={
+              out
+                ? max
+                : tool && mode === "check_in"
+                  ? availability.data?.loans.find(
+                      (l) => l.id === Number(loanId),
+                    )?.remaining
+                  : undefined
+            }
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
           />
         </label>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Project (optional)</span>
-          <select
+        <label className="block text-sm">
+          Notes (optional)
+          <input
             className={inputCls}
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-          >
-            <option value="">— None —</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.jobNumber} — {p.name}
-              </option>
-            ))}
-          </select>
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
         </label>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Notes (optional)</span>
-          <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </label>
-
+        {save.error && (
+          <p role="alert" className="text-sm text-destructive">
+            {save.error.message}
+          </p>
+        )}
+        {availability.error && (
+          <p role="alert">
+            Could not check reservations and returns. Close and try again.
+          </p>
+        )}
         <button
-          type="submit"
-          disabled={mut.isPending}
-          className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          className={`${primaryBtn} w-full`}
+          disabled={
+            save.isPending || availability.isLoading || availability.isError
+          }
         >
-          {mut.isPending ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : isOut ? (
-            <PackageMinus className="h-5 w-5" />
-          ) : (
-            <PackagePlus className="h-5 w-5" />
-          )}
-          {isOut ? "Check out" : "Check in"}
+          {save.isPending ? "Saving…" : title}
         </button>
       </form>
     </Modal>

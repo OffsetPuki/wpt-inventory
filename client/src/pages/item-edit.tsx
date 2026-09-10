@@ -1,3 +1,4 @@
+import { invalidateInventory } from "@/lib/inventory";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -12,7 +13,7 @@ export default function ItemEditPage({ id }: { id: string }) {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
 
-  const { data: item, isLoading } = useQuery<Item>({
+  const { data: item, isLoading, error, refetch } = useQuery<Item>({
     queryKey: ["item", itemId],
     queryFn: async () => (await apiRequest("GET", `/api/items/${itemId}`)).json(),
   });
@@ -23,6 +24,7 @@ export default function ItemEditPage({ id }: { id: string }) {
       return (await res.json()) as Item;
     },
     onSuccess: () => {
+      void invalidateInventory(qc);
       qc.invalidateQueries({ queryKey: ["item", itemId] });
       qc.invalidateQueries({ queryKey: ["item-detail", itemId] });
       qc.invalidateQueries({ queryKey: ["items"] });
@@ -33,6 +35,7 @@ export default function ItemEditPage({ id }: { id: string }) {
       toast({ variant: "destructive", title: "Could not save", description: e?.message }),
   });
 
+  if (error) return <div role="alert"><p>Could not load this item. {error.message}</p><button onClick={()=>void refetch()}>Retry</button></div>;
   if (isLoading || !item) {
     return (
       <div className="flex justify-center py-20 text-muted-foreground">
@@ -55,7 +58,7 @@ export default function ItemEditPage({ id }: { id: string }) {
         mode="edit"
         initial={item}
         submitting={update.isPending}
-        onSubmit={(payload) => update.mutate(payload)}
+        onSubmit={(payload) => update.mutateAsync(payload)}
       />
     </div>
   );

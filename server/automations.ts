@@ -594,7 +594,7 @@ function runBusinessSweep(): void {
   step("low stock", () => {
     const rows = sqlite.prepare(`
       SELECT id, name, quantity FROM items
-      WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold
+      WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity - quantity_reserved <= low_stock_threshold
     `).all() as any[];
     for (const i of rows) {
       ensureTask(`auto:low-stock:${i.id}`, `Reorder ${i.name} — ${i.quantity} left`);
@@ -926,7 +926,7 @@ function buildDigest(now: number, today: string): string {
 
   const low = sqlite.prepare(`
     SELECT name, quantity FROM items
-    WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold
+    WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity - quantity_reserved <= low_stock_threshold
     ORDER BY name
   `).all() as any[];
   if (low.length > 0) {
@@ -1063,7 +1063,7 @@ export function registerAttentionRoute(app: Express): void {
       `, today, localDate(now + 30 * DAY_MS)),
       lowStock: n(`
         SELECT COUNT(*) AS n FROM items
-        WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity <= low_stock_threshold
+        WHERE deleted_at IS NULL AND low_stock_threshold > 0 AND quantity - quantity_reserved <= low_stock_threshold
       `),
     });
   });

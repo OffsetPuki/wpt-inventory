@@ -78,6 +78,15 @@ export function duplicateSession(sess, sid) {
 export function loadSession() { try { return sessionKey() ? safeParse(localStorage.getItem(sessionKey()), null) : null; } catch { return null; } }
 export function saveSession(sess) { return sessionKey() ? safeSet(sessionKey(), sess) : false; }
 export function clearSession() { try { if (sessionKey()) localStorage.removeItem(sessionKey()); } catch { /* ignore */ } }
+// A delayed write from a screen being unmounted must stay with its original
+// account, even if a different person signs in before the request completes.
+export function captureDraftStorage() {
+  const key = sessionKey();
+  return {
+    save: (sess) => !!key && key === sessionKey() && !!sess && safeSet(key, sess),
+    clear: () => { try { if (key && key === sessionKey()) localStorage.removeItem(key); } catch { /* unavailable */ } },
+  };
+}
 
 export const DEFAULT_SHOP = {
   name: 'CJM Metals',

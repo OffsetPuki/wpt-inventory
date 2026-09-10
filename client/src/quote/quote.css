@@ -29,6 +29,8 @@
   min-height: calc(100vh - 4rem);
 }
 
+/* Compact workbench: configure first, expand detailed pricing when needed. */
+
 /* The quote page opts out of the suite shell's content padding and paints the
    whole main column cream (stays light even in dark mode — it's a paper tool).
    overflow: visible — the shell's main is overflow-y-auto but never actually
@@ -805,4 +807,101 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   /* Print margins (@page) are injected by QuoteBuilder only while the print
      view is open — a static rule here would leak into every other page's
      printout for the rest of the session. */
+}
+
+/* Quote workbench */
+.qa .page { padding-top: 24px; padding-bottom: 120px; }
+.qa .page-head { margin-bottom: 24px; }
+.qa .page-head h1 { font-size: clamp(2rem, 4vw, 3rem); line-height: 1.1; margin-top: 12px; }
+.qa .page-head .hint { margin-top: 10px; }
+.qa .topbar { padding-block: 12px; }
+.qa .topnav { gap: 20px; overflow-x: auto; white-space: nowrap; flex-wrap: nowrap; padding-bottom: 4px; }
+.qa .quote-start { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: start; margin-bottom: 24px; }
+.qa .quote-home .type-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 0; background: none; }
+.qa .quote-home .type-card { min-height: 0; padding: 18px; gap: 12px; border: 1px solid var(--line-strong); }
+.qa .quote-home .type-card:last-child { grid-column: auto; }
+.qa .quote-home .type-card .art, .qa .quote-home .type-card .idx { display: none; }
+.qa .quote-home .type-card h2 { font-size: 1.6rem; }
+.qa .quote-home .type-card p { font-size: .8rem; }
+.qa .quote-home .type-card .go { display: block; margin-top: 12px; }
+.qa .quote-workbench .cfg { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; }
+.qa .quote-workbench .cfg-controls { position: static; gap: 24px; order: 0; min-width: 0; }
+.qa .quote-workbench .cfg-right { gap: 18px; order: 1; min-width: 0; }
+.qa .quote-control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 18px; }
+.qa .quote-control-grid .wide { grid-column: 1 / -1; }
+.qa .quote-control-grid .ctrl-legend { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-bottom: 8px; }
+.qa .quote-control-grid .lbl { font-size: .72rem; letter-spacing: .07em; }
+.qa .quote-control-grid .num-wrap { justify-content: flex-start; }
+.qa .quote-control-grid .num, .qa .quote-control-grid .num-measure { width: 100%; max-width: 100%; min-height: 40px; text-align: left; }
+.qa .quote-control-grid .num-wrap .num:not(.num-measure) { width: 80px; }
+.qa .quote-control-grid .seg-opt span { font-size: .7rem; letter-spacing: .06em; min-height: 42px; }
+.qa .quote-section { border: 1px solid var(--line-strong); padding: 16px; min-width: 0; }
+.qa .quote-section > summary { cursor: pointer; font-size: .9rem; font-weight: 600; }
+.qa .quote-section > summary span { display: block; font-size: .75rem; font-weight: 400; color: var(--steel); padding-top: 4px; }
+.qa .quote-section[open] > summary { margin-bottom: 18px; }
+.qa .quote-section .field { margin-bottom: 14px; }
+.qa .quote-section .estimate { border: 0; }
+.qa .quote-section .estimate-head { padding-inline: 0; }
+.qa .quote-section .lines { padding-inline: 0; }
+.qa .field > span { letter-spacing: .05em; text-transform: none; font-size: .78rem; }
+.qa .field input, .qa .field select { min-width: 0; min-height: 42px; }
+.qa .customer-fields { min-width: 0; }
+.qa .customer-fields .fields { margin-top: 12px; }
+.qa .customer-results { border: 1px solid var(--line-strong); max-height: 260px; overflow-y: auto; margin-top: 6px; }
+.qa .customer-results button { display: block; width: 100%; text-align: left; padding: 12px; border-bottom: 1px solid var(--line); }
+.qa .customer-results button:hover, .qa .customer-results button:focus-visible { background: var(--cream-dark); }
+.qa .customer-results button span { display: block; font-size: .75rem; color: var(--steel); overflow-wrap: anywhere; }
+.qa .field-error { color: #9c3023; font-size: .8rem; margin-top: 6px; }
+.qa .pricing-attention { background: #f8eddc; padding: 14px; font-size: .8rem; }
+.qa .pricing-attention p { margin: 6px 0; }
+.qa .pricing-attention ul { list-style: disc; padding-left: 18px; margin-bottom: 12px; }
+.qa .preview-stage { padding: 8px; }
+.qa .quote-actionbar { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 28px max(12px, env(safe-area-inset-bottom)); background: var(--cream); border-top: 1px solid var(--line-strong); box-shadow: 0 -4px 18px #00000008; }
+.qa .quote-actionbar strong { display: block; font-size: 1.5rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.qa .draft-status { flex: 1; color: var(--steel); font-size: .8rem; }
+.qa .draft-status small { display: block; font-size: .72rem; max-width: 40rem; }
+.qa .quote-actionbar .btn { white-space: nowrap; padding: 12px 18px; letter-spacing: .08em; }
+.qa .review-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.4fr); gap: 24px; align-items: start; }
+.qa .review-settings { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.qa .review-actions { display: flex; flex-direction: column; gap: 14px; }
+.qa .review-actions .btn { letter-spacing: .04em; padding: 12px 16px; }
+.qa .customer-preview { min-width: 0; }
+.qa .customer-preview h2 { font-size: 1rem; margin-bottom: 12px; }
+.qa .customer-preview iframe { width: 100%; height: 850px; border: 1px solid var(--line-strong); background: white; }
+.qa .disabled { opacity: .5; pointer-events: none; }
+.qa .quote-filters { display: grid; grid-template-columns: minmax(0,2fr) 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.qa .quote-selection, .qa .quote-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0; flex-wrap: wrap; font-size: .85rem; }
+@media (min-width: 1024px) { .qa .quote-actionbar { left: 16rem; } }
+@media (max-width: 980px) {
+  .qa .quote-workbench .cfg, .qa .review-layout { grid-template-columns: minmax(0, 1fr); }
+  .qa .quote-workbench .cfg-controls { order: 0; }
+  .qa .quote-workbench .cfg-right { order: 1; }
+  .qa .quote-start { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .qa .quote-start > .btn { justify-self: start; }
+  .qa .quote-home .type-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qa .customer-preview { grid-row: 1; }
+  .qa .customer-preview iframe { height: 560px; }
+  .qa .quote-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qa .quote-filters > :first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .qa .quote-actionbar { gap: 10px; padding-inline: 16px; flex-wrap: wrap; }
+  .qa .quote-actionbar strong { font-size: 1.15rem; }
+  .qa .quote-actionbar .btn { padding: 12px; font-size: .7rem; }
+  .qa .draft-status { min-width: 45px; }
+  .qa .draft-status:has(small) { order: 3; flex-basis: 100%; }
+  .qa .quote-section { padding: 12px; }
+  .qa .quote-control-grid { gap: 18px 14px; }
+  .qa .quote-control-grid .num { font-size: 16px; }
+  .qa .quote-home .type-card { padding: 14px; }
+  .qa .quote-home .type-card p { font-size: .75rem; }
+}
+.qa .review-fields { border: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.qa .review-fields:disabled { opacity: .65; }
+.qa .dimension-title { font-size: .9rem; font-weight: 600; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.qa .review-settings summary { overflow-wrap: anywhere; }
+.qa #quote-send-actions .btn-row { flex-wrap: nowrap; gap: 8px; }
+@media (max-width: 560px) {
+  .qa .quote-review + .quote-actionbar .draft-status { flex: 0; }
+  .qa #quote-send-actions .btn { padding-inline: 10px; font-size: .65rem; }
 }

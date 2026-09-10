@@ -980,12 +980,12 @@ export function registerCrmRoutes(app: Express): void {
     if (status && (CLIENT_STATUSES as readonly string[]).includes(status)) {
       conds.push(eq(clients.status, status as ClientStatus));
     }
-    res.json(
-      db.select().from(clients)
+    let listing = db.select().from(clients)
         .where(and(...conds))
         .orderBy(desc(clients.createdAt), desc(clients.id))
-        .all(),
-    );
+        .$dynamic();
+    if (req.query.limit !== undefined) listing = listing.limit(Math.max(1, Math.min(50, Math.trunc(Number(req.query.limit)) || 12)));
+    res.json(listing.all());
   });
 
   // Combined detail payload (client + their leads/activity feed) in

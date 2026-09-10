@@ -99,7 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
     key: "inventory",
     label: "Inventory",
     entries: [
-      { to: "/home", label: "Find Items", icon: Search },
+      { to: "/home", label: "Items", icon: Search },
       { to: "/add", label: "Add Item", icon: Plus, needs: "elevated" },
       { to: "/activity", label: "Activity", icon: Activity },
       { to: "/map", label: "Shop Map", icon: Map },

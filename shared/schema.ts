@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -89,7 +89,13 @@ export const items = sqliteTable("items", {
   category: text("category", { enum: CATEGORIES }).notNull().default("tools"),
   photoUrl: text("photo_url"),
   photos: text("photos"), // JSON string[]
-  quantity: integer("quantity").notNull().default(0),
+  quantity: real("quantity").notNull().default(0),
+  unit: text("unit").notNull().default("each"),
+  stockVersion: integer("stock_version").notNull().default(0),
+  detailVersion: integer("detail_version").notNull().default(0),
+  reorderTarget: real("reorder_target").notNull().default(0),
+  supplier: text("supplier"),
+  lastCostCents: integer("last_cost_cents").notNull().default(0),
   notes: text("notes"),
   // Location
   area: text("area", { enum: AREAS }),
@@ -99,11 +105,11 @@ export const items = sqliteTable("items", {
   shelf: text("shelf"),
   bin: text("bin"),
   // Tracking
-  lowStockThreshold: integer("low_stock_threshold").notNull().default(0),
+  lowStockThreshold: real("low_stock_threshold").notNull().default(0),
   partNumber: text("part_number"),
   mfgPartNumber: text("mfg_part_number"),
   itemType: text("item_type", { enum: ITEM_TYPES }).notNull().default("stock"),
-  quantityReserved: integer("quantity_reserved").notNull().default(0),
+  quantityReserved: real("quantity_reserved").notNull().default(0),
   // Phase C #15: soft ref into the quote price book's materials{} (e.g.
   // "tube_4x4_316") — the bridge between inventory stock and quote pricing.
   // No FK: the price book lives in JSON, not a table.
@@ -271,15 +277,21 @@ export const projectChecklist = sqliteTable("project_checklist", {
 // items routes do their own checking.)
 
 export const insertAdjustmentSchema = z.object({
-  delta: z.number().int(),
+  delta: z.number().finite().optional(),
+  countedQuantity: z.number().finite().nonnegative().optional(),
+  expectedVersion: z.number().int().nonnegative().optional(),
+  requestKey: z.string().min(8).max(100).optional(),
   reason: z.enum(ADJUSTMENT_REASONS),
   notes: z.string().optional(),
-});
+}).refine(v => (v.delta === undefined) !== (v.countedQuantity === undefined), "Supply a count or a change, not both");
 
 export const insertTransactionSchema = z.object({
-  quantity: z.number().int().positive(),
+  quantity: z.number().finite().positive(),
   notes: z.string().optional(),
   projectId: z.number().int().optional(),
+  loanId: z.number().int().positive().optional(),
+  action: z.enum(["receive", "return_unused", "return_tool"]).optional(),
+  requestKey: z.string().min(8).max(100).optional(),
 });
 
 export const fromTemplateSchema = z.object({

@@ -1,3 +1,4 @@
+import { invalidateInventory } from "@/lib/inventory";
 import { memo, useCallback, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -131,7 +132,7 @@ export default function ProjectChecklist({ projectId }: { projectId: number }) {
     enabled: isManager,
   });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["checklist", projectId] });
+  const invalidate = () => invalidateInventory(qc);
 
   const setStatus = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: ChecklistStatus }) =>

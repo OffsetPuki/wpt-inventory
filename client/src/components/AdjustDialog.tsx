@@ -1,100 +1,107 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { invalidateInventory, fractionalUnit } from "@/lib/inventory";
+import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
 import { toast } from "@/components/ui/toaster";
-import { ADJUSTMENT_REASONS, type Item, type AdjustmentReason } from "@shared/schema";
+import {
+  ADJUSTMENT_REASONS,
+  type Item,
+  type AdjustmentReason,
+} from "@shared/schema";
 import { ADJUSTMENT_REASON_LABELS } from "@/lib/format";
 import Modal from "./Modal";
-import { Loader2 } from "lucide-react";
-
-const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
-
-interface AdjustDialogProps {
+export default function AdjustDialog({
+  item,
+  open,
+  onClose,
+}: {
   item: Item;
   open: boolean;
   onClose: () => void;
-}
-
-export default function AdjustDialog({ item, open, onClose }: AdjustDialogProps) {
-  const qc = useQueryClient();
-  const [delta, setDelta] = useState("0");
-  const [reason, setReason] = useState<AdjustmentReason>("count_correction");
-  const [notes, setNotes] = useState("");
-
+}) {
+  const qc = useQueryClient(),
+    key = useRef(crypto.randomUUID()),
+    baseline = useRef({ version: item.stockVersion, quantity: item.quantity });
+  const [count, setCount] = useState(String(item.quantity)),
+    [reason, setReason] = useState<AdjustmentReason>("count_correction"),
+    [notes, setNotes] = useState("");
+  const reset = () => {
+    baseline.current = { version: item.stockVersion, quantity: item.quantity };
+    setCount(String(item.quantity));
+    key.current = crypto.randomUUID();
+  };
   useEffect(() => {
     if (open) {
-      setDelta("0");
+      reset();
       setReason("count_correction");
       setNotes("");
     }
-  }, [open]);
-
-  const deltaNum = Number(delta) || 0;
-  const projected = item.quantity + deltaNum;
-
-  const mut = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", `/api/items/${item.id}/adjust`, {
-        delta: deltaNum,
+  }, [open, item.id]);
+  const save = useMutation({
+    mutationFn: async () =>
+      apiRequest("POST", `/api/items/${item.id}/adjust`, {
+        countedQuantity: Number(count),
+        expectedVersion: baseline.current.version,
         reason,
-        notes: notes.trim() || undefined,
-      });
-    },
+        notes,
+        requestKey: key.current,
+      }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["item", item.id] });
-      qc.invalidateQueries({ queryKey: ["item-detail", item.id] });
-      qc.invalidateQueries({ queryKey: ["items"] });
-      toast({ variant: "success", title: "Stock adjusted" });
+      void invalidateInventory(qc);
+      toast({ variant: "success", title: "Count recorded" });
       onClose();
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not adjust", description: e?.message }),
+    onError: () => {
+      void invalidateInventory(qc);
+    },
   });
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (deltaNum === 0) {
-      toast({ variant: "destructive", title: "Enter a non-zero change" });
-      return;
-    }
-    mut.mutate();
-  }
-
   return (
-    <Modal open={open} onClose={onClose} title="Adjust stock">
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <p className="text-sm text-muted-foreground">
-          {item.name} — <span className="font-medium text-foreground">{item.quantity}</span> in
-          stock
+    <Modal
+      open={open}
+      onClose={save.isPending ? () => {} : onClose}
+      title="Count stock"
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <p className="text-sm">
+          {item.name} · recorded count: {baseline.current.quantity} {item.unit}
         </p>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">
-            Change (use a negative number to remove)
-          </span>
+        <label className="block text-sm">
+          I counted
           <input
-            className={inputCls}
+            required
             type="number"
-            value={delta}
-            onChange={(e) => setDelta(e.target.value)}
+            min="0"
+            step={fractionalUnit(item.unit) ? 0.0001 : 1}
+            className={inputCls}
+            value={count}
+            onChange={(e) => setCount(e.target.value)}
           />
         </label>
-
         <p className="text-sm text-muted-foreground">
-          New quantity will be{" "}
-          <span
-            className={
-              projected < 0 ? "font-semibold text-destructive" : "font-semibold text-foreground"
-            }
-          >
-            {projected}
-          </span>
+          Change:{" "}
+          {(Number(count) - baseline.current.quantity).toLocaleString(
+            undefined,
+            { maximumFractionDigits: 4 },
+          )}{" "}
+          {item.unit}. Every count is recorded in history.
         </p>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Reason</span>
+        {Number(count) < item.quantityReserved && (
+          <p className="text-sm text-amber-700">
+            This is less than the reserved quantity. Review the affected jobs
+            after recording your count.
+          </p>
+        )}
+        <label className="block text-sm">
+          Reason
           <select
+            aria-label="Reason"
             className={inputCls}
             value={reason}
             onChange={(e) => setReason(e.target.value as AdjustmentReason)}
@@ -106,19 +113,31 @@ export default function AdjustDialog({ item, open, onClose }: AdjustDialogProps)
             ))}
           </select>
         </label>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Notes (optional)</span>
-          <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <label className="block text-sm">
+          Notes
+          <input
+            className={inputCls}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
         </label>
-
-        <button
-          type="submit"
-          disabled={mut.isPending}
-          className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
-        >
-          {mut.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Save adjustment
+        {save.error && (
+          <div role="alert">
+            <p className="text-sm text-destructive">{save.error.message}</p>
+            <button
+              type="button"
+              className={secondaryBtn}
+              onClick={() => {
+                reset();
+                save.reset();
+              }}
+            >
+              Start from latest count
+            </button>
+          </div>
+        )}
+        <button className={primaryBtn} disabled={save.isPending}>
+          Record count
         </button>
       </form>
     </Modal>

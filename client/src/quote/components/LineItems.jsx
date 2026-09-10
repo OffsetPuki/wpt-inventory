@@ -34,9 +34,10 @@ function Num({ value, onChange, ...rest }) {
 
 function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
   const fields = KIND_FIELDS[item.kind];
-  const flags = [item.edited && 'edited', item.unpriced && 'unpriced'].filter(Boolean).join(' ');
+  const missingCost = item.unpriced || !(Number(item.rate) > 0);
+  const flags = [item.edited && 'edited', missingCost && 'unpriced'].filter(Boolean).join(' ');
   return (
-    <div className={`line${flags ? ' ' + flags : ''}`}>
+    <div id={`quote-line-${item.key}`} className={`line${flags ? ' ' + flags : ''}`}>
       <div className="line-name">
         <span className="dot" />
         {/* The description is what the CUSTOMER reads on their quote, so it's
@@ -47,7 +48,7 @@ function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
           title="Rename this line — this is the wording the customer sees"
           onChange={(e) => onEdit(item.key, 'name', e.target.value)}
         />
-        {item.unpriced && <span className="line-warn" title={item.key === 'tabletop' ? 'Enter the cost per tabletop in this quote.' : "A rate driving this line isn't set in the Price Book — open it and fill in the missing rate."}>⚠ unset rate</span>}
+        {missingCost && <span className="line-warn">Check missing cost</span>}
         {/* Line order is what the customer reads on their quote — put the
             headline work at the top, the odds and ends underneath. */}
         {onMove && (
@@ -88,7 +89,7 @@ function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
         {item.kind === 'flat' ? (
           <span className="line-field">
             <label>Amount $</label>
-            <Num value={item.rate} min="0" step="1" onChange={(v) => onEdit(item.key, 'rate', v)} />
+            <Num aria-label={`${item.name} cost`} aria-invalid={item.unpriced || undefined} value={item.rate} min="0" step="1" onChange={(v) => onEdit(item.key, 'rate', v)} />
           </span>
         ) : (
           <>
@@ -98,7 +99,7 @@ function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
             </span>
             <span className="line-field">
               <label>{fields.rate} ({fields.rateUnit})</label>
-              <Num value={item.rate} min="0" step="0.1" onChange={(v) => onEdit(item.key, 'rate', v)} />
+              <Num aria-label={`${item.name} rate`} aria-invalid={item.unpriced || undefined} value={item.rate} min="0" step="0.1" onChange={(v) => onEdit(item.key, 'rate', v)} />
             </span>
           </>
         )}

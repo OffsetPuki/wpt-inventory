@@ -1,3 +1,4 @@
+import ReceiveDelivery from "@/components/inventory/ReceiveDelivery";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -14,7 +15,7 @@ import {
   PO_STATUSES,
   PO_STATUS_LABELS,
   type PoStatus,
-  type PurchaseOrder,
+  type PurchaseOrder as SavedPurchaseOrder,
 } from "@shared/finance-schema";
 import type { Project } from "@shared/schema";
 import { parseLineItems, type LineItem } from "@shared/biz-common";
@@ -36,11 +37,12 @@ const STATUS_TONE: Record<PoStatus, ChipTone> = {
   cancelled: "red",
 };
 
-function StatusChip({ status }: { status: PoStatus }) {
-  return <Chip tone={STATUS_TONE[status]}>{PO_STATUS_LABELS[status]}</Chip>;
+type PurchaseOrder=SavedPurchaseOrder & {partiallyReceived?:boolean};
+function StatusChip({ status,partial }: { status: PoStatus;partial?:boolean }) {
+  return <Chip tone={STATUS_TONE[status]}>{partial?"Partially received":PO_STATUS_LABELS[status]}</Chip>;
 }
 
-const PO_KEYS = [["finance-pos"], ["finance-stats"]];
+const PO_KEYS = [["finance-pos"], ["finance-stats"], ["inventory"], ["items"], ["item-detail"], ["finance-expenses"]];
 
 // ─── Line-items editor ────────────────────────────────────────────────────────
 
@@ -52,6 +54,7 @@ interface ItemDraft {
   // price-book link so marking the PO received still stocks the item in.
   unit?: string;
   materialKey?: string;
+  inventoryItemId?: number;
 }
 
 const EMPTY_ITEM: ItemDraft = { description: "", qty: "1", unitPrice: "" };
@@ -67,6 +70,7 @@ function draftsToLineItems(drafts: ItemDraft[]): LineItem[] {
       unitPriceCents: parseMoney(d.unitPrice),
       ...(d.unit ? { unit: d.unit } : {}),
       ...(d.materialKey ? { materialKey: d.materialKey } : {}),
+      ...(d.inventoryItemId ? { inventoryItemId:d.inventoryItemId } : {}),
     }));
 }
 
@@ -151,6 +155,8 @@ function PoFormModal({
   po?: PurchaseOrder | null;
   projects: Project[];
 }) {
+  const [receiving,setReceiving]=useState(false);
+  const receiptStatus=useQuery<any>({queryKey:["inventory","receiving",po?.id],enabled:open&&!!po,queryFn:async()=>(await apiRequest("GET",`/api/finance/purchase-orders/${po!.id}/receiving`)).json()});
   const [vendor, setVendor] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -172,6 +178,7 @@ function PoFormModal({
               unitPrice: (it.unitPriceCents / 100).toFixed(2),
               unit: it.unit,
               materialKey: it.materialKey,
+              inventoryItemId:it.inventoryItemId,
             }))
           : [{ ...EMPTY_ITEM }]
       );
@@ -217,7 +224,7 @@ function PoFormModal({
   });
 
   const totalCents = draftTotalCents(drafts);
-  const editable = !po || po.status === "open";
+  const editable = !po || (po.status === "open" && !!receiptStatus.data && !receiptStatus.data.lines.some((l:any)=>l.received>0));
 
   return (
     <Modal
@@ -226,13 +233,14 @@ function PoFormModal({
       title={po ? po.number : "New purchase order"}
       maxWidth="max-w-2xl"
     >
+      {receiving&&po&&<ReceiveDelivery poId={po.id} onClose={()=>{setReceiving(false);onClose();}}/>}
       <div className="flex max-h-[72vh] flex-col gap-4 overflow-y-auto pr-1">
         {po && (
           <div className="flex items-center gap-3">
-            <StatusChip status={po.status} />
+            <StatusChip status={po.status} partial={po.partiallyReceived} />
             {!editable && (
               <span className="text-sm text-muted-foreground">
-                {po.status === "cancelled" ? "Cancelled — view only." : "Locked — view only."}
+                {po.status === "cancelled" ? "Cancelled — view only." : "Received quantities are locked. Receive the remaining delivery below."}
               </span>
             )}
           </div>
@@ -319,12 +327,12 @@ function PoFormModal({
         {po && po.status === "open" && (
           <div className="flex flex-wrap gap-2 border-t border-border pt-4">
             <button
-              onClick={() => setStatus.mutate("received")}
+              onClick={() => setReceiving(true)}
               disabled={setStatus.isPending}
               className={secondaryBtn}
             >
               <CheckCircle2 className="h-4 w-4" />
-              Mark received
+              Receive delivery
             </button>
             <button
               onClick={() => {
@@ -478,7 +486,7 @@ export default function PurchaseOrdersPage() {
                     {formatMoney(po.totalCents)}
                   </td>
                   <td className="px-4 py-3">
-                    <StatusChip status={po.status} />
+                    <StatusChip status={po.status} partial={po.partiallyReceived} />
                   </td>
                 </tr>
               ))}
