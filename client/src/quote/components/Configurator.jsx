@@ -31,7 +31,7 @@ export default function Configurator({
         <div className="cfg">
           <form className="cfg-controls" onSubmit={(e) => e.preventDefault()}>
             {controls.map((c) => (
-              <Control key={c.name} control={c} value={state[c.name]} onChange={onChangeOption} />
+              <Control key={c.name} control={c} value={typeof c.value === 'function' ? c.value(state) : state[c.name]} onChange={onChangeOption} />
             ))}
           </form>
 

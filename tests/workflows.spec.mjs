@@ -223,12 +223,14 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await page.getByRole("button").filter({ has: page.getByRole("heading", { name: "Table", exact: true }) }).click();
   await expect(page.getByRole("heading", { name: "Table", exact: true })).toBeVisible();
   for (const [label, input, shown] of [
-    ["Top length", "1 ft", "1 ft"],
-    ["Top width", "60 in", "60 in"],
+    ["Frame length", "1 ft", "1 ft"],
+    ["Frame width", "60 in", "60 in"],
     ["Frame height", "80 in", "80 in"],
-    ["Top length", "20 ft", "20 ft"],
-    ["Top width", "8.2 in", "8.2 in"],
+    ["Frame length", "20 ft", "20 ft"],
+    ["Frame width", "8.2 in", "8.2 in"],
     ["Frame height", "12.2 in", "12.2 in"],
+    ["Frame length", "2 ft 9 in", "2 ft 9 in"],
+    ["Frame width", "16-3/4 in", "16-3/4 in"],
   ]) {
     const field = page.getByLabel(label, { exact: true });
     await field.fill(input);
@@ -238,14 +240,27 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   const tableSaved = page.waitForResponse((r) => r.url().endsWith("/api/quotes") && r.request().method() === "POST");
   await page.getByRole("button", { name: "Save to suite", exact: true }).click();
   expect((await tableSaved).ok()).toBe(true);
-  const tableDraft = JSON.parse(app.sqlite.prepare("SELECT payload FROM quotes ORDER BY id DESC LIMIT 1").get().payload);
+  const frameRow = app.sqlite.prepare("SELECT id, payload FROM quotes ORDER BY id DESC LIMIT 1").get();
+  const tableDraft = JSON.parse(frameRow.payload);
   expect(tableDraft.type).toBe("table");
-  expect(tableDraft.state).toMatchObject({ lengthFt: 20, widthIn: 8.2, frameHeightIn: 12.2 });
+  expect(tableDraft.state).toMatchObject({ frameLengthFt: 2.75, frameWidthIn: 16.75, frameHeightIn: 12.2 });
+  const frameToken = "cd".repeat(24);
+  app.sqlite.prepare("UPDATE quotes SET share_token = ? WHERE id = ?").run(frameToken, frameRow.id);
+  const frameDocument = (await (await fetch(`${app.base}/api/public/quote/${frameToken}?preview=1`)).json()).quote.doc;
+  expect(frameDocument.specs).toContainEqual({ label: "Frame size", value: "2 ft 9 in × 16-3/4 in" });
+  expect(frameDocument.specs.some(s => ["Top size", "Steel base", "Overall height", "Tabletop material"].includes(s.label))).toBe(false);
+  expect(frameDocument.project.summary).not.toMatch(/top/i);
   await page.reload();
   await page.getByRole("button", { name: /Continue draft/ }).click();
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
+  await expect(page.getByLabel("Frame length", { exact: true })).toHaveValue("2 ft 9 in");
+  await expect(page.getByLabel("Frame width", { exact: true })).toHaveValue("16-3/4 in");
+  await expect(page.getByLabel("Top length", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Top width", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Tabletop thickness", { exact: true })).toHaveCount(0);
   await expect(page.locator("svg").filter({ hasText: '12.2" FRAME' })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Table preview" })).not.toContainText("TOP");
+  await page.getByRole("img", { name: "Table preview" }).screenshot({ path: "test-results/table-frame-preview.png" });
   await page.getByLabel("Frame height", { exact: true }).fill("0");
   await page.getByLabel("Frame height", { exact: true }).press("Tab");
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
@@ -254,6 +269,10 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await expect(page.getByRole("radio", { name: "Frame only", exact: true })).toBeChecked();
   await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveCount(0);
   await page.getByText("Frame + tabletop", { exact: true }).click();
+  await page.getByLabel("Top length", { exact: true }).fill("3 ft");
+  await page.getByLabel("Top length", { exact: true }).press("Tab");
+  await page.getByLabel("Top width", { exact: true }).fill("20 in");
+  await page.getByLabel("Top width", { exact: true }).press("Tab");
   await expect(page.getByText(/Enter the included tabletop material\./)).toBeVisible();
   await expect(page.getByText(/Tabletop included but no cost charged — enter the cost per top\./)).toBeVisible();
   await page.getByLabel("Tabletop material", { exact: true }).fill("Finished white oak");
@@ -268,10 +287,15 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   const topLine = page.locator(".line").filter({ has: page.locator('input[value="Tabletop — Finished white oak"]') });
   await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
   await expect(page.locator("svg").filter({ hasText: "TABLETOP INCLUDED" })).toBeVisible();
+  await page.getByRole("img", { name: "Table preview" }).screenshot({ path: "test-results/table-included-preview.png" });
   await page.getByText("Frame only", { exact: true }).click();
   await expect(topLine).toHaveCount(0);
   await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Tabletop thickness", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Top length", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Top width", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Frame length", { exact: true })).toHaveValue("2 ft 9 in");
+  await expect(page.getByLabel("Frame width", { exact: true })).toHaveValue("16-3/4 in");
   await page.getByLabel("Frame height", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ animations: "disabled", path: "test-results/table-frame-only-mobile.png" });
   await page.getByText("Frame + tabletop", { exact: true }).click();
@@ -288,7 +312,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   expect((await includedSaved).ok()).toBe(true);
   const includedRow = app.sqlite.prepare("SELECT id, payload FROM quotes ORDER BY id DESC LIMIT 1").get();
   const includedDraft = JSON.parse(includedRow.payload);
-  expect(includedDraft.state).toMatchObject({ includeTop: "yes", topMaterial: "Finished white oak", topCost: "450.25", qty: "3", frameHeightIn: 12.2, topThicknessIn: 0.03125 });
+  expect(includedDraft.state).toMatchObject({ includeTop: "yes", topMaterial: "Finished white oak", topCost: "450.25", qty: "3", frameLengthFt: 2.75, frameWidthIn: 16.75, frameHeightIn: 12.2, topThicknessIn: 0.03125, lengthFt: 3, widthIn: 20 });
   // Exercise the real public document builder against this isolated saved quote.
   const token = "ab".repeat(24);
   app.sqlite.prepare("UPDATE quotes SET share_token = ? WHERE id = ?").run(token, includedRow.id);
@@ -297,11 +321,15 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   const doc = (await docResponse.json()).quote.doc;
   expect(doc.specs).toContainEqual({ label: "Scope", value: "Steel frame and tabletop included" });
   expect(doc.specs).toContainEqual({ label: "Tabletop material", value: "Finished white oak" });
+  expect(doc.specs).toContainEqual({ label: "Frame size", value: "2 ft 9 in × 16-3/4 in" });
+  expect(doc.specs).toContainEqual({ label: "Top size", value: "3 ft × 20 in" });
   expect(doc.materials.find(m => m.name === "Tabletop — Finished white oak").amountCents).toBeGreaterThan(135075);
   expect(JSON.stringify(doc)).not.toContain('"topCost"');
   await page.reload();
   await page.getByRole("button", { name: /Continue draft/ }).click();
   await expect(page.getByRole("radio", { name: "Frame + tabletop", exact: true })).toBeChecked();
+  await expect(page.getByLabel("Frame length", { exact: true })).toHaveValue("2 ft 9 in");
+  await expect(page.getByLabel("Frame width", { exact: true })).toHaveValue("16-3/4 in");
   await expect(page.getByLabel("Tabletop thickness", { exact: true })).toHaveValue("0.03125 in");
   await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveValue("Finished white oak");
   await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("450.25");

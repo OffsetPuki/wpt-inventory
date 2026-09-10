@@ -102,16 +102,18 @@ const ftDisplay = (v) => `${v} ft`;
 // ── Table base geometry ──────────────────────────────────────────────────────
 // Measured off the CJM bar-table Fusion design: the steel base runs 1.5 in past
 // the wood top on every side (a 96 × 21 in top sits on a 99 × 24 in base). The
-// sliders everywhere — website and shop — set the TOP size, because that's what
-// the customer goes and buys, so the base footprint is always derived from it.
+// Older saved quotes and website designs contain only the top dimensions.
+// Keep their original footprint until the owner enters explicit frame sizes.
 export const TABLE_BASE_OVERHANG_IN = 1.5;
 
-/** Steel-base footprint for a given top size → { lengthFt, widthIn }. */
+/** Actual frame dimensions, with the original top-based geometry as a fallback. */
 export function tableBaseFootprint(s) {
   const over = TABLE_BASE_OVERHANG_IN;
+  const frameLength = Number(s.frameLengthFt);
+  const frameWidth = Number(s.frameWidthIn);
   return {
-    lengthFt: (Number(s.lengthFt) || 0) + (2 * over) / 12,
-    widthIn: (Number(s.widthIn) || 0) + 2 * over,
+    lengthFt: Number.isFinite(frameLength) && frameLength > 0 ? frameLength : (Number(s.lengthFt) || 0) + (2 * over) / 12,
+    widthIn: Number.isFinite(frameWidth) && frameWidth > 0 ? frameWidth : (Number(s.widthIn) || 0) + 2 * over,
   };
 }
 
@@ -522,7 +524,7 @@ export const CONFIG = {
   // ---- Table ------------------------------------------------------------------
   // Mirrors the website's table designer (CJM/src/pages/customize/table.astro).
   // Frame only is the default; an included tabletop is priced per quote.
-  // Sizes describe the top and the base is built to suit it. The shop can
+  // Frame and tabletop sizes are separate. The shop can
   // enter any positive dimension, including fractions
   // finer than a sixteenth, without a preset size range.
   table: {
@@ -554,9 +556,11 @@ export const CONFIG = {
       },
       { kind: 'text', name: 'topMaterial', label: 'Tabletop material', placeholder: 'e.g. Finished white oak', visibleWhen: (s) => s.includeTop === 'yes' },
       { kind: 'number', name: 'topCost', label: 'Tabletop cost ($ each)', min: 0, step: 0.01, note: 'Your total cost for one finished top, before markup.', visibleWhen: (s) => s.includeTop === 'yes' },
-      { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', positive: true, exact: true },
-      { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', positive: true, exact: true },
+      { kind: 'number', name: 'frameLengthFt', label: 'Frame length', unit: 'ft', positive: true, exact: true, value: (s) => tableBaseFootprint(s).lengthFt },
+      { kind: 'number', name: 'frameWidthIn', label: 'Frame width', unit: 'in', positive: true, exact: true, value: (s) => tableBaseFootprint(s).widthIn },
       { kind: 'number', name: 'frameHeightIn', label: 'Frame height', unit: 'in', positive: true, exact: true },
+      { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', positive: true, exact: true, visibleWhen: (s) => s.includeTop === 'yes' },
+      { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', positive: true, exact: true, visibleWhen: (s) => s.includeTop === 'yes' },
       { kind: 'number', name: 'topThicknessIn', label: 'Tabletop thickness', unit: 'in', positive: true, exact: true, visibleWhen: (s) => s.includeTop === 'yes' },
       {
         kind: 'segment', name: 'footrest', label: 'Foot rest', cols: 2,
@@ -771,7 +775,9 @@ export function summaryLine(type, s) {
   if (type === 'table') {
     const tt = optionLabel('table', 'tableType', s.tableType || 'bar');
     const n = Number(s.qty) > 1 ? `${s.qty} × ` : '';
-    return `${n}${tt} · ${s.includeTop === 'yes' ? 'Frame + tabletop' : 'Frame only'} · ${ft(s.lengthFt, true)} × ${inch(s.widthIn, true)} top · ${inch(s.frameHeightIn, true)} frame · ${fin}`;
+    const base = tableBaseFootprint(s);
+    const top = s.includeTop === 'yes' ? ` · ${ft(s.lengthFt, true)} × ${inch(s.widthIn, true)} top` : '';
+    return `${n}${tt} · ${s.includeTop === 'yes' ? 'Frame + tabletop' : 'Frame only'} · ${ft(base.lengthFt, true)} × ${inch(base.widthIn, true)} frame · ${inch(s.frameHeightIn, true)} high${top} · ${fin}`;
   }
   if (type === 'concrete') {
     const proj = optionLabel('concrete', 'project', s.project);
@@ -891,8 +897,8 @@ export function specRows(type, s) {
     const overall = (Number(s.frameHeightIn) || 0) + thick;
     const rows = [['Type', optionLabel('table', 'tableType', s.tableType || 'bar')]];
     if (Number(s.qty) > 1) rows.push(['Quantity', `${s.qty} tables`]);
-    rows.push(['Top size', `${FT(s.lengthFt, true)} × ${IN(s.widthIn, true)}`]);
-    rows.push(['Steel base', `${FT(base.lengthFt, true)} × ${IN(base.widthIn, true)}`]);
+    rows.push(['Frame size', `${FT(base.lengthFt, true)} × ${IN(base.widthIn, true)}`]);
+    if (s.includeTop === 'yes') rows.push(['Top size', `${FT(s.lengthFt, true)} × ${IN(s.widthIn, true)}`]);
     rows.push(['Frame height', IN(s.frameHeightIn, true)]);
     if (s.includeTop === 'yes') rows.push(['Overall height', `${IN(overall, true)} with a ${IN(thick, true)} top`]);
     rows.push(['Foot rest', s.footrest === 'no' ? 'No' : 'Yes']);
@@ -902,7 +908,7 @@ export function specRows(type, s) {
       rows.push(['Tabletop material', String(s.topMaterial || '').trim() || 'To be specified']);
       rows.push(['Scope', 'Steel frame and tabletop included']);
     } else {
-      rows.push(['Scope', 'Steel frame only — customer supplies the tabletop']);
+      rows.push(['Scope', 'Steel frame only']);
     }
     return rows.map(([label, value]) => ({ label, value }));
   }

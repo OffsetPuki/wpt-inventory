@@ -9,7 +9,7 @@ import {
   deriveItems, buildLineState, deriveWarnings, materialTotals, materialLibrary, lineCost, matRate, foldGroups,
 } from '../client/src/quote/lib/estimate.js';
 import { computeTotals } from '../client/src/quote/lib/quote.js';
-import { defaultState, summaryLine, specRows } from '../client/src/quote/data/configurators.js';
+import { defaultState, summaryLine, specRows, tableBaseFootprint } from '../client/src/quote/data/configurators.js';
 import { deepMerge, duplicateSession } from '../client/src/quote/lib/store.js';
 import { renderTable } from '../client/src/quote/lib/preview/table.js';
 
@@ -450,9 +450,31 @@ console.log('\nOptional tabletop pricing and scope:');
   }
   const specs = specRows('table', included);
   check('customer specs include material and scope but no cost basis', specs.some(r => r.value === 'Finished white oak') && specs.some(r => r.value === 'Steel frame and tabletop included') && !JSON.stringify(specs).includes('450.25'));
-  check('frame-only specs omit retained tabletop details and show exclusion', !specRows('table', off).some(r => ['Tabletop material', 'Overall height'].includes(r.label)) && specRows('table', off).some(r => /customer supplies the tabletop/.test(r.value)));
+  check('frame-only specs omit all tabletop details', !specRows('table', off).some(r => ['Top size', 'Tabletop material', 'Overall height', 'Steel base'].includes(r.label)) && specRows('table', off).some(r => r.value === 'Steel frame only'));
   check('preview and summary distinguish included top', renderTable(included).includes('TABLETOP INCLUDED') && !renderTable(included).includes('TOP BY CUSTOMER') && summaryLine('table', included).includes('Frame + tabletop'));
-  check('frame-only preview shows top as excluded', renderTable(off).includes('TOP BY CUSTOMER — NOT INCLUDED') && summaryLine('table', off).includes('Frame only'));
+  check('frame-only preview contains no top', !renderTable(off).includes('TOP') && !renderTable(off).includes('#B89472') && !summaryLine('table', off).includes(' top'));
+}
+
+console.log('\nDirect frame dimensions and legacy quote compatibility:');
+{
+  const legacy = { ...defaultState('table'), lengthFt: 2.75, widthIn: 16.75, frameHeightIn: 16, footrest: 'no' };
+  const oldBase = tableBaseFootprint(legacy);
+  const oldEstimate = deriveItems('table', legacy, pb);
+  check('old top-based quotes keep their 36 × 19.75 in frame', oldBase.lengthFt === 3 && oldBase.widthIn === 19.75);
+  check('old rail/cross quantities remain unchanged', item(oldEstimate.items, 'rails').qty === 9.33 && item(oldEstimate.items, 'cross').qty === 1.94);
+  const direct = { ...legacy, frameLengthFt: 2.75, frameWidthIn: 16.75 };
+  const base = tableBaseFootprint(direct);
+  const estimated = deriveItems('table', direct, pb);
+  check('entered frame dimensions get no added overhang', base.lengthFt === 2.75 && base.widthIn === 16.75);
+  check('frame dimensions drive actual cut quantities', item(estimated.items, 'rails').qty === 8.33 && item(estimated.items, 'cross').qty === 0.79);
+  check('frame-only specification names the entered frame', specRows('table', direct).some(r => r.label === 'Frame size' && r.value === '2 ft 9 in × 16-3/4 in'));
+  const hiddenTopChanged = { ...direct, lengthFt: 20, widthIn: 80, topThicknessIn: 9 };
+  check('hidden top dimensions cannot resize or reprice an explicit frame', JSON.stringify(deriveItems('table', direct, pb)) === JSON.stringify(deriveItems('table', hiddenTopChanged, pb)));
+  check('hidden top dimensions cannot change the frame-only drawing', renderTable(direct) === renderTable(hiddenTopChanged));
+  const included = { ...direct, includeTop: 'yes', lengthFt: 3, widthIn: 20, topCost: 150, topMaterial: 'Oak' };
+  check('adding a larger top keeps the entered frame', JSON.stringify(tableBaseFootprint(included)) === JSON.stringify(base));
+  check('included quote distinguishes top and frame sizes', specRows('table', included).some(r => r.label === 'Top size' && r.value === '3 ft × 20 in') && specRows('table', included).some(r => r.label === 'Frame size' && r.value === '2 ft 9 in × 16-3/4 in'));
+  check('larger included top renders without invalid geometry', !/NaN|Infinity/.test(renderTable(included)) && renderTable(included).includes('TABLETOP INCLUDED'));
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);

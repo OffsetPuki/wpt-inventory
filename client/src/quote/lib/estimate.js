@@ -714,7 +714,10 @@ function estimateTable(s, pb) {
   const frameHeightIn = num(s.frameHeightIn, 40);
   const frameHeightFt = frameHeightIn / 12;
 
-  const base = tableBaseFootprint({ lengthFt: topLenFt, widthIn: num(s.widthIn, 0) });
+  const base = tableBaseFootprint({ ...s, lengthFt: topLenFt, widthIn: num(s.widthIn, 0) });
+  // Preserve the labor basis of saved top-based quotes. A directly entered
+  // frame length prices fabrication from that actual frame measurement.
+  const laborLengthFt = num(s.frameLengthFt, 0) > 0 ? base.lengthFt : topLenFt;
   const baseWidthFt = base.widthIn / 12;
   const planArea = round2(base.lengthFt * baseWidthFt * qty);
 
@@ -771,7 +774,7 @@ function estimateTable(s, pb) {
 
   return {
     items,
-    laborHours: round2(qty * (num(t.fabHoursPerTable, 0) + num(t.fabHoursPerFt, 0) * topLenFt)),
+    laborHours: round2(qty * (num(t.fabHoursPerTable, 0) + num(t.fabHoursPerFt, 0) * laborLengthFt)),
     installHours: round2(qty * num(t.deliveryHoursPerTable, 0)),
   };
 }
