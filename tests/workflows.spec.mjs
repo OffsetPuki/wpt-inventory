@@ -252,6 +252,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await page.getByLabel("Frame height", { exact: true }).press("Tab");
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
   await page.screenshot({ animations: "disabled", path: "test-results/table-custom-dimensions.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("radio", { name: "Frame only", exact: true })).toBeChecked();
   await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveCount(0);
   await page.getByText("Frame + tabletop", { exact: true }).click();
@@ -295,6 +296,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await expect(page.getByRole("radio", { name: "Frame + tabletop", exact: true })).toBeChecked();
   await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveValue("Finished white oak");
   await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("450.25");
-  await page.locator(".cfg-controls").screenshot({ animations: "disabled", path: "test-results/tabletop-options-mobile.png" });
+  await page.getByLabel("Tabletop cost ($ each)", { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ animations: "disabled", path: "test-results/tabletop-options-mobile.png" });
   expect(errors).toEqual([]);
 });
