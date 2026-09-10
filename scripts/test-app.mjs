@@ -36,7 +36,10 @@ export async function testApp({ serve = false } = {}) {
     stripeCalls.push({ path: address.pathname, method: init.method || "GET" });
     const path = address.pathname;
     let result;
-    if (path === "/v1/checkout/sessions") {
+    if (path.startsWith("/v1/payment_intents/")) {
+      if (path.endsWith("pi_method_unavailable")) return new Response("{}", { status: 503 });
+      result = { latest_charge: { payment_method_details: { type: path.endsWith("pi_bank") ? "us_bank_account" : "card" } } };
+    } else if (path === "/v1/checkout/sessions") {
       const key = new Headers(init.headers).get("Idempotency-Key");
       if (!key) throw new Error("Checkout must send an idempotency key");
       const prior = requests.get(key);

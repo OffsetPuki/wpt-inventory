@@ -344,6 +344,24 @@ async function stripeSession(id: string) {
   if (!response.ok) throw new Error(`Could not verify previous payment (${response.status})`);
   return response.json();
 }
+async function stripePaymentMethod(paymentIntent: string): Promise<"card" | "bank_transfer" | "other"> {
+  if (!paymentIntent) return "other";
+  try {
+    const response = await fetch(`https://api.stripe.com/v1/payment_intents/${encodeURIComponent(paymentIntent)}?expand[]=latest_charge`, {
+      headers: { Authorization: `Bearer ${stripeKey()}` }, signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return "other";
+    const intent = await response.json();
+    const type = intent.latest_charge?.payment_method_details?.type;
+    if (type === "card") return "card";
+    if (["us_bank_account", "sepa_debit", "acss_debit", "bacs_debit", "au_becs_debit"].includes(type)) return "bank_transfer";
+  } catch (error) {
+    console.warn("[pay] payment method unavailable; recording as other", error);
+  }
+  // The signed event still proves receipt. A classification lookup must not
+  // drop money or mistake an unknown wallet or bank payment for a card.
+  return "other";
+}
 async function closeCheckout(id: string) {
   const current = await stripeSession(id);
   if (current.status === 'open') await stripePost(`checkout/sessions/${encodeURIComponent(id)}/expire`, {});
@@ -580,7 +598,7 @@ export function registerPayRoutes(app: Express): void {
   // because the signature covers the exact bytes, not the reparsed JSON.
   // Always 200 on anything we've decided not to act on — a 4xx just makes
   // Stripe retry a webhook that will never succeed.
-  app.post("/api/public/stripe/webhook", (req, res) => {
+  app.post("/api/public/stripe/webhook", async (req, res) => {
     const event = verifiedEvent(req.body as Buffer, req.header("stripe-signature"));
     if (!event) {
       console.warn("[pay] webhook rejected — bad or missing signature");
@@ -627,9 +645,11 @@ export function registerPayRoutes(app: Express): void {
     }
 
     try {
+      const existingPayment = sqlite.prepare("SELECT method FROM fin_invoice_payments WHERE reference=?").get(reference) as {method: "card" | "bank_transfer" | "other"} | undefined;
+      const method = existingPayment?.method ?? await stripePaymentMethod(String(session.payment_intent || ""));
       recordInvoicePayment(req as Request, inv, {
         amountCents,
-        method: "card", // Apple Pay and Google Pay ARE card payments
+        method,
         reference,
         paidAt: todayLocal(),
         notes: inv.discountCents != null && session.metadata?.which === "full"

@@ -126,6 +126,14 @@ try {
   assert.equal(sqlite.prepare("SELECT invoice_id FROM fin_payment_exceptions WHERE event_id='evt_early_dispute'").get().invoice_id, outOfOrder.id);
   assert.equal(sqlite.prepare("SELECT count(*) n FROM fin_invoice_payments WHERE invoice_id=?").get(outOfOrder.id).n, 1);
   check("Disputes delivered before payments attach to the correct invoice when checkout arrives");
+  const bank = invoice("BANK-METHOD");
+  await event(paid(bank, "bank"), "checkout.session.async_payment_succeeded");
+  assert.equal(sqlite.prepare("SELECT method FROM fin_invoice_payments WHERE invoice_id=?").get(bank.id).method, "bank_transfer");
+  const unknownMethod = invoice("METHOD-UNAVAILABLE");
+  await event(paid(unknownMethod, "method_unavailable"));
+  assert.equal(sqlite.prepare("SELECT method FROM fin_invoice_payments WHERE invoice_id=?").get(unknownMethod.id).method, "other");
+  assert.equal(sqlite.prepare("SELECT paid_cents FROM fin_invoices WHERE id=?").get(unknownMethod.id).paid_cents, 10000);
+  check("Stripe bank payments use the bank method; unavailable classification never drops a confirmed payment");
   const twice = invoice("CHECKOUT");
   const [first, second] = await Promise.all([
     api(`/api/public/invoice/${twice.token}/checkout`, "POST", {
