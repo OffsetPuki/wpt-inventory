@@ -117,6 +117,15 @@ try {
   check(
     "Delayed payments, refunds, overpayments, and wrong-currency events have explicit outcomes",
   );
+  const outOfOrder = invoice("DISPUTE-FIRST");
+  await event({ id: "du_early", payment_intent: "pi_early", amount: 10000,
+    status: "needs_response" }, "charge.dispute.created", "evt_early_dispute");
+  assert.equal(sqlite.prepare("SELECT invoice_id FROM fin_payment_exceptions WHERE event_id='evt_early_dispute'").get().invoice_id, null);
+  await event(paid(outOfOrder, "early"));
+  await event(paid(outOfOrder, "early"));
+  assert.equal(sqlite.prepare("SELECT invoice_id FROM fin_payment_exceptions WHERE event_id='evt_early_dispute'").get().invoice_id, outOfOrder.id);
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM fin_invoice_payments WHERE invoice_id=?").get(outOfOrder.id).n, 1);
+  check("Disputes delivered before payments attach to the correct invoice when checkout arrives");
   const twice = invoice("CHECKOUT");
   const [first, second] = await Promise.all([
     api(`/api/public/invoice/${twice.token}/checkout`, "POST", {

@@ -700,6 +700,12 @@ export function registerPayRoutes(app: Express): void {
 
         return inv;
       });
+      // Stripe can deliver a refund or dispute before the completed checkout.
+      // Once its payment exists, attach those earlier alerts to the invoice.
+      // This also runs on retries, without recording another payment.
+      sqlite.prepare(`UPDATE fin_payment_exceptions SET invoice_id=?
+        WHERE invoice_id IS NULL AND json_valid(details)
+          AND json_extract(details, '$.reference')=?`).run(inv.id, reference);
     } catch (e) {
       // 500 so Stripe retries — the idempotency check above makes that safe.
       console.error("[pay] failed to record online payment", reference, e);
