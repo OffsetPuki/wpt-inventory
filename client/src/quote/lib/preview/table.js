@@ -14,7 +14,8 @@
 
 import { shade, pts } from './svg.js';
 import { tableBaseFootprint } from '../../data/configurators.js';
-import { formatTick } from '../measure.js';
+import { formatTick as formatMeasuredTick } from '../measure.js';
+const formatTick = (value, unit) => formatMeasuredTick(value, unit, { exact: true });
 
 export function renderTable(state) {
   const VB_W = 800;
@@ -79,7 +80,9 @@ export function renderTable(state) {
   }
 
   // ---- top-frame cross members, one every ~24 in (matches the estimator) ----
-  const crossCount = Math.max(2, Math.round((baseLenFt * 12) / 24) + 1);
+  // Dense cross members are sampled to the preview's pixel resolution. This
+  // limits SVG work for very long tables without limiting the entered size.
+  const crossCount = Math.min(Math.max(2, Math.round((baseLenFt * 12) / 24) + 1), Math.max(2, Math.floor(lenPx / 4)));
   const crossT = Math.max(2, pxPerFt * (2 / 12));
   for (let i = 0; i <= crossCount; i++) {
     const px = x0 + (lenPx * i) / crossCount;

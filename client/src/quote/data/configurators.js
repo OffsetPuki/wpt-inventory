@@ -117,10 +117,10 @@ export function tableBaseFootprint(s) {
 
 // Dimension formatting. Long form (FT/IN) for printed spec rows — "6 ft 4-1/2 in";
 // tick form (ft/inch) for the tight one-line summaries — 6'4-1/2".
-const FT = (v) => formatMeasure(v, 'ft');
-const IN = (v) => formatMeasure(v, 'in');
-const ft = (v) => formatTick(v, 'ft');
-const inch = (v) => formatTick(v, 'in');
+const FT = (v, exact = false) => formatMeasure(v, 'ft', { exact });
+const IN = (v, exact = false) => formatMeasure(v, 'in', { exact });
+const ft = (v, exact = false) => formatTick(v, 'ft', { exact });
+const inch = (v, exact = false) => formatTick(v, 'in', { exact });
 
 export const CONFIG = {
   // ---- Fence ----------------------------------------------------------------
@@ -523,8 +523,8 @@ export const CONFIG = {
   // Mirrors the website's table designer (CJM/src/pages/customize/table.astro).
   // CJM builds the STEEL BASE ONLY — the customer supplies their own wood top,
   // so every size here describes the top they're buying and the base is built
-  // to suit it. Sizes run wider than the website's sliders on purpose: the shop
-  // takes phone orders the web tool won't cover.
+  // to suit it. The shop can enter any positive dimension, including fractions
+  // finer than a sixteenth, without a preset size range.
   table: {
     defaults: {
       tableType: 'bar',
@@ -545,10 +545,10 @@ export const CONFIG = {
         options: [{ value: 'bar', label: 'Bar Table' }],
       },
       { kind: 'number', name: 'qty', label: 'How many', unit: 'tables', min: 1, max: 50, step: 1 },
-      { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', min: 2, max: 16, step: 0.5 },
-      { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', min: 12, max: 48, step: 1 },
-      { kind: 'number', name: 'frameHeightIn', label: 'Frame height', unit: 'in', min: 16, max: 46, step: 1 },
-      { kind: 'number', name: 'topThicknessIn', label: "Customer's top thickness", unit: 'in', min: 0.5, max: 4, step: 0.25 },
+      { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', positive: true, exact: true },
+      { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', positive: true, exact: true },
+      { kind: 'number', name: 'frameHeightIn', label: 'Frame height', unit: 'in', positive: true, exact: true },
+      { kind: 'number', name: 'topThicknessIn', label: "Customer's top thickness", unit: 'in', positive: true, exact: true },
       {
         kind: 'segment', name: 'footrest', label: 'Foot rest', cols: 2,
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }],
@@ -762,7 +762,7 @@ export function summaryLine(type, s) {
   if (type === 'table') {
     const tt = optionLabel('table', 'tableType', s.tableType || 'bar');
     const n = Number(s.qty) > 1 ? `${s.qty} × ` : '';
-    return `${n}${tt} · ${ft(s.lengthFt)} × ${inch(s.widthIn)} top · ${inch(s.frameHeightIn)} frame · ${fin}`;
+    return `${n}${tt} · ${ft(s.lengthFt, true)} × ${inch(s.widthIn, true)} top · ${inch(s.frameHeightIn, true)} frame · ${fin}`;
   }
   if (type === 'concrete') {
     const proj = optionLabel('concrete', 'project', s.project);
@@ -882,10 +882,10 @@ export function specRows(type, s) {
     const overall = (Number(s.frameHeightIn) || 0) + thick;
     const rows = [['Type', optionLabel('table', 'tableType', s.tableType || 'bar')]];
     if (Number(s.qty) > 1) rows.push(['Quantity', `${s.qty} tables`]);
-    rows.push(['Top size', `${FT(s.lengthFt)} × ${IN(s.widthIn)}`]);
-    rows.push(['Steel base', `${FT(base.lengthFt)} × ${IN(base.widthIn)}`]);
-    rows.push(['Frame height', IN(s.frameHeightIn)]);
-    rows.push(['Overall height', `${IN(overall)} with a ${IN(thick)} top`]);
+    rows.push(['Top size', `${FT(s.lengthFt, true)} × ${IN(s.widthIn, true)}`]);
+    rows.push(['Steel base', `${FT(base.lengthFt, true)} × ${IN(base.widthIn, true)}`]);
+    rows.push(['Frame height', IN(s.frameHeightIn, true)]);
+    rows.push(['Overall height', `${IN(overall, true)} with a ${IN(thick, true)} top`]);
     rows.push(['Foot rest', s.footrest === 'no' ? 'No' : 'Yes']);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('table', 'coating', s.coating)]);
     rows.push(['Finish', fin]);

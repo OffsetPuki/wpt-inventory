@@ -27,9 +27,9 @@ function MeasureField({ control, value, onChange, className = 'num' }) {
 
   const commit = () => {
     if (draft == null) return;
-    const parsed = parseMeasure(draft, unit);
+    const parsed = parseMeasure(draft, unit, { exact: control.exact });
     setDraft(null);
-    if (parsed == null) return; // unreadable — snap back to the current value
+    if (parsed == null || (control.positive && parsed <= 0)) return;
     const min = control.min == null ? -Infinity : Number(control.min);
     const max = control.max == null ? Infinity : Number(control.max);
     onChange(control.name, Math.min(max, Math.max(min, parsed)));
@@ -40,7 +40,7 @@ function MeasureField({ control, value, onChange, className = 'num' }) {
       type="text"
       className={className}
       name={control.name}
-      value={draft == null ? formatMeasure(value, unit) : draft}
+      value={draft == null ? formatMeasure(value, unit, { exact: control.exact }) : draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {

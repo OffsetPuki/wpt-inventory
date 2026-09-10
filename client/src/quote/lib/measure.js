@@ -9,8 +9,8 @@
 //    formatMeasure(6.375, 'ft')       →  "6 ft 4-1/2 in"
 //
 //  So the owner types what they measured on site and the math never changes.
-//  Everything snaps to the nearest 1/16 in — finer than anyone tapes, and it
-//  keeps 1/3 of a foot from turning into 0.33333333333333331 in the payload.
+//  Measurements default to the nearest 1/16 in. Controls with `exact: true`
+//  preserve entered precision, including smaller fractions and decimals.
 // =============================================================================
 
 const SIXTEENTHS = 16;
@@ -68,9 +68,10 @@ function snap(value, unit) {
  * Returns null when there's nothing usable, so callers can leave the old value
  * alone instead of writing NaN into the design.
  */
-export function parseMeasure(input, unit = 'ft') {
+export function parseMeasure(input, unit = 'ft', { exact = false } = {}) {
   if (input == null) return null;
   const u = measureUnit(unit);
+  const finish = (n) => Number.isFinite(n) ? (exact ? n : snap(n, u)) : null;
   const s = String(input)
     .toLowerCase()
     .replace(/[′’]/g, "'")   // ′ ’ → '
@@ -92,18 +93,18 @@ export function parseMeasure(input, unit = 'ft') {
       inches = parseQuantity(after);
       if (inches == null) return null;
     }
-    return snap(u === 'ft' ? feet + inches / 12 : feet * 12 + inches, u);
+    return finish(u === 'ft' ? feet + inches / 12 : feet * 12 + inches);
   }
 
   if (s.includes('"')) {
     const inches = parseQuantity(s.replace(/"/g, '').trim());
     if (inches == null) return null;
-    return snap(u === 'ft' ? inches / 12 : inches, u);
+    return finish(u === 'ft' ? inches / 12 : inches);
   }
 
   // No unit marker — a bare number is already in the field's own unit.
   const bare = parseQuantity(s);
-  return bare == null ? null : snap(bare, u);
+  return bare == null ? null : finish(bare);
 }
 
 /** 4.5 → "4-1/2", 4 → "4", 0.5 → "1/2". Assumes a non-negative inch count. */
@@ -123,10 +124,12 @@ function inchStr(inches) {
  *   formatMeasure(40.5, 'in')  → "40-1/2 in"
  * An inches field never grows feet — a 36 in railing reads "36 in", not "3 ft".
  */
-export function formatMeasure(value, unit = 'ft') {
+export function formatMeasure(value, unit = 'ft', { exact = false } = {}) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '';
   const u = measureUnit(unit);
+  // Preserve custom precision instead of displaying a different measurement.
+  if (exact && !Number.isInteger((u === 'ft' ? n * 12 : n) * SIXTEENTHS)) return `${n} ${u}`;
   const sign = n < 0 ? '-' : '';
   const totalIn = Math.round(Math.abs(u === 'ft' ? n * 12 : n) * SIXTEENTHS) / SIXTEENTHS;
 
@@ -140,10 +143,11 @@ export function formatMeasure(value, unit = 'ft') {
 }
 
 /** Compact form for tight spots (preview dimension labels): 6'4-1/2" / 40-1/2". */
-export function formatTick(value, unit = 'ft') {
+export function formatTick(value, unit = 'ft', { exact = false } = {}) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '';
   const u = measureUnit(unit);
+  if (exact && !Number.isInteger((u === 'ft' ? n * 12 : n) * SIXTEENTHS)) return `${n}${u === 'ft' ? "'" : '"'}`;
   const totalIn = Math.round(Math.abs(u === 'ft' ? n * 12 : n) * SIXTEENTHS) / SIXTEENTHS;
   const sign = n < 0 ? '-' : '';
   if (u === 'in') return `${sign}${inchStr(totalIn)}"`;

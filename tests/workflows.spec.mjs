@@ -218,5 +218,39 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
       2,
     ),
   );
+  await page.goto(app.base + "/#/crm/quotes");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button").filter({ has: page.getByRole("heading", { name: "Table", exact: true }) }).click();
+  await expect(page.getByRole("heading", { name: "Table", exact: true })).toBeVisible();
+  for (const [label, input, shown] of [
+    ["Top length", "1 ft", "1 ft"],
+    ["Top width", "60 in", "60 in"],
+    ["Frame height", "80 in", "80 in"],
+    ["Customer's top thickness", "6 in", "6 in"],
+    ["Top length", "20 ft", "20 ft"],
+    ["Top width", "8.2 in", "8.2 in"],
+    ["Frame height", "12.2 in", "12.2 in"],
+    ["Customer's top thickness", "1/32 in", "0.03125 in"],
+  ]) {
+    const field = page.getByLabel(label, { exact: true });
+    await field.fill(input);
+    await field.press("Tab");
+    await expect(field).toHaveValue(shown);
+  }
+  const tableSaved = page.waitForResponse((r) => r.url().endsWith("/api/quotes") && r.request().method() === "POST");
+  await page.getByRole("button", { name: "Save to suite", exact: true }).click();
+  expect((await tableSaved).ok()).toBe(true);
+  const tableDraft = JSON.parse(app.sqlite.prepare("SELECT payload FROM quotes ORDER BY id DESC LIMIT 1").get().payload);
+  expect(tableDraft.type).toBe("table");
+  expect(tableDraft.state).toMatchObject({ lengthFt: 20, widthIn: 8.2, frameHeightIn: 12.2, topThicknessIn: 0.03125 });
+  await page.reload();
+  await page.getByRole("button", { name: /Continue draft/ }).click();
+  await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
+  await expect(page.getByLabel("Customer's top thickness", { exact: true })).toHaveValue("0.03125 in");
+  await expect(page.locator("svg").filter({ hasText: '12.2" FRAME' })).toBeVisible();
+  await page.getByLabel("Frame height", { exact: true }).fill("0");
+  await page.getByLabel("Frame height", { exact: true }).press("Tab");
+  await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
+  await page.screenshot({ animations: "disabled", path: "test-results/table-custom-dimensions.png" });
   expect(errors).toEqual([]);
 });
