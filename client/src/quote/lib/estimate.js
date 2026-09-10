@@ -688,8 +688,7 @@ function estimatePergola(s, pb) {
 }
 
 /**
- * Table base. CJM builds the STEEL BASE ONLY — the customer's wood top is not
- * a line on this quote, by design.
+ * Table frame, with an optional finished tabletop cost entered per quote.
  *
  * The shop math is measured straight off the CJM bar-table Fusion model, so a
  * default 8 ft × 21 in table reproduces the real cut list:
@@ -749,13 +748,21 @@ function estimateTable(s, pb) {
     key: 'footPlates', materialId: 'plate_1_2', qty: 2 * 0.5 * baseWidthFt * qty,
     name: `Foot plates — ${2 * qty} × 6 in × ${Math.round(base.widthIn)} in (1/2 in plate)`,
   }));
-  // Tabs + hardware that fasten the customer's top down. Priced per table
+  // Tabs + hardware that fasten the top down. Priced per table
   // because it's a fixed little kit, not a function of size.
   pushPriced(items, {
     key: 'topFastening', kind: 'unit', qty,
     name: `Top fastening — tabs + hardware (${qty} ${qty === 1 ? 'table' : 'tables'})`,
     rate: round2(num(t.topFasteningPerTable, 0)),
   });
+  if (s.includeTop === 'yes') {
+    const material = String(s.topMaterial || '').trim();
+    pushPriced(items, {
+      key: 'tabletop', kind: 'unit', unit: 'tops', qty,
+      name: material ? `Tabletop — ${material}` : 'Tabletop — material to be specified',
+      rate: round2(Math.max(0, num(s.topCost, 0))),
+    });
+  }
 
   const coat = coatingItem(pb, s, planArea);
   if (coat) items.push(coat);
@@ -917,6 +924,9 @@ const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimate
  */
 function isConsumablesBase(it) {
   if (!it) return false;
+  // The entered tabletop cost already covers the finished top. Adding it
+  // must not also increase welding wire, gas or paint for the steel frame.
+  if (it.key === 'tabletop') return false;
   if (it.kind === 'flat') return false;
   if (typeof it.materialId === 'string' && it.materialId.startsWith('hw_')) return false;
   return true;
@@ -1201,8 +1211,13 @@ export function deriveWarnings(type, state, lineState, pricing) {
     }
   }
   if (type === 'table') {
-    info('Steel base only — confirm the customer knows they are buying the wood top.');
-    if (!has('topFastening')) info('No top-fastening hardware — how is their top attaching?');
+    if (s.includeTop === 'yes') {
+      if (!String(s.topMaterial || '').trim()) warn('Enter the included tabletop material.');
+      if (!has('tabletop')) warn('Tabletop included but no cost charged — enter the cost per top.');
+    } else {
+      info('Frame only — the customer supplies the tabletop.');
+    }
+    if (!has('topFastening')) info('No top-fastening hardware — how is the top attaching?');
   }
   if (type === 'custom') {
     // Nothing is derived here, so an empty quote is a real possibility —

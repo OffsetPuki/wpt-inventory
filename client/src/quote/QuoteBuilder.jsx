@@ -93,6 +93,9 @@ function migrateSession(sess, priceBook) {
   const legacy = sess.markupPct;
   return {
     ...sess,
+    state: sess.type === 'table'
+      ? { includeTop: 'no', topMaterial: '', topCost: '', ...sess.state }
+      : sess.state,
     materialMarkupPct:
       sess.materialMarkupPct ?? legacy ?? priceBook.materialMarkupPct,
     laborMarkupPct: sess.laborMarkupPct ?? legacy ?? priceBook.laborMarkupPct,
@@ -452,10 +455,27 @@ export default function QuoteBuilder({ initialSettings }) {
   // ── Session mutators ────────────────────────────────────────────────────────
   const patchSession = (patch) => setSession((s) => ({ ...s, ...patch }));
   const setStateField = (name, value) =>
-    setSession((s) => ({ ...s, state: { ...s.state, [name]: value } }));
+    setSession((s) => {
+      const next = { ...s, state: { ...s.state, [name]: value } };
+      // An explicit tabletop control edit wins over an older line edit.
+      // Keep unrelated overrides (including customer-facing groups) intact.
+      const resetField = { topCost: 'rate', topMaterial: 'name', qty: 'qty', includeTop: 'removed' }[name];
+      if (s.type === 'table' && resetField && s.overrides?.items?.tabletop) {
+        const tabletop = { ...s.overrides.items.tabletop };
+        delete tabletop[resetField];
+        next.overrides = { ...s.overrides, items: { ...s.overrides.items, tabletop } };
+      }
+      return next;
+    });
   const editItem = (key, field, value) =>
     setSession((s) => {
       const items = { ...(s.overrides.items || {}) };
+      // The tabletop cost field and its line-item rate edit the same amount.
+      if (s.type === 'table' && key === 'tabletop' && field === 'rate') {
+        items[key] = { ...(items[key] || {}) };
+        delete items[key].rate;
+        return { ...s, state: { ...s.state, topCost: value }, overrides: { ...s.overrides, items } };
+      }
       items[key] = { ...(items[key] || {}), [field]: value };
       return { ...s, overrides: { ...s.overrides, items } };
     });

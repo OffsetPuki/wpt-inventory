@@ -385,7 +385,7 @@ export const PRICE_BOOK_SCHEMA = [
   },
   {
     title: 'Table',
-    note: 'Steel base only — the customer supplies the top. Legs, rails, foot rest and foot plates all price from the material library.',
+    note: 'Legs, rails, foot rest and foot plates price from the material library. Add an optional tabletop and its cost on each quote.',
     fields: [
       { path: 'table.topFasteningPerTable', label: 'Top fastening (tabs + hardware)', prefix: '$', suffix: '/ table', step: 5 },
       { path: 'table.fabHoursPerTable', label: 'Shop labor — per table', suffix: 'hrs', step: 0.5 },

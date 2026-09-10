@@ -226,11 +226,11 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
     ["Top length", "1 ft", "1 ft"],
     ["Top width", "60 in", "60 in"],
     ["Frame height", "80 in", "80 in"],
-    ["Customer's top thickness", "6 in", "6 in"],
+    ["Tabletop thickness", "6 in", "6 in"],
     ["Top length", "20 ft", "20 ft"],
     ["Top width", "8.2 in", "8.2 in"],
     ["Frame height", "12.2 in", "12.2 in"],
-    ["Customer's top thickness", "1/32 in", "0.03125 in"],
+    ["Tabletop thickness", "1/32 in", "0.03125 in"],
   ]) {
     const field = page.getByLabel(label, { exact: true });
     await field.fill(input);
@@ -246,11 +246,55 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await page.reload();
   await page.getByRole("button", { name: /Continue draft/ }).click();
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
-  await expect(page.getByLabel("Customer's top thickness", { exact: true })).toHaveValue("0.03125 in");
+  await expect(page.getByLabel("Tabletop thickness", { exact: true })).toHaveValue("0.03125 in");
   await expect(page.locator("svg").filter({ hasText: '12.2" FRAME' })).toBeVisible();
   await page.getByLabel("Frame height", { exact: true }).fill("0");
   await page.getByLabel("Frame height", { exact: true }).press("Tab");
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
   await page.screenshot({ animations: "disabled", path: "test-results/table-custom-dimensions.png" });
+  await expect(page.getByRole("radio", { name: "Frame only", exact: true })).toBeChecked();
+  await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveCount(0);
+  await page.getByText("Frame + tabletop", { exact: true }).click();
+  await expect(page.getByText(/Enter the included tabletop material\./)).toBeVisible();
+  await expect(page.getByText(/Tabletop included but no cost charged — enter the cost per top\./)).toBeVisible();
+  await page.getByLabel("Tabletop material", { exact: true }).fill("Finished white oak");
+  await page.getByLabel("Tabletop cost ($ each)", { exact: true }).fill("450.25");
+  await page.getByLabel("How many", { exact: true }).fill("3");
+  const topLine = page.locator(".line").filter({ has: page.locator('input[value="Tabletop — Finished white oak"]') });
+  await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
+  await expect(page.locator("svg").filter({ hasText: "TABLETOP INCLUDED" })).toBeVisible();
+  await page.getByText("Frame only", { exact: true }).click();
+  await expect(topLine).toHaveCount(0);
+  await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveCount(0);
+  await page.getByText("Frame + tabletop", { exact: true }).click();
+  await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveValue("Finished white oak");
+  await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("450.25");
+  // Rate edits in the itemized list and the cost field stay synchronized.
+  await topLine.locator('.line-controls input[type="number"]').nth(1).fill("500");
+  await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("500");
+  await page.getByLabel("Tabletop cost ($ each)", { exact: true }).fill("450.25");
+  await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
+  const includedSaved = page.waitForResponse((r) => /\/api\/quotes\/\d+$/.test(r.url()) && r.request().method() === "PATCH");
+  await page.getByRole("button", { name: "Save to suite", exact: true }).click();
+  expect((await includedSaved).ok()).toBe(true);
+  const includedRow = app.sqlite.prepare("SELECT id, payload FROM quotes ORDER BY id DESC LIMIT 1").get();
+  const includedDraft = JSON.parse(includedRow.payload);
+  expect(includedDraft.state).toMatchObject({ includeTop: "yes", topMaterial: "Finished white oak", topCost: "450.25", qty: "3", frameHeightIn: 12.2 });
+  // Exercise the real public document builder against this isolated saved quote.
+  const token = "ab".repeat(24);
+  app.sqlite.prepare("UPDATE quotes SET share_token = ? WHERE id = ?").run(token, includedRow.id);
+  const docResponse = await fetch(`${app.base}/api/public/quote/${token}?preview=1`);
+  expect(docResponse.ok).toBe(true);
+  const doc = (await docResponse.json()).quote.doc;
+  expect(doc.specs).toContainEqual({ label: "Scope", value: "Steel frame and tabletop included" });
+  expect(doc.specs).toContainEqual({ label: "Tabletop material", value: "Finished white oak" });
+  expect(doc.materials.find(m => m.name === "Tabletop — Finished white oak").amountCents).toBeGreaterThan(135075);
+  expect(JSON.stringify(doc)).not.toContain('"topCost"');
+  await page.reload();
+  await page.getByRole("button", { name: /Continue draft/ }).click();
+  await expect(page.getByRole("radio", { name: "Frame + tabletop", exact: true })).toBeChecked();
+  await expect(page.getByLabel("Tabletop material", { exact: true })).toHaveValue("Finished white oak");
+  await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveValue("450.25");
+  await page.locator(".cfg-controls").screenshot({ animations: "disabled", path: "test-results/tabletop-options-mobile.png" });
   expect(errors).toEqual([]);
 });

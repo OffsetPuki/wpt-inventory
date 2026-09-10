@@ -11,6 +11,7 @@ import {
 import { computeTotals } from '../client/src/quote/lib/quote.js';
 import { defaultState, summaryLine, specRows } from '../client/src/quote/data/configurators.js';
 import { deepMerge, duplicateSession } from '../client/src/quote/lib/store.js';
+import { renderTable } from '../client/src/quote/lib/preview/table.js';
 
 let failures = 0;
 function check(name, cond, detail = '') {
@@ -419,6 +420,39 @@ console.log('\nDuplicate a saved quote:');
   // The copy still prices — same total as the original priced at today's rates.
   const lsCopy = buildLineState(copy.type, copy.state, pb, copy.overrides);
   check('the copy prices', lineCost(item(lsCopy.items, 'custom_1')) === 550);
+}
+
+console.log('\nOptional tabletop pricing and scope:');
+{
+  const base = { ...defaultState('table'), qty: 3 };
+  const included = { ...base, includeTop: 'yes', topMaterial: 'Finished white oak', topCost: '450.25' };
+  const frameLines = buildLineState('table', base, pb, {});
+  const topLines = buildLineState('table', included, pb, {});
+  const top = item(topLines.items, 'tabletop');
+  check('new quotes default to frame only', base.includeTop === 'no' && !item(frameLines.items, 'tabletop'));
+  check('each table gets one tabletop at the entered cost', top.qty === 3 && top.rate === 450.25 && lineCost(top) === 1350.75);
+  check('material appears on the customer line', top.name === 'Tabletop — Finished white oak');
+  check('tabletop does not increase welding consumables', lineCost(item(topLines.items, 'consumables')) === lineCost(item(frameLines.items, 'consumables')));
+  const pricing = { materialMarkupPct: 35, laborMarkupPct: 35, taxPct: 0 };
+  check('existing material markup applies once', approx(computeTotals(topLines, pricing).total - computeTotals(frameLines, pricing).total, 1350.75 * 1.35, 0.02));
+  const off = { ...included, includeTop: 'no' };
+  const offLines = buildLineState('table', off, pb, { items: { tabletop: { rate: 999 } } });
+  check('frame only excludes even a previously edited tabletop', !item(offLines.items, 'tabletop') && computeTotals(offLines, pricing).total === computeTotals(frameLines, pricing).total);
+  const legacy = { ...included };
+  delete legacy.includeTop;
+  check('legacy quotes remain frame only', !item(deriveItems('table', legacy, pb).items, 'tabletop'));
+  for (const cost of ['', 0, -50, 'invalid']) {
+    const unset = { ...included, topCost: cost, topMaterial: '' };
+    const lines = buildLineState('table', unset, pb, {});
+    const warnings = deriveWarnings('table', unset, lines, pricing);
+    check(`unset/invalid cost ${JSON.stringify(cost)} stays visible without negative pricing`, item(lines.items, 'tabletop').unpriced && lineCost(item(lines.items, 'tabletop')) === 0);
+    check(`missing details ${JSON.stringify(cost)} are flagged`, warnings.some(w => /tabletop material/.test(w.msg)) && warnings.some(w => /cost per top/.test(w.msg)));
+  }
+  const specs = specRows('table', included);
+  check('customer specs include material and scope but no cost basis', specs.some(r => r.value === 'Finished white oak') && specs.some(r => r.value === 'Steel frame and tabletop included') && !JSON.stringify(specs).includes('450.25'));
+  check('frame-only specs omit retained material and show exclusion', !specRows('table', off).some(r => r.label === 'Tabletop material') && specRows('table', off).some(r => /customer supplies the tabletop/.test(r.value)));
+  check('preview and summary distinguish included top', renderTable(included).includes('TABLETOP INCLUDED') && !renderTable(included).includes('TOP BY CUSTOMER') && summaryLine('table', included).includes('Frame + tabletop'));
+  check('frame-only preview shows top as excluded', renderTable(off).includes('TOP BY CUSTOMER — NOT INCLUDED') && summaryLine('table', off).includes('Frame only'));
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);

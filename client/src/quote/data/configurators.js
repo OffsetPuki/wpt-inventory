@@ -521,18 +521,21 @@ export const CONFIG = {
 
   // ---- Table ------------------------------------------------------------------
   // Mirrors the website's table designer (CJM/src/pages/customize/table.astro).
-  // CJM builds the STEEL BASE ONLY — the customer supplies their own wood top,
-  // so every size here describes the top they're buying and the base is built
-  // to suit it. The shop can enter any positive dimension, including fractions
+  // Frame only is the default; an included tabletop is priced per quote.
+  // Sizes describe the top and the base is built to suit it. The shop can
+  // enter any positive dimension, including fractions
   // finer than a sixteenth, without a preset size range.
   table: {
     defaults: {
       tableType: 'bar',
+      includeTop: 'no',
+      topMaterial: '',
+      topCost: '',
       qty: 1,
       lengthFt: 8,         // top length — the website designer's default
       widthIn: 21,         // top width
       frameHeightIn: 40,   // steel base height
-      topThicknessIn: 2,   // the top the CUSTOMER supplies — 40 + 2 = 42 in bar height
+      topThicknessIn: 2,   // 40 + 2 = 42 in overall bar height
       footrest: 'yes',
       coating: 'standard',
       color: '#0A0A0A',
@@ -545,10 +548,16 @@ export const CONFIG = {
         options: [{ value: 'bar', label: 'Bar Table' }],
       },
       { kind: 'number', name: 'qty', label: 'How many', unit: 'tables', min: 1, max: 50, step: 1 },
+      {
+        kind: 'segment', name: 'includeTop', label: 'Include tabletop?', cols: 2,
+        options: [{ value: 'no', label: 'Frame only' }, { value: 'yes', label: 'Frame + tabletop' }],
+      },
+      { kind: 'text', name: 'topMaterial', label: 'Tabletop material', placeholder: 'e.g. Finished white oak', visibleWhen: (s) => s.includeTop === 'yes' },
+      { kind: 'number', name: 'topCost', label: 'Tabletop cost ($ each)', min: 0, step: 0.01, note: 'Your total cost for one finished top, before markup.', visibleWhen: (s) => s.includeTop === 'yes' },
       { kind: 'number', name: 'lengthFt', label: 'Top length', unit: 'ft', positive: true, exact: true },
       { kind: 'number', name: 'widthIn', label: 'Top width', unit: 'in', positive: true, exact: true },
       { kind: 'number', name: 'frameHeightIn', label: 'Frame height', unit: 'in', positive: true, exact: true },
-      { kind: 'number', name: 'topThicknessIn', label: "Customer's top thickness", unit: 'in', positive: true, exact: true },
+      { kind: 'number', name: 'topThicknessIn', label: 'Tabletop thickness', unit: 'in', positive: true, exact: true },
       {
         kind: 'segment', name: 'footrest', label: 'Foot rest', cols: 2,
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }],
@@ -762,7 +771,7 @@ export function summaryLine(type, s) {
   if (type === 'table') {
     const tt = optionLabel('table', 'tableType', s.tableType || 'bar');
     const n = Number(s.qty) > 1 ? `${s.qty} × ` : '';
-    return `${n}${tt} · ${ft(s.lengthFt, true)} × ${inch(s.widthIn, true)} top · ${inch(s.frameHeightIn, true)} frame · ${fin}`;
+    return `${n}${tt} · ${s.includeTop === 'yes' ? 'Frame + tabletop' : 'Frame only'} · ${ft(s.lengthFt, true)} × ${inch(s.widthIn, true)} top · ${inch(s.frameHeightIn, true)} frame · ${fin}`;
   }
   if (type === 'concrete') {
     const proj = optionLabel('concrete', 'project', s.project);
@@ -889,9 +898,12 @@ export function specRows(type, s) {
     rows.push(['Foot rest', s.footrest === 'no' ? 'No' : 'Yes']);
     if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('table', 'coating', s.coating)]);
     rows.push(['Finish', fin]);
-    // The product boundary, stated on the printed quote so there's no argument
-    // later about who was buying the wood.
-    rows.push(['Scope', 'Steel base only — customer supplies the wood top']);
+    if (s.includeTop === 'yes') {
+      rows.push(['Tabletop material', String(s.topMaterial || '').trim() || 'To be specified']);
+      rows.push(['Scope', 'Steel frame and tabletop included']);
+    } else {
+      rows.push(['Scope', 'Steel frame only — customer supplies the tabletop']);
+    }
     return rows.map(([label, value]) => ({ label, value }));
   }
   if (type === 'concrete') {

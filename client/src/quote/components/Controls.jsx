@@ -143,6 +143,7 @@ function NumberField({ control, value, onChange }) {
                 max={control.max}
                 step={control.step}
                 value={value}
+                aria-label={control.label}
                 onChange={(e) => onChange(control.name, e.target.value)}
               />
               {control.unit && <span className="num-suffix">{control.unit}</span>}
@@ -150,6 +151,7 @@ function NumberField({ control, value, onChange }) {
           )}
         </span>
       </legend>
+      {control.note && <span className="ctrl-note">{control.note}</span>}
     </fieldset>
   );
 }
@@ -164,6 +166,7 @@ function TextField({ control, value, onChange }) {
         className="ctrl-text"
         name={control.name}
         value={value ?? ''}
+        aria-label={control.label}
         placeholder={control.placeholder || ''}
         onChange={(e) => onChange(control.name, e.target.value)}
       />

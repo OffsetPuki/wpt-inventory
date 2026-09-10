@@ -47,7 +47,7 @@ function ItemRow({ item, onEdit, onRemove, onMove, first, last }) {
           title="Rename this line — this is the wording the customer sees"
           onChange={(e) => onEdit(item.key, 'name', e.target.value)}
         />
-        {item.unpriced && <span className="line-warn" title="A rate driving this line isn't set in the Price Book — open it and fill in the missing rate.">⚠ unset rate</span>}
+        {item.unpriced && <span className="line-warn" title={item.key === 'tabletop' ? 'Enter the cost per tabletop in this quote.' : "A rate driving this line isn't set in the Price Book — open it and fill in the missing rate."}>⚠ unset rate</span>}
         {/* Line order is what the customer reads on their quote — put the
             headline work at the top, the odds and ends underneath. */}
         {onMove && (
@@ -274,8 +274,8 @@ export default function LineItems({
 
       {unpricedCount > 0 && (
         <div className="estimate-warn">
-          ⚠ {unpricedCount === 1 ? '1 line has' : `${unpricedCount} lines have`} a rate that isn't set in the Price Book —
-          {' '}some options aren't moving the price yet.
+          ⚠ {unpricedCount === 1 ? '1 line has' : `${unpricedCount} lines have`} no cost set —
+          {' '}fill in the missing rates before sending the quote.
         </div>
       )}
 

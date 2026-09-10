@@ -5,11 +5,11 @@
  * state, returns inner-SVG markup for an <svg viewBox="0 0 800 450">. Uses the
  * carport/pergola cavalier oblique projection.
  *
- * The wood top is drawn hatched and outlined rather than solid — CJM builds the
- * steel base only, and the preview should never let anyone forget that.
+ * An included tabletop is solid; a customer-supplied top is hatched and
+ * outlined, with a label making the quote's scope explicit.
  *
  * state: { lengthFt, widthIn, frameHeightIn, topThicknessIn, footrest, color,
- *          qty } — see data/configurators.js.
+ *          qty, includeTop } — see data/configurators.js.
  */
 
 import { shade, pts } from './svg.js';
@@ -28,6 +28,7 @@ export function renderTable(state) {
   const frameHeightIn = Number(state.frameHeightIn) || 40;
   const topThickIn = Number(state.topThicknessIn) || 1.5;
   const hasFootrest = state.footrest !== 'no';
+  const includeTop = state.includeTop === 'yes';
   const frame = state.color || '#0A0A0A';
   const frameDark = shade(frame, -0.25);
   const wood = '#B89472';
@@ -116,7 +117,7 @@ export function renderTable(state) {
     parts.push(`<rect x="${(x0 + inset).toFixed(1)}" y="${frY.toFixed(1)}" width="${(lenPx - inset * 2).toFixed(1)}" height="${(frT * 0.32).toFixed(1)}" fill="${shade(frame, 0.28)}" />`);
   }
 
-  // ---- the customer's wood top: hatched + outlined, NOT part of the quote ----
+  // ---- tabletop: solid if included, hatched if customer supplied ----
   const topThickPx = Math.max(3, topThickFt * pxPerFt);
   // The top sits inset from the base's ends by the overhang (1.5 in per side)
   const topInsetPx = Math.max(0, ((baseLenFt - topLenFt) / 2) * pxPerFt);
@@ -128,12 +129,14 @@ export function renderTable(state) {
     + `<rect width="7" height="7" fill="${wood}" fill-opacity="0.13" />`
     + `<line x1="0" y1="0" x2="0" y2="7" stroke="${wood}" stroke-width="1.6" stroke-opacity="0.55" /></pattern>`,
   );
+  const topFill = includeTop ? wood : 'url(#cjm-tbl-wood)';
+  const topDash = includeTop ? '' : ' stroke-dasharray="5 3"';
   // top face (going back), then the front edge
   parts.push(`<polygon points="${pts([
     [tL, topY], [tR, topY], [tR + dvx, topY - dvy], [tL + dvx, topY - dvy],
-  ])}" fill="url(#cjm-tbl-wood)" stroke="${wood}" stroke-width="1" stroke-dasharray="5 3" />`);
-  parts.push(`<rect x="${tL.toFixed(1)}" y="${topY.toFixed(1)}" width="${(tR - tL).toFixed(1)}" height="${topThickPx.toFixed(1)}" fill="url(#cjm-tbl-wood)" stroke="${wood}" stroke-width="1" stroke-dasharray="5 3" />`);
-  parts.push(`<text x="${((tL + tR) / 2 + dvx / 2).toFixed(1)}" y="${(topY - dvy - 8).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1.5" fill="${dimText}">TOP BY CUSTOMER — NOT INCLUDED</text>`);
+  ])}" fill="${topFill}" stroke="${wood}" stroke-width="1"${topDash} />`);
+  parts.push(`<rect x="${tL.toFixed(1)}" y="${topY.toFixed(1)}" width="${(tR - tL).toFixed(1)}" height="${topThickPx.toFixed(1)}" fill="${includeTop ? shade(wood, -0.2) : topFill}" stroke="${wood}" stroke-width="1"${topDash} />`);
+  parts.push(`<text x="${((tL + tR) / 2 + dvx / 2).toFixed(1)}" y="${(topY - dvy - 8).toFixed(1)}" text-anchor="middle" font-family="Inter, sans-serif" font-size="9" letter-spacing="1.5" fill="${dimText}">${includeTop ? 'TABLETOP INCLUDED' : 'TOP BY CUSTOMER — NOT INCLUDED'}</text>`);
 
   // ---- dimensions ----
   const wY = GROUND_Y + 14;
