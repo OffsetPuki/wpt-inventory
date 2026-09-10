@@ -469,7 +469,7 @@ function runBusinessSweep(): void {
   step("review-ask retry", () => {
     if (!mailEnabled()) return;
     const rows = sqlite.prepare(`
-      SELECT id, token, name, email FROM review_requests
+      SELECT id, token, name, email, invoice_id, lead_id FROM review_requests
       WHERE email IS NOT NULL AND email != ''
         AND sent_at IS NULL AND submitted_at IS NULL AND created_at >= ?
         AND created_at < ?
@@ -480,6 +480,8 @@ function runBusinessSweep(): void {
       if (isOptedOut(rr.email)) continue;
       setImmediate(async () => {
         const msg = renderTemplate("review.request", {
+          leadId: String(rr.lead_id || ""),
+          invoiceNumber: (sqlite.prepare("SELECT number FROM fin_invoices WHERE id=?").get(rr.invoice_id) as any)?.number || "",
           firstName: firstNameOf(rr.name),
           reviewUrl: `${PUBLIC_SITE_URL}/review/${rr.token}`,
         });
@@ -741,7 +743,10 @@ function runBusinessSweep(): void {
   // 21. Nightly DB snapshot (Phase E) — >20h age gate makes it fire about once
   // a day off the hourly tick; rotation keeps the 7 newest in DATA_DIR/backups.
   step("nightly backup", () => {
-    maybeNightlyBackup(now);
+    void maybeNightlyBackup(now).catch(error => {
+      console.error("[backup] nightly/offsite backup failed",error);
+      ensureTask(`auto:backup-failed:${today}`, "Check the failed complete backup in Settings → Backups");
+    });
   });
 
   // 21b. Weekly offsite copy (Phase E) — small enough and mail configured:
@@ -768,7 +773,7 @@ function runBusinessSweep(): void {
         const ok = await sendOwnerMail({
           subject: `CJM Suite weekly backup — ${today}`,
           text:
-            `Attached is this week's gzipped snapshot of the suite database (${filename}).\n\n` +
+            `Attached is this week's complete backup of the database and uploads (${filename}).\n\n` +
             `Keep a copy somewhere off the server — your PC, OneDrive, a USB stick. ` +
             `See RESTORE.md in the repo for how to restore it.`,
           attachments: [{ filename, content: fs.readFileSync(snap.file) }],

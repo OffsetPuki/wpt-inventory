@@ -1,3 +1,4 @@
+import { saveLeadPhoto } from "./media";
 import type { Express } from "express";
 import path from "path";
 import fs from "fs";
@@ -44,6 +45,8 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_web_designs_created ON web_designs(created_at);
 `);
+
+sqlite.exec(`CREATE TABLE IF NOT EXISTS web_lead_receipts (submission_id TEXT PRIMARY KEY, lead_id INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
 
 // Additive migration: the saved design-preview PNG (an /uploads URL) arrived
 // after installs existed. SQLite has no IF NOT EXISTS for columns — the throw
@@ -134,6 +137,8 @@ const intakeSchema = z.object({
   // Deliberately unvalidated here: an oversized/malformed snapshot is ignored
   // by saveDesignPng, never a reason to reject the lead itself.
   designPng: z.unknown().optional(),
+  photos: z.array(z.string().max(1_400_000)).max(3).optional(),
+  submissionId: z.string().regex(/^[a-zA-Z0-9-]{16,80}$/).optional(),
 });
 
 // SITE_DOMAINS (the notes "From <domain>" line, the audit userName and the
@@ -342,6 +347,14 @@ export function registerPublicRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
 
+    if(body.submissionId) {
+      const receipt=sqlite.prepare("SELECT lead_id FROM web_lead_receipts WHERE submission_id=?").get(body.submissionId) as any;
+      if(receipt)return res.status(200).json({ok:true,id:receipt.lead_id,deduped:true});
+    }
+    let photoUrls:string[]=[];
+    try {photoUrls=(body.photos || []).map(saveLeadPhoto);}
+    catch(error:any){return res.status(400).json({message:error.message});}
+    const {row,dupe}=sqlite.transaction(()=>{
     const source = mapSource(body.utm?.source);
     // Pre-`site` senders (the metals site before the rollout) omit the field.
     const site: LeadSite = body.site ?? "metals";
@@ -396,6 +409,7 @@ export function registerPublicRoutes(app: Express): void {
       // a stored value.
       row = db.update(leads)
         .set({
+          preferredLanguage: body.lang ?? dupe.preferredLanguage,
           name: body.name || dupe.name,
           phone: body.phone || dupe.phone,
           email: body.email || dupe.email,
@@ -408,6 +422,7 @@ export function registerPublicRoutes(app: Express): void {
         .get();
     } else {
       row = db.insert(leads).values({
+        preferredLanguage: body.lang ?? "en",
         name: body.name,
         phone: body.phone || null,
         email: body.email || null,
@@ -428,6 +443,7 @@ export function registerPublicRoutes(app: Express): void {
     // The saved snapshot doubles as the lead's first photo — it shows up in
     // the CRM photo strip like any shop-floor upload.
     if (pngUrl) appendLeadPhoto(row.id, pngUrl);
+    for(const photo of photoUrls)appendLeadPhoto(row.id,photo);
 
     // Configurator designs get their own structured row so the Quote App's
     // "Find design" lookup can serve them. Resubmitting the same code (e.g.
@@ -517,21 +533,15 @@ export function registerPublicRoutes(app: Express): void {
       });
     }
 
-    // Customer acknowledgement, for the three sister sites only.
-    //
-    // Concrete, insulation and trades hand ALL their customer mail to a Google
-    // Apps Script webhook that has never been configured, so their customers
-    // saw a thank-you page and then heard nothing — no reference to quote back,
-    // nothing to reply to with photos. The suite can send it itself and needs
-    // no Google account to do it.
-    //
-    // Skipping metals is not optional: that site's script already sends this
-    // exact email, and sending here too would give every metals customer two.
-    if (!dupe && site !== "metals" && body.email && mailEnabled() && !isOptedOut(body.email)) {
+    // The suite acknowledges CRM intake for every trade. Websites invoke their
+    // fallback mail path only when CRM persistence cannot be confirmed.
+    if (!dupe && body.email && mailEnabled() && !isOptedOut(body.email)) {
       const msg = renderTemplate("lead.received", {
+        lang:body.lang ?? "en",
+        brand:({metals:"CJM Metals",concrete:"CJM Concrete",insulation:"CJM Insulation",trades:"CJM Trades"})[site],
         firstName: firstNameOf(body.name),
         service: body.service || body.message || "your project",
-        refLine: body.designRef ? `Your project code is ${body.designRef} — quote it if you call.\n` : "",
+        refLine: body.designRef ? (body.lang === "es" ? `Tu código de proyecto es ${body.designRef}.\n` : `Your project code is ${body.designRef}.\n`) : "",
       });
       if (msg) {
         setImmediate(() => {
@@ -540,6 +550,9 @@ export function registerPublicRoutes(app: Express): void {
       }
     }
 
+    if(body.submissionId)sqlite.prepare("INSERT INTO web_lead_receipts (submission_id,lead_id,created_at) VALUES (?,?,?)").run(body.submissionId,row.id,Date.now());
+    return {row,dupe};
+    })();
     res.status(201).json(
       dupe ? { ok: true, id: row.id, deduped: true } : { ok: true, id: row.id },
     );

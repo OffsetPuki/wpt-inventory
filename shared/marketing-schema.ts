@@ -87,7 +87,7 @@ export const portfolioItems = sqliteTable("mk_portfolio", {
   title: text("title").notNull(),
   category: text("category"), // "Gates", "Fencing", … (free text)
   photoUrl: text("photo_url").notNull(), // /uploads/… path
-  published: integer("published", { mode: "boolean" }).notNull().default(true),
+  published: integer("published", { mode: "boolean" }).notNull().default(false),
   orderIndex: integer("order_index").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()

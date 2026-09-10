@@ -1,3 +1,4 @@
+import { acceptQuote } from "./quote-lifecycle";
 import type { Express } from "express";
 import {
   eq, and, or, desc, isNull, sql, like, gte, lte, notInArray, type SQL,
@@ -119,6 +120,18 @@ for (const col of [
   }
 }
 
+for (const table of ["crm_leads","crm_clients"]) {
+  const columns=sqlite.pragma(`table_info(${table})`) as {name:string}[];
+  if(!columns.some(c=>c.name==="preferred_language")) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN preferred_language TEXT NOT NULL DEFAULT 'en'`);
+    // Recover known preferences once; later explicit owner edits are preserved.
+    if(table==="crm_leads" && sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='web_designs'").get())
+      sqlite.exec("UPDATE crm_leads SET preferred_language=coalesce((SELECT lang FROM web_designs WHERE lead_id=crm_leads.id ORDER BY id DESC LIMIT 1),'en')");
+    if(table==="crm_clients")
+      sqlite.exec("UPDATE crm_clients SET preferred_language=coalesce((SELECT preferred_language FROM crm_leads WHERE client_id=crm_clients.id ORDER BY id DESC LIMIT 1),'en')");
+  }
+}
+
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -234,6 +247,7 @@ export interface QuoteContactInfo {
   email?: string | null;
   phone?: string | null;
   designRef?: string | null;
+  preferredLanguage?: "en" | "es";
 }
 
 // Normalized contact channels for matching, falling back to the linked web
@@ -276,6 +290,7 @@ export function findOrCreateClientByContact(info: QuoteContactInfo): number | nu
     });
   if (existing) return existing.id;
   const row = db.insert(clients).values({
+    preferredLanguage: info.preferredLanguage ?? "en",
     name: (info.name ?? "").trim() || emailNorm || `Customer …${phoneDigits}`,
     email: (info.email ?? "").trim() || (emailNorm || null),
     phone: (info.phone ?? "").trim() || null,
@@ -406,19 +421,11 @@ export function onQuoteEvent(
   setImmediate(() => {
     try {
       const { emailNorm, phoneDigits } = resolveQuoteContact(info);
-      if (!emailNorm && !phoneDigits) return;
-
-      // ponytail: JS scan over live leads, newest first — fine at shop scale.
-      const lead = db.select().from(leads)
-        .where(isNull(leads.deletedAt))
-        .orderBy(desc(leads.createdAt), desc(leads.id))
-        .all()
-        .find((l) => {
-          const lEmail = (l.email ?? "").trim().toLowerCase();
-          const lPhone = contactDigits(l.phone);
-          return (!!emailNorm && !!lEmail && lEmail === emailNorm)
-            || (!!phoneDigits && !!lPhone && lPhone === phoneDigits);
-        });
+      const linked = sqlite.prepare(`SELECT coalesce(q.lead_id, d.lead_id) AS lead_id FROM quotes q
+        LEFT JOIN web_designs d ON upper(d.ref) = upper(q.design_ref) WHERE q.number = ?`).get(info.quoteNumber) as { lead_id: number | null } | undefined;
+      const lead = linked?.lead_id == null ? undefined : db.select().from(leads)
+        .where(and(eq(leads.id, linked.lead_id), isNull(leads.deletedAt))).get();
+      if (!lead && !emailNorm && !phoneDigits) return;
 
       const now = Date.now();
 
@@ -470,6 +477,7 @@ export function onQuoteEvent(
               ? declineNote
               : `Quote ${info.quoteNumber} shared with this contact`,
         }).run();
+        sqlite.prepare("UPDATE quotes SET lead_id = ? WHERE number = ? AND lead_id IS NULL").run(created.id, info.quoteNumber);
         if (evt === "sent") ensureQuoteReminder(created, now);
         else if (evt === "accepted") stampInvoiceLead(info.quoteNumber, created.id);
         return;
@@ -544,80 +552,28 @@ export function onQuoteEvent(
 // dashboard's open pipeline (draft + sent), and still being chased by the
 // automated follow-up ladder, which fires on status = 'sent' (automations.ts).
 //
-// Matching is onQuoteEvent's rule read backwards: normalized email or
-// digits-only phone off the builder's customer card, falling back to the linked
-// website design's contact. Name is deliberately NOT a channel — too collidable
-// to close money records on.
-//
-// Won accepts exactly ONE quote: the newest open one. Sibling revisions of the
-// same job are normal (a re-quote supersedes last week's), and accepting both
-// would double-book the job in every accepted-quote report — monthly revenue,
-// revenue closed (30d), the costing report. The older siblings are declined as
-// superseded so the pipeline still clears.
-// ponytail: newest-wins is a heuristic — the owner has no per-quote control to
-// say which one sold, and the note on each card says what happened to it.
-// Exported for scripts/check-lead-quote-close.mjs, which drives it directly.
+// A win uses the selected explicitly linked quote. Loss closes only this job.
 export function closeQuotesForLead(
-  lead: Lead,
-  outcome: "won" | "lost",
-  reason: WinLossReason | null,
-  now: number,
+  lead: Lead, outcome: "won" | "lost", reason: WinLossReason | null, now: number, selectedQuoteId?: number,
 ): string[] {
-  const emailNorm = (lead.email ?? "").trim().toLowerCase();
-  const phoneDigits = contactDigits(lead.phone);
-  if (!emailNorm && !phoneDigits) return [];
-  try {
-    // Open quotes with their resolved contact, newest first. Same coalesce
-    // chain as the opt-out flags in quotes.ts: payload customer card, else the
-    // website design the quote was started from.
-    const open = sqlite.prepare(`
-      SELECT q.id, q.number,
-             lower(trim(coalesce(nullif(json_extract(q.payload, '$.customer.email'), ''), d.email, ''))) AS email,
-             coalesce(nullif(json_extract(q.payload, '$.customer.phone'), ''), d.phone, '') AS phone
-      FROM quotes q
-      LEFT JOIN web_designs d ON upper(d.ref) = upper(q.design_ref)
-      WHERE q.deleted_at IS NULL AND q.status IN ('draft', 'sent')
-      ORDER BY coalesce(q.sent_at, q.updated_at, q.created_at) DESC, q.id DESC
-    `).all() as { id: number; number: string; email: string; phone: string }[];
-
-    const mine = open.filter((q) => {
-      const qPhone = contactDigits(q.phone);
-      return (!!emailNorm && !!q.email && q.email === emailNorm)
-        || (!!phoneDigits && !!qPhone && qPhone === phoneDigits);
-    });
-    if (!mine.length) return [];
-
-    // The lead's loss reason carries straight over when the customer could have
-    // picked it themselves — QUOTE_DECLINE_REASONS is a subset of
-    // WIN_LOSS_REASONS on purpose. "no_response" and the win reasons have no
-    // customer-facing equivalent, so they land on "other".
-    const declineReason =
-      (QUOTE_DECLINE_REASONS as readonly string[]).includes(reason ?? "")
-        ? reason : "other";
-    const decline = sqlite.prepare(`
-      UPDATE quotes SET status = 'declined', declined_at = ?, decline_reason = ?,
-                        decline_note = ?, updated_at = ? WHERE id = ?
-    `);
-    const accept = sqlite.prepare(
-      "UPDATE quotes SET status = 'accepted', accepted_at = ?, accept_note = ?, updated_at = ? WHERE id = ?",
-    );
-    mine.forEach((q, i) => {
-      if (outcome === "lost") {
-        decline.run(now, declineReason, "Marked lost in the CRM", now, q.id);
-      } else if (i === 0) {
-        accept.run(now, "Marked won in the CRM", now, q.id);
-      } else {
-        decline.run(now, "scope_changed",
-          `Superseded by ${mine[0].number} — lead marked won`, now, q.id);
-      }
-    });
-    return mine.map((q) => q.number);
-  } catch (e) {
-    // quotes/web_designs belong to the quote module — absent (or mid-migration)
-    // must never fail the owner's stage change.
-    console.error("[crm] lead → quote close failed", e);
-    return [];
+  const linked = sqlite.prepare(`SELECT q.id, q.number, q.status FROM quotes q
+    WHERE q.deleted_at IS NULL AND q.status IN ('draft', 'sent', 'accepted') AND
+    (q.lead_id = ? OR (q.lead_id IS NULL AND q.design_ref IS NOT NULL AND EXISTS
+      (SELECT 1 FROM web_designs d WHERE upper(d.ref) = upper(q.design_ref) AND d.lead_id = ?)))`)
+    .all(lead.id, lead.id) as { id: number; number: string; status: string }[];
+  if (!linked.length) return [];
+  if (outcome === "won") {
+    const selected = selectedQuoteId == null ? (linked.length === 1 ? linked[0] : null) : linked.find(q => q.id === selectedQuoteId);
+    if (!selected) throw new Error("Choose the quote this customer accepted. Other quotes will stay unchanged.");
+    acceptQuote(selected.id, "Marked won in the CRM", null, "CJM team");
+    return [selected.number];
   }
+  const declineReason = (QUOTE_DECLINE_REASONS as readonly string[]).includes(reason ?? "") ? reason : "other";
+  for (const quote of linked.filter(q => q.status !== "accepted")) {
+    sqlite.prepare("UPDATE quotes SET status='declined', declined_at=?, decline_reason=?, decline_note=?, updated_at=? WHERE id=?")
+      .run(now, declineReason, "This job was marked lost in the CRM", now, quote.id);
+  }
+  return linked.filter(q => q.status !== "accepted").map(q => q.number);
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -916,7 +872,10 @@ export function registerCrmRoutes(app: Express): void {
         ORDER BY created_at DESC, id DESC LIMIT 1
       `).get(id) ?? null;
     } catch { /* website module absent */ }
-    res.json({ design });
+    const quotes = sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents FROM quotes WHERE lead_id = ? OR design_ref IN (SELECT ref FROM web_designs WHERE lead_id = ?) ORDER BY id DESC`).all(id, id);
+    const jobs = sqlite.prepare(`SELECT DISTINCT p.id, p.name FROM projects p JOIN fin_invoices i ON i.project_id = p.id WHERE i.lead_id = ? AND p.deleted_at IS NULL`).all(id);
+    const invoices = isElevated(req) ? sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents, paid_cents AS paidCents FROM fin_invoices WHERE lead_id = ? AND deleted_at IS NULL ORDER BY id DESC`).all(id) : [];
+    res.json({ design, quotes, projects: jobs, invoices });
   });
 
   app.patch("/api/crm/leads/:id", requireAuth, (req, res) => {
@@ -964,7 +923,22 @@ export function registerCrmRoutes(app: Express): void {
       }
     }
 
-    const row = db.update(leads).set(update).where(eq(leads.id, id)).returning().get();
+    let row: Lead;
+    let closedQuotes: string[] = [];
+    try {
+      row = sqlite.transaction(() => {
+        if (stageChanged && (parsed.stage === "won" || parsed.stage === "lost")) {
+          closedQuotes = closeQuotesForLead(existing, parsed.stage, update.winLossReason ?? null, now,
+            Number.isInteger(req.body?.quoteId) ? req.body.quoteId : undefined);
+          if (closedQuotes.length && parsed.stage === "won") {
+            update.revenueClosedCents = db.select().from(leads).where(eq(leads.id, id)).get()!.revenueClosedCents;
+          }
+        }
+        return db.update(leads).set(update).where(eq(leads.id, id)).returning().get();
+      })();
+    } catch (error: any) {
+      return res.status(409).json({ message: error.message });
+    }
     if (!row) return res.status(404).json({ message: "Lead not found" });
 
     if (stageChanged) {
@@ -972,9 +946,6 @@ export function registerCrmRoutes(app: Express): void {
       if (row.stage === "quote_sent") ensureQuoteReminder(row, now);
       // (e) Closing the lead closes its open quotes (see closeQuotesForLead) —
       // synchronously, so the Saved list agrees the moment the board does.
-      const closedQuotes = (row.stage === "won" || row.stage === "lost")
-        ? closeQuotesForLead(row, row.stage, row.winLossReason ?? null, now)
-        : [];
       audit(req, "crm.lead_stage", {
         targetType: "lead", targetId: row.id, targetName: row.name,
         details: {

@@ -4,10 +4,8 @@ import { storage } from "./storage";
 
 // ─── Session config ──────────────────────────────────────────────────────────
 
-// 30-day sliding TTL: every authenticated request bumps the expiry, so a token
-// that's actively used keeps working; a token that's idle for 30 days expires
-// and the user has to sign in again.
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// Sign in again after 12 hours, including sessions created before this limit.
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface SessionData {
   userId: number;
@@ -27,13 +25,13 @@ export function createSession(userId: number, role: string, name: string): strin
 export function getSession(token: string): SessionData | null {
   const row = storage.getSession(token);
   if (!row) return null;
-  if (row.expiresAt < Date.now()) {
+  if (row.expiresAt < Date.now() || row.createdAt + SESSION_TTL_MS < Date.now() || !storage.userCanSignIn(row.userId)) {
     storage.deleteSession(token);
     return null;
   }
-  // Sliding TTL — bump expiry so an active session never abruptly times out.
-  storage.touchSession(token, Date.now() + SESSION_TTL_MS);
-  return { userId: row.userId, role: row.role, name: row.name };
+  // Absolute lifetime also expires sessions created before the shorter limit.
+  const user = storage.getUserById(row.userId)!;
+  return { userId: user.id, role: user.role, name: user.name };
 }
 
 export function destroySession(token: string): void {
@@ -87,12 +85,17 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
   req.user = { ...session, token };
+  const user = storage.getUserById(session.userId)!;
+  if (process.env.NODE_ENV === "production" && user.role !== "worker" && (user.credentialType !== "password" || !user.totpSecret)
+    && !req.path.startsWith("/api/security/") && !["/api/auth/me","/api/auth/logout"].includes(req.path)) {
+    res.status(428).json({message:"Complete owner security setup before using the suite.",securitySetupRequired:true}); return;
+  }
   next();
 }
 
 // Elevated endpoints — the owner. Legacy 'manager'/'technician' roles are
-// still accepted: sessions persist in SQLite, so outstanding rows carry the
-// old role strings until they expire (30-day sliding TTL).
+// still accepted for older accounts. Roles are refreshed from the user record
+// on every authenticated request.
 export function requireElevated(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     const role = req.user?.role;

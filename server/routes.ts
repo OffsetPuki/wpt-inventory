@@ -1,3 +1,5 @@
+import { setMediaCookie } from "./media";
+import { registerSecurityRoutes, verifySecondFactor, strongPassword } from "./security";
 import type { Express } from "express";
 import multer from "multer";
 import path from "path";
@@ -6,9 +8,9 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
-import { storage, uploadsDir, sqlite } from "./storage";
+import { storage, uploadsDir, sqlite, toPublicUser } from "./storage";
 import { audit, clientIp } from "./audit";
-import { requireAuth, requireElevated, createSession, destroySession } from "./auth";
+import { requireAuth, requireElevated, createSession, destroySession, getSession } from "./auth";
 import { isElevated } from "./http-util";
 // Business-suite modules. Import order matters for DDL: marketing owns the
 // mk_* tables that CRM's automation hooks insert into, so it loads first.
@@ -18,7 +20,7 @@ import { registerPmRoutes } from "./pm";
 import { registerHrRoutes } from "./hr";
 import { registerFinanceRoutes } from "./finance";
 import { registerSearchRoutes } from "./search";
-import { registerPublicRoutes } from "./public-api";
+import { registerPublicRoutes, hasLeadKey } from "./public-api";
 // Customer-facing portal (estimates, quote links, reviews, site info) —
 // reads tables owned by public-api, quotes and marketing, so it loads last.
 import { registerPublicPortalRoutes } from "./public-portal";
@@ -108,6 +110,7 @@ const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
+  registerSecurityRoutes(app);
   // ─── Auth ────────────────────────────────────────────────────────────────
 
   // Express types `req.params.*` as `string | string[]`; narrow to string.
@@ -138,7 +141,7 @@ export function registerRoutes(app: Express): void {
     // during the ~80ms hash so concurrent logins don't queue behind it.
     const hashToCheck = user ? user.pin : DUMMY_BCRYPT_HASH;
     const matched = await bcrypt.compare(body.pin, hashToCheck);
-    const ok = !!user && matched;
+    const ok = !!user && matched && storage.userCanSignIn(user.id) && verifySecondFactor(user.id, user.totpSecret, body.otp);
 
     if (!ok) {
       // Only track failures for known usernames — counting bogus usernames
@@ -159,7 +162,7 @@ export function registerRoutes(app: Express): void {
           });
         }
       }
-      return res.status(401).json({ message: "Invalid name or PIN" });
+      return res.status(401).json({ message: "Invalid sign-in details. Check your password/PIN and authenticator or recovery code." });
     }
 
     storage.clearLoginAttempts(body.name);
@@ -168,12 +171,14 @@ export function registerRoutes(app: Express): void {
       userId: user.id, userName: user.name, role: user.role,
       action: "auth.login_success", ip: clientIp(req),
     });
-    const { pin, ...publicUser } = user;
+    const publicUser = toPublicUser(user);
+    setMediaCookie(req,res,token);
     res.json({ token, user: publicUser });
   });
 
   app.post("/api/auth/logout", requireAuth, (req, res) => {
     if (req.user?.token) destroySession(req.user.token);
+    setMediaCookie(req,res,null);
     audit(req, "auth.logout");
     res.json({ ok: true });
   });
@@ -181,7 +186,8 @@ export function registerRoutes(app: Express): void {
   app.get("/api/auth/me", requireAuth, (req, res) => {
     const user = storage.getUserById(req.user!.userId);
     if (!user) return res.status(401).json({ message: "User not found" });
-    const { pin, ...publicUser } = user;
+    const publicUser = toPublicUser(user);
+    setMediaCookie(req,res,req.user!.token);
     res.json(publicUser);
   });
 
@@ -200,8 +206,8 @@ export function registerRoutes(app: Express): void {
     try {
       const { name, pin, role } = req.body;
       if (!name || !pin) return res.status(400).json({ message: "Name and PIN required" });
-      if (typeof pin !== "string" || !/^\d{4}$/.test(pin)) {
-        return res.status(400).json({ message: "PIN must be 4 digits" });
+      if (role === "owner" ? !strongPassword(pin) : typeof pin !== "string" || !/^\d{4,12}$/.test(pin)) {
+        return res.status(400).json({ message: "Owners need a password of at least 12 characters; workers need a 4–12 digit PIN." });
       }
       const finalRole = role || "worker";
       if (!ROLES.includes(finalRole)) {
@@ -215,6 +221,7 @@ export function registerRoutes(app: Express): void {
         pin: bcrypt.hashSync(pin, BCRYPT_ROUNDS),
         role: finalRole,
       });
+      if (finalRole === "owner") sqlite.prepare("UPDATE users SET credential_type='password' WHERE id=?").run(user.id);
       audit(req, "user.create", {
         targetType: "user", targetId: user.id, targetName: user.name,
         details: { role: user.role },
@@ -225,34 +232,37 @@ export function registerRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/users/:id", requireElevated, (req, res) => {
-    const id = pid(req.params.id);
-    const target = storage.getUserById(id);
-    // Logged hours ARE the payroll record now (payroll reads pm_time_entries),
-    // and that table cascades on user delete — so removing a login would
-    // silently erase what someone was owed and what a job cost. Make it an
-    // explicit decision instead. pm module owns the table → raw SQL/try-catch.
+  app.patch("/api/users/:id/access", requireElevated, (req,res) => {
     try {
-      const logged = sqlite.prepare(
-        "SELECT COUNT(*) AS n, COALESCE(SUM(duration_min), 0) AS mins FROM pm_time_entries WHERE user_id = ?",
-      ).get(id) as { n: number; mins: number };
-      if (logged.n > 0) {
-        const hours = Math.round((logged.mins / 60) * 10) / 10;
-        return res.status(409).json({
-          message: `${target?.name ?? "This user"} has ${hours} logged hour${hours === 1 ? "" : "s"} `
-            + "on the clock — deleting the login would erase them from payroll and job costing. "
-            + "Change the PIN to lock them out, or delete their time entries first.",
-        });
-      }
-    } catch {
-      /* pm module absent — nothing to protect */
-    }
-    storage.deleteUser(id);
-    audit(req, "user.delete", {
-      targetType: "user", targetId: id, targetName: target?.name ?? null,
-      details: { role: target?.role ?? null },
-    });
-    res.json({ ok: true });
+      const id=pid(req.params.id);
+      if(typeof req.body?.active !== "boolean") return res.status(400).json({message:"Choose activate or deactivate."});
+      if(id===req.user!.userId && !req.body.active) return res.status(400).json({message:"Another owner must deactivate your account."});
+      storage.setUserAccess(id,req.body.active);
+      audit(req,"user.access_change",{targetType:"user",targetId:id,details:{active:req.body.active}});
+      res.json({ok:true});
+    } catch(error:any) {res.status(409).json({message:error.message});}
+  });
+  app.post("/api/users/:id/reset-credential", requireElevated, async (req,res,next) => {
+    try {
+    const user=storage.getUserById(pid(req.params.id));
+    if(!user) return res.status(404).json({message:"User not found"});
+    const credential=req.body?.credential;
+    if(user.role!=="worker" ? !strongPassword(credential) : typeof credential!=="string" || !/^\d{4,12}$/.test(credential)) return res.status(400).json({message:"Use a 12+ character owner password or a 4–12 digit worker PIN."});
+    const hash=await bcrypt.hash(credential,12);
+    storage.setUserPin(user.id,hash);
+    if(user.role!=="worker") sqlite.prepare("UPDATE users SET credential_type='password' WHERE id=?").run(user.id);
+    audit(req,"user.credential_reset",{targetType:"user",targetId:user.id});
+    res.json({ok:true});
+    } catch(error) { next(error); }
+  });
+  app.delete("/api/users/:id", requireElevated, (req,res) => {
+    // Keep all payroll, job and audit relationships; removal means deactivate.
+    try {
+      if(pid(req.params.id)===req.user!.userId) return res.status(400).json({message:"Another owner must deactivate your account."});
+      storage.setUserAccess(pid(req.params.id),false);
+      audit(req,"user.deactivate",{targetType:"user",targetId:pid(req.params.id)});
+      res.json({ok:true,deactivated:true});
+    } catch(error:any) {res.status(409).json({message:error.message});}
   });
 
   // ─── Items ──────────────────────────────────────────────────────────────
@@ -801,6 +811,13 @@ export function registerRoutes(app: Express): void {
     // (b) it's not ours — either way, refuse to serve it.
     const mime = EXT_TO_MIME[ext];
     if (!mime) return next();
+    const publicImage=storage.getSettings().logoUrl === `/uploads/${safeName}` || !!sqlite.prepare("SELECT 1 FROM mk_portfolio WHERE published=1 AND photo_url=? LIMIT 1").get(`/uploads/${safeName}`);
+    const cookie=String(req.headers.cookie || '').split(';').map(v=>v.trim()).find(v=>v.startsWith('cjm_media='))?.slice(10);
+    const token=(req.headers['x-auth'] as string | undefined) || cookie;
+    if(!publicImage && !hasLeadKey(req) && (!token || !getSession(token))) return res.status(401).json({message:"Sign in to view this private image."});
+    const mediaSession = token ? getSession(token) : null;
+    if(!publicImage && !hasLeadKey(req) && mediaSession && process.env.NODE_ENV === "production" && toPublicUser(storage.getUserById(mediaSession.userId)!).securitySetupRequired)
+      return res.status(428).json({message:"Complete owner security setup before viewing private files."});
     const filePath = path.join(uploadsDir, safeName);
     if (!fs.existsSync(filePath)) return next();
 
@@ -810,9 +827,9 @@ export function registerRoutes(app: Express): void {
     // it read any worker's localStorage token.
     res.setHeader("Content-Type", mime);
     res.setHeader("X-Content-Type-Options", "nosniff");
-    // Content-addressed filenames (unique id baked in) never change, so the
-    // long immutable cache is safe.
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    // Private files must be reauthorized; published images use a short cache.
+    res.setHeader("Cache-Control", publicImage ? "public, max-age=300" : "private, no-store");
+    res.setHeader("Vary", "Cookie, X-Auth, X-Lead-Key");
     res.sendFile(filePath);
   });
 }

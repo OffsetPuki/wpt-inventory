@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { storage, sqlite } from "./storage";
 import { DEFAULT_CJM_EQUIPMENT_PRESETS } from "../shared/cjm-presets";
@@ -49,7 +50,7 @@ export function seedDefaults(): void {
     // In production, seed with a random PIN and log it ONCE so the operator
     // can sign in — never bake the publicly-known dev default into prod.
     const isProd = process.env.NODE_ENV === "production";
-    const ownerPin = isProd ? randomPin() : "1234";
+    const ownerPin = isProd ? crypto.randomBytes(18).toString("base64url") : "1234";
     console.log("[seed] Creating default Owner user");
     storage.createUser({
       name: "Owner",

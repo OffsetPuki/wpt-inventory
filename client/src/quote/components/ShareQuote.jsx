@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/toaster';
  * email it straight to the customer. Rendered from the Saved list rows and
  * from the details step once the quote has saved.
  */
-export default function ShareQuote({ quoteId, customerEmail, onBeforeShare }) {
+export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIssued }) {
   const qc = useQueryClient();
 
   // The Saved list omits the payload (it's the big JSON blob), so a caller
@@ -29,11 +29,15 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare }) {
   const [result, setResult] = useState(null); // { url, emailed, wantedEmail }
 
   const share = useMutation({
-    mutationFn: async (body) => (await apiRequest('POST', `/api/quotes/${quoteId}/share`, body)).json(),
+    mutationFn: async (body) => {
+      if (onBeforeShare) await onBeforeShare();
+      return (await apiRequest('POST', `/api/quotes/${quoteId}/share`, body)).json();
+    },
     onSuccess: (res, body) => {
       setResult({ url: res.url, emailed: res.emailed, wantedEmail: !!body.sendEmail });
       // The first share moves the quote draft → sent — refresh the Saved list badge.
       qc.invalidateQueries({ queryKey: ['quotes'] });
+      onIssued?.({ ...res, wantedEmail: !!body.sendEmail });
       qc.invalidateQueries({ queryKey: ['quote', quoteId] });
     },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not create the link', description: e?.message }),
@@ -66,7 +70,7 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare }) {
               onClick={() => {
                 // Details step: flush edits typed on this screen (customer
                 // name, notes) so the public page shows what's on screen.
-                if (onBeforeShare) onBeforeShare();
+
                 share.mutate(email && sendEmail ? { sendEmail: true, email } : {});
               }}
               disabled={share.isPending}

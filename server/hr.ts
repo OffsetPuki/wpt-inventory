@@ -1,7 +1,8 @@
+import { initializePayRates, payrollSummary, payrollRange, payrollDate, closedPeriod } from "./payroll";
 import type { Express } from "express";
 import { z } from "zod";
 import { eq, and, desc, isNull, sql, getTableColumns } from "drizzle-orm";
-import { sqlite, db } from "./storage";
+import { sqlite, db, storage } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
 import { expenses } from "../shared/finance-schema";
@@ -71,6 +72,8 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_hr_leave_status ON hr_leave_requests(status);
   CREATE INDEX IF NOT EXISTS idx_hr_leave_created ON hr_leave_requests(created_at);
 `);
+
+initializePayRates();
 
 // One-time: the approve/deny workflow is gone — time off filed is fact, so
 // anything still "pending" from the old world counts as approved.
@@ -221,9 +224,31 @@ export function registerHrRoutes(app: Express): void {
   app.patch("/api/hr/employees/:id", requireElevated, (req, res) => {
     try {
       const data = insertEmployeeSchema.partial().parse(req.body);
-      const row = db.update(employees).set(data)
-        .where(and(eq(employees.id, pid(req.params.id)), isNull(employees.deletedAt)))
-        .returning().get();
+      const existing = getEmployee(pid(req.params.id));
+      if (!existing) return res.status(404).json({ message: "Employee not found" });
+      const row = sqlite.transaction(() => {
+        if (data.payRateCents !== undefined && data.payRateCents !== existing.payRateCents || data.payType !== undefined && data.payType !== existing.payType) {
+          const effectiveDate = String(req.body?.payEffectiveDate || todayLocal());
+          payrollDate(effectiveDate);
+          const latest = sqlite.prepare('SELECT max(effective_date) AS date FROM hr_pay_rates WHERE employee_id=?').get(existing.id) as any;
+          if (latest?.date && effectiveDate < latest.date) throw new Error('A newer rate already exists. Choose its date or a later open date.');
+          if (effectiveDate > todayLocal()) throw new Error("Schedule a future rate when it becomes effective; today's profile must keep today's rate.");
+          if (closedPeriod(effectiveDate, '9999-12-31')) throw new Error("This rate would change closed payroll. Use a correction in an open period.");
+          sqlite.prepare(`INSERT INTO hr_pay_rates (employee_id,effective_date,pay_type,rate_cents,created_at) VALUES (?,?,?,?,?)
+            ON CONFLICT(employee_id,effective_date) DO UPDATE SET pay_type=excluded.pay_type,rate_cents=excluded.rate_cents`)
+            .run(existing.id,effectiveDate,data.payType ?? existing.payType,data.payRateCents ?? existing.payRateCents,Date.now());
+          audit(req,"hr.pay_rate_change",{targetType:"employee",targetId:existing.id,details:{effectiveDate,previousRate:existing.payRateCents,newRate:data.payRateCents ?? existing.payRateCents}});
+        }
+        if (data.status === "terminated" && existing.status !== "terminated") {
+          if (existing.userId != null) storage.setUserAccess(existing.userId, false);
+          data.endDate ??= todayLocal();
+        }
+        if (data.userId !== undefined && data.userId !== existing.userId) {
+          const hasHours = existing.userId != null && sqlite.prepare("SELECT 1 FROM pm_time_entries WHERE user_id=? LIMIT 1").get(existing.userId);
+          if (hasHours) throw new Error("This employee has recorded time. Preserve their linked login and deactivate access instead.");
+        }
+        return db.update(employees).set(data).where(eq(employees.id,existing.id)).returning().get();
+      })();
       if (!row) return res.status(404).json({ message: "Employee not found" });
       res.json(row);
     } catch (e: any) {
@@ -315,51 +340,15 @@ export function registerHrRoutes(app: Express): void {
     if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
       return res.status(400).json({ message: "from and to must be YYYY-MM-DD" });
     }
-    const startMs = dayStartMs(from);
-    const endMs = dayEndMs(to);
-    if (endMs < startMs) {
-      return res.status(400).json({ message: "to must be on or after from" });
-    }
+    try { res.json(payrollSummary(from, to)); }
+    catch (error: any) { res.status(400).json({message:error.message}); }
+  });
 
-    const active = db.select().from(employees)
-      .where(and(eq(employees.status, "active"), isNull(employees.deletedAt)))
-      .orderBy(employees.lastName, employees.firstName).all();
-
-    // pm module owns pm_time_entries → raw SQL + try/catch; absent module
-    // degrades to 0 hours.
-    let minutesStmt: any = null;
-    try {
-      minutesStmt = sqlite.prepare(
-        `SELECT COALESCE(SUM(duration_min), 0) AS m FROM pm_time_entries
-         WHERE user_id = ? AND ended_at IS NOT NULL AND started_at >= ? AND started_at <= ?`,
-      );
-    } catch { /* pm module absent */ }
-
-    // Inclusive calendar days in the range, for pro-rating salaries
-    // (cents/year ÷ 365). Round handles DST edges.
-    const days = Math.round((dayStartMs(to) - startMs) / MS_PER_DAY) + 1;
-
-    res.json(active.map((e) => {
-      let hours = 0;
-      if (minutesStmt && e.userId != null) {
-        try {
-          const min = (minutesStmt.get(e.userId, startMs, endMs) as { m: number }).m;
-          hours = Math.round((min / 60) * 100) / 100;
-        } catch { /* best-effort */ }
-      }
-      const grossCents = e.payType === "hourly"
-        ? Math.round(hours * e.payRateCents)
-        : Math.round((e.payRateCents * days) / 365);
-      return {
-        employeeId: e.id,
-        name: fullName(e),
-        payType: e.payType,
-        payRateCents: e.payRateCents,
-        hours,
-        grossCents,
-        linkedLogin: e.userId != null,
-      };
-    }));
+  app.get("/api/hr/payroll/runs", requireElevated, (_req,res) => {
+    res.json(sqlite.prepare("SELECT id,from_date,to_date,total_cents,expense_id,closed_at FROM hr_payroll_runs ORDER BY closed_at DESC").all());
+  });
+  app.get("/api/hr/employees/:id/pay-rates", requireElevated, (req,res) => {
+    res.json(sqlite.prepare("SELECT effective_date,pay_type,rate_cents FROM hr_pay_rates WHERE employee_id=? ORDER BY effective_date DESC").all(pid(req.params.id)));
   });
 
   // Books the period's labor as one Finance expense. `auto:payroll:<from>:<to>`
@@ -367,24 +356,20 @@ export function registerHrRoutes(app: Express): void {
   app.post("/api/hr/payroll/record-expense", requireElevated, (req, res) => {
     try {
       const body = recordExpenseSchema.parse(req.body);
-      const key = `auto:payroll:${body.from}:${body.to}`;
-      const dupe = sqlite.prepare(
-        "SELECT id FROM fin_expenses WHERE deleted_at IS NULL AND notes LIKE ?",
-      ).get(`${key}%`);
-      if (dupe) {
-        return res.status(409).json({
-          message: `Payroll for ${body.from} → ${body.to} is already on the books`,
-        });
-      }
-      const row = db.insert(expenses).values({
-        date: todayLocal(),
-        vendor: "Payroll",
-        category: "payroll",
-        amountCents: body.amountCents,
-        paymentMethod: "other",
-        billable: false,
-        notes: `${key} — labor`,
-      }).returning().get();
+      const period = payrollRange(body.from,body.to);
+      const row = sqlite.transaction(() => {
+        if (sqlite.prepare("SELECT 1 FROM fin_expenses WHERE category='payroll' AND notes LIKE ? LIMIT 1").get(`auto:payroll:${body.from}:${body.to}%`)) throw new Error("An expense already records this payroll period. Review it before creating another.");
+        if (sqlite.prepare("SELECT 1 FROM pm_time_entries WHERE ended_at IS NULL AND started_at < ? LIMIT 1").get(period.end)) throw new Error("Stop running timers before closing this period.");
+        if (closedPeriod(body.from,body.to)) throw new Error("This period overlaps closed payroll. Choose an open period.");
+        const snapshot=payrollSummary(body.from,body.to);
+        const total=snapshot.reduce((sum,r)=>sum+r.grossCents,0);
+        if (total !== body.amountCents) throw new Error("Payroll changed since this screen loaded. Refresh and review the new total.");
+        const expense=db.insert(expenses).values({date:todayLocal(),vendor:"Payroll",category:"payroll",
+          amountCents:total,paymentMethod:"other",billable:false,notes:`auto:payroll:${body.from}:${body.to} — closed payroll`}).returning().get();
+        sqlite.prepare(`INSERT INTO hr_payroll_runs (from_date,to_date,snapshot,total_cents,expense_id,closed_by,closed_at) VALUES (?,?,?,?,?,?,?)`)
+          .run(body.from,body.to,JSON.stringify(snapshot),total,expense.id,req.user!.userId,Date.now());
+        return expense;
+      })();
       audit(req, "hr.payroll_expense_post", {
         targetType: "expense", targetId: row.id,
         targetName: `Payroll ${body.from} → ${body.to}`,

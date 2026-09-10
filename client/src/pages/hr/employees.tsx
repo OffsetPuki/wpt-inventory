@@ -8,7 +8,7 @@ import Modal from "@/components/Modal";
 import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import { Chip, type ChipTone } from "@/components/ui/Chip";
 import { inputCls } from "@/lib/ui-styles";
-import { formatDate, formatMoney, parseMoney } from "@/lib/format";
+import { formatDate, formatMoney, parseMoney, todayYmd } from "@/lib/format";
 import type { PublicUser } from "@shared/schema";
 import {
   EMPLOYMENT_TYPES,
@@ -61,6 +61,8 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
   const [status, setStatus] = useState<EmployeeStatus>(employee?.status ?? "active");
   const [hireDate, setHireDate] = useState(employee?.hireDate ?? "");
   const [endDate, setEndDate] = useState(employee?.endDate ?? "");
+  const [payEffectiveDate, setPayEffectiveDate] = useState(todayYmd());
+  const { data: payHistory = [] } = useQuery<{ effective_date: string; pay_type: string; rate_cents: number }[]>({ queryKey: ["hr-pay-rates", employee?.id], enabled: !!employee, queryFn: async () => (await apiRequest("GET", `/api/hr/employees/${employee!.id}/pay-rates`)).json() });
   const [payType, setPayType] = useState<PayType>(employee?.payType ?? "hourly");
   const [payRate, setPayRate] = useState(
     employee ? String(employee.payRateCents / 100) : ""
@@ -90,6 +92,7 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
         endDate: endDate || null,
         payType,
         payRateCents: parseMoney(payRate),
+        payEffectiveDate,
         emergencyContact: emergencyContact.trim() || null,
         notes: notes.trim() || null,
         userId: userId ? Number(userId) : null,
@@ -98,7 +101,7 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
         ? { method: "PATCH", url: `/api/hr/employees/${employee.id}`, body }
         : { method: "POST", url: "/api/hr/employees", body };
     },
-    invalidate: [["hr-employees"], ["hr-employee-detail"]],
+    invalidate: [["hr-employees"], ["hr-employee-detail"], ["hr-pay-rates"], ["hr-payroll-summary"]],
     successTitle: employee ? "Employee updated" : "Employee added",
     errorTitle: "Could not save employee",
     onSuccess: onClose,
@@ -122,6 +125,8 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
         }}
         className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
       >
+        {employee && <details className="rounded-xl border border-border p-3 text-sm"><summary>Pay rate history</summary>{payHistory.map((r) => <p className="mt-2" key={r.effective_date}>{r.effective_date === '0001-01-01' ? 'Initial known rate' : r.effective_date}: {formatMoney(r.rate_cents)} / {r.pay_type === 'hourly' ? 'hour' : 'year'}</p>)}</details>}
+        {employee && (parseMoney(payRate) !== employee.payRateCents || payType !== employee.payType) && <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">New rate effective date</span><input required type="date" max={todayYmd()} className={inputCls} value={payEffectiveDate} onChange={(e) => setPayEffectiveDate(e.target.value)} /><span className="text-xs text-muted-foreground">Earlier hours keep their dated rate. Closed payroll stays unchanged.</span></label>}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">First name</span>

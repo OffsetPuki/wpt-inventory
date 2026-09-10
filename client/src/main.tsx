@@ -6,6 +6,7 @@ import { AuthProvider } from "./lib/auth";
 import { Toaster } from "./components/ui/toaster";
 import ThemeProvider from "./components/ThemeProvider";
 import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -13,7 +14,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <App />
+          <ErrorBoundary><App /></ErrorBoundary>
           <Toaster />
         </AuthProvider>
       </ThemeProvider>

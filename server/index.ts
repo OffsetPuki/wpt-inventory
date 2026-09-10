@@ -125,7 +125,7 @@ app.use(compression());
 // (≤ 2M chars ≈ 1.5 MB of PNG). Mounted BEFORE the global parser — body-parser
 // skips a body that's already been parsed, so this scoped 4 MB limit wins for
 // that one route and everything else stays at 1 MB.
-app.use("/api/public/leads", express.json({ limit: "4mb" }));
+app.use("/api/public/leads", express.json({ limit: "6mb" }));
 // Stripe signs the exact bytes it sent, so this one route needs the raw body —
 // a reparsed-and-restringified JSON never matches the signature. Same
 // mounted-first trick as the lead route above: the global parser below skips a

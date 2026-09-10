@@ -10,6 +10,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
+  const [otp,setOtp]=useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // The username autocomplete used to call an unauthenticated endpoint
@@ -23,10 +24,10 @@ export default function LoginPage() {
   });
 
   async function attemptLogin() {
-    if (submitting || !name.trim() || pin.length !== 4) return;
+    if (submitting || !name.trim() || pin.length < 4) return;
     setSubmitting(true);
     try {
-      await login(name.trim(), pin);
+      await login(name.trim(), pin, otp);
       // App re-renders to the authenticated router; "/" redirects by role.
     } catch (err: any) {
       toast({
@@ -42,22 +43,16 @@ export default function LoginPage() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim() || pin.length !== 4) {
+    if (!name.trim() || pin.length < 4) {
       toast({
         variant: "destructive",
         title: "Missing information",
-        description: "Enter your name and a 4-digit PIN.",
+        description: "Enter your name and your password or PIN.",
       });
       return;
     }
     attemptLogin();
   }
-
-  // Sign in automatically the moment a 4-digit PIN is entered (no button press).
-  useEffect(() => {
-    if (pin.length === 4 && name.trim()) attemptLogin();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pin]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6">
@@ -65,10 +60,10 @@ export default function LoginPage() {
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo size="lg" showText={false} />
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">
-            {settings?.companyName || "CJM Metals"}
+            CJM Trades
           </h1>
           <p className="mt-1 text-base text-muted-foreground">
-            {settings?.companyTagline || "Custom metalwork. No shortcuts."}
+            Metals · Concrete · Insulation
           </p>
         </div>
 
@@ -92,23 +87,25 @@ export default function LoginPage() {
 
           <div className="flex flex-col gap-2">
             <label htmlFor="pin" className="text-base font-medium text-foreground">
-              4-digit PIN
+              Password or PIN
             </label>
             <input
               id="pin"
               type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={4}
+              autoComplete="current-password"
+              maxLength={128}
               value={pin}
               onChange={(e) =>
-                setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+                setPin(e.target.value)
               }
               placeholder="••••"
               className="h-14 rounded-xl border border-input bg-background px-4 text-center text-2xl tracking-[0.5em] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
             />
           </div>
 
+          <label className="flex flex-col gap-2">Authenticator or recovery code (if enabled)
+            <input className="h-12 rounded-xl border border-input bg-background px-4" autoComplete="one-time-code" value={otp} onChange={e=>setOtp(e.target.value)} />
+          </label>
           <button
             type="submit"
             disabled={submitting}

@@ -1,5 +1,5 @@
 import { Router, Route, Switch, Redirect } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+import { useAppLocation } from "./lib/hash-location";
 import { useAuth } from "./lib/auth";
 import { Suspense, lazy, type ReactNode } from "react";
 
@@ -8,6 +8,7 @@ import { Suspense, lazy, type ReactNode } from "react";
 // small and the user only downloads code for the screens they actually open.
 
 import AppShell from "./components/AppShell";
+const SecurityPage = lazy(() => import("./pages/security"));
 const LoginPage = lazy(() => import("./pages/login"));
 const HomePage = lazy(() => import("./pages/home"));
 const AddItemPage = lazy(() => import("./pages/add"));
@@ -74,7 +75,7 @@ function RoleRedirect() {
 // ─── Root app component ─────────────────────────────────────────────────────
 
 export default function App() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, user } = useAuth();
 
   if (isLoading) {
     return <LoadingSpinner />;
@@ -82,7 +83,7 @@ export default function App() {
 
   if (!isAuthenticated) {
     return (
-      <Router hook={useHashLocation}>
+      <Router hook={useAppLocation}>
         <Suspense fallback={<LoadingSpinner />}>
           <Switch>
             <Route path="/">
@@ -97,11 +98,14 @@ export default function App() {
     );
   }
 
+  if (user?.securitySetupRequired) return <Suspense fallback={<LoadingSpinner />}><SecurityPage /></Suspense>;
+
   return (
-    <Router hook={useHashLocation}>
+    <Router hook={useAppLocation}>
       <AppShell>
         <Suspense fallback={<LoadingSpinner />}>
         <Switch>
+          <Route path="/security"><SecurityPage /></Route>
           {/* Root redirect */}
           <Route path="/">
             <RoleRedirect />

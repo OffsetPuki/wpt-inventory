@@ -256,7 +256,7 @@ const findInvoice = (token: string, allowDraft = false): Invoice | undefined => 
 // Two calls, one auth header, form-encoded bodies — the SDK would be a
 // dependency for `new URLSearchParams`.
 
-async function stripePost(path: string, params: Record<string, string>): Promise<any> {
+async function stripePost(path: string, params: Record<string, string>, idempotencyKey?: string): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -264,6 +264,7 @@ async function stripePost(path: string, params: Record<string, string>): Promise
       method: "POST",
       headers: {
         Authorization: `Bearer ${stripeKey()}`,
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams(params).toString(),
@@ -320,9 +321,63 @@ function verifiedEvent(raw: Buffer, header: string | undefined): any | null {
   }
 }
 
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS fin_checkout_sessions (
+    fingerprint TEXT PRIMARY KEY, invoice_id INTEGER NOT NULL, request_key TEXT NOT NULL,
+    session_id TEXT, url TEXT, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+  );
+`);
+
+const checkoutQueues = new Map<number, Promise<void>>();
+async function checkoutLock(invoiceId: number): Promise<() => void> {
+  const previous = checkoutQueues.get(invoiceId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  checkoutQueues.set(invoiceId, current);
+  await previous;
+  return () => { release(); if (checkoutQueues.get(invoiceId) === current) checkoutQueues.delete(invoiceId); };
+}
+async function stripeSession(id: string) {
+  const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${stripeKey()}` }, signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`Could not verify previous payment (${response.status})`);
+  return response.json();
+}
+async function closeCheckout(id: string) {
+  const current = await stripeSession(id);
+  if (current.status === 'open') await stripePost(`checkout/sessions/${encodeURIComponent(id)}/expire`, {});
+  else if (current.status === 'complete') {
+    const recorded = current.payment_intent && sqlite.prepare('SELECT 1 FROM fin_invoice_payments WHERE reference=?').get(String(current.payment_intent));
+    if (!recorded) throw new Error('A previous payment is processing. Wait for its confirmation before paying again.');
+  } else if (!['complete','expired'].includes(current.status)) throw new Error('Could not confirm the previous payment page is closed.');
+  sqlite.prepare('UPDATE fin_checkout_sessions SET url=NULL, expires_at=0 WHERE session_id=?').run(id);
+}
+async function expireChangedInvoices() {
+  if (!stripeKey()) return;
+  const jobs = sqlite.prepare('SELECT invoice_id FROM fin_checkout_expiry_queue ORDER BY created_at LIMIT 20').all() as {invoice_id:number}[];
+  for (const job of jobs) {
+    const release = await checkoutLock(job.invoice_id);
+    try {
+      const sessions = sqlite.prepare('SELECT session_id FROM fin_checkout_sessions WHERE invoice_id=? AND session_id IS NOT NULL AND url IS NOT NULL').all(job.invoice_id) as {session_id:string}[];
+      for (const row of sessions) await closeCheckout(row.session_id);
+      sqlite.prepare('DELETE FROM fin_checkout_expiry_queue WHERE invoice_id=?').run(job.invoice_id);
+    } catch (error) {
+      sqlite.prepare(`INSERT OR IGNORE INTO fin_payment_exceptions (event_id,invoice_id,kind,details,created_at) VALUES (?,?,?,?,?)`)
+        .run(`expire:${job.invoice_id}`,job.invoice_id,'checkout_expiration_failed',String(error),Date.now());
+    } finally { release(); }
+  }
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerPayRoutes(app: Express): void {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS fin_checkout_expiry_queue (invoice_id INTEGER PRIMARY KEY,created_at INTEGER NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS fin_expire_changed_checkout AFTER UPDATE OF paid_cents,total_cents,status,items,deposit_cents,retainage_cents,discount_cents,deleted_at ON fin_invoices
+    WHEN OLD.paid_cents IS NOT NEW.paid_cents OR OLD.total_cents IS NOT NEW.total_cents OR OLD.status IS NOT NEW.status OR OLD.items IS NOT NEW.items OR OLD.deposit_cents IS NOT NEW.deposit_cents OR OLD.retainage_cents IS NOT NEW.retainage_cents OR OLD.discount_cents IS NOT NEW.discount_cents OR OLD.deleted_at IS NOT NEW.deleted_at
+    BEGIN INSERT INTO fin_checkout_expiry_queue (invoice_id,created_at) VALUES (NEW.id,unixepoch()*1000) ON CONFLICT(invoice_id) DO UPDATE SET created_at=excluded.created_at; END;`);
+  const expiryTimer = setInterval(() => { void expireChangedInvoices().catch((e) => console.error('[pay] expiration retry failed',e)); }, 30_000);
+  expiryTimer.unref();
   // The customer's invoice document. Deliberately hand-picked rather than
   // spread from the row: `notes` is the owner's scratch pad (the quote-accept
   // hook writes into it, and the mailer reads addresses out of it), share_token
@@ -424,13 +479,17 @@ export function registerPayRoutes(app: Express): void {
   // retrying a declined card and useless for anyone farming session URLs.
   app.post("/api/public/invoice/:token/checkout", publicLimiter(20), async (req, res) => {
     const token = String(req.params.token);
-    const inv = findInvoice(token);
+    let inv = findInvoice(token);
     if (!inv) return res.status(404).json({ ok: false });
     if (!stripeKey()) return res.status(503).json({ ok: false, reason: "unconfigured" });
     if (inv.status === "void" || inv.status === "paid") {
       return res.status(409).json({ ok: false, reason: "closed" });
     }
 
+    const release = await checkoutLock(inv.id);
+    try {
+    inv = findInvoice(token);
+    if (!inv || ["paid", "void"].includes(inv.status)) return res.status(409).json({ok:false,reason:"closed"});
     // "full" only means anything while the offer stands; payable() decides
     // that, so a stale page asking for it just gets the ordinary balance.
     const asked = String(req.body?.which ?? "");
@@ -451,9 +510,41 @@ export function registerPayRoutes(app: Express): void {
       ? `Invoice ${inv.number} — paid in full (${discountBp() / 100}% discount)`
       : `Invoice ${inv.number}${inv.paidCents > 0 ? " — remaining balance" : ""}`;
 
+    const fingerprint = crypto.createHash("sha256").update(JSON.stringify({
+      invoiceId: inv.id, amountCents, which, home, paid: inv.paidCents,
+      total: inv.totalCents, items: inv.items, discount: inv.discountCents, retainage: inv.retainageCents,
+    })).digest("hex");
+    const checkout = sqlite.transaction(() => {
+      const now = Date.now();
+      const existing = sqlite.prepare("SELECT * FROM fin_checkout_sessions WHERE fingerprint = ?")
+        .get(fingerprint) as { request_key: string; session_id: string | null; url: string | null; expires_at: number } | undefined;
+      if (existing && ((existing.url && existing.session_id) || existing.expires_at > now)) return existing;
+      const request_key = `cjm-${crypto.randomUUID()}`;
+      const expires_at = now + 24 * 60 * 60_000;
+      sqlite.prepare(`INSERT INTO fin_checkout_sessions (fingerprint, invoice_id, request_key, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?) ON CONFLICT(fingerprint) DO UPDATE SET request_key=excluded.request_key,
+        session_id=NULL, url=NULL, expires_at=excluded.expires_at, created_at=excluded.created_at`)
+        .run(fingerprint, inv!.id, request_key, expires_at, now);
+      return { request_key, session_id: null, url: null, expires_at };
+    })();
+    if (checkout.url && checkout.session_id) {
+      const current = await stripeSession(checkout.session_id);
+      if (current.status === 'open') return res.json({ ok: true, url: checkout.url });
+      if (current.status === 'complete') return res.status(409).json({ok:false,reason:'processing',message:'This payment has already been submitted. Wait for confirmation.'});
+      sqlite.prepare('UPDATE fin_checkout_sessions SET url=NULL,expires_at=0 WHERE session_id=?').run(checkout.session_id);
+      return res.status(409).json({ok:false,reason:'expired',message:'This payment page expired. Please try again.'});
+    }
     try {
+      const stale = sqlite.prepare("SELECT session_id FROM fin_checkout_sessions WHERE invoice_id = ? AND fingerprint != ? AND session_id IS NOT NULL AND url IS NOT NULL")
+        .all(inv.id, fingerprint) as { session_id: string }[];
+      for (const old of stale) {
+        // Expiration failure is visible and retryable; do not open a competing
+        // session while an older payment page may still be usable.
+        await closeCheckout(old.session_id);
+      }
       const session = await stripePost("checkout/sessions", {
         mode: "payment",
+        // Stripe defaults to 24 hours; omitting a relative expiry keeps retry parameters identical.
         // ?paid=1 only tells the page to say "thanks, updating" — the webhook,
         // not this redirect, is what moves money in the ledger.
         success_url: `${home}?paid=1`,
@@ -468,13 +559,21 @@ export function registerPayRoutes(app: Express): void {
         "metadata[invoiceId]": String(inv.id),
         "metadata[invoiceNumber]": inv.number,
         "metadata[which]": which,
-      });
+      }, checkout.request_key);
       if (!session?.url) throw new Error("no session url");
+      sqlite.prepare("UPDATE fin_checkout_sessions SET session_id = ?, url = ?, expires_at = ? WHERE fingerprint = ? AND request_key = ?")
+        .run(session.id, session.url, session.expires_at ? session.expires_at * 1000 : checkout.expires_at, fingerprint, checkout.request_key);
+      const latest = findInvoice(token);
+      if (!latest || latest.paidCents !== inv.paidCents || latest.totalCents !== inv.totalCents || latest.items !== inv.items || latest.status !== inv.status) {
+        await closeCheckout(session.id);
+        return res.status(409).json({ok:false,reason:'changed',message:'The invoice changed. Reload it before paying.'});
+      }
       res.json({ ok: true, url: session.url });
     } catch (e) {
       console.error("[pay] checkout session failed", e);
       res.status(502).json({ ok: false, reason: "stripe" });
     }
+    } catch (error) { res.status(502).json({ok:false,reason:"stripe",message:String(error)}); } finally { release(); }
   });
 
   // Stripe tells us the money landed. Mounted with express.raw (see index.ts)
@@ -487,7 +586,19 @@ export function registerPayRoutes(app: Express): void {
       console.warn("[pay] webhook rejected — bad or missing signature");
       return res.status(400).json({ ok: false });
     }
-    if (event.type !== "checkout.session.completed") return res.json({ received: true });
+    if (["charge.refunded", "charge.dispute.created", "charge.dispute.closed", "checkout.session.async_payment_failed"].includes(event.type)) {
+      const object = event.data?.object ?? {};
+      const ref = String(object.payment_intent || "");
+      const payment = ref ? sqlite.prepare("SELECT invoice_id FROM fin_invoice_payments WHERE reference = ?").get(ref) as { invoice_id: number } | undefined : undefined;
+      sqlite.prepare(`INSERT OR IGNORE INTO fin_payment_exceptions (event_id, invoice_id, kind, details, created_at)
+        VALUES (?, ?, ?, ?, ?)`).run(String(event.id), (payment?.invoice_id ?? Number(object.metadata?.invoiceId)) || null,
+          event.type, JSON.stringify({ reference: ref, objectId: object.id, amount: object.amount_refunded ?? object.amount, status: object.status }), Date.now());
+      if (event.type === "checkout.session.async_payment_failed" && object.id) {
+        sqlite.prepare('UPDATE fin_checkout_sessions SET url=NULL,expires_at=0 WHERE session_id=?').run(String(object.id));
+      }
+      return res.json({ received: true });
+    }
+    if (!["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type)) return res.json({ received: true });
 
     const session = event.data?.object ?? {};
     if (session.payment_status !== "paid") return res.json({ received: true });
@@ -495,25 +606,37 @@ export function registerPayRoutes(app: Express): void {
     const invoiceId = Number(session.metadata?.invoiceId);
     const amountCents = Number(session.amount_total);
     const reference = String(session.payment_intent || session.id || "");
-    if (!Number.isInteger(invoiceId) || !(amountCents > 0) || !reference) {
+    if (!Number.isSafeInteger(invoiceId) || !Number.isSafeInteger(amountCents) || !(amountCents > 0) || session.currency !== "usd" || !reference) {
+      sqlite.prepare(`INSERT OR IGNORE INTO fin_payment_exceptions (event_id,invoice_id,kind,details,created_at) VALUES (?,NULL,'unmatched_payment',?,?)`).run(String(event.id),JSON.stringify({sessionId:session.id,invoiceId,amountCents,currency:session.currency}),Date.now());
       console.error("[pay] paid session with no usable invoice ref", session.id);
       return res.json({ received: true });
     }
 
-    // Idempotency. Stripe retries until it gets a 2xx, and a retry after a
-    // crashed handler must not bill the customer's ledger twice. The
-    // transaction id is the natural key — one payment per PaymentIntent.
-    const seen = sqlite
-      .prepare("SELECT id FROM fin_invoice_payments WHERE reference = ?")
-      .get(reference);
-    if (seen) return res.json({ received: true });
-
     let inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
     if (!inv || inv.deletedAt != null) {
+      sqlite.prepare(`INSERT OR IGNORE INTO fin_payment_exceptions (event_id,invoice_id,kind,details,created_at) VALUES (?,?,'payment_missing_invoice',?,?)`).run(String(event.id),invoiceId,JSON.stringify({reference,amountCents}),Date.now());
       console.error("[pay] paid session for a missing invoice", invoiceId, reference);
       return res.json({ received: true });
     }
 
+    // A payment against a voided invoice is a real problem — the money is in
+    // the Stripe account either way, so record it and let the owner see it
+    // rather than silently dropping it on the floor.
+    if (inv.status === "void") {
+      console.error("[pay] payment landed on a VOID invoice", inv.number, reference);
+    }
+
+    try {
+      recordInvoicePayment(req as Request, inv, {
+        amountCents,
+        method: "card", // Apple Pay and Google Pay ARE card payments
+        reference,
+        paidAt: todayLocal(),
+        notes: inv.discountCents != null && session.metadata?.which === "full"
+          ? `Paid online in full — ${usd(inv.discountCents)} prompt-payment discount applied`
+          : `Paid online — ${session.metadata?.which === "deposit" ? "deposit" : "balance"}`,
+      }, "stripe", (current) => {
+        let inv = current;
     // Granting the discount. It has to happen BEFORE the payment is recorded,
     // because the status ladder compares what was paid against the invoice
     // total — restate the total first and the payment settles it; the other
@@ -574,28 +697,15 @@ export function registerPayRoutes(app: Express): void {
         );
       }
     }
-    // A payment against a voided invoice is a real problem — the money is in
-    // the Stripe account either way, so record it and let the owner see it
-    // rather than silently dropping it on the floor.
-    if (inv.status === "void") {
-      console.error("[pay] payment landed on a VOID invoice", inv.number, reference);
-    }
 
-    try {
-      recordInvoicePayment(req as Request, inv, {
-        amountCents,
-        method: "card", // Apple Pay and Google Pay ARE card payments
-        reference,
-        paidAt: todayLocal(),
-        notes: inv.discountCents != null && session.metadata?.which === "full"
-          ? `Paid online in full — ${usd(inv.discountCents)} prompt-payment discount applied`
-          : `Paid online — ${session.metadata?.which === "deposit" ? "deposit" : "balance"}`,
-      }, "stripe");
+        return inv;
+      });
     } catch (e) {
       // 500 so Stripe retries — the idempotency check above makes that safe.
       console.error("[pay] failed to record online payment", reference, e);
       return res.status(500).json({ ok: false });
     }
+    void expireChangedInvoices().catch((error) => console.error("[pay] expiration failed",error));
     res.json({ received: true });
   });
 }

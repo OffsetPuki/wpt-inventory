@@ -9,6 +9,7 @@ export default defineConfig({
     "./shared/pm-schema.ts",
     "./shared/finance-schema.ts",
     "./shared/quote-schema.ts",
+    "./shared/operational-schema.ts",
   ],
   out: "./drizzle",
   dialect: "sqlite",

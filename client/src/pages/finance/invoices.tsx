@@ -1,3 +1,4 @@
+import { useDeepLink } from "@/lib/deep-link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
@@ -1539,7 +1540,9 @@ export default function InvoicesPage() {
   const [tab, setTab] = useState("");
   const [q, setQ] = useState("");
   const [newOpen, setNewOpen] = useState(false);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const invoiceLink = useDeepLink("invoice");
+  const [detailId, setDetailId] = useState<number | null>(invoiceLink ? Number(invoiceLink) : null);
+  useEffect(() => { if (invoiceLink) setDetailId(Number(invoiceLink)); }, [invoiceLink]);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
 
   const url = useMemo(() => {

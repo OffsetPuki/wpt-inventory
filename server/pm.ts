@@ -1,3 +1,4 @@
+import { lockedTime, closedPeriod, dateKey, payrollDate, rateOn } from "./payroll";
 import type { Express } from "express";
 import path from "path";
 import fs from "fs";
@@ -16,7 +17,7 @@ import {
   TASK_STATUSES, DOCUMENT_KINDS,
 } from "../shared/pm-schema";
 import { clients } from "../shared/crm-schema";
-import { pid, qstr, ymdLocal, isElevated, registerSoftDelete, registerCreate } from "./http-util";
+import { pid, qstr, todayLocal, ymdLocal, isElevated, registerSoftDelete, registerCreate } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/pm-schema.ts exactly. pm_contracts.client_id is a soft
@@ -506,7 +507,7 @@ export function registerPmRoutes(app: Express): void {
       .orderBy(desc(timeEntries.startedAt))
       .limit(limit)
       .all();
-    res.json(rows);
+    res.json(rows.map((r) => ({ ...r, locked: lockedTime(r) })));
   });
 
   app.get("/api/pm/time/running", requireAuth, (req, res) => {
@@ -574,6 +575,7 @@ export function registerPmRoutes(app: Express): void {
     } else {
       return res.status(400).json({ message: "Provide startedAt + endedAt, or durationMin with one of them" });
     }
+    if (closedPeriod(dateKey(new Date(startedAt)),dateKey(new Date(Math.max(startedAt, endedAt! - 1))))) return res.status(409).json({message:"This payroll period is closed. Ask an owner to record a correction in an open period."});
     const entry = db.insert(timeEntries).values({
       userId: req.user!.userId,
       projectId: body.projectId ?? null,
@@ -587,10 +589,37 @@ export function registerPmRoutes(app: Express): void {
     res.status(201).json(entry);
   });
 
+  app.get("/api/pm/time/:id/corrections", requireElevated, (req,res) => {
+    res.json(sqlite.prepare("SELECT effective_date,minutes_delta,rate_cents,reason FROM hr_time_corrections WHERE time_entry_id=? ORDER BY created_at DESC").all(pid(req.params.id)));
+  });
+
+  app.post("/api/pm/time/:id/corrections", requireElevated, (req,res) => {
+    try {
+      const entry=db.select().from(timeEntries).where(eq(timeEntries.id,pid(req.params.id))).get();
+      if (!entry) return res.status(404).json({message:"Time entry not found"});
+      const date=String(req.body?.effectiveDate ?? todayLocal()); payrollDate(date);
+      const minutes=Number(req.body?.minutesDelta); const reason=String(req.body?.reason ?? "").trim();
+      if (!Number.isSafeInteger(minutes) || minutes===0 || Math.abs(minutes)>1440 || reason.length<3 || reason.length>1000) return res.status(400).json({message:"Enter a correction of up to 24 hours and a reason."});
+      if (!entry.endedAt) return res.status(409).json({message:"Stop the timer before correcting it."});
+      const corrected = sqlite.prepare("SELECT coalesce(sum(minutes_delta),0) AS minutes FROM hr_time_corrections WHERE time_entry_id=?").get(entry.id) as any;
+      if (entry.durationMin + corrected.minutes + minutes < 0) return res.status(400).json({message:"Corrections cannot reduce the original entry below zero hours."});
+      if (closedPeriod(date)) return res.status(409).json({message:"Choose an open payroll date."});
+      const employee=sqlite.prepare("SELECT id FROM hr_employees WHERE user_id=?").get(entry.userId) as {id:number}|undefined;
+      if (!employee) return res.status(400).json({message:"Link an employee before recording a payroll correction."});
+      const rate=rateOn(employee.id,dateKey(new Date(entry.startedAt)));
+      if (!rate || rate.pay_type !== "hourly") return res.status(400).json({message:"Hourly corrections need a historical hourly pay rate. Review salary adjustments separately."});
+      const row=sqlite.prepare(`INSERT INTO hr_time_corrections (time_entry_id,user_id,minutes_delta,effective_date,rate_cents,reason,created_by,created_at) VALUES (?,?,?,?,?,?,?,?) RETURNING *`)
+        .get(entry.id,entry.userId,minutes,date,rate.rate_cents,reason,req.user!.userId,Date.now());
+      audit(req,"pm.time_correction",{targetType:"time_entry",targetId:entry.id,details:{minutes,date,reason,invoiceId:entry.invoiceId}});
+      res.status(201).json(row);
+    } catch(error:any) {res.status(400).json({message:error.message});}
+  });
+
   app.patch("/api/pm/time/:id", requireAuth, (req, res) => {
     const id = pid(req.params.id);
     const existing = db.select().from(timeEntries).where(eq(timeEntries.id, id)).get();
     if (!existing) return res.status(404).json({ message: "Time entry not found" });
+    if (lockedTime(existing)) return res.status(409).json({ message: "This time is billed or in closed payroll. An owner can record a correction without changing the original." });
     if (existing.userId !== req.user!.userId && !isElevated(req)) {
       return res.status(403).json({ message: "You can only edit your own time entries" });
     }
@@ -610,7 +639,10 @@ export function registerPmRoutes(app: Express): void {
       && nextEnd != null) {
       set.durationMin = Math.max(0, Math.round((nextEnd - nextStart) / 60000));
     }
+    if (nextEnd != null && nextEnd < nextStart) return res.status(400).json({message:"End must be after start."});
+    if (closedPeriod(dateKey(new Date(nextStart)),dateKey(new Date(Math.max(nextStart,(nextEnd ?? nextStart)-1))))) return res.status(409).json({message:"Cannot move time into a closed payroll period."});
     const updated = db.update(timeEntries).set(set).where(eq(timeEntries.id, id)).returning().get();
+    audit(req,"pm.time_edit",{targetType:"time_entry",targetId:id,details:{before:existing,after:updated}});
     res.json(updated);
   });
 
@@ -618,10 +650,12 @@ export function registerPmRoutes(app: Express): void {
     const id = pid(req.params.id);
     const existing = db.select().from(timeEntries).where(eq(timeEntries.id, id)).get();
     if (!existing) return res.status(404).json({ message: "Time entry not found" });
+    if (lockedTime(existing)) return res.status(409).json({ message: "This time is billed or in closed payroll. An owner can record a correction without changing the original." });
     if (existing.userId !== req.user!.userId && !isElevated(req)) {
       return res.status(403).json({ message: "You can only delete your own time entries" });
     }
     // No deleted_at column on time entries — hard delete.
+    audit(req,"pm.time_delete",{targetType:"time_entry",targetId:id,details:{before:existing}});
     db.delete(timeEntries).where(eq(timeEntries.id, id)).run();
     res.json({ ok: true });
   });

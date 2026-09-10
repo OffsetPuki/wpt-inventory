@@ -6,6 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { setDraftUser } from "../quote/lib/store.js";
 import type { PublicUser } from "@shared/schema";
 import { apiRequest, getAuthToken, queryClient, setAuthToken } from "./queryClient";
 
@@ -18,7 +19,7 @@ interface AuthContextValue {
   // Anything above worker: the owner (plus the legacy manager/technician
   // roles a not-yet-refreshed session may still carry).
   isElevated: boolean;
-  login: (name: string, pin: string) => Promise<void>;
+  login: (name: string, pin: string, otp?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -42,10 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await apiRequest("GET", "/api/auth/me");
         const me = (await res.json()) as PublicUser;
         if (cancelled) return;
+        setDraftUser(me.id);
         setUser(me);
       } catch {
         if (cancelled) return;
         setAuthToken(null);
+        setDraftUser(null);
+        sessionStorage.removeItem("cjm.quote.prefillLead");
         setUser(null);
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -61,22 +65,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // React to mid-session token invalidations (apiRequest dispatches this on 401).
   useEffect(() => {
     const onInvalidated = () => {
-      setUser(null);
+      setDraftUser(null);
+        sessionStorage.removeItem("cjm.quote.prefillLead");
+        setUser(null);
       queryClient.clear();
     };
     window.addEventListener("auth-invalidated", onInvalidated);
     return () => window.removeEventListener("auth-invalidated", onInvalidated);
   }, []);
 
-  const login = useCallback(async (name: string, pin: string) => {
+  const login = useCallback(async (name: string, pin: string, otp?: string) => {
     setIsLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/auth/login", { name, pin });
+      const res = await apiRequest("POST", "/api/auth/login", { name, pin, otp });
       const data = await res.json();
       const newToken: string = data.token;
       const loggedInUser: PublicUser = data.user;
 
       setAuthToken(newToken); // also persists to localStorage
+      setDraftUser(loggedInUser.id);
       setUser(loggedInUser);
     } finally {
       setIsLoading(false);
@@ -90,7 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Even if server logout fails, clear client state
     }
     setAuthToken(null); // also clears localStorage
-    setUser(null);
+    setDraftUser(null);
+        sessionStorage.removeItem("cjm.quote.prefillLead");
+        setUser(null);
     queryClient.clear();
   }, []);
 

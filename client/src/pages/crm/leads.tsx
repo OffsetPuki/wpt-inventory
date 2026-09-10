@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useDeepLink } from "@/lib/deep-link";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -228,6 +229,13 @@ function CloseLeadModal({
   onClose: () => void;
 }) {
   const [reason, setReason] = useState<WinLossReason | "">(lead.winLossReason ?? "");
+  const [quoteId, setQuoteId] = useState("");
+  const { data: job, isError: jobFailed } = useQuery<{ quotes: { id: number; number: string; status: string; totalCents: number }[] }>({
+    queryKey: ["crm-lead-detail", lead.id],
+    queryFn: async () => (await apiRequest("GET", `/api/crm/leads/${lead.id}/detail`)).json(),
+  });
+  const offers = job?.quotes.filter((q) => ['draft', 'sent', 'accepted'].includes(q.status)) ?? [];
+
   const [revenue, setRevenue] = useState(
     lead.estimatedValueCents ? String(lead.estimatedValueCents / 100) : ""
   );
@@ -238,6 +246,7 @@ function CloseLeadModal({
       url: `/api/crm/leads/${lead.id}`,
       body: {
         stage: to,
+        quoteId: quoteId ? Number(quoteId) : offers.length === 1 ? offers[0].id : undefined,
         winLossReason: reason || undefined,
         ...(to === "won" ? { revenueClosedCents: parseMoney(revenue) } : {}),
       },
@@ -270,7 +279,9 @@ function CloseLeadModal({
             ))}
           </select>
         </label>
-        {to === "won" && (
+        {to === "won" && offers.length > 0 && <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Quote to accept</span><select className={inputCls} required value={quoteId || (offers.length === 1 ? String(offers[0].id) : '')} onChange={(e) => setQuoteId(e.target.value)}><option value="">Choose the agreed quote</option>{offers.map((q) => <option key={q.id} value={q.id}>{q.number} · {formatMoney(q.totalCents)} · {q.status}</option>)}</select><span className="text-xs text-muted-foreground">Accepting creates the linked job and invoice. Other offers remain separate.</span></label>}
+        {jobFailed && <p role="alert">Could not load linked quotes. Close and reopen this dialog to retry.</p>}
+        {to === "won" && offers.length === 0 && (
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Revenue closed ($)</span>
             <input className={inputCls} inputMode="decimal" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
@@ -278,7 +289,7 @@ function CloseLeadModal({
         )}
         <button
           type="submit"
-          disabled={close.isPending}
+          disabled={close.isPending || jobFailed || !job || (to === "won" && offers.length > 1 && !quoteId)}
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {close.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
@@ -327,7 +338,12 @@ function LeadDetailModal({
   });
 
   // Phase B #13: the website design they configured.
-  const { data: extras } = useQuery<{
+  const [selectedQuote, setSelectedQuote] = useState("");
+  const [language, setLanguage] = useState(lead.preferredLanguage ?? "en");
+  const { data: extras, isError: detailFailed, refetch: retryDetail } = useQuery<{
+    quotes: { id: number; number: string; status: string; totalCents: number }[];
+    projects: { id: number; name: string }[];
+    invoices: { id: number; number: string; status: string; totalCents: number; paidCents: number }[];
     design: {
       ref: string;
       sourceTool: string | null;
@@ -351,12 +367,15 @@ function LeadDetailModal({
         method: "PATCH",
         url: `/api/crm/leads/${lead.id}`,
         body: {
+          leadId: lead.id,
           name: name.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,
           source,
           site,
           stage,
+        preferredLanguage: language,
+        quoteId: selectedQuote ? Number(selectedQuote) : undefined,
           winLossReason: clearsClose ? null : winLossReason || undefined,
           serviceRequested: serviceRequested.trim() || null,
           serviceArea: serviceArea.trim() || null,
@@ -416,6 +435,7 @@ function LeadDetailModal({
       sessionStorage.setItem(
         "cjm.quote.prefillLead",
         JSON.stringify({
+          leadId: lead.id,
           name: name.trim(),
           phone: phone.trim(),
           email: email.trim(),
@@ -434,6 +454,16 @@ function LeadDetailModal({
   return (
     <Modal open onClose={onClose} title={lead.name} maxWidth="max-w-2xl">
       <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto pr-1">
+        <section className="rounded-xl border border-border p-4">
+          <h3 className="font-semibold">This job</h3>
+          {detailFailed && <p role="alert">Linked records could not load. <button className="underline" onClick={() => retryDetail()}>Retry</button></p>}
+          <div className="mt-2 flex flex-col gap-2 text-sm">
+            {extras?.quotes.map((q) => <div key={q.id}>{q.number} · {q.status} · {formatMoney(q.totalCents)} <button type="button" className="ml-2 underline" onClick={async () => { try { const row = await (await apiRequest("POST", `/api/quotes/${q.id}/share`, { preview: true })).json(); window.open(row.url, '_blank', 'noopener'); } catch (e: any) { toast({ variant: 'destructive', title: 'Could not open quote', description: e.message }); } }}>View quote</button></div>)}
+            {extras?.projects.map((p) => <a className="underline" key={p.id} href={`/#/project/${p.id}`}>{p.name} — project</a>)}
+            {extras?.invoices.map((i) => <a className="underline" key={i.id} href={`/#/finance/invoices?invoice=${i.id}`}>{i.number} · {i.status} · {formatMoney(i.totalCents - i.paidCents)} balance</a>)}
+            {extras && !extras.quotes.length && !extras.projects.length && <p className="text-muted-foreground">No quote yet. Use “Quote this lead” below to get started.</p>}
+          </div>
+        </section>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -449,6 +479,8 @@ function LeadDetailModal({
           }}
           className="flex flex-col gap-4"
         >
+          <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Customer language</span><select className={inputCls} value={language} onChange={(e) => setLanguage(e.target.value as "en" | "es")}><option value="en">English</option><option value="es">Español</option></select></label>
+          {stage === 'won' && lead.stage !== 'won' && (extras?.quotes.filter((q) => q.status !== 'declined').length ?? 0) > 1 && <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Quote to accept</span><select required className={inputCls} value={selectedQuote} onChange={(e) => setSelectedQuote(e.target.value)}><option value="">Choose the agreed quote</option>{extras?.quotes.filter((q) => q.status !== 'declined').map((q) => <option key={q.id} value={q.id}>{q.number} · {formatMoney(q.totalCents)}</option>)}</select></label>}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-foreground">Name</span>
@@ -700,7 +732,9 @@ export default function LeadsPage() {
   const [to, setTo] = useState("");
 
   const [newOpen, setNewOpen] = useState(false);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const leadLink = useDeepLink("lead");
+  const [detailId, setDetailId] = useState<number | null>(leadLink ? Number(leadLink) : null);
+  useEffect(() => { if (leadLink) setDetailId(Number(leadLink)); }, [leadLink]);
   const [closing, setClosing] = useState<{ lead: Lead; to: "won" | "lost" } | null>(null);
   const [dragOverStage, setDragOverStage] = useState<LeadStage | null>(null);
 

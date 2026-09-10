@@ -1,83 +1,217 @@
-import { TYPES } from '../data/configurators.js';
+import { TYPES } from "../data/configurators.js";
 
 const ICONS = {
   fence: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <line x1="30" y1="20" x2="30" y2="170" /><line x1="125" y1="20" x2="125" y2="170" />
-      <line x1="220" y1="20" x2="220" y2="170" /><line x1="290" y1="20" x2="290" y2="170" />
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <line x1="30" y1="20" x2="30" y2="170" />
+      <line x1="125" y1="20" x2="125" y2="170" />
+      <line x1="220" y1="20" x2="220" y2="170" />
+      <line x1="290" y1="20" x2="290" y2="170" />
       {[40, 60, 80, 100, 120, 140].map((y) => (
         <g key={y}>
-          <line x1="30" y1={y} x2="125" y2={y} /><line x1="125" y1={y} x2="220" y2={y} /><line x1="220" y1={y} x2="290" y2={y} />
+          <line x1="30" y1={y} x2="125" y2={y} />
+          <line x1="125" y1={y} x2="220" y2={y} />
+          <line x1="220" y1={y} x2="290" y2={y} />
         </g>
       ))}
     </svg>
   ),
   gate: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <rect x="60" y="20" width="200" height="150" />
-      {[40, 58, 76, 94, 112, 130, 148].map((y) => <line key={y} x1="60" y1={y} x2="260" y2={y} />)}
-      <circle cx="60" cy="55" r="3" /><circle cx="60" cy="135" r="3" /><circle cx="260" cy="95" r="3" />
+      {[40, 58, 76, 94, 112, 130, 148].map((y) => (
+        <line key={y} x1="60" y1={y} x2="260" y2={y} />
+      ))}
+      <circle cx="60" cy="55" r="3" />
+      <circle cx="60" cy="135" r="3" />
+      <circle cx="260" cy="95" r="3" />
     </svg>
   ),
   carport: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M50 95 L150 52 L250 95" />
       <path d="M92 73 L192 30 L292 73" strokeOpacity="0.55" />
-      <path d="M150 52 L192 30" /><path d="M50 95 L92 73" strokeOpacity="0.55" /><path d="M250 95 L292 73" strokeOpacity="0.55" />
-      <path d="M50 95 V160" /><path d="M250 95 V160" />
-      <path d="M92 73 V148" strokeOpacity="0.4" /><path d="M292 73 V148" strokeOpacity="0.4" />
+      <path d="M150 52 L192 30" />
+      <path d="M50 95 L92 73" strokeOpacity="0.55" />
+      <path d="M250 95 L292 73" strokeOpacity="0.55" />
+      <path d="M50 95 V160" />
+      <path d="M250 95 V160" />
+      <path d="M92 73 V148" strokeOpacity="0.4" />
+      <path d="M292 73 V148" strokeOpacity="0.4" />
       <path d="M38 160 H300" strokeOpacity="0.25" />
     </svg>
   ),
   railing: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <line x1="30" y1="40" x2="290" y2="40" strokeWidth="4" />
       <line x1="30" y1="150" x2="290" y2="150" />
-      <line x1="36" y1="40" x2="36" y2="164" strokeWidth="3" /><line x1="284" y1="40" x2="284" y2="164" strokeWidth="3" />
-      {[66, 92, 118, 144, 170, 196, 222, 248].map((x) => <line key={x} x1={x} y1="46" x2={x} y2="150" />)}
+      <line x1="36" y1="40" x2="36" y2="164" strokeWidth="3" />
+      <line x1="284" y1="40" x2="284" y2="164" strokeWidth="3" />
+      {[66, 92, 118, 144, 170, 196, 222, 248].map((x) => (
+        <line key={x} x1={x} y1="46" x2={x} y2="150" />
+      ))}
       <line x1="20" y1="164" x2="300" y2="164" strokeOpacity="0.25" />
     </svg>
   ),
   pergola: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <line x1="40" y1="52" x2="280" y2="52" strokeWidth="3" />
-      <line x1="64" y1="34" x2="256" y2="34" strokeOpacity="0.55" strokeWidth="3" />
-      <line x1="40" y1="52" x2="64" y2="34" /><line x1="280" y1="52" x2="256" y2="34" />
-      {[72, 104, 136, 168, 200, 232].map((x) => <line key={x} x1={x} y1="52" x2={x + 24} y2="34" strokeOpacity="0.7" />)}
-      <line x1="48" y1="52" x2="48" y2="164" strokeWidth="3" /><line x1="272" y1="52" x2="272" y2="164" strokeWidth="3" />
-      <line x1="70" y1="34" x2="70" y2="150" strokeOpacity="0.4" strokeWidth="2" /><line x1="250" y1="34" x2="250" y2="150" strokeOpacity="0.4" strokeWidth="2" />
-      <line x1="48" y1="76" x2="66" y2="58" strokeOpacity="0.7" /><line x1="272" y1="76" x2="254" y2="58" strokeOpacity="0.7" />
+      <line
+        x1="64"
+        y1="34"
+        x2="256"
+        y2="34"
+        strokeOpacity="0.55"
+        strokeWidth="3"
+      />
+      <line x1="40" y1="52" x2="64" y2="34" />
+      <line x1="280" y1="52" x2="256" y2="34" />
+      {[72, 104, 136, 168, 200, 232].map((x) => (
+        <line key={x} x1={x} y1="52" x2={x + 24} y2="34" strokeOpacity="0.7" />
+      ))}
+      <line x1="48" y1="52" x2="48" y2="164" strokeWidth="3" />
+      <line x1="272" y1="52" x2="272" y2="164" strokeWidth="3" />
+      <line
+        x1="70"
+        y1="34"
+        x2="70"
+        y2="150"
+        strokeOpacity="0.4"
+        strokeWidth="2"
+      />
+      <line
+        x1="250"
+        y1="34"
+        x2="250"
+        y2="150"
+        strokeOpacity="0.4"
+        strokeWidth="2"
+      />
+      <line x1="48" y1="76" x2="66" y2="58" strokeOpacity="0.7" />
+      <line x1="272" y1="76" x2="254" y2="58" strokeOpacity="0.7" />
       <line x1="30" y1="164" x2="290" y2="164" strokeOpacity="0.25" />
     </svg>
   ),
   table: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       {/* wood top — dashed, because the customer supplies it */}
-      <path d="M24 58 H272 V68 H24 Z" strokeOpacity="0.45" strokeDasharray="5 3" />
-      <path d="M24 58 L46 46 H294 L272 58" strokeOpacity="0.45" strokeDasharray="5 3" />
-      <path d="M294 46 V56 L272 68" strokeOpacity="0.45" strokeDasharray="5 3" />
+      <path
+        d="M24 58 H272 V68 H24 Z"
+        strokeOpacity="0.45"
+        strokeDasharray="5 3"
+      />
+      <path
+        d="M24 58 L46 46 H294 L272 58"
+        strokeOpacity="0.45"
+        strokeDasharray="5 3"
+      />
+      <path
+        d="M294 46 V56 L272 68"
+        strokeOpacity="0.45"
+        strokeDasharray="5 3"
+      />
       {/* steel base */}
-      <path d="M56 68 V158" /><path d="M240 68 V158" />
-      <path d="M40 158 H72" /><path d="M224 158 H256" />
-      <path d="M78 56 V146" strokeOpacity="0.4" /><path d="M262 56 V146" strokeOpacity="0.4" />
+      <path d="M56 68 V158" />
+      <path d="M240 68 V158" />
+      <path d="M40 158 H72" />
+      <path d="M224 158 H256" />
+      <path d="M78 56 V146" strokeOpacity="0.4" />
+      <path d="M262 56 V146" strokeOpacity="0.4" />
       <path d="M56 132 H240" />
       <path d="M14 158 H306" strokeOpacity="0.25" />
     </svg>
   ),
   // A slab plan with its control-joint grid — the concrete calculator's view.
   concrete: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <rect x="40" y="24" width="240" height="132" strokeWidth="3" />
-      <line x1="120" y1="24" x2="120" y2="156" strokeDasharray="2 8" strokeWidth="2" />
-      <line x1="200" y1="24" x2="200" y2="156" strokeDasharray="2 8" strokeWidth="2" />
-      <line x1="40" y1="90" x2="280" y2="90" strokeDasharray="2 8" strokeWidth="2" />
-      {[64, 88, 144, 168, 224, 248].map((x) => <line key={x} x1={x} y1="24" x2={x} y2="156" strokeOpacity="0.15" />)}
-      {[46, 68, 112, 134].map((y) => <line key={y} x1="40" y1={y} x2="280" y2={y} strokeOpacity="0.15" />)}
+      <line
+        x1="120"
+        y1="24"
+        x2="120"
+        y2="156"
+        strokeDasharray="2 8"
+        strokeWidth="2"
+      />
+      <line
+        x1="200"
+        y1="24"
+        x2="200"
+        y2="156"
+        strokeDasharray="2 8"
+        strokeWidth="2"
+      />
+      <line
+        x1="40"
+        y1="90"
+        x2="280"
+        y2="90"
+        strokeDasharray="2 8"
+        strokeWidth="2"
+      />
+      {[64, 88, 144, 168, 224, 248].map((x) => (
+        <line key={x} x1={x} y1="24" x2={x} y2="156" strokeOpacity="0.15" />
+      ))}
+      {[46, 68, 112, 134].map((y) => (
+        <line key={y} x1="40" y1={y} x2="280" y2={y} strokeOpacity="0.15" />
+      ))}
     </svg>
   ),
   // A pipe in section — insulation hatch between bore and jacket.
   insulation: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <circle cx="160" cy="90" r="72" strokeWidth="2" />
       <circle cx="160" cy="90" r="34" strokeWidth="2" />
       <circle cx="160" cy="90" r="26" strokeOpacity="0.4" />
@@ -86,8 +220,10 @@ const ICONS = {
         return (
           <line
             key={i}
-            x1={160 + 34 * Math.cos(a)} y1={90 + 34 * Math.sin(a)}
-            x2={160 + 72 * Math.cos(a)} y2={90 + 72 * Math.sin(a)}
+            x1={160 + 34 * Math.cos(a)}
+            y1={90 + 34 * Math.sin(a)}
+            x2={160 + 72 * Math.cos(a)}
+            y2={90 + 72 * Math.sin(a)}
             strokeOpacity="0.35"
           />
         );
@@ -96,52 +232,98 @@ const ICONS = {
   ),
   // A window grill — the job this type was added for.
   custom: (
-    <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg
+      viewBox="0 0 320 180"
+      className="art"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
       <rect x="48" y="16" width="224" height="148" strokeWidth="3" />
-      {[80, 112, 144, 176, 208, 240].map((x) => <line key={x} x1={x} y1="16" x2={x} y2="164" />)}
+      {[80, 112, 144, 176, 208, 240].map((x) => (
+        <line key={x} x1={x} y1="16" x2={x} y2="164" />
+      ))}
       <line x1="48" y1="62" x2="272" y2="62" strokeWidth="2" />
       <line x1="48" y1="118" x2="272" y2="118" strokeWidth="2" />
     </svg>
   ),
 };
 
-export default function Home({ onPick, onFind }) {
+export default function Home({ onPick, onFind, onContinue, draftName }) {
   return (
     <div className="page">
       <div className="container">
-        <div className="page-head" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 24, marginBottom: 56 }}>
+        <div
+          className="page-head"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr",
+            gap: 24,
+            marginBottom: 56,
+          }}
+        >
           <div>
             <p className="eyebrow">— New quote</p>
-            <h1 className="display" style={{ marginTop: 14 }}>Build it. Price it. Send it.</h1>
+            <h1 className="display" style={{ marginTop: 14 }}>
+              Build it. Price it. Send it.
+            </h1>
           </div>
           <p className="home-lede">
-            Pick a build, configure it exactly like the customer would on the site, and a priced,
-            itemized quote falls out — every number editable.
+            Pick a build, configure it exactly like the customer would on the
+            site, and a priced, itemized quote falls out — every number
+            editable.
             {onFind && (
               <>
-                {' '}Customer has a design code from the website?{' '}
-                <button className="home-find-link" onClick={onFind}>Look it up →</button>
+                {" "}
+                Customer has a design code from the website?{" "}
+                <button className="home-find-link" onClick={onFind}>
+                  Look it up →
+                </button>
               </>
             )}
           </p>
         </div>
 
-        <div className="type-grid">
-          {TYPES.map((t, i) => (
-            <button key={t.key} className="type-card" onClick={() => onPick(t.key)}>
-              <div className="idx">
-                <span>{String(i + 1).padStart(2, '0')}</span>
-                <span className="bar" />
-              </div>
-              {ICONS[t.key]}
-              <div>
-                <h2 className="display">{t.label}</h2>
-                <p>{t.tagline}</p>
-                <span className="go">Start designing →</span>
-              </div>
-            </button>
-          ))}
-        </div>
+        {onContinue && (
+          <button
+            className="btn"
+            style={{ marginBottom: 24 }}
+            onClick={onContinue}
+          >
+            Continue draft — {draftName}
+          </button>
+        )}
+        {["Metals", "Concrete", "Insulation"].map((trade) => (
+          <section key={trade} style={{ marginBottom: 32 }}>
+            <h2 style={{ marginBottom: 16, fontSize: 24 }}>CJM {trade}</h2>
+            <div className="type-grid">
+              {TYPES.filter((t) =>
+                trade === "Concrete"
+                  ? t.key === "concrete"
+                  : trade === "Insulation"
+                    ? t.key === "insulation"
+                    : !["concrete", "insulation"].includes(t.key),
+              ).map((t, i) => (
+                <button
+                  key={t.key}
+                  className="type-card"
+                  onClick={() => onPick(t.key)}
+                >
+                  <div className="idx">
+                    <span>{String(i + 1).padStart(2, "0")}</span>
+                    <span className="bar" />
+                  </div>
+                  {ICONS[t.key]}
+                  <div>
+                    <h2 className="display">{t.label}</h2>
+                    <p>{t.tagline}</p>
+                    <span className="go">Start designing →</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );

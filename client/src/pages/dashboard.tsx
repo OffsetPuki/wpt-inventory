@@ -214,6 +214,8 @@ export default function DashboardPage() {
   const quotes = useStats<QuoteStats>("quotes-stats", "/api/quotes/stats");
   const att = useStats<Attention>("dashboard-attention", "/api/dashboard/attention");
 
+  const failedSections = [ ["Sales", crm], ["Sales reports", crmReports], ["Marketing", mk], ["People", hr], ["Projects", pm], ["Finance", fin], ["Finance reports", finReports], ["Inventory", inv], ["Quotes", quotes], ["Needs attention", att] ] as const;
+
   const alerts = mk.data?.alerts ?? [];
   const monthly = finReports.data?.monthly ?? [];
   const incomeTrend = momTrend(monthly.map((m) => m.incomeCents));
@@ -236,6 +238,7 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <Header title="Dashboard" description="Your business at a glance" />
+      {failedSections.filter(([, query]) => query.isError).map(([label, query]) => <div key={label} role="alert" className="mb-3 rounded-xl border border-red-500/40 p-4 text-sm">{label} could not load. Figures in this section are unavailable. <button className="ml-2 underline" onClick={() => query.refetch()}>Retry</button></div>)}
 
       {alerts.length > 0 && (
         <div className="mb-6 flex flex-col gap-2">
@@ -292,10 +295,10 @@ export default function DashboardPage() {
               {att.data.tasks.slice(0, 10).map((t) => (
                 <li key={`${t.source}-${t.id}`}>
                   <Link
-                    href="/pm/board"
+                    href={`/pm/board?task=${t.id}`}
                     className="flex items-center justify-between gap-3 py-2 hover:bg-accent/40"
                   >
-                    <span className="min-w-0 truncate text-sm text-foreground">{t.title}</span>
+                    <span className="min-w-0 break-words text-sm text-foreground">{t.title}</span>
                     <span className="flex shrink-0 items-center gap-2 text-xs">
                       <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">
                         {t.source === "pm" ? "Board" : "Follow-up"}

@@ -1,3 +1,5 @@
+import { Link } from "wouter";
+import Modal from "@/components/Modal";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -26,7 +28,7 @@ const ROLE_BADGE: Record<Role, string> = {
 };
 const ROLE_HELP: Record<Role, string> = {
   owner: "Everything — dashboard, finance, users, settings.",
-  worker: "Floor user — find / add items, check in/out, view projects.",
+  worker: "Shop work, time tracking, projects, customer leads and quotes. Finance, payroll and account settings are owner-only.",
 };
 
 const inputCls =
@@ -35,6 +37,8 @@ const inputCls =
 export default function UsersPage() {
   const { user: me } = useAuth();
   const qc = useQueryClient();
+  const [resetUser,setResetUser]=useState<PublicUser|null>(null);
+  const [credential,setCredential]=useState("");
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [role, setRole] = useState<Role>("worker");
@@ -59,23 +63,31 @@ export default function UsersPage() {
   });
 
   const del = useMutation({
-    mutationFn: async (id: number) => apiRequest("DELETE", `/api/users/${id}`),
+    mutationFn: async (user: PublicUser) => apiRequest("PATCH", `/api/users/${user.id}/access`, {active:user.disabledAt!=null}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["users"] });
-      toast({ variant: "success", title: "User removed" });
+      toast({ variant: "success", title: "Access updated" });
     },
-    onError: (e: any) => toast({ variant: "destructive", title: "Could not remove", description: e?.message }),
+    onError: (e: any) => toast({ variant: "destructive", title: "Could not update access", description: e?.message }),
   });
 
   return (
     <div className="mx-auto max-w-3xl">
       <Header title="Users" description="Who can sign in and what they can do" />
+      <Link href="/security" className="mb-4 inline-block underline">My password, authenticator and devices</Link>
+      {resetUser && <Modal open title={`Reset ${resetUser.name}'s sign-in`} onClose={()=>setResetUser(null)}>
+        <form className="space-y-4" onSubmit={async e=>{e.preventDefault();try{await apiRequest("POST",`/api/users/${resetUser.id}/reset-credential`,{credential});setResetUser(null);setCredential("");toast({title:"Credential reset. Existing sessions signed out."});if(resetUser.id===me?.id)location.reload();}catch(error:any){toast({variant:"destructive",title:"Could not reset",description:error.message});}}}>
+          <p className="text-sm">This signs out existing sessions and preserves their work history. An enabled authenticator remains required.</p>
+          <label className="block">{resetUser.role==="worker"?"New PIN (4–12 digits)":"New password (12+ characters)"}<input required className={inputCls} type="password" autoComplete="new-password" value={credential} onChange={e=>setCredential(e.target.value)}/></label>
+          <button className="h-11 rounded-lg bg-primary px-4 text-primary-foreground">Reset and sign out sessions</button>
+        </form>
+      </Modal>}
 
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!name.trim() || pin.length !== 4) {
-            toast({ variant: "destructive", title: "Enter a name and 4-digit PIN" });
+          if (!name.trim() || (role === "owner" ? pin.length < 12 : !/^\d{4,12}$/.test(pin))) {
+            toast({ variant: "destructive", title: "Enter a name and a valid password or PIN" });
             return;
           }
           create.mutate();
@@ -87,15 +99,15 @@ export default function UsersPage() {
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">PIN</span>
+          <span className="text-sm font-medium text-foreground">{role === "owner" ? "Password (12+ characters)" : "PIN (4–12 digits)"}</span>
           <input
             className={inputCls}
             type="password"
-            inputMode="numeric"
+            inputMode={role === "worker" ? "numeric" : "text"}
             autoComplete="new-password"
-            maxLength={4}
+            maxLength={64}
             value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            onChange={(e) => setPin(e.target.value)}
           />
         </label>
         <label className="flex flex-col gap-1.5">
@@ -146,15 +158,11 @@ export default function UsersPage() {
                   </p>
                 </div>
               </div>
-              {me?.id !== u.id && (
-                <button
-                  onClick={() => del.mutate(u.id)}
-                  className="text-muted-foreground transition-colors hover:text-destructive"
-                  aria-label="Remove user"
-                >
-                  <Trash2 className="h-5 w-5" />
-                </button>
-              )}
+              <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+                <span>{u.disabledAt != null ? "Inactive" : "Active"}</span>
+                <button className="underline" onClick={()=>{setResetUser(u);setCredential("");}}>Reset {u.role==="worker"?"PIN":"password"}</button>
+                {me?.id!==u.id && <button disabled={del.isPending} className="underline" onClick={()=>del.mutate(u)}>{u.disabledAt!=null?"Activate":"Deactivate access"}</button>}
+              </div>
             </li>
           ))}
         </ul>

@@ -17,6 +17,7 @@ import { Loader2, Wallet, Receipt, Info } from "lucide-react";
 
 interface SummaryRow {
   employeeId: number;
+  multipleRates?: boolean;
   name: string;
   payType: "salary" | "hourly";
   payRateCents: number;
@@ -32,6 +33,7 @@ function ymdLocal(d: Date): string {
 }
 
 function rateLabel(r: SummaryRow): string {
+  if (r.multipleRates) return "Dated rates";
   return `${formatMoney(r.payRateCents)}${r.payType === "salary" ? "/yr" : "/hr"}`;
 }
 
@@ -50,6 +52,8 @@ export default function HrPayrollPage() {
     enabled: isElevated && rangeValid,
   });
 
+  const { data: runs = [], isError: runsFailed } = useQuery<{ id: number; from_date: string; to_date: string; total_cents: number }[]>({ queryKey: ["hr-payroll-runs"], queryFn: async () => (await apiRequest("GET", "/api/hr/payroll/runs")).json(), enabled: isElevated });
+  const overlappingRun = runs.find((r) => r.from_date <= to && r.to_date >= from);
   const totalCents = rows.reduce((s, r) => s + r.grossCents, 0);
 
   const record = useApiMutation({
@@ -58,7 +62,7 @@ export default function HrPayrollPage() {
       url: "/api/hr/payroll/record-expense",
       body: { from, to, amountCents: totalCents },
     }),
-    invalidate: [["finance-expenses"], ["finance-stats"]],
+    invalidate: [["finance-expenses"], ["finance-stats"], ["hr-payroll-runs"], ["hr-payroll-summary"]],
     successTitle: "Recorded as expense",
     errorTitle: "Could not record expense",
   });
@@ -79,19 +83,19 @@ export default function HrPayrollPage() {
     <div className="mx-auto max-w-6xl">
       <Header
         title="Payroll"
-        description="Hours from time tracking × pay rate, ready to book as an expense"
+        description="Dated pay rates, recorded hours, and closed payroll periods"
       >
         <button
           onClick={() => {
-            if (window.confirm(`Record ${formatMoney(totalCents)} of payroll (${from} → ${to}) as an expense?`)) {
+            if (window.confirm(`Close payroll for ${from} → ${to} and record ${formatMoney(totalCents)} as an expense? Hours in this period will be locked.`)) {
               record.mutate();
             }
           }}
-          disabled={totalCents === 0 || record.isPending || !rangeValid}
+          disabled={totalCents <= 0 || record.isPending || !rangeValid || !!overlappingRun || runsFailed}
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {record.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Receipt className="h-5 w-5" />}
-          Record as expense
+          Close period and record expense
         </button>
       </Header>
 
@@ -121,10 +125,13 @@ export default function HrPayrollPage() {
         )}
       </div>
 
+      {runsFailed && <p role="alert" className="mb-4">Closed periods could not load. Refresh before closing payroll.</p>}
+      {overlappingRun && <p className="mb-4 rounded-xl border border-border p-4 text-sm">This range includes closed payroll ({overlappingRun.from_date} to {overlappingRun.to_date}). Corrections belong in an open period.</p>}
+      {runs.length > 0 && <details className="mb-4 rounded-xl border border-border p-4 text-sm"><summary>Closed periods</summary>{runs.map((r) => <button className="mt-2 block underline" key={r.id} onClick={() => { setFrom(r.from_date); setTo(r.to_date); }}>{r.from_date} to {r.to_date} · {formatMoney(r.total_cents)}</button>)}</details>}
       {isLoading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
-        <EmptyState icon={Wallet} message="No active employees">
+        <EmptyState icon={Wallet} message="No payroll entries in this period">
           <p className="text-sm">Add employees (with a pay rate) on the Employees page.</p>
         </EmptyState>
       ) : (

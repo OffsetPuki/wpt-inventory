@@ -1,3 +1,4 @@
+import PaymentExceptions from "@/components/PaymentExceptions";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -231,6 +232,7 @@ export default function FinanceOverviewPage() {
     return (
       <div className="mx-auto max-w-6xl">
         <Header title="Finance" description="Accounting overview" />
+      <PaymentExceptions />
         <LoadingBlock />
       </div>
     );
@@ -247,6 +249,7 @@ export default function FinanceOverviewPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <Header title="Finance" description="Accounting overview" />
+      <PaymentExceptions />
 
       {/* KPI row */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

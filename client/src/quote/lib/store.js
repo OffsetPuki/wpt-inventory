@@ -4,10 +4,16 @@
 //  Ported from the standalone CJM Quote app. The price book and shop identity
 //  moved to the suite's database (GET/PUT /api/quotes/settings) so every
 //  device sees the same rates — only the in-progress session (a scratchpad)
-//  still lives in localStorage, same key as the old app.
+//  still lives in localStorage, scoped to the signed-in user.
 // =============================================================================
 
-const SESSION_KEY = 'cjm.session.v1';
+let draftUserId = null;
+export function setDraftUser(id) {
+  draftUserId = Number.isInteger(id) && id > 0 ? id : null;
+  // An unowned legacy draft must never appear in another person's account.
+  // Keep the legacy key for recovery, but never load an unowned draft.
+}
+const sessionKey = () => draftUserId ? `cjm.session.v2.user.${draftUserId}` : null;
 
 function safeParse(s, fallback) {
   if (s == null) return fallback;
@@ -53,6 +59,10 @@ export function deepMerge(base, over) {
 export function duplicateSession(sess, sid) {
   const copy = { ...sess };
   delete copy.designRef;
+  delete copy.leadId;
+  delete copy.version;
+  delete copy.quoteStatus;
+  delete copy.revisionOf;
   return {
     ...copy,
     sid,
@@ -65,9 +75,9 @@ export function duplicateSession(sess, sid) {
   };
 }
 
-export function loadSession() { return safeParse(localStorage.getItem(SESSION_KEY), null); }
-export function saveSession(sess) { return safeSet(SESSION_KEY, sess); }
-export function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ } }
+export function loadSession() { try { return sessionKey() ? safeParse(localStorage.getItem(sessionKey()), null) : null; } catch { return null; } }
+export function saveSession(sess) { return sessionKey() ? safeSet(sessionKey(), sess) : false; }
+export function clearSession() { try { if (sessionKey()) localStorage.removeItem(sessionKey()); } catch { /* ignore */ } }
 
 export const DEFAULT_SHOP = {
   name: 'CJM Metals',

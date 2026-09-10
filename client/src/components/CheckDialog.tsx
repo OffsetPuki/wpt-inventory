@@ -55,8 +55,12 @@ export default function CheckDialog({ item, mode, open, onClose }: CheckDialogPr
       toast({ variant: "success", title: isOut ? "Checked out" : "Checked in" });
       onClose();
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save", description: e?.message }),
+    onError: (e: any) => {
+      qc.invalidateQueries({ queryKey: ["item", item.id] });
+      qc.invalidateQueries({ queryKey: ["item-detail", item.id] });
+      qc.invalidateQueries({ queryKey: ["items"] });
+      toast({ variant: "destructive", title: "Could not save", description: e?.message });
+    },
   });
 
   function submit(e: React.FormEvent) {

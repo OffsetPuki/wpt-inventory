@@ -76,6 +76,7 @@ export const clients = sqliteTable("crm_clients", {
   name: text("name").notNull(),
   company: text("company"),
   email: text("email"),
+  preferredLanguage: text("preferred_language", {enum:["en","es"]}).notNull().default("en"),
   phone: text("phone"),
   address: text("address"),
   city: text("city"),
@@ -93,6 +94,7 @@ export const leads = sqliteTable("crm_leads", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   email: text("email"),
+  preferredLanguage: text("preferred_language", {enum:["en","es"]}).notNull().default("en"),
   phone: text("phone"),
   source: text("source", { enum: LEAD_SOURCES }).notNull().default("other"),
   // Which family website sent the lead (see LEAD_SITES).

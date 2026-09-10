@@ -7,7 +7,7 @@ import Attachments from './Attachments.jsx';
 
 export default function QuoteForm({
   type, state, totals, designRef, customer, notes, depositPct, quoteId, features, attachments,
-  onChangeCustomer, onChangeNotes, onChangeFeatures, onChangeAttachments, onChangeDeposit, onBack, onPreview, onPersist,
+  onChangeCustomer, onChangeNotes, onChangeFeatures, onChangeAttachments, onChangeDeposit, onBack, onPreview, onPersist, onIssued,
 }) {
   const field = (key, label, props = {}) => (
     <label className="field">
@@ -29,6 +29,7 @@ export default function QuoteForm({
     onChangeCustomer('company', c.company || '');
     onChangeCustomer('phone', c.phone || '');
     onChangeCustomer('email', c.email || '');
+    onChangeCustomer('preferredLanguage', c.preferredLanguage || 'en');
   };
 
   return (
@@ -61,6 +62,10 @@ export default function QuoteForm({
               {field('phone', 'Phone', { type: 'tel' })}
               {field('email', 'Email', { type: 'email' })}
             </div>
+            <label className="field">
+              <span>Customer language</span>
+              <select value={customer.preferredLanguage || 'en'} onChange={e=>onChangeCustomer('preferredLanguage',e.target.value)}><option value="en">English</option><option value="es">Español</option></select>
+            </label>
             <label className="field">
               <span>Project location</span>
               <input value={customer.location || ''} placeholder="Arlington, TX" onChange={(e) => onChangeCustomer('location', e.target.value)} />
@@ -126,7 +131,7 @@ export default function QuoteForm({
             {quoteId && (
               <div>
                 <p className="section-title">Send to customer</p>
-                <ShareQuote quoteId={quoteId} customerEmail={customer.email || ''} onBeforeShare={onPersist} />
+                <ShareQuote quoteId={quoteId} customerEmail={customer.email || ''} onBeforeShare={onPersist} onIssued={onIssued} />
               </div>
             )}
           </div>

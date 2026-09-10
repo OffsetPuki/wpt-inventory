@@ -16,3 +16,7 @@ dist/
 # is one developer's permission allowlist, and the lock file is transient.
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Local browser test output
+test-results/
+playwright-report/

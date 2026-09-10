@@ -1,3 +1,4 @@
+import { communicationContext, localizedLink } from "./communication";
 import type { Express } from "express";
 import crypto from "crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -18,6 +19,7 @@ import { isElevated } from "./http-util";
 import { buildLineState, lineCost, materialTotals } from "../client/src/quote/lib/estimate.js";
 import { deepMerge } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
+import { acceptQuote } from "./quote-lifecycle";
 
 // ─── Quote builder module ────────────────────────────────────────────────────
 // Backs the ported CJM Quote app (client/src/quote). Three responsibilities:
@@ -60,6 +62,9 @@ sqlite.exec(`
 // them were ever shared. SQLite has no IF NOT EXISTS for columns — the throw
 // on re-run is expected.
 for (const col of [
+  "lead_id INTEGER",
+  "revision_of INTEGER",
+  "version INTEGER NOT NULL DEFAULT 1",
   "share_token TEXT",
   "status TEXT NOT NULL DEFAULT 'draft'",
   "sent_at INTEGER",
@@ -445,6 +450,9 @@ export function registerQuoteRoutes(app: Express): void {
         type: quotes.type,
         customerName: quotes.customerName,
         designRef: quotes.designRef,
+        leadId: quotes.leadId,
+        revisionOf: quotes.revisionOf,
+        version: quotes.version,
         totalCents: quotes.totalCents,
         status: quotes.status,
         sentAt: quotes.sentAt,
@@ -479,6 +487,12 @@ export function registerQuoteRoutes(app: Express): void {
       const body = { ...req.body };
       normalizePayload(body);
       const data = insertQuoteSchema.parse(body);
+      if (data.leadId == null && data.designRef) {
+        data.leadId = (sqlite.prepare("SELECT lead_id FROM web_designs WHERE upper(ref) = upper(?)").get(data.designRef) as { lead_id: number } | undefined)?.lead_id ?? null;
+      }
+      if (data.leadId != null && !sqlite.prepare("SELECT id FROM crm_leads WHERE id = ? AND deleted_at IS NULL").get(data.leadId)) {
+        return res.status(400).json({ message: "Choose an existing lead for this quote." });
+      }
       const row = insertQuoteWithNumber(data);
       audit(req, "quote.create", {
         targetType: "quote", targetId: row.id, targetName: row.number,
@@ -490,21 +504,46 @@ export function registerQuoteRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/quotes/:id/revision", requireAuth, (req, res) => {
+    const original = db.select().from(quotes).where(eq(quotes.id, pid(req.params.id))).get();
+    if (!original || original.deletedAt != null) return res.status(404).json({ message: "Quote not found" });
+    if (original.status === "accepted") return res.status(409).json({ message: "This job is already accepted. Use a project change order, or duplicate it for a separate job." });
+    const row = sqlite.transaction(() => {
+      const created = insertQuoteWithNumber({ type: original.type, customerName: original.customerName,
+        designRef: original.designRef, leadId: original.leadId, revisionOf: original.revisionOf ?? original.id,
+        payload: original.payload, totalCents: original.totalCents });
+      if (original.status === "sent") db.update(quotes).set({ status: "declined", declinedAt: Date.now(),
+        declineReason: "scope_changed", declineNote: `Superseded by revision ${created.number}` }).where(eq(quotes.id, original.id)).run();
+      return created;
+    })();
+    audit(req, "quote.revision", { targetType: "quote", targetId: row.id, targetName: row.number, details: { previousId: original.id } });
+    res.status(201).json(row);
+  });
+
+  app.post("/api/quotes/:id/accept", requireAuth, (req, res) => {
+    try { res.json(acceptQuote(pid(req.params.id), String(req.body?.note ?? ""), req.ip ?? null, req.user!.name)); }
+    catch (error: any) { res.status(409).json({ message: error.message }); }
+  });
+
   app.patch("/api/quotes/:id", requireAuth, (req, res) => {
     const id = pid(req.params.id);
     const existing = db.select().from(quotes)
       .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
       .get();
     if (!existing) return res.status(404).json({ message: "Quote not found" });
+    if (existing.status !== "draft") return res.status(409).json({ message: "This quote has been issued. Create a revision to change it." });
+    if (req.body?.version !== existing.version) return res.status(409).json({ message: "This draft changed on another screen. Reopen it before saving." });
     try {
       const body = { ...req.body };
       normalizePayload(body);
       const parsed = insertQuoteSchema.partial().parse(body);
+      if (parsed.leadId != null && !sqlite.prepare("SELECT 1 FROM crm_leads WHERE id=? AND deleted_at IS NULL").get(parsed.leadId)) return res.status(400).json({message:"Choose an existing lead."});
       const row = db.update(quotes)
-        .set({ ...parsed, updatedAt: Date.now() })
-        .where(eq(quotes.id, id))
+        .set({ ...parsed, version: existing.version + 1, updatedAt: Date.now() })
+        .where(and(eq(quotes.id, id), eq(quotes.version, existing.version), eq(quotes.status, "draft")))
         .returning()
         .get();
+      if (!row) return res.status(409).json({ message: "This quote changed. Reopen it before saving." });
       res.json(row);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -517,6 +556,7 @@ export function registerQuoteRoutes(app: Express): void {
       .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
       .get();
     if (!target) return res.status(404).json({ message: "Quote not found" });
+    if (target.status !== "draft") return res.status(409).json({ message: "Issued quotes are preserved. Create a revision or record a decline instead." });
     db.update(quotes).set({ deletedAt: Date.now() }).where(eq(quotes.id, id)).run();
     audit(req, "quote.delete", {
       targetType: "quote", targetId: id, targetName: target.number,
@@ -548,7 +588,7 @@ export function registerQuoteRoutes(app: Express): void {
       if (!quote.shareToken) {
         db.update(quotes).set({ shareToken: token }).where(eq(quotes.id, id)).run();
       }
-      return res.json({ url: `${PUBLIC_SITE_URL}/quote/${token}?preview=1`, emailed: false });
+      return res.json({ url: localizedLink(`${PUBLIC_SITE_URL}/quote/${token}?preview=1`, communicationContext({quoteNumber:quote.number}).lang), emailed: false });
     }
 
     const updates: Partial<typeof quotes.$inferInsert> = { shareToken: token };
@@ -558,7 +598,7 @@ export function registerQuoteRoutes(app: Express): void {
     }
     db.update(quotes).set(updates).where(eq(quotes.id, id)).run();
 
-    const url = `${PUBLIC_SITE_URL}/quote/${token}`;
+    const url = localizedLink(`${PUBLIC_SITE_URL}/quote/${token}`, communicationContext({quoteNumber:quote.number}).lang);
 
     // Email the customer the link when asked — explicit address wins, else the
     // one they typed into the builder's customer card (stored in the payload).

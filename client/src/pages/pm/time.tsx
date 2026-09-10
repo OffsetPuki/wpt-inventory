@@ -23,7 +23,7 @@ import {
   CircleDollarSign,
 } from "lucide-react";
 
-type TimeRow = TimeEntry & { projectName: string | null; taskTitle: string | null };
+type TimeRow = TimeEntry & { locked?: boolean; projectName: string | null; taskTitle: string | null };
 type TaskRow = PmTask & { projectName: string | null; assigneeName: string | null };
 
 function ymdOfMs(ms: number): string {
@@ -295,6 +295,22 @@ function EntryDialog({
 
 // ─── Time page ───────────────────────────────────────────────────────────────
 
+function CorrectionDialog({ entry, onClose }: { entry: TimeRow; onClose: () => void }) {
+  const [minutes, setMinutes] = useState("");
+  const [date, setDate] = useState(ymdOfMs(Date.now()));
+  const [reason, setReason] = useState("");
+  const { data: history = [] } = useQuery<{ effective_date: string; minutes_delta: number; rate_cents: number; reason: string }[]>({ queryKey: ["time-corrections", entry.id], queryFn: async () => (await apiRequest("GET", `/api/pm/time/${entry.id}/corrections`)).json() });
+  const save = useApiMutation({ request: () => ({ method: "POST", url: `/api/pm/time/${entry.id}/corrections`, body: { effectiveDate: date, minutesDelta: Number(minutes), reason } }), invalidate: [["time-corrections"], ["hr-payroll-summary"]], successTitle: "Payroll correction recorded", errorTitle: "Could not record correction", onSuccess: onClose });
+  return <Modal open onClose={onClose} title="Correct recorded time"><form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+    <p className="text-sm text-muted-foreground">The original entry stays unchanged. This adds or subtracts pay in an open payroll period at the original hourly rate. Adjust any customer invoice separately in Finance.</p>
+    <label className="block text-sm">Minutes to add or subtract<input required type="number" min={-1440} max={1440} step={1} placeholder="60 or -30" className={inputCls} value={minutes} onChange={(e) => setMinutes(e.target.value)} /></label>
+    <label className="block text-sm">Apply in payroll on<input required type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} /></label>
+    <label className="block text-sm">Reason<textarea required minLength={3} maxLength={1000} className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+    {history.map((h,i) => <p className="text-xs" key={i}>{h.effective_date}: {h.minutes_delta > 0 ? '+' : ''}{h.minutes_delta} minutes — {h.reason}</p>)}
+    <button disabled={save.isPending} className="rounded-xl bg-primary px-4 py-3 text-primary-foreground">Record correction</button>
+  </form></Modal>;
+}
+
 export default function PmTimePage() {
   const { user, isElevated } = useAuth();
 
@@ -311,6 +327,7 @@ export default function PmTimePage() {
 
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [correcting, setCorrecting] = useState<TimeRow | null>(null);
   const [editingEntry, setEditingEntry] = useState<TimeRow | null>(null);
 
   const { data: projects = [] } = useQuery<Project[]>({
@@ -621,13 +638,14 @@ export default function PmTimePage() {
                     </span>
                     {e.endedAt && (
                       <div className="flex shrink-0 items-center gap-1">
+                        {isElevated && <button className="rounded-lg px-2 py-1 text-xs underline" onClick={() => setCorrecting(e)}>Correct</button>}
                         <button
                           onClick={() => {
                             setEditingEntry(e);
                             setDialogOpen(true);
                           }}
                           className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          aria-label="Edit entry"
+                          disabled={e.locked} title={e.locked ? "Billed or closed payroll — record a correction" : "Edit entry"} aria-label="Edit entry"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
@@ -636,7 +654,7 @@ export default function PmTimePage() {
                             if (window.confirm("Delete this time entry?")) del.mutate(e.id);
                           }}
                           className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-red-600 dark:hover:text-red-400"
-                          aria-label="Delete entry"
+                          disabled={e.locked} aria-label="Delete entry"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -650,6 +668,7 @@ export default function PmTimePage() {
         </div>
       )}
 
+      {correcting && <CorrectionDialog entry={correcting} onClose={() => setCorrecting(null)} />}
       <EntryDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Express } from "express";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
@@ -105,7 +106,7 @@ sqlite.exec(`
     title TEXT NOT NULL,
     category TEXT,
     photo_url TEXT NOT NULL,
-    published INTEGER NOT NULL DEFAULT 1,
+    published INTEGER NOT NULL DEFAULT 0,
     order_index INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
@@ -582,7 +583,7 @@ export function registerMarketingRoutes(app: Express): void {
   });
 
   registerCreate(app, "/api/marketing/portfolio", requireElevated, {
-    table: portfolioItems, schema: insertPortfolioItemSchema,
+    table: portfolioItems, schema: insertPortfolioItemSchema.extend({published: z.boolean().default(false)}),
     action: "marketing.portfolio_create", targetType: "portfolio",
     name: (r) => r.title, audit,
   });

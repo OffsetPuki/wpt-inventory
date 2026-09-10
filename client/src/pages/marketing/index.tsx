@@ -425,7 +425,7 @@ function PortfolioDialog({
         category: category.trim() || null,
         photoUrl,
         // Editing leaves Live/Hidden exactly as the owner set it.
-        ...(item ? {} : { published: true }),
+        ...(item ? {} : { published: false }),
       },
     }),
     invalidate: [["marketing", "portfolio"]],
@@ -535,7 +535,7 @@ function PortfolioTab() {
     <div>
       <div className="mb-6 flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Published photos appear in the website's "recent work" feed. New photos publish immediately.
+          Add photos of completed CJM work, review the image and caption, then choose Publish. New uploads stay private until published.
         </p>
         <button onClick={() => setAddOpen(true)} className={cn(primaryBtn, "shrink-0")}>
           <Plus className="h-5 w-5" />
@@ -576,7 +576,7 @@ function PortfolioTab() {
                     )}
                   >
                     <Globe className="h-3.5 w-3.5" />
-                    {it.published ? "Live" : "Hidden"}
+                    {it.published ? "Unpublish" : "Publish approved photo"}
                   </button>
                   <div className="ml-auto flex items-center gap-1.5">
                     <button

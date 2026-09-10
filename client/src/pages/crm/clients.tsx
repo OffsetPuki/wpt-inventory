@@ -63,6 +63,7 @@ function parseTags(json: string | null): string[] {
 
 function ClientFormModal({ client, onClose }: { client: Client | null; onClose: () => void }) {
   const [name, setName] = useState(client?.name ?? "");
+  const [preferredLanguage, setPreferredLanguage] = useState(client?.preferredLanguage ?? "en");
   const [company, setCompany] = useState(client?.company ?? "");
   const [email, setEmail] = useState(client?.email ?? "");
   const [phone, setPhone] = useState(client?.phone ?? "");
@@ -80,6 +81,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
         .filter(Boolean);
       const body = {
         name: name.trim(),
+        preferredLanguage,
         company: company.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
@@ -130,6 +132,10 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
             <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
           </label>
         </div>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">Customer language</span>
+          <select className={inputCls} value={preferredLanguage} onChange={e=>setPreferredLanguage(e.target.value as "en"|"es")}><option value="en">English</option><option value="es">Español</option></select>
+        </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Address</span>
           <input className={inputCls} value={address} onChange={(e) => setAddress(e.target.value)} />

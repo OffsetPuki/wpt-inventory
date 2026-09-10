@@ -36,6 +36,9 @@ export const quotes = sqliteTable("quotes", {
   type: text("type", { enum: QUOTE_TYPES }).notNull(),
   customerName: text("customer_name"),
   designRef: text("design_ref"), // website design code ("CJM-F7K2") if started from one
+  leadId: integer("lead_id"),
+  revisionOf: integer("revision_of"),
+  version: integer("version").notNull().default(1),
   // Display metadata for the list view. Computed by the builder's pricing
   // engine, which lives client-side — unlike crm_estimates this is not a
   // server-verified financial total.
@@ -86,6 +89,8 @@ export const quoteSettings = sqliteTable("quote_settings", {
 export const insertQuoteSchema = createInsertSchema(quotes).omit({
   id: true,
   number: true, // server-assigned
+  revisionOf: true,
+  version: true,
   // Share/accept lifecycle is server-managed (POST /:id/share + the public
   // accept endpoint) — a client write could forge an acceptance.
   shareToken: true,

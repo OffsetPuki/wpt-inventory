@@ -258,6 +258,9 @@ function addColumnIfMissing(table: string, column: string, ddl: string): void {
 }
 
 addColumnIfMissing("items", "deleted_at", "deleted_at INTEGER");
+addColumnIfMissing("users", "disabled_at", "disabled_at INTEGER");
+addColumnIfMissing("users", "credential_type", "credential_type TEXT NOT NULL DEFAULT 'pin'");
+addColumnIfMissing("users", "totp_secret", "totp_secret TEXT");
 addColumnIfMissing("projects", "deleted_at", "deleted_at INTEGER");
 // Wiring plan, Fix 2 — jobs link to a CRM client by id (soft ref, see schema.ts).
 addColumnIfMissing("projects", "client_id", "client_id INTEGER");
@@ -315,9 +318,9 @@ addColumnIfMissing("settings", "template_catalog_version", "template_catalog_ver
 
 // ─── Helper: strip pin from user ─────────────────────────────────────────────
 
-function toPublicUser(u: User): PublicUser {
-  const { pin, ...pub } = u;
-  return pub;
+export function toPublicUser(u: User): PublicUser {
+  const { pin, totpSecret, ...pub } = u;
+  return { ...pub, mfaEnabled: !!totpSecret, securitySetupRequired: u.role !== "worker" && (u.credentialType !== "password" || !totpSecret) };
 }
 
 // ─── Storage API ─────────────────────────────────────────────────────────────
@@ -349,6 +352,29 @@ export const storage = {
 
   setUserPin(id: number, pinHash: string): void {
     sqlite.prepare("UPDATE users SET pin = ? WHERE id = ?").run(pinHash, id);
+    sqlite.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+  },
+
+  userCanSignIn(id: number): boolean {
+    const user = this.getUserById(id);
+    if (!user || user.disabledAt != null) return false;
+    if (sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hr_employees'").get()) {
+      if (sqlite.prepare("SELECT 1 FROM hr_employees WHERE user_id = ? AND status = 'terminated' AND deleted_at IS NULL").get(id)) return false;
+    }
+    return true;
+  },
+
+  setUserAccess(id: number, active: boolean): void {
+    sqlite.transaction(() => {
+      const user = this.getUserById(id);
+      if (!user) throw new Error("User not found");
+      if (!active && user.role !== "worker" && user.disabledAt == null) {
+        const others = sqlite.prepare("SELECT count(*) AS n FROM users WHERE id != ? AND role != 'worker' AND disabled_at IS NULL").get(id) as { n: number };
+        if (!others.n) throw new Error("Keep at least one active owner account.");
+      }
+      sqlite.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(active ? null : Date.now(), id);
+      sqlite.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+    })();
   },
 
   getAllUsersWithPin(): User[] {
@@ -405,9 +431,9 @@ export const storage = {
     ).run(token, userId, role, name, expiresAt);
   },
 
-  getSession(token: string): { userId: number; role: string; name: string; expiresAt: number } | null {
+  getSession(token: string): { userId: number; role: string; name: string; expiresAt: number; createdAt: number } | null {
     const row = sqlite.prepare(
-      "SELECT user_id as userId, role, name, expires_at as expiresAt FROM sessions WHERE token = ?"
+      "SELECT user_id as userId, role, name, expires_at as expiresAt, created_at as createdAt FROM sessions WHERE token = ?"
     ).get(token) as any;
     return row || null;
   },
@@ -702,6 +728,9 @@ export const storage = {
       const item = tx.select().from(items)
         .where(and(eq(items.id, itemId), sql`${items.deletedAt} IS NULL`)).get();
       if (!item) throw new Error("Item not found");
+      if (type === "check_out" && item.quantity < data.quantity) {
+        throw new Error(`Only ${Math.max(0, item.quantity)} left in stock. Refresh and choose a smaller quantity.`);
+      }
       sqlite.prepare("UPDATE items SET quantity = quantity + ? WHERE id = ?").run(delta, itemId);
       return tx.insert(transactions).values({
         itemId,

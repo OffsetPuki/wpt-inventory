@@ -1,3 +1,5 @@
+import { insertNumbered } from "./numbering";
+import { communicationContext, localizedLink } from "./communication";
 import type { Express, Request, Response } from "express";
 import type { z } from "zod";
 import crypto from "crypto";
@@ -291,28 +293,7 @@ export function presentInvoice(inv: Invoice, today: string) {
 // The UNIQUE constraint on `number` is the arbiter under concurrency — on
 // conflict we bump the seq and retry (bounded, so a pathological table can't
 // spin forever).
-export function insertNumbered<T>(
-  table: string,
-  prefix: string,
-  doInsert: (num: string) => T,
-  opts: { seed?: () => number; attempts?: number } = {},
-): T {
-  const base = opts.seed
-    ? opts.seed()
-    : (sqlite.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM ${table}`).get() as { m: number }).m + 1;
-  const year = new Date().getFullYear();
-  const attempts = opts.attempts ?? 25;
-  for (let i = 0; i < attempts; i++) {
-    const num = `${prefix}-${year}-${String(base + i).padStart(4, "0")}`;
-    try {
-      return doInsert(num);
-    } catch (e: any) {
-      if (String(e?.message ?? "").includes("UNIQUE")) continue;
-      throw e;
-    }
-  }
-  throw new Error(`Could not allocate a unique ${prefix} number`);
-}
+export { insertNumbered } from "./numbering";
 
 // Cross-module reads into CRM (`clientNameById` is imported from crm.ts —
 // same degrade-to-null stance). If that module isn't wired yet these queries
@@ -398,6 +379,7 @@ function queueReviewRequest(inv: Invoice): void {
         const first = firstNameOf(name);
         // Wording is owner-editable in the Emails section.
         const msg = renderTemplate("review.request", {
+          invoiceNumber: inv.number,
           firstName: first,
           reviewUrl: `${PUBLIC_SITE_URL}/review/${token}`,
         });
@@ -482,7 +464,7 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
 // (status "sent"), so a customer's link never carries it.
 export const invoicePayLink = (inv: Invoice): string | null =>
   inv.shareToken
-    ? `${PUBLIC_SITE_URL}/invoice/${inv.shareToken}${inv.status === "draft" ? "?preview=1" : ""}`
+    ? localizedLink(`${PUBLIC_SITE_URL}/invoice/${inv.shareToken}${inv.status === "draft" ? "?preview=1" : ""}`, communicationContext({invoiceNumber:inv.number}).lang)
     : null;
 
 // The prompt-payment discount rate in basis points (Finance → Billing markups).
@@ -572,10 +554,12 @@ function queueInvoiceEmail(inv: Invoice): void {
         ? Math.round((grossCents * discountBp) / 10_000)
         : 0;
 
+      const comm=communicationContext({invoiceNumber:inv.number});
+      const spanish=comm.lang==='es';
       const ok = await sendMail({
         to,
-        subject: `Invoice ${inv.number} from ${shopBrand()}${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
-        text:
+        subject: spanish ? `Factura ${inv.number} — ${comm.brand || shopBrand()}` : `Invoice ${inv.number} from ${shopBrand()}${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
+        text: spanish ? `Hola ${first},\n\nTu factura ${inv.number} está lista.\nTotal: ${usd(inv.totalCents)}\nSaldo: ${usd(inv.totalCents-retainageOf(inv)-inv.paidCents)}\n${inv.dueDate ? `Vencimiento: ${inv.dueDate}\n` : ''}\n${payUrl || ''}\n\nRevisa la factura para ver el detalle y las opciones de pago. Si tienes preguntas, responde a este correo.\n\n${comm.brand || shopBrand()}` :
           `Hi ${first},\n\n` +
           `Here's your invoice ${inv.number}:\n\n` +
           (lines.length ? `${lines.join("\n")}\n\n` : "") +
@@ -740,6 +724,16 @@ function queuePaidCloseLoop(req: Request, inv: Invoice): void {
 // the close-loop hooks can never drift apart between the two. Callers own the
 // validation and the void check; this owns everything that happens after.
 
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS fin_payment_receipts (
+    reference TEXT PRIMARY KEY, payment_id INTEGER NOT NULL REFERENCES fin_invoice_payments(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS fin_payment_exceptions (
+    id INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, invoice_id INTEGER,
+    kind TEXT NOT NULL, details TEXT NOT NULL, created_at INTEGER NOT NULL, resolved_at INTEGER
+  );
+`);
+
 export function recordInvoicePayment(
   req: Request,
   inv: Invoice,
@@ -747,29 +741,51 @@ export function recordInvoicePayment(
   // Who recorded it, when the request carries no signed-in user — the Stripe
   // webhook. Owner entries leave it unset and the audit log names the session.
   source?: string,
+  beforeRecord?: (current: Invoice) => Invoice,
 ): { payment: typeof invoicePayments.$inferSelect; invoice: Invoice } {
-  const payment = db.insert(invoicePayments)
-    .values({ invoiceId: inv.id, ...body })
-    .returning()
-    .get();
-  // Auto-status from the running paid total: covered → paid, anything → partial.
-  const paidCents = inv.paidCents + body.amountCents;
-  // A $0-total invoice must not auto-settle to "paid" (mirrors the reversal
-  // path's `&& inv.totalCents > 0` guard). Retainage-aware: the GC paying
-  // everything BUT the withheld retainage settles the invoice — the retainage
-  // is collected later via the release invoice (Phase G #3).
-  const status: InvoiceStatus =
-    paidCents >= inv.totalCents - retainageOf(inv) && inv.totalCents > 0 ? "paid" : "partial";
-  const invoice = db.update(invoices)
-    .set({ paidCents, status })
-    .where(eq(invoices.id, inv.id))
-    .returning()
-    .get();
+  const { payment, invoice, inserted, previousStatus } = sqlite.transaction(() => {
+    let current = db.select().from(invoices).where(eq(invoices.id, inv.id)).get();
+    if (!current || current.deletedAt != null) throw new Error("Invoice not found");
+    const previousStatus = current.status;
+    // The unique receipt registry also protects new references when a legacy
+    // database contains duplicate reference strings that need owner review.
+    let payment = source && body.reference
+      ? db.select().from(invoicePayments).where(eq(invoicePayments.reference, body.reference)).get()
+      : undefined;
+    if (payment && payment.invoiceId !== current.id) throw new Error("Payment reference belongs to another invoice");
+    const inserted = !payment;
+    if (!payment) {
+      if (beforeRecord) current = beforeRecord(current);
+      payment = db.insert(invoicePayments).values({ invoiceId: current.id, ...body }).returning().get();
+      if (source && body.reference) {
+        sqlite.prepare("INSERT INTO fin_payment_receipts (reference, payment_id) VALUES (?, ?)")
+          .run(body.reference, payment.id);
+      }
+    }
+    // Recompute from the ledger even on a retry: this repairs the historical
+    // insert-succeeded/update-failed state without recording money twice.
+    const paidCents = Number(db.select({ n: sql<number>`coalesce(sum(${invoicePayments.amountCents}), 0)` })
+      .from(invoicePayments).where(eq(invoicePayments.invoiceId, current.id)).get()!.n);
+    const status: InvoiceStatus = current.status === "void" ? "void"
+      : paidCents >= current.totalCents - retainageOf(current) && current.totalCents > 0 ? "paid"
+      : paidCents > 0 ? "partial" : current.status;
+    const invoice = db.update(invoices).set({ paidCents, status })
+      .where(eq(invoices.id, current.id)).returning().get();
+    if (paidCents > current.totalCents || current.status === "void") {
+      sqlite.prepare(`INSERT OR IGNORE INTO fin_payment_exceptions (event_id, invoice_id, kind, details, created_at)
+        VALUES (?, ?, ?, ?, ?)`).run(`payment:${payment.id}`, current.id,
+          current.status === "void" ? "payment_on_void_invoice" : "overpayment",
+          JSON.stringify({ paidCents, totalCents: current.totalCents, reference: body.reference }), Date.now());
+    }
+    return { payment, invoice, inserted, previousStatus };
+  })();
+  if (!inserted) return { payment, invoice };
+  const status = invoice.status;
 
   // Newly settled → queue the review ask, push realized revenue back onto the
   // CRM lead and retire the "Schedule the job" task (Phase A #6). All
   // deferred; none can break this path.
-  if (status === "paid" && inv.status !== "paid") {
+  if (status === "paid" && previousStatus !== "paid") {
     queueReviewRequest(invoice);
     queuePaidCloseLoop(req, invoice);
   }
@@ -919,6 +935,17 @@ function unreleaseRetainage(inv: Invoice): void {
 }
 
 export function registerFinanceRoutes(app: Express): void {
+  app.get("/api/finance/payment-exceptions", requireElevated, (_req, res) => {
+    res.json(sqlite.prepare(`SELECT e.*, i.number AS invoice_number FROM fin_payment_exceptions e
+      LEFT JOIN fin_invoices i ON i.id = e.invoice_id WHERE e.resolved_at IS NULL ORDER BY e.created_at DESC`).all());
+  });
+  app.post("/api/finance/payment-exceptions/:id/resolve", requireElevated, (req, res) => {
+    const note = String(req.body?.note ?? "").trim();
+    if (!note) return res.status(400).json({ message: "Describe the reconciliation before resolving this exception." });
+    sqlite.prepare("UPDATE fin_payment_exceptions SET resolved_at = ? WHERE id = ?").run(Date.now(), pid(req.params.id));
+    audit(req, "finance.payment_exception_resolve", { targetType: "payment_exception", targetId: pid(req.params.id), details: { note } });
+    res.json({ ok: true });
+  });
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 
   app.get("/api/finance/stats", requireElevated, (_req, res) => {

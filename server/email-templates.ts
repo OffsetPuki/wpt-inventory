@@ -1,3 +1,4 @@
+import { communicationContext, localizedLink } from "./communication";
 import { sqlite } from "./storage";
 import { isOptedOut, mailEnabled, sendMail } from "./mailer";
 
@@ -309,6 +310,49 @@ export const BUILT_INS: BuiltIn[] = [
   },
 ];
 
+const SPANISH_TEMPLATES: Record<string, {subject:string;body:string}> = {
+  "lead.received": {
+    "subject": "Recibimos tu solicitud — {{brand}}",
+    "body": "Hola {{firstName}},\n\nGracias por contactarnos. Guardamos tu solicitud y nuestro equipo la revisará.\n{{refLine}}\nPuedes responder a este correo si necesitas agregar algo.\n\n{{signoff}}"
+  },
+  "quote.share": {
+    "subject": "Tu cotización de {{brand}} — {{quoteNumber}}",
+    "body": "Hola {{customerName}},\n\nTu cotización {{quoteNumber}} está lista. Revísala y acéptala aquí:\n\n{{quoteUrl}}\n\nSi tienes preguntas, responde a este correo.\n\n{{signoff}}"
+  },
+  "quote.accepted": {
+    "subject": "Cotización {{quoteNumber}} aceptada — {{brand}}",
+    "body": "Hola {{customerName}},\n\nRegistramos tu aceptación de la cotización {{quoteNumber}}. Te contactaremos para acordar los siguientes pasos del proyecto.\n\n{{signoff}}"
+  },
+  "quote.followup1": {
+    "subject": "¿Tienes preguntas sobre tu cotización {{quoteNumber}}?",
+    "body": "Hola {{firstName}},\n\n¿Tienes preguntas sobre tu cotización {{quoteNumber}} por {{quoteTotal}}? Puedes revisarla aquí:\n\n{{quoteUrl}}\n\nEstamos para ayudarte.\n\n{{signoff}}\n\nDejar de recibir estos correos: {{unsubscribeUrl}}"
+  },
+  "quote.followup2": {
+    "subject": "Seguimiento de tu cotización {{quoteNumber}} — {{brand}}",
+    "body": "Hola {{firstName}},\n\nEste es nuestro último recordatorio. Si necesitas ajustar el proyecto, responde a este correo. Tu cotización está aquí:\n\n{{quoteUrl}}\n\n{{signoff}}\n\nDejar de recibir estos correos: {{unsubscribeUrl}}"
+  },
+  "invoice.overdue": {
+    "subject": "Recordatorio de factura {{invoiceNumber}} — {{brand}}",
+    "body": "Hola {{firstName}},\n\nLa factura {{invoiceNumber}} tiene un saldo de {{balance}} con vencimiento {{dueDate}}. Si ya enviaste el pago, por favor avísanos.\n\n{{signoff}}"
+  },
+  "review.request": {
+    "subject": "¿Cómo nos fue? — {{brand}}",
+    "body": "Hola {{firstName}},\n\nGracias por elegir a {{brand}}. Nos ayudaría conocer tu opinión sobre el proyecto:\n\n{{reviewUrl}}\n\n{{signoff}}"
+  },
+  "payment.receipt.partial": {
+    "subject": "Recibimos {{amount}} — factura {{invoiceNumber}}",
+    "body": "Hola {{firstName}},\n\nRegistramos tu pago de {{amount}} para la factura {{invoiceNumber}}. El saldo pendiente es {{balance}}.\n\n{{signoff}}"
+  },
+  "payment.receipt.final": {
+    "subject": "Pago recibido — factura {{invoiceNumber}}",
+    "body": "Hola {{firstName}},\n\nRegistramos tu pago de {{amount}} para la factura {{invoiceNumber}}. Gracias por tu pago.\n\n{{signoff}}"
+  }
+};
+for (const [id,translated] of Object.entries(SPANISH_TEMPLATES)) {
+  const original=BUILT_INS.find(t=>t.id===id);
+  if(original)BUILT_INS.push({...original,id:`${id}.es`,name:`${original.name} — Español`,...translated});
+}
+
 /** Listed in the UI so the owner can see it exists, but not editable. */
 export const LOCKED_NOTE = "Built from the invoice's own figures — line items, "
   + "totals, retainage and deposit — so its wording can't be edited without "
@@ -360,8 +404,18 @@ export function renderTemplate(
   id: string,
   vars: Record<string, string>,
 ): { subject: string; text: string; template: string } | null {
-  const def = BUILT_INS.find((t) => t.id === id);
-  const row = storedRow(id);
+  const context=communicationContext({quoteNumber:vars.quoteNumber,invoiceNumber:vars.invoiceNumber,leadId:vars.leadId?Number(vars.leadId):undefined});
+  const lang=vars.lang || context.lang;
+  const baseId=id.replace(/\.es$/, '');
+  const effectiveId=lang==='es' && SPANISH_TEMPLATES[baseId]?`${baseId}.es`:id;
+  if(storedRow(baseId)?.enabled===0)return null;
+  const def = BUILT_INS.find((t) => t.id === effectiveId);
+  const row = storedRow(effectiveId);
+  vars={...vars};
+  if(context.brand && !vars.brand)vars.brand=context.brand;
+  if(vars.brand && !vars.signoff)vars.signoff=`— ${vars.brand}`;
+  if(lang==='es')for(const key of ['firstName','customerName'])if(vars[key]==='there')vars[key]='cliente';
+  for(const key of ['quoteUrl','invoiceUrl','reviewUrl'])if(vars[key])vars[key]=localizedLink(vars[key],lang);
   if (row && row.enabled !== 1) return null;
   const subjectSrc = row?.subject ?? def?.subject ?? "";
   let bodySrc = row?.body ?? def?.body ?? "";
@@ -380,7 +434,7 @@ export function renderTemplate(
     subject: render(subjectSrc, allVars, optional).trim(),
     text: render(bodySrc, allVars, optional),
     // Rides along into sendMail so the sent history knows which email this was.
-    template: id,
+    template: effectiveId,
   };
 }
 

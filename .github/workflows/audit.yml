@@ -18,11 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci --ignore-scripts
       # Fail on high or critical advisories. Moderate/low are surfaced in the
       # output but don't break the build (avoids noisy PR blocks for dev-only
       # esbuild-style advisories).
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+      - name: Audit dependencies
+        run: npm audit --audit-level=high

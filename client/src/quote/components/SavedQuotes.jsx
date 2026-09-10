@@ -88,7 +88,7 @@ function BuyList({ ids, onClose }) {
       </div>
       {poNumber && (
         <p className="hint">
-          Purchase order <strong>{poNumber}</strong> created — <a href="/finance/purchase-orders">open it in Finance</a> to set the vendor and prices.
+          Purchase order <strong>{poNumber}</strong> created — <a href="/#/finance/purchase-orders">open it in Finance</a> to set the vendor and prices.
         </p>
       )}
       {isLoading && <p className="hint">Adding up materials…</p>}
@@ -157,11 +157,21 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
       // them anyway, but not handing them over makes that impossible to undo by
       // accident later.
       if (duplicate) onDuplicate(payload);
-      else onOpen({ ...payload, quoteId: row.id, number: row.number });
+      else onOpen({ ...payload, quoteId: row.id, number: row.number, version: row.version, leadId: row.leadId, quoteStatus: row.status });
     },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not open quote', description: e?.message }),
   });
 
+  const viewQuote = useMutation({
+    mutationFn: async (id) => (await apiRequest('POST', `/api/quotes/${id}/share`, { preview: true })).json(),
+    onSuccess: (row) => window.open(row.url, '_blank', 'noopener'),
+    onError: (e) => toast({ variant: 'destructive', title: 'Could not open quote', description: e?.message }),
+  });
+  const reviseQuote = useMutation({
+    mutationFn: async (id) => (await apiRequest('POST', `/api/quotes/${id}/revision`)).json(),
+    onSuccess: (row) => { qc.invalidateQueries({ queryKey: ['quotes'] }); openQuote.mutate({ id: row.id }); },
+    onError: (e) => toast({ variant: 'destructive', title: 'Could not create revision', description: e?.message }),
+  });
   const deleteQuote = useMutation({
     mutationFn: async (id) => apiRequest('DELETE', `/api/quotes/${id}`),
     onSuccess: () => {
@@ -250,9 +260,11 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                   </div>
                   <div className="line-cost">${fmtMoney((q.totalCents || 0) / 100)}</div>
                   <div className="line-controls">
-                    <button className="btn ghost sq-btn" onClick={() => openQuote.mutate({ id: q.id })} disabled={openQuote.isPending}>
-                      Open
+                    <button className="btn ghost sq-btn" onClick={() => q.status === 'draft' ? openQuote.mutate({ id: q.id }) : viewQuote.mutate(q.id)} disabled={openQuote.isPending || viewQuote.isPending}>
+                      {q.status === 'draft' ? 'Edit draft' : 'View issued quote'}
                     </button>
+                    {['sent', 'declined'].includes(q.status) && <button className="btn ghost sq-btn" disabled={reviseQuote.isPending} onClick={() => { if (window.confirm('Create a revised draft? The old offer will close and its issued copy will stay unchanged.')) reviseQuote.mutate(q.id); }}>Revise</button>}
+                    {q.leadId && <a className="btn ghost sq-btn" href={`/#/crm/leads?lead=${q.leadId}`}>Open job</a>}
                     {onDuplicate && (
                       <button
                         className="btn ghost sq-btn"
@@ -266,13 +278,13 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                     <button className="btn ghost sq-btn" onClick={() => setShareId(shareId === q.id ? null : q.id)}>
                       {shareId === q.id ? 'Close' : 'Send'}
                     </button>
-                    <button
+                    {q.status === 'draft' && <button
                       className="btn ghost sq-btn"
                       onClick={() => { if (window.confirm(`Delete quote ${q.number}?`)) deleteQuote.mutate(q.id); }}
                       disabled={deleteQuote.isPending}
                     >
                       Delete
-                    </button>
+                    </button>}
                   </div>
                   {shareId === q.id && <ShareQuote quoteId={q.id} />}
                 </div>

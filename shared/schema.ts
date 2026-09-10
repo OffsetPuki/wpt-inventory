@@ -74,6 +74,9 @@ export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
   pin: text("pin").notNull(),
+  disabledAt: integer("disabled_at"),
+  credentialType: text("credential_type").notNull().default("pin"),
+  totpSecret: text("totp_secret"),
   role: text("role", { enum: ROLES }).notNull().default("worker"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
@@ -290,13 +293,14 @@ export const fromTemplateSchema = z.object({
 
 export const loginSchema = z.object({
   name: z.string().min(1),
-  pin: z.string().length(4),
+  pin: z.string().min(4).max(128),
+  otp: z.string().max(80).optional(),
 });
 
 // ─── TypeScript Types ────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
-export type PublicUser = Omit<User, "pin">;
+export type PublicUser = Omit<User, "pin" | "totpSecret"> & { mfaEnabled: boolean; securitySetupRequired: boolean };
 
 export type Item = typeof items.$inferSelect;
 

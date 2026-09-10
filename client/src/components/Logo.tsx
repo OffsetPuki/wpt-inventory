@@ -16,7 +16,8 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
     refetchInterval: false,
   });
 
-  const name = settings?.companyName || "CJM Metals";
+  const name = (!settings?.companyName || settings.companyName === "CJM Metals") ? "CJM Trades" : settings.companyName;
+  const tagline = !settings?.companyTagline || settings.companyTagline === "Custom metalwork. No shortcuts." ? "Metals · Concrete · Insulation" : settings.companyTagline;
   const logoUrl = settings?.logoUrl;
 
   const iconSize = size === "sm" ? "h-7 w-7" : size === "lg" ? "h-12 w-12" : "h-9 w-9";
@@ -43,8 +44,8 @@ export default function Logo({ size = "md", showText = true }: LogoProps) {
           <span className={`${textSize} truncate font-bold leading-tight tracking-tight text-foreground`}>
             {name}
           </span>
-          <span className="truncate text-[10px] uppercase leading-none tracking-[0.2em] text-muted-foreground">
-            {settings?.companyTagline || "Custom Metalwork"}
+          <span className="text-[9px] uppercase leading-tight tracking-wide text-muted-foreground">
+            {tagline}
           </span>
         </div>
       )}

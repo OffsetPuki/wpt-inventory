@@ -185,6 +185,8 @@ function BackupCard() {
     lastSnapshotAt: number | null;
     lastSnapshotBytes: number | null;
     lastOffsiteAt: number | null;
+    offsiteConfigured: boolean;
+    lastOffsiteError: string | null;
   }>({
     queryKey: ["backup-status"],
     queryFn: async () => (await apiRequest("GET", "/api/admin/backup/status")).json(),
@@ -197,7 +199,7 @@ function BackupCard() {
       const blob = await res.blob();
       const name =
         res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ??
-        "cjm-backup.db.gz";
+        "cjm-full-backup.tar.gz";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -214,7 +216,10 @@ function BackupCard() {
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <h2 className="text-base font-semibold text-foreground">Database backup</h2>
+      <h2 className="text-base font-semibold text-foreground">Complete business backup</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Includes the database, project photos, drawings and attachments. Keeps the latest 14 complete snapshots.</p>
+      {!status?.offsiteConfigured && <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">Automatic offsite storage is not configured. Download a copy to independent storage.</p>}
+      {status?.lastOffsiteError && <p role="alert" className="mt-2 text-sm text-destructive">{status.lastOffsiteError}</p>}
       <p className="mt-1 text-sm text-muted-foreground">
         Database size: {fmtBytes(status?.dbBytes)} · Last nightly snapshot:{" "}
         {status?.lastSnapshotAt ? formatDateTime(status.lastSnapshotAt) : "none yet"}
@@ -223,7 +228,7 @@ function BackupCard() {
           is worth nothing if that volume dies. This line is the one that says
           whether a copy has actually left the server. */}
       <p className="mt-1 text-sm text-muted-foreground">
-        Last offsite copy:{" "}
+        Last verified automatic offsite copy:{" "}
         {status?.lastOffsiteAt ? (
           formatDateTime(status.lastOffsiteAt)
         ) : (
