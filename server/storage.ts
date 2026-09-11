@@ -266,6 +266,7 @@ addColumnIfMissing("users", "totp_secret", "totp_secret TEXT");
 addColumnIfMissing("projects", "deleted_at", "deleted_at INTEGER");
 // Wiring plan, Fix 2 — jobs link to a CRM client by id (soft ref, see schema.ts).
 addColumnIfMissing("projects", "client_id", "client_id INTEGER");
+for (const [name, type] of Object.entries({quote_id:'INTEGER',lead_id:'INTEGER',site:"TEXT NOT NULL DEFAULT 'metals'",site_address:'TEXT',preferred_language:"TEXT NOT NULL DEFAULT 'en'",billing_mode:"TEXT NOT NULL DEFAULT 'review'",schedule_state:"TEXT NOT NULL DEFAULT 'tentative'",start_date:'TEXT',due_date:'TEXT',version:'INTEGER NOT NULL DEFAULT 1'})) addColumnIfMissing('projects',name,`${name} ${type}`);
 // Phase C #15 — items map onto the quote price book's material ids.
 addColumnIfMissing("items", "material_key", "material_key TEXT");
 // Phase C #19 — adjustments carry the job that consumed the stock (soft ref).
@@ -791,6 +792,7 @@ export const storage = {
 
   createProject(data: { jobNumber: string; name: string; customer?: string; clientId?: number | null; status?: string; notes?: string }): Project {
     const clientId = data.clientId ?? null;
+    if(clientId!=null&&!this.crmClientName(clientId))throw new Error('Choose an active customer.');
     return db.insert(projects).values({
       jobNumber: data.jobNumber,
       name: data.name,

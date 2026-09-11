@@ -16,13 +16,20 @@ interface SearchHit {
 export default function SearchBar() {
   const [, setLocation] = useLocation();
   const [q, setQ] = useState("");
+  const [active,setActive]=useState(0);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error,setError]=useState("");
+  const [expanded,setExpanded]=useState(false);
+  const [more,setMore]=useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const seqRef = useRef(0);
 
   useEffect(() => {
+    const seq = ++seqRef.current;
+    const controller = new AbortController();
+    setError("");
     const query = q.trim();
     if (query.length < 2) {
       setHits([]);
@@ -30,24 +37,26 @@ export default function SearchBar() {
       return;
     }
     setLoading(true);
-    const seq = ++seqRef.current;
     const t = setTimeout(async () => {
       try {
-        const res = await (await apiRequest("GET", `/api/search?q=${encodeURIComponent(query)}`)).json();
+        const res = await (await apiRequest("GET", `/api/search?q=${encodeURIComponent(query)}${expanded?"&all=1":""}`, undefined, {signal:controller.signal})).json();
         // Stale responses (an older keystroke resolving late) are dropped.
         if (seq === seqRef.current) {
           setHits(res.results ?? []);
+          setMore(!!res.more);
+          if(res.unavailable?.length)setError(`Some sections are unavailable: ${res.unavailable.join(", ")}`);
           setLoading(false);
         }
       } catch {
         if (seq === seqRef.current) {
           setHits([]);
+          setError("Search unavailable. Try again.");
           setLoading(false);
         }
       }
     }, 250);
-    return () => clearTimeout(t);
-  }, [q]);
+    return () => {clearTimeout(t);controller.abort();};
+  }, [q,expanded]);
 
   // Click-away closes the dropdown.
   useEffect(() => {
@@ -82,7 +91,7 @@ export default function SearchBar() {
       <input
         value={q}
         onChange={(e) => {
-          setQ(e.target.value);
+          setQ(e.target.value);setExpanded(false);setActive(0);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
@@ -91,7 +100,10 @@ export default function SearchBar() {
           // !loading, or the phone keyboard's Go opens the hit for the query
           // BEFORE the one just typed — hits still holds the old results for the
           // 250ms debounce plus the round trip, while the panel shows a spinner.
-          if (e.key === "Enter" && !loading && hits.length > 0) go(hits[0]);
+          const ordered=groups.flatMap(g=>g.hits);
+          if(e.key==='ArrowDown'){e.preventDefault();setActive(i=>Math.min(i+1,ordered.length-1));}
+          if(e.key==='ArrowUp'){e.preventDefault();setActive(i=>Math.max(0,i-1));}
+          if (e.key === "Enter" && !loading && ordered.length > 0) {e.preventDefault();go(ordered[Math.max(0,Math.min(active,ordered.length-1))]);}
         }}
         placeholder="Search clients, invoices, items…"
         className="h-10 w-full rounded-full border border-input bg-background pl-10 pr-4 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
@@ -104,12 +116,13 @@ export default function SearchBar() {
           anchors back to the input. */}
       {open && q.trim().length >= 2 && (
         <div className="fixed inset-x-3 top-[4.25rem] z-50 max-h-[40vh] overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1.5 shadow-lg lg:absolute lg:inset-x-auto lg:left-0 lg:right-0 lg:top-full lg:mt-2 lg:max-h-96">
+          {error && <p role="alert" className="px-3 py-2 text-destructive">{error}</p>}
           {loading ? (
             <div className="flex justify-center py-4 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           ) : hits.length === 0 ? (
-            <p className="px-3 py-3 text-sm text-muted-foreground">No results for “{q.trim()}”</p>
+            !error&&<p className="px-3 py-3 text-sm text-muted-foreground">No results for “{q.trim()}”</p>
           ) : (
             groups.map((g) => (
               <div key={g.type} className="mb-1 last:mb-0">
@@ -120,6 +133,9 @@ export default function SearchBar() {
                   <button
                     key={`${g.type}-${i}`}
                     onClick={() => go(h)}
+                    onMouseEnter={()=>setActive(groups.flatMap(g=>g.hits).indexOf(h))}
+                    aria-current={groups.flatMap(g=>g.hits).indexOf(h)===active?"true":undefined}
+                    style={groups.flatMap(g=>g.hits).indexOf(h)===active?{backgroundColor:"hsl(var(--accent))"}:undefined}
                     className="flex w-full items-baseline justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent"
                   >
                     <span className="truncate font-medium text-foreground">{h.label}</span>
@@ -131,6 +147,7 @@ export default function SearchBar() {
               </div>
             ))
           )}
+          {more&&!expanded&&<button className="px-3 py-3 underline" onClick={()=>setExpanded(true)}>More matches</button>}
         </div>
       )}
     </div>

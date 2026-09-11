@@ -270,6 +270,7 @@ export function registerHrRoutes(app: Express): void {
   app.get("/api/hr/leave", requireAuth, (req, res) => {
     // userId (the employee's linked login) rides along so the Gantt can match
     // task assignees against time off (Phase D #24c).
+    const range=req.query.from&&req.query.to?sql`${leaveRequests.startDate}<=${String(req.query.to)} AND ${leaveRequests.endDate}>=${String(req.query.from)}`:undefined;
     if (elevatedRole(req)) {
       return res.json(
         db.select({
@@ -279,7 +280,7 @@ export function registerHrRoutes(app: Express): void {
         })
           .from(leaveRequests)
           .innerJoin(employees, eq(leaveRequests.employeeId, employees.id))
-          .orderBy(desc(leaveRequests.createdAt)).all()
+          .where(range).orderBy(desc(leaveRequests.createdAt)).all()
       );
     }
     // Non-elevated users only see their own entries, via the linked profile.
@@ -287,7 +288,7 @@ export function registerHrRoutes(app: Express): void {
     if (!emp) return res.json([]);
     res.json(
       db.select().from(leaveRequests)
-        .where(eq(leaveRequests.employeeId, emp.id))
+        .where(and(eq(leaveRequests.employeeId, emp.id),range))
         .orderBy(desc(leaveRequests.createdAt)).all()
         .map((r) => ({ ...r, userId: req.user!.userId }))
     );

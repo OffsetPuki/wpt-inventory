@@ -70,7 +70,7 @@ export function createFullBackup(): Promise<{ file: string; bytes: number }> {
     const partial = file + ".partial";
     try {
       sqlite.prepare("VACUUM INTO ?").run(path.join(stage, database));
-      const uploads = uploadedFiles(path.join(dataDir, "uploads"));
+      const uploads = [...uploadedFiles(path.join(dataDir, "uploads")),...uploadedFiles(path.join(dataDir,"mail-attachments"))];
       // Freeze uploaded files before yielding. This process is the sole writer
       // to the Railway SQLite volume, so edits cannot race the snapshot copy.
       for (const name of uploads) {

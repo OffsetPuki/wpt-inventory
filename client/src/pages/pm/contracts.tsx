@@ -1,3 +1,4 @@
+import { useRecordLink, readContext } from "@/lib/record-link";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
@@ -428,7 +429,7 @@ function ContractDialog({
         notes: notes.trim() || null,
       };
       return contract
-        ? { method: "PATCH", url: `/api/pm/contracts/${contract.id}`, body: payload }
+        ? { method: "PATCH", expectedVersion:(contract as any)?._version, url: `/api/pm/contracts/${contract.id}`, body: payload }
         : { method: "POST", url: "/api/pm/contracts", body: payload };
     },
     invalidate: [["pm-contracts"]],
@@ -1031,6 +1032,7 @@ export default function PmContractsPage() {
   const [dialogOpen, setDialogOpen] = useState(() => !!prefill);
   const [editing, setEditing] = useState<ContractRow | null>(null);
   const [viewing, setViewing] = useState<ContractRow | null>(null);
+  useRecordLink("contract", "/api/pm/contracts", setViewing);
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ["projects"],

@@ -173,6 +173,16 @@ export const projects = sqliteTable("projects", {
   // trick as mk_tasks.leadId. `customer` above stays as the denormalized
   // display fallback (pattern: fin_invoices.clientName).
   clientId: integer("client_id"),
+  quoteId: integer("quote_id"),
+  leadId: integer("lead_id"),
+  site: text("site").notNull().default("metals"),
+  siteAddress: text("site_address"),
+  preferredLanguage: text("preferred_language").notNull().default("en"),
+  billingMode: text("billing_mode").notNull().default("review"),
+  scheduleState: text("schedule_state").notNull().default("tentative"),
+  startDate: text("start_date"),
+  dueDate: text("due_date"),
+  version: integer("version").notNull().default(1),
   status: text("status", { enum: PROJECT_STATUSES })
     .notNull()
     .default("active"),

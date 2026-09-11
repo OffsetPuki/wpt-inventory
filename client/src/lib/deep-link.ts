@@ -11,3 +11,8 @@ export function useDeepLink(name: string) {
   }, [name]);
   return value;
 }
+
+export function consumeRecordLink(name:string){
+ const [base,search]=window.location.hash.split('?');const params=new URLSearchParams(search||'');params.delete(name);
+ history.replaceState(history.state,'',window.location.pathname+window.location.search+base+(params.size?'?'+params.toString():''));window.dispatchEvent(new HashChangeEvent('hashchange'));
+}

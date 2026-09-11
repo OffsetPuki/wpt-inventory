@@ -1,6 +1,7 @@
+import { enqueueFollowup } from "./outbox";
 import { reserveStock } from "./inventory-core";
 import { normalizeStockUnit, fractionalUnit, stockRound } from "../shared/inventory";
-import { eq } from "drizzle-orm";
+import { eq,or } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { quotes, QUOTE_TYPE_LABELS } from "../shared/quote-schema";
 import { projects } from "../shared/schema";
@@ -58,8 +59,11 @@ export function acceptQuote(
         : db.select().from(leads).where(eq(leads.id, leadId)).get();
     if (lead?.deletedAt != null)
       throw new Error("Restore the linked lead before accepting this quote.");
+    const selectedClientId = session.customer?.clientId;
+    if (selectedClientId != null && (!Number.isInteger(selectedClientId) || !sqlite.prepare('SELECT 1 FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(selectedClientId))) throw new Error('Restore or choose the linked customer before accepting.');
+    if (lead?.clientId != null && selectedClientId != null && lead.clientId !== selectedClientId) throw new Error('The selected customer differs from the linked lead. Review the customer link first.');
     const clientId =
-      lead?.clientId ??
+      lead?.clientId ?? selectedClientId ??
       findOrCreateClientByContact({
         ...customer,
         designRef: quote.designRef,
@@ -132,7 +136,7 @@ export function acceptQuote(
     let project = db
       .select()
       .from(projects)
-      .where(eq(projects.jobNumber, quote.number))
+      .where(or(eq(projects.quoteId,id),eq(projects.jobNumber, quote.number)))
       .get();
     if (!project)
       project = db
@@ -151,7 +155,10 @@ export function acceptQuote(
         .set({ deletedAt: null })
         .where(eq(projects.id, project.id))
         .run();
+    if(project.quoteId&&project.quoteId!==id)throw new Error('This job is already linked to a different accepted quote. Review its source records.');
     const projectId = project.id;
+    sqlite.prepare(`UPDATE projects SET quote_id=?,lead_id=?,site=?,site_address=coalesce(site_address,?),preferred_language=?,billing_mode=CASE WHEN billing_mode='review' THEN 'fixed' ELSE billing_mode END WHERE id=?`)
+      .run(id,leadId,lead.site,session.customer?.location || null,lead.preferredLanguage || 'en',projectId);
     const depositPct = Math.min(
       100,
       Math.max(0, Number(session.depositPct) || 0),
@@ -159,6 +166,7 @@ export function acceptQuote(
     const depositCents = depositPct
       ? Math.round((quote.totalCents * depositPct) / 100)
       : null;
+    sqlite.prepare("INSERT OR IGNORE INTO suite_job_rules(project_id,deposit_required) VALUES(?,?)").run(projectId,depositCents?1:0);
     let invoice = db
       .select()
       .from(invoices)
@@ -318,6 +326,10 @@ export function acceptQuote(
         },
       });
     }
+    if (!alreadyAccepted) {
+      enqueueFollowup(`accept-owner:${id}`,'quote-accepted-owner',{quoteId:id});
+      enqueueFollowup(`accept-customer:${id}`,'quote-accepted-customer',{quoteId:id});
+    }
     return {
       quote,
       customer,
@@ -327,27 +339,6 @@ export function acceptQuote(
       invoiceId: invoice!.id,
     };
   })();
-  if (!result.alreadyAccepted && mailEnabled()) {
-    setImmediate(async () => {
-      try {
-        await sendOwnerMail({
-          subject: `[CJM Trades] Quote accepted — ${result.quote.number}`,
-          text: `${result.customer.name || "Customer"} accepted ${result.quote.number}. The linked project and draft invoice are ready for review.`,
-        });
-        if (result.customer.email) {
-          const message = renderTemplate("quote.accepted", {
-            customerName: result.customer.name || "there",
-            firstName: firstNameOf(result.customer.name),
-            quoteNumber: result.quote.number,
-          });
-          if (message)
-            await sendMail({ to: result.customer.email, ...message });
-        }
-      } catch (error) {
-        console.error("[quote] acceptance notification failed", error);
-      }
-    });
-  }
   return {
     ok: true,
     status: "accepted",

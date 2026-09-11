@@ -1,3 +1,5 @@
+import { useApiMutation } from '@/hooks/useApiMutation';
+import { useDialogDraft } from '@/lib/dialog-draft';
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -35,38 +37,21 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
   const [customer, setCustomer] = useState("");
   const [clientId, setClientId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [clientSearch,setClientSearch]=useState('');
+  const recovered=useDialogDraft('new-job',open,{jobNumber,name,customer,clientId,notes},v=>{setJobNumber(v.jobNumber);setName(v.name);setCustomer(v.customer);setClientId(v.clientId);setNotes(v.notes);});
 
   // Fix 2 (wiring plan): jobs link to a CRM client by id. The picker is
   // optional — free-text customer still works for non-CRM names.
   const { data: clients = [] } = useQuery<Client[]>({
-    queryKey: ["crm-clients-picker"],
-    queryFn: async () => (await apiRequest("GET", "/api/crm/clients?status=active")).json(),
+    queryKey: ["crm-clients-picker",clientSearch,clientId],
+    queryFn: async ({signal}) => (await apiRequest("GET", `/api/suite/pickers/clients?q=${encodeURIComponent(clientSearch)}&id=${clientId||""}`,undefined,{signal})).json(),
     enabled: open,
   });
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (
-        await apiRequest("POST", "/api/projects", {
-          jobNumber: jobNumber.trim(),
-          name: name.trim(),
-          customer: customer.trim() || undefined,
-          clientId: clientId ?? undefined,
-          notes: notes.trim() || undefined,
-        })
-      ).json(),
-    onSuccess: (p) => {
-      qc.invalidateQueries({ queryKey: ["projects"] });
-      toast({ variant: "success", title: "Project created" });
-      onClose();
-      setLocation(`/project/${p.id}`);
-    },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not create", description: e?.message }),
-  });
+  const create=useApiMutation({request:()=>({method:'POST',url:'/api/projects',body:{jobNumber:jobNumber.trim(),name:name.trim(),customer:customer.trim()||undefined,clientId:clientId??undefined,notes:notes.trim()||undefined}}),invalidate:[['projects']],successTitle:'Job created',errorTitle:'Could not create job',onSuccess:p=>{recovered.clear();onClose();setLocation(`/project/${p.id}`);}});
 
   return (
-    <Modal open={open} onClose={onClose} title="New project">
+    <Modal preservesDraft open={open} onClose={onClose} title="New job">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -78,16 +63,17 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
         }}
         className="flex flex-col gap-4"
       >
+        {recovered.notice}
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Job number</span>
           <input className={inputCls} value={jobNumber} onChange={(e) => setJobNumber(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Project name</span>
+          <span className="text-sm font-medium text-foreground">Job name</span>
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Client</span>
+          <span className="text-sm font-medium text-foreground">Client</span><input aria-label="Find customer" className={inputCls} placeholder="Search customers" value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
           <select
             className={inputCls}
             value={clientId ?? ""}
@@ -127,7 +113,7 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Create project
+          Create job
         </button>
       </form>
     </Modal>
@@ -157,7 +143,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <Header title="Projects" description="Jobs, builds, and service dispatches">
+      <Header title="Jobs" description="Jobs, builds, and service dispatches">
         {isManager && (
           <>
             <button
@@ -172,7 +158,7 @@ export default function ProjectsPage() {
               className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
             >
               <Plus className="h-5 w-5" />
-              New project
+              New job
             </button>
           </>
         )}
@@ -195,7 +181,7 @@ export default function ProjectsPage() {
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
           <FolderKanban className="h-12 w-12" />
-          <p className="text-lg">No projects yet</p>
+          <p className="text-lg">No jobs yet</p>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

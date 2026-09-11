@@ -1,3 +1,5 @@
+import { useDialogDraft } from "@/lib/dialog-draft";
+import { useApiMutation } from "@/hooks/useApiMutation";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -40,6 +42,7 @@ export function TaskDialog({
   projects,
   users,
   isElevated,
+  defaultProjectId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -47,6 +50,7 @@ export function TaskDialog({
   projects: Project[];
   users: PublicUser[];
   isElevated: boolean;
+  defaultProjectId?: number;
 }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
@@ -63,14 +67,50 @@ export function TaskDialog({
     if (!open) return;
     setTitle(task?.title ?? "");
     setDescription(task?.description ?? "");
-    setProjectId(task?.projectId ? String(task.projectId) : "");
+    setProjectId(
+      task?.projectId
+        ? String(task.projectId)
+        : defaultProjectId
+          ? String(defaultProjectId)
+          : "",
+    );
     setStatus(task?.status ?? "todo");
     setPriority(task?.priority ?? "medium");
     setAssigneeId(task?.assigneeId ? String(task.assigneeId) : "");
     setStartDate(task?.startDate ?? "");
     setDueDate(task?.dueDate ?? "");
-    setEstimateHours(task?.estimateHours != null ? String(task.estimateHours) : "");
+    setEstimateHours(
+      task?.estimateHours != null ? String(task.estimateHours) : "",
+    );
   }, [open, task]);
+
+  const recovered = useDialogDraft(
+    `task:${task?.id || "new"}:${defaultProjectId || ""}`,
+    open,
+    {
+      title,
+      description,
+      projectId,
+      status,
+      priority,
+      assigneeId,
+      startDate,
+      dueDate,
+      estimateHours,
+    },
+    (v) => {
+      if (Object.hasOwn(v, "title")) setTitle(v.title);
+      if (Object.hasOwn(v, "description")) setDescription(v.description);
+      if (Object.hasOwn(v, "projectId")) setProjectId(v.projectId);
+      if (Object.hasOwn(v, "status")) setStatus(v.status);
+      if (Object.hasOwn(v, "priority")) setPriority(v.priority);
+      if (Object.hasOwn(v, "assigneeId")) setAssigneeId(v.assigneeId);
+      if (Object.hasOwn(v, "startDate")) setStartDate(v.startDate);
+      if (Object.hasOwn(v, "dueDate")) setDueDate(v.dueDate);
+      if (Object.hasOwn(v, "estimateHours")) setEstimateHours(v.estimateHours);
+    },
+    (task as any)?._version,
+  );
 
   const buildPayload = () => {
     const eh = parseFloat(estimateHours);
@@ -87,29 +127,36 @@ export function TaskDialog({
     };
   };
 
-  const save = useMutation({
-    mutationFn: async () =>
-      task
-        ? (await apiRequest("PATCH", `/api/pm/tasks/${task.id}`, buildPayload())).json()
-        : (await apiRequest("POST", "/api/pm/tasks", buildPayload())).json(),
+  const save = useApiMutation({
+    request: () => ({
+      method: task ? "PATCH" : "POST",
+      url: task ? `/api/pm/tasks/${task.id}` : "/api/pm/tasks",
+      body: buildPayload(),
+      expectedVersion: recovered.expectedVersion,
+    }),
+    invalidate: [["pm-tasks"]],
+    successTitle: task ? "Task updated" : "Task created",
+    errorTitle: "Could not save task",
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pm-tasks"] });
-      toast({ variant: "success", title: task ? "Task updated" : "Task created" });
+      recovered.clear();
       onClose();
     },
-    onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not save task", description: e?.message }),
   });
 
   const del = useMutation({
-    mutationFn: async () => (await apiRequest("DELETE", `/api/pm/tasks/${task!.id}`)).json(),
+    mutationFn: async () =>
+      (await apiRequest("DELETE", `/api/pm/tasks/${task!.id}`)).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pm-tasks"] });
       toast({ variant: "success", title: "Task deleted" });
       onClose();
     },
     onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not delete", description: e?.message }),
+      toast({
+        variant: "destructive",
+        title: "Could not delete",
+        description: e?.message,
+      }),
   });
 
   const startTimer = useMutation({
@@ -123,14 +170,28 @@ export function TaskDialog({
       ).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pm-time-running"] });
-      toast({ variant: "success", title: "Timer started", description: task?.title });
+      toast({
+        variant: "success",
+        title: "Timer started",
+        description: task?.title,
+      });
     },
     onError: (e: any) =>
-      toast({ variant: "destructive", title: "Could not start timer", description: e?.message }),
+      toast({
+        variant: "destructive",
+        title: "Could not start timer",
+        description: e?.message,
+      }),
   });
 
   return (
-    <Modal open={open} onClose={onClose} title={task ? "Edit task" : "New task"} maxWidth="max-w-lg">
+    <Modal
+      preservesDraft
+      open={open}
+      onClose={onClose}
+      title={task ? "Edit task" : "New task"}
+      maxWidth="max-w-lg"
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -142,12 +203,19 @@ export function TaskDialog({
         }}
         className="flex flex-col gap-4"
       >
+        {recovered.notice}
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Title</span>
-          <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input
+            className={inputCls}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Description (optional)</span>
+          <span className="text-sm font-medium text-foreground">
+            Description (optional)
+          </span>
           <textarea
             className={cn(inputCls, "h-auto min-h-[80px] py-2")}
             rows={3}
@@ -158,7 +226,11 @@ export function TaskDialog({
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Project</span>
-            <select className={inputCls} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+            <select
+              className={inputCls}
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+            >
               <option value="">No project</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -182,7 +254,9 @@ export function TaskDialog({
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Priority</span>
+            <span className="text-sm font-medium text-foreground">
+              Priority
+            </span>
             <select
               className={inputCls}
               value={priority}
@@ -197,7 +271,9 @@ export function TaskDialog({
           </label>
           {isElevated && (
             <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Assignee</span>
+              <span className="text-sm font-medium text-foreground">
+                Assignee
+              </span>
               <select
                 className={inputCls}
                 value={assigneeId}
@@ -213,7 +289,9 @@ export function TaskDialog({
             </label>
           )}
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Start date</span>
+            <span className="text-sm font-medium text-foreground">
+              Start date
+            </span>
             <input
               type="date"
               className={inputCls}
@@ -222,7 +300,9 @@ export function TaskDialog({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Due date</span>
+            <span className="text-sm font-medium text-foreground">
+              Due date
+            </span>
             <input
               type="date"
               className={inputCls}
@@ -231,7 +311,9 @@ export function TaskDialog({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Estimate (hours)</span>
+            <span className="text-sm font-medium text-foreground">
+              Estimate (hours)
+            </span>
             <input
               type="number"
               min="0"
@@ -245,9 +327,10 @@ export function TaskDialog({
               <span
                 className={cn(
                   "text-xs",
-                  task.estimateHours != null && (task.loggedMin ?? 0) > task.estimateHours * 60
+                  task.estimateHours != null &&
+                    (task.loggedMin ?? 0) > task.estimateHours * 60
                     ? "font-medium text-red-600 dark:text-red-400"
-                    : "text-muted-foreground"
+                    : "text-muted-foreground",
                 )}
               >
                 Logged {fmtH(task.loggedMin ?? 0)}

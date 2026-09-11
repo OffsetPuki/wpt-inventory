@@ -4,8 +4,9 @@ import {
   type QueryKey,
   type UseMutationResult,
 } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest,getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
+import { useRef } from 'react';
 
 // ─── Shared CRUD mutation hook ────────────────────────────────────────────────
 // Every create/update/delete on the CRUD pages was the same shape:
@@ -28,6 +29,7 @@ export interface ApiRequestSpec {
   method: string;
   url: string;
   body?: unknown;
+  expectedVersion?: number;
 }
 
 type SuccessTitle<TData, TVars> =
@@ -51,12 +53,22 @@ export function useApiMutation<TData = any, TVars = void>(
   opts: ApiMutationOptions<TData, TVars>,
 ): UseMutationResult<TData, Error, TVars> {
   const qc = useQueryClient();
+  const retryIdentity=useRef<{request:string,key:string,storageKey:string}|null>(null);
   return useMutation<TData, Error, TVars>({
     mutationFn: async (vars: TVars) => {
-      const { method, url, body } = opts.request(vars);
-      return (await apiRequest(method, url, body)).json();
+      const { method, url, body,expectedVersion } = opts.request(vars);
+      const request=JSON.stringify({method,url,body});
+      if(retryIdentity.current?.request!==request){
+        const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(getAuthToken()+request));
+        const storageKey='suite-request:'+Array.from(new Uint8Array(bytes)).map(b=>b.toString(16).padStart(2,'0')).join('');
+        let key:string=crypto.randomUUID();try{key=sessionStorage.getItem(storageKey)||key;sessionStorage.setItem(storageKey,key);}catch{}
+        retryIdentity.current={request,key,storageKey};
+      }
+      return (await apiRequest(method, url, body,{expectedVersion,idempotencyKey:method==='POST'?retryIdentity.current.key:undefined})).json();
     },
     onSuccess: (data, vars) => {
+      if(retryIdentity.current)try{sessionStorage.removeItem(retryIdentity.current.storageKey);}catch{}
+      retryIdentity.current=null;
       opts.invalidate?.forEach((key) => qc.invalidateQueries({ queryKey: key }));
       const title =
         typeof opts.successTitle === "function"

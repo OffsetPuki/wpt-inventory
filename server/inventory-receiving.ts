@@ -1,3 +1,4 @@
+import { receiveStockCost } from './stock-cost';
 import type { Express } from "express";
 import { z } from "zod";
 import { sqlite } from "./storage";
@@ -168,7 +169,7 @@ export function receivePo(id: number, userId: number, raw: unknown) {
             .run(po.vendor, cost, item.id);
         } else if (receipt.stockQuantity !== 0)
           throw new Error("Select the destination inventory item.");
-        sqlite
+        const receivedRow=sqlite
           .prepare(
             "INSERT INTO inventory_receipts(po_id,line_index,quantity,item_id,stock_quantity,user_id) VALUES(?,?,?,?,?,?)",
           )
@@ -180,6 +181,7 @@ export function receivePo(id: number, userId: number, raw: unknown) {
             receipt.stockQuantity,
             userId,
           );
+        if(receipt.itemId)receiveStockCost(sqlite,Number(receivedRow.lastInsertRowid),receipt.itemId,receipt.stockQuantity,Math.max(0,receipt.quantity*line.unitPriceCents),po.vendor);
       }
       const totals = sqlite
         .prepare(

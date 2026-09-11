@@ -66,6 +66,7 @@ export const payrollRuns = sqliteTable(
 export const timeCorrections = sqliteTable("hr_time_corrections", {
   id: integer("id").primaryKey(),
   timeEntryId: integer("time_entry_id").notNull(),
+  invoiceId: integer("invoice_id"),
   userId: integer("user_id").notNull(),
   minutesDelta: integer("minutes_delta").notNull(),
   effectiveDate: text("effective_date").notNull(),

@@ -8,6 +8,8 @@ import { Suspense, lazy, type ReactNode } from "react";
 // small and the user only downloads code for the screens they actually open.
 
 import AppShell from "./components/AppShell";
+const TodayPage = lazy(() => import("./pages/today"));
+const SuiteHealthPage = lazy(() => import("./pages/suite-health"));
 const SecurityPage = lazy(() => import("./pages/security"));
 const LoginPage = lazy(() => import("./pages/login"));
 const HomePage = lazy(() => import("./pages/home"));
@@ -17,7 +19,7 @@ const ItemEditPage = lazy(() => import("./pages/item-edit"));
 const DashboardPage = lazy(() => import("./pages/dashboard"));
 const ActivityPage = lazy(() => import("./pages/activity"));
 const ProjectsPage = lazy(() => import("./pages/projects"));
-const ProjectDetailPage = lazy(() => import("./pages/project-detail"));
+const ProjectDetailPage = lazy(() => import("./pages/job-workspace"));
 const MapPage = lazy(() => import("./pages/map"));
 const UsersPage = lazy(() => import("./pages/users"));
 const SettingsPage = lazy(() => import("./pages/settings"));
@@ -69,7 +71,7 @@ function ElevatedRoute({ children }: { children: ReactNode }) {
 
 function RoleRedirect() {
   const { isElevated } = useAuth();
-  return <Redirect to={isElevated ? "/dashboard" : "/home"} />;
+  return <Redirect to="/today" />;
 }
 
 // ─── Root app component ─────────────────────────────────────────────────────
@@ -105,6 +107,8 @@ export default function App() {
       <AppShell>
         <Suspense fallback={<LoadingSpinner />}>
         <Switch>
+          <Route path="/today"><TodayPage /></Route>
+          <Route path="/suite-health"><ElevatedRoute><SuiteHealthPage /></ElevatedRoute></Route>
           <Route path="/security"><SecurityPage /></Route>
           {/* Root redirect */}
           <Route path="/">

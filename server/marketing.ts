@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { uploadsDir } from './storage';
+import { inventoryOnce } from './inventory-core';
 import { z } from "zod";
 import type { Express } from "express";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
@@ -140,6 +144,9 @@ try {
   /* column already exists */
 }
 
+for(const [column,definition] of Object.entries({site:"TEXT NOT NULL DEFAULT 'metals'",project_id:'INTEGER',approved_by:'INTEGER',approved_at:'INTEGER'})){
+ if(!(sqlite.prepare('PRAGMA table_info(mk_portfolio)').all() as any[]).some(c=>c.name===column))sqlite.exec(`ALTER TABLE mk_portfolio ADD COLUMN ${column} ${definition}`);
+}
 // Additive migration: mk_settings.lead_time_weeks (website banner) — same deal.
 try {
   sqlite.exec("ALTER TABLE mk_settings ADD COLUMN lead_time_weeks INTEGER");
@@ -649,12 +656,17 @@ export function registerMarketingRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const row = db.insert(portfolioItems).values(body).returning().get();
-    audit(req, "marketing.portfolio_create", {
-      targetType: "portfolio", targetId: row.id, targetName: row.title,
-      details: { fromProject: project.jobNumber },
-    });
-    res.status(201).json(row);
+    try {
+      if(project.status!=='done')throw new Error('Complete the job before publishing finished work.');
+      if(req.body.approved!==true)throw new Error('Confirm approval to publish this title and photo publicly.');
+      if(req.body.site!==project.site)throw new Error('The destination must match the job trade.');
+      if(!/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(body.photoUrl)||!fs.existsSync(path.join(uploadsDir,path.basename(body.photoUrl))))throw new Error('Choose an uploaded job photo.');
+      const requestKey=z.string().min(8).max(100).parse(req.body.requestKey);
+      const row=inventoryOnce(sqlite,req.user!.userId,requestKey,{action:'publish-job',projectId:project.id,...body},()=>{
+        const row=db.insert(portfolioItems).values({...body,site:project.site,projectId:project.id,approvedBy:req.user!.userId,approvedAt:Date.now()}).returning().get();
+        audit(req,'marketing.portfolio_create',{targetType:'project',targetId:project.id,targetName:row.title,details:{portfolioId:row.id,site:project.site,publicPhoto:row.photoUrl}});return row;
+      });res.status(201).json(row);
+    }catch(e:any){res.status(400).json({message:e.message});}
   });
 }
 

@@ -1,3 +1,4 @@
+import { readContext } from '@/lib/record-link';
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -105,7 +106,7 @@ function EntryDialog({
       setEndTime("");
       setDuration("");
       setDescription("");
-      setProjectSel("");
+      setProjectSel(readContext("projectId")||"");
       setTaskSel("");
       setBillable(true);
     }

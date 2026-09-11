@@ -128,7 +128,7 @@ export default function CrmOverviewPage() {
           value={stats?.closeRate == null ? "—" : formatPercent(stats.closeRate, 0)}
         />
         <Kpi label="Quotes sent (30d)" value={String(stats?.quotesSentLast30 ?? 0)} />
-        <Kpi label="Revenue closed (30d)" value={formatMoney(stats?.revenueClosed30dCents)} />
+        <Kpi label="Won contract value (30d)" value={formatMoney(stats?.revenueClosed30dCents)} />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">

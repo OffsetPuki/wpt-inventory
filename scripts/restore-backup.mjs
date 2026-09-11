@@ -22,7 +22,7 @@ export async function restoreBackup(archive, destination) {
     !name.split("/").includes("..") &&
     (/^snapshot-[a-f0-9-]+\.db$/.test(name) ||
       /^manifest-[a-f0-9-]+\.json$/.test(name) ||
-      /^uploads\/[\w./-]*$/.test(name));
+      /^uploads\/[\w./-]*$/.test(name) || /^mail-attachments\/[a-f0-9-]+$/.test(name));
   const entries = [];
   let bytes = 0;
   let invalid = null;
@@ -70,7 +70,7 @@ export async function restoreBackup(archive, destination) {
   if (checksum(dbFile) !== manifest.databaseSha256)
     throw new Error("Database checksum mismatch.");
   for (const item of manifest.uploads) {
-    if (!allowed(item.path) || !item.path.startsWith("uploads/"))
+    if (!allowed(item.path) || !/^(uploads|mail-attachments)\//.test(item.path))
       throw new Error("Unsafe manifest path.");
     const file = path.join(destination, item.path);
     if (fs.statSync(file).size !== item.bytes || checksum(file) !== item.sha256)

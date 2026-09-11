@@ -353,6 +353,7 @@ export function registerPmRoutes(app: Express): void {
     const conditions: any[] = [isNull(pmTasks.deletedAt)];
     const projectId = qstr(req.query.projectId);
     const status = qstr(req.query.status);
+    if (req.query.from && req.query.to) conditions.push(sql`coalesce(${pmTasks.startDate},${pmTasks.dueDate})<=${String(req.query.to)} AND coalesce(${pmTasks.dueDate},${pmTasks.startDate})>=${String(req.query.from)}`);
     const assigneeId = qstr(req.query.assigneeId);
     const q = qstr(req.query.q);
     if (projectId) conditions.push(eq(pmTasks.projectId, parseInt(projectId, 10)));
@@ -524,6 +525,12 @@ export function registerPmRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message || "Invalid request" });
     }
+    if (body.taskId) {
+      const task:any=sqlite.prepare('SELECT project_id FROM pm_tasks WHERE id=? AND deleted_at IS NULL').get(body.taskId);
+      if(!task || (body.projectId != null && task.project_id !== body.projectId)) return res.status(400).json({message:'Choose a task from this job.'});
+      body.projectId=task.project_id;
+    }
+    if(body.projectId&&!sqlite.prepare("SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL AND status!='done'").get(body.projectId))return res.status(400).json({message:'Choose an active job.'});
     // One running timer per user — stop the old one before starting another.
     const running = db.select().from(timeEntries)
       .where(and(eq(timeEntries.userId, req.user!.userId), isNull(timeEntries.endedAt)))
@@ -564,6 +571,7 @@ export function registerPmRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message || "Invalid request" });
     }
+    if(body.taskId){const task:any=sqlite.prepare('SELECT project_id FROM pm_tasks WHERE id=? AND deleted_at IS NULL').get(body.taskId);if(!task||(body.projectId!=null&&task.project_id!==body.projectId))return res.status(400).json({message:'Choose a task from this job.'});body.projectId=task.project_id;}
     let { startedAt, endedAt, durationMin } = body;
     if (startedAt != null && endedAt != null) {
       if (endedAt < startedAt) return res.status(400).json({ message: "endedAt must be after startedAt" });
@@ -629,7 +637,11 @@ export function registerPmRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message || "Invalid request" });
     }
-    const set: Partial<typeof timeEntries.$inferInsert> = { ...patch };
+    const nextTask=patch.taskId===undefined?existing.taskId:patch.taskId;
+    let nextProject=patch.projectId===undefined?existing.projectId:patch.projectId;
+    if(nextTask){const task:any=sqlite.prepare('SELECT project_id FROM pm_tasks WHERE id=? AND deleted_at IS NULL').get(nextTask);if(!task||nextProject&&task.project_id!==nextProject)return res.status(400).json({message:'Task must belong to the selected job.'});nextProject=task.project_id;}
+    if(nextProject&&!sqlite.prepare('SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL').get(nextProject))return res.status(400).json({message:'Job not found.'});
+    const set: Partial<typeof timeEntries.$inferInsert> = { ...patch,projectId:nextProject };
     // Keep durationMin consistent when the interval shifts and the caller
     // didn't supply an explicit override.
     const nextStart = patch.startedAt ?? existing.startedAt;
@@ -844,6 +856,13 @@ export function registerPmRoutes(app: Express): void {
       details: { projectId: row.projectId, amountCents: row.amountCents },
     });
     res.status(201).json(row);
+  });
+
+  app.use('/api/pm/change-orders/:id',requireElevated,(req,res,next)=>{
+    if(!['PATCH','DELETE'].includes(req.method))return next();
+    const billed=sqlite.prepare("SELECT 1 FROM suite_change_bills b JOIN fin_invoices i ON i.id=b.invoice_id WHERE b.change_order_id=? AND i.deleted_at IS NULL AND i.status!='void'").get(pid(req.params.id));
+    if(billed)return res.status(409).json({message:'This extra is linked to an active invoice. Void that invoice before changing or removing the approved extra.'});
+    next();
   });
 
   app.patch("/api/pm/change-orders/:id", requireElevated, (req, res) => {

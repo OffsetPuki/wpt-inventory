@@ -13,6 +13,10 @@
 //  writes is deleted again on the way out.
 // =============================================================================
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+process.env.DATA_DIR=mkdtempSync(join(tmpdir(),"cjm-mailer-check-"));
 process.env.RESEND_API_KEY = "test-key-not-real";
 process.env.MAIL_FROM = "CJM Metals <support@cjmmetals.com>";
 process.env.OWNER_EMAIL = "owner@cjmmetals.example";

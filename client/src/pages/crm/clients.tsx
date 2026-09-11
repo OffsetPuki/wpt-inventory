@@ -1,3 +1,7 @@
+import { useDialogDraft } from '@/lib/dialog-draft';
+import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import { RetryBlock } from '@/components/RetryBlock';
+import { useRecordLink, readContext } from "@/lib/record-link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -73,6 +77,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
   const [tags, setTags] = useState(parseTags(client?.tags ?? null).join(", "));
   const [notes, setNotes] = useState(client?.notes ?? "");
 
+  const recovered=useDialogDraft(`ClientFormModal:${client?.id||"new"}`,true,{name,preferredLanguage,company,email,phone,address,city,zip,tags,notes},v=>{if(Object.hasOwn(v,"name"))setName(v.name);if(Object.hasOwn(v,"preferredLanguage"))setPreferredLanguage(v.preferredLanguage);if(Object.hasOwn(v,"company"))setCompany(v.company);if(Object.hasOwn(v,"email"))setEmail(v.email);if(Object.hasOwn(v,"phone"))setPhone(v.phone);if(Object.hasOwn(v,"address"))setAddress(v.address);if(Object.hasOwn(v,"city"))setCity(v.city);if(Object.hasOwn(v,"zip"))setZip(v.zip);if(Object.hasOwn(v,"tags"))setTags(v.tags);if(Object.hasOwn(v,"notes"))setNotes(v.notes);},(client as any)?._version);
   const save = useApiMutation({
     request: () => {
       const tagList = tags
@@ -92,17 +97,17 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
         notes: notes.trim() || null,
       };
       return client
-        ? { method: "PATCH", url: `/api/crm/clients/${client.id}`, body }
+        ? { method: "PATCH", expectedVersion:recovered.expectedVersion, url: `/api/crm/clients/${client.id}`, body }
         : { method: "POST", url: "/api/crm/clients", body };
     },
     invalidate: [["crm-clients"], ["crm-client-detail"]],
     successTitle: client ? "Client updated" : "Client created",
     errorTitle: "Could not save client",
-    onSuccess: () => onClose(),
+    onSuccess: () => {recovered.clear();onClose();},
   });
 
   return (
-    <Modal open onClose={onClose} title={client ? "Edit client" : "New client"} maxWidth="max-w-lg">
+    <Modal preservesDraft open onClose={onClose} title={client ? "Edit client" : "New client"} maxWidth="max-w-lg">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -114,6 +119,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
         }}
         className="flex flex-col gap-4"
       >
+        {recovered.notice}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Name</span>
@@ -447,19 +453,22 @@ function ClientDetailModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ClientsPage() {
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("active");
+  const [q, setQ] = useRememberedState("client/src/pages/crm/clients.tsx:q","");
+  const [status, setStatus] = useRememberedState("client/src/pages/crm/clients.tsx:status","active");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  useRecordLink("client", "/api/crm/clients", row=>setDetailId(row.id));
 
+  const {page,setPage}=useListPage('clients:client/src/pages/crm/clients.tsx',[q.trim(),status]);
   const params = new URLSearchParams();
+    params.set('page',String(page));params.set('limit','50');
   if (q.trim()) params.set("q", q.trim());
   if (status) params.set("status", status);
   const url = `/api/crm/clients${params.toString() ? `?${params.toString()}` : ""}`;
 
-  const { data: clients = [], isLoading } = useQuery<Client[]>({
-    queryKey: ["crm-clients", q.trim(), status],
+  const { data: clients = [], isLoading,isError,error,refetch } = useQuery<Client[]>({
+    queryKey: ["crm-clients", q.trim(), status,page],
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
 
@@ -511,7 +520,8 @@ export default function ClientsPage() {
         </select>
       </div>
 
-      {isLoading ? (
+      <PageButtons page={page} setPage={setPage} count={clients.length}/>
+      {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : clients.length === 0 ? (
         <EmptyState icon={Contact} message="No clients yet">

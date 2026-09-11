@@ -1,3 +1,7 @@
+import { listWindow } from './pagination';
+import { enqueueFollowup } from './outbox';
+import { jobStockCost,unbilledStock } from './stock-cost';
+import { projectLabor } from './labor-cost';
 import { registerReceivingRoutes, receivePoRemaining } from "./inventory-receiving";
 import { insertNumbered } from "./numbering";
 import { communicationContext, localizedLink } from "./communication";
@@ -10,7 +14,7 @@ import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
 import { sqlite, db, uploadsDir } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
-import { mailEnabled, sendMail, isOptedOut } from "./mailer";
+import { mailEnabled, sendMail, queueMail, isOptedOut } from "./mailer";
 import { renderTemplate, firstNameOf, shopBrand } from "./email-templates";
 import {
   invoices, invoicePayments, expenses, purchaseOrders,
@@ -253,7 +257,7 @@ export function otherInvoicedCents(inv: Invoice, onlyEarlier = false): number {
 // reports as overdue, but the stored status stays untouched so a payment (or a
 // due-date extension) snaps it back without any sweep job.
 function derivedStatus(inv: Invoice, today: string): InvoiceStatus {
-  if ((inv.status === "sent" || inv.status === "partial") && inv.dueDate && inv.dueDate < today) {
+  if ((inv.status === "sent" || inv.status === "partial") && inv.dueDate && inv.dueDate < today && inv.totalCents-(inv.retainageCents||0)-inv.paidCents>0) {
     return "overdue";
   }
   return inv.status;
@@ -335,9 +339,9 @@ function getInvoice(id: number): Invoice | undefined {
 
 const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com";
 
-function queueReviewRequest(inv: Invoice): void {
-  setImmediate(async () => {
-    try {
+function queueReviewRequest(inv: Invoice): void { enqueueFollowup(`invoice-review:${inv.id}`,"queueReviewRequest",{inv}); }
+export async function run_queueReviewRequest(inv: Invoice, deliveryKey:string) {
+ return sqlite.transaction(()=>{
       // Owner opt-out lives in mk_settings; a missing row/table means default on.
       const cfg = db.select({ on: marketingSettings.autoReviewRequest })
         .from(marketingSettings).where(eq(marketingSettings.id, 1)).get();
@@ -359,16 +363,7 @@ function queueReviewRequest(inv: Invoice): void {
       // Phase B #12: tie the invitation to the customer — clientId straight
       // off the invoice; leadId from the Phase A stamp, else the client's most
       // recent won lead (crm table → try/catch, degrades to NULL).
-      let leadId: number | null = inv.leadId ?? null;
-      if (leadId == null && inv.clientId != null) {
-        try {
-          leadId = (sqlite.prepare(`
-            SELECT id FROM crm_leads
-            WHERE deleted_at IS NULL AND client_id = ? AND stage = 'won'
-            ORDER BY created_at DESC, id DESC LIMIT 1
-          `).get(inv.clientId) as { id: number } | undefined)?.id ?? null;
-        } catch { /* crm module absent */ }
-      }
+      const leadId=inv.leadId ?? (inv.projectId?(sqlite.prepare('SELECT lead_id FROM projects WHERE id=?').get(inv.projectId) as any)?.lead_id:null) ?? null;
 
       const token = crypto.randomBytes(24).toString("hex");
       const inserted = sqlite.prepare(`
@@ -376,7 +371,7 @@ function queueReviewRequest(inv: Invoice): void {
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(token, name, email, inv.id, inv.clientId ?? null, leadId);
 
-      if (mailEnabled() && email && !isOptedOut(email)) {
+      if (email && !isOptedOut(email)) {
         const first = firstNameOf(name);
         // Wording is owner-editable in the Emails section.
         const msg = renderTemplate("review.request", {
@@ -384,15 +379,7 @@ function queueReviewRequest(inv: Invoice): void {
           firstName: first,
           reviewUrl: `${PUBLIC_SITE_URL}/review/${token}`,
         });
-        const ok = msg ? await sendMail({ to: email, ...msg }) : false;
-        if (ok) {
-          sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
-            .run(Date.now(), inserted.lastInsertRowid);
-          logEmailActivity({
-            clientId: inv.clientId, leadId,
-            subject: `Review request after ${inv.number} was paid`,
-          });
-        }
+        if(msg)queueMail({to:email,...msg,deliveryKey:`review-request:${inserted.lastInsertRowid}`,condition:{kind:'review-open',id:Number(inserted.lastInsertRowid)}});
       }
 
       // Always surface the ask in-app too — with no email on file (or no
@@ -402,13 +389,13 @@ function queueReviewRequest(inv: Invoice): void {
         kind: "review_request",
         leadId,
         autoCreated: true,
+        autoKey:`suite:review:${inv.id}`,
+        projectId:inv.projectId,
         dueDate: todayLocal(),
         description: `Invoice ${inv.number} paid.`,
       }).run();
-    } catch (e) {
-      console.error("[finance] review-request hook failed", e);
-    }
-  });
+
+ })();
 }
 
 // ─── Payment receipt email ───────────────────────────────────────────────────
@@ -418,10 +405,9 @@ function queueReviewRequest(inv: Invoice): void {
 // mailer or no client email on file. (`usd` — cents → "$x.xx" — lives in
 // ./http-util.)
 
-function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
-  setImmediate(async () => {
-    try {
-      if (!mailEnabled() || inv.clientId == null) return;
+function queuePaymentReceipt(inv: Invoice, amountCents: number): void { enqueueFollowup(`payment-receipt:${inv.id}:${(sqlite.prepare("SELECT max(id) id FROM fin_invoice_payments WHERE invoice_id=?").get(inv.id) as any).id}`,"queuePaymentReceipt",{inv,amountCents}); }
+export async function run_queuePaymentReceipt(inv: Invoice, amountCents: number, deliveryKey:string) {
+      if (inv.clientId == null) return;
       const client = db.select({ name: clients.name, email: clients.email })
         .from(clients).where(eq(clients.id, inv.clientId)).get();
       if (!client?.email) return;
@@ -440,7 +426,7 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
           balance: usd(balanceCents),
         },
       );
-      const ok = msg ? await sendMail({ to: client.email, ...msg }) : false;
+      const ok = msg ? await sendMail({ to: client.email, ...msg,deliveryKey }) : false;
       // Phase B #9: receipt on the timeline.
       if (ok) {
         logEmailActivity({
@@ -448,10 +434,7 @@ function queuePaymentReceipt(inv: Invoice, amountCents: number): void {
           subject: `Payment receipt — ${usd(amountCents)} received on ${inv.number}`,
         });
       }
-    } catch (e) {
-      console.error("[finance] payment-receipt hook failed", e);
-    }
-  });
+
 }
 
 // ─── The customer's invoice link ─────────────────────────────────────────────
@@ -500,10 +483,9 @@ export function invoiceRecipient(inv: Invoice): string | null {
     || null;
 }
 
-function queueInvoiceEmail(inv: Invoice): void {
-  setImmediate(async () => {
-    try {
-      if (!mailEnabled()) return;
+function queueInvoiceEmail(inv: Invoice): void { enqueueFollowup(`invoice-email:${inv.id}:${inv.sentAt}`,"queueInvoiceEmail",{inv}); }
+export async function run_queueInvoiceEmail(inv: Invoice, deliveryKey:string) {
+
       const client = inv.clientId != null
         ? db.select({ name: clients.name, email: clients.email })
             .from(clients).where(eq(clients.id, inv.clientId)).get()
@@ -558,7 +540,7 @@ function queueInvoiceEmail(inv: Invoice): void {
       const comm=communicationContext({invoiceNumber:inv.number});
       const spanish=comm.lang==='es';
       const ok = await sendMail({
-        to,
+        deliveryKey,to,
         subject: spanish ? `Factura ${inv.number} — ${comm.brand || shopBrand()}` : `Invoice ${inv.number} from ${shopBrand()}${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
         text: spanish ? `Hola ${first},\n\nTu factura ${inv.number} está lista.\nTotal: ${usd(inv.totalCents)}\nSaldo: ${usd(inv.totalCents-retainageOf(inv)-inv.paidCents)}\n${inv.dueDate ? `Vencimiento: ${inv.dueDate}\n` : ''}\n${payUrl || ''}\n\nRevisa la factura para ver el detalle y las opciones de pago. Si tienes preguntas, responde a este correo.\n\n${comm.brand || shopBrand()}` :
           `Hi ${first},\n\n` +
@@ -587,10 +569,7 @@ function queueInvoiceEmail(inv: Invoice): void {
           subject: `Invoice ${inv.number} sent — ${usd(inv.totalCents - retainageOf(inv) - inv.paidCents)} due`,
         });
       }
-    } catch (e) {
-      console.error("[finance] invoice-sent email hook failed", e);
-    }
-  });
+
 }
 
 // ─── PO received → materials expense (Phase A #4) ────────────────────────────
@@ -599,39 +578,11 @@ function queueInvoiceEmail(inv: Invoice): void {
 // already prices the materials, and billable=1 would double-bill via
 // pull-unbilled. Deduped by the auto: key in notes (postPayrollExpense style).
 
-// ─── Fully paid → close the loop (Phase A #6) ────────────────────────────────
-// A settled invoice pushes realized revenue back onto its CRM lead (stamped by
-// the quote-accept hook — only ever RAISED, a partial refund story must not
-// shrink closed revenue) and retires the accept hook's "Schedule the job"
-// task. Cross-module tables → raw SQL, everything deferred + try/catch'd.
-
-function queuePaidCloseLoop(req: Request, inv: Invoice): void {
-  setImmediate(() => {
-    try {
-      // The accept hook wrote "From quote Q-2026-0001 — …" into notes; that
-      // number keys the task it created (public-portal.ts).
-      const quoteNumber = /^From quote (\S+)/.exec(inv.notes ?? "")?.[1];
-      if (inv.leadId == null && !quoteNumber) return;
-      if (inv.leadId != null) {
-        sqlite.prepare(`
-          UPDATE crm_leads SET revenue_closed_cents = ?
-          WHERE id = ? AND deleted_at IS NULL AND revenue_closed_cents < ?
-        `).run(inv.totalCents, inv.leadId, inv.totalCents);
-      }
-      if (quoteNumber) {
-        sqlite.prepare(`
-          UPDATE pm_tasks SET status = 'done', completed_at = ?
-          WHERE deleted_at IS NULL AND status != 'done' AND auto_created = 1 AND title LIKE ?
-        `).run(Date.now(), `Schedule the job — quote ${quoteNumber} accepted%`);
-      }
-      audit(req, "finance.invoice_paid_sync", {
-        targetType: "invoice", targetId: inv.id, targetName: inv.number,
-        details: { leadId: inv.leadId, quoteNumber: quoteNumber ?? null, totalCents: inv.totalCents },
-      });
-    } catch (e) {
-      console.error("[finance] paid close-loop hook failed", e);
-    }
-  });
+// Record the connection without replacing the won contract value with a
+// deposit or marking scheduled work complete. Collected cash is derived from
+// invoice payments in the job and finance views.
+function queuePaidCloseLoop(req:Request,inv:Invoice):void {
+ audit(req,'finance.payment_link_update',{targetType:'invoice',targetId:inv.id,targetName:inv.number,details:{leadId:inv.leadId}});
 }
 
 // ─── Recording money — the one path ──────────────────────────────────────────
@@ -693,25 +644,18 @@ export function recordInvoicePayment(
           current.status === "void" ? "payment_on_void_invoice" : "overpayment",
           JSON.stringify({ paidCents, totalCents: current.totalCents, reference: body.reference }), Date.now());
     }
+    if(inserted){
+      queuePaidCloseLoop(req,invoice);
+      if(status==='paid'&&previousStatus!=='paid')queueReviewRequest(invoice);
+      queuePaymentReceipt(invoice,body.amountCents);
+    }
     return { payment, invoice, inserted, previousStatus };
   })();
   if (!inserted) return { payment, invoice };
-  const status = invoice.status;
-
-  // Newly settled → queue the review ask, push realized revenue back onto the
-  // CRM lead and retire the "Schedule the job" task (Phase A #6). All
-  // deferred; none can break this path.
-  if (status === "paid" && previousStatus !== "paid") {
-    queueReviewRequest(invoice);
-    queuePaidCloseLoop(req, invoice);
-  }
-  // Every recorded payment → receipt email to the customer (same contract).
-  queuePaymentReceipt(invoice, body.amountCents);
-
   audit(req, "finance.payment_record", {
     targetType: "invoice", targetId: inv.id, targetName: inv.number,
     details: {
-      amountCents: body.amountCents, method: body.method, newStatus: status,
+      amountCents: body.amountCents, method: body.method, newStatus: invoice.status,
       ...(source ? { source } : {}),
     },
   });
@@ -778,13 +722,16 @@ interface UnbilledTimeGroup {
   entryIds: number[];
   payRateCents: number; // effective HOURLY rate (salary pro-rated at 2080 h/yr)
   payType: string | null;
+  costCents: number;
+  correctionIds: number[];
+  missingRate: boolean;
 }
 
 // Billable + unstamped work on a project. Time is grouped per worker — the
 // owner's decision: bill at each worker's HR pay rate × (1 + labor markup).
 // hr_employees / pm_time_entries belong to other modules → raw SQL + try/catch;
 // absent tables degrade to no time (or a 0 rate the owner edits on the invoice).
-function collectUnbilled(projectId: number): { expenses: Expense[]; time: UnbilledTimeGroup[] } {
+function collectUnbilled(projectId: number): { expenses: Expense[]; time: UnbilledTimeGroup[]; stock: ReturnType<typeof unbilledStock> } {
   const exps = db.select().from(expenses).where(and(
     isNull(expenses.deletedAt),
     eq(expenses.billable, true),
@@ -792,46 +739,16 @@ function collectUnbilled(projectId: number): { expenses: Expense[]; time: Unbill
     eq(expenses.projectId, projectId),
   )).all();
 
-  let time: UnbilledTimeGroup[] = [];
-  try {
-    const rows = sqlite.prepare(`
-      SELECT te.id, te.user_id AS userId, te.duration_min AS minutes, u.name AS userName
-      FROM pm_time_entries te JOIN users u ON u.id = te.user_id
-      WHERE te.project_id = ? AND te.billable = 1 AND te.invoice_id IS NULL
-        AND te.ended_at IS NOT NULL AND te.duration_min > 0
-    `).all(projectId) as { id: number; userId: number; minutes: number; userName: string }[];
-    const byUser = new Map<number, UnbilledTimeGroup>();
-    for (const r of rows) {
-      let g = byUser.get(r.userId);
-      if (!g) {
-        g = { userId: r.userId, userName: r.userName, minutes: 0, entryIds: [], payRateCents: 0, payType: null };
-        byUser.set(r.userId, g);
-      }
-      g.minutes += r.minutes;
-      g.entryIds.push(r.id);
-    }
-    for (const g of byUser.values()) {
-      try {
-        const emp = sqlite.prepare(
-          "SELECT pay_type AS payType, pay_rate_cents AS rate FROM hr_employees WHERE user_id = ? AND deleted_at IS NULL",
-        ).get(g.userId) as { payType?: string; rate?: number } | undefined;
-        if (emp) {
-          g.payType = emp.payType ?? null;
-          // Salary is cents/year — 2080 work-hours/yr gives the hourly equivalent.
-          g.payRateCents = emp.payType === "salary"
-            ? Math.round((emp.rate ?? 0) / 2080)
-            : (emp.rate ?? 0);
-        }
-      } catch { /* hr module absent — rate stays 0 */ }
-    }
-    time = [...byUser.values()];
-  } catch { /* pm module absent — no time to bill */ }
-  return { expenses: exps, time };
+  const costing=projectLabor(projectId,true);
+  const time=costing.groups as UnbilledTimeGroup[];
+  return { expenses: exps, time,stock:unbilledStock(sqlite,projectId) };
 }
 
 // Void/delete releases the stamps so the work becomes billable again.
 function releaseBilledItems(invoiceId: number): void {
+  sqlite.prepare("UPDATE suite_stock_costs SET invoice_id=NULL WHERE invoice_id=?").run(invoiceId);
   sqlite.prepare("UPDATE fin_expenses SET invoice_id = NULL WHERE invoice_id = ?").run(invoiceId);
+  sqlite.prepare("UPDATE hr_time_corrections SET invoice_id=NULL WHERE invoice_id=?").run(invoiceId);
   try {
     sqlite.prepare("UPDATE pm_time_entries SET invoice_id = NULL WHERE invoice_id = ?").run(invoiceId);
   } catch { /* pm module absent */ }
@@ -848,6 +765,14 @@ function unreleaseRetainage(inv: Invoice): void {
   sqlite.prepare(
     "UPDATE fin_invoices SET retainage_released_at = NULL WHERE project_id = ? AND retainage_released_at = ?",
   ).run(Number(m[1]), Number(m[2]));
+}
+
+function validateInvoiceJob(projectId:number|null|undefined,clientId:number|null|undefined){
+  if(clientId!=null&&!sqlite.prepare('SELECT 1 FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(clientId))throw new Error('Choose an active customer.');
+  if(projectId==null)return;
+  const job:any=sqlite.prepare('SELECT client_id FROM projects WHERE id=? AND deleted_at IS NULL').get(projectId);
+  if(!job)throw new Error('Choose an active job.');
+  if(job.client_id!=null&&job.client_id!==clientId)throw new Error('This job belongs to a different customer. Select the job customer.');
 }
 
 export function registerFinanceRoutes(app: Express): void {
@@ -1050,24 +975,12 @@ export function registerFinanceRoutes(app: Express): void {
     if (clientId) conds.push(eq(invoices.clientId, parseInt(clientId, 10)));
     if (projectId) conds.push(eq(invoices.projectId, parseInt(projectId, 10)));
 
-    const today = todayLocal();
-    let rows = db.select().from(invoices)
-      .where(and(...conds))
-      .orderBy(desc(invoices.createdAt), desc(invoices.id))
-      .all()
-      .map((r) => presentInvoice(r, today));
-
-    // Status filter runs against the DERIVED status so ?status=overdue works
-    // (and ?status=sent excludes rows that have tipped overdue).
-    if (status) rows = rows.filter((r) => r.status === status);
-    if (q) {
-      const needle = q.toLowerCase();
-      rows = rows.filter(
-        (r) =>
-          r.number.toLowerCase().includes(needle) ||
-          (r.clientName ?? "").toLowerCase().includes(needle)
-      );
-    }
+    const today=todayLocal(),window=listWindow(req);
+    const derived=sql`CASE WHEN ${invoices.status} IN ('sent','partial') AND ${invoices.dueDate}<${today} AND ${invoices.totalCents}-coalesce(${invoices.retainageCents},0)-${invoices.paidCents}>0 THEN 'overdue' ELSE ${invoices.status} END`;
+    if(status)conds.push(sql`${derived}=${status}`);
+    if(q)conds.push(sql`(instr(lower(${invoices.number}),lower(${q}))>0 OR instr(lower(coalesce(${invoices.clientName},'')),lower(${q}))>0)`);
+    res.setHeader('X-Total-Count',String(db.select({n:sql<number>`count(*)`}).from(invoices).where(and(...conds)).get()?.n||0));
+    const rows=db.select().from(invoices).where(and(...conds)).orderBy(desc(invoices.createdAt),desc(invoices.id)).limit(window.limit).offset(window.offset).all().map(r=>presentInvoice(r,today));
     res.json(rows);
   });
 
@@ -1079,6 +992,7 @@ export function registerFinanceRoutes(app: Express): void {
       const raw = { ...req.body };
       if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
       body = insertInvoiceSchema.parse(raw);
+      validateInvoiceJob(body.projectId,body.clientId);
       retainagePct = retainagePctSchema.parse(raw.retainagePct);
       const discount = discountInputSchema.parse(raw);
       attachments = raw.attachments !== undefined
@@ -1157,6 +1071,10 @@ export function registerFinanceRoutes(app: Express): void {
       const raw = { ...req.body };
       if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
       body = insertInvoiceSchema.partial().parse(raw);
+      if((body.projectId!==undefined&&body.projectId!==inv.projectId)||(body.clientId!==undefined&&body.clientId!==inv.clientId)) {
+        if(inv.status!=='draft'||paymentCountFor(inv.id)>0)throw new Error('The job and customer on an issued invoice are locked. Void and reissue it to change them.');
+        validateInvoiceJob(body.projectId===undefined?inv.projectId:body.projectId,body.clientId===undefined?inv.clientId:body.clientId);
+      }
       retainagePct = retainagePctSchema.parse(raw.retainagePct);
       discount = discountInputSchema.parse(raw);
       attachments = raw.attachments !== undefined
@@ -1180,6 +1098,12 @@ export function registerFinanceRoutes(app: Express): void {
       });
     }
 
+    if(body.items!==undefined){
+      const linked=sqlite.prepare(`SELECT 1 FROM fin_expenses WHERE invoice_id=@id UNION ALL SELECT 1 FROM pm_time_entries WHERE invoice_id=@id UNION ALL SELECT 1 FROM hr_time_corrections WHERE invoice_id=@id UNION ALL SELECT 1 FROM suite_stock_costs WHERE invoice_id=@id UNION ALL SELECT 1 FROM suite_change_bills WHERE invoice_id=@id LIMIT 1`).get({id:inv.id});
+      const amounts=(json:string)=>JSON.stringify(parseLineItems(json).map(i=>({description:i.description,qty:i.qty,unitPriceCents:i.unitPriceCents})));
+      if(linked&&amounts(body.items)!==amounts(inv.items))return res.status(409).json({message:'This invoice contains linked work or an approved extra. Void it and create a replacement before changing those lines, so the same work cannot be billed twice.'});
+      if(linked)body.items=inv.items;
+    }
     const updates: Partial<typeof invoices.$inferInsert> = { ...body };
     // Attachments aren't money: a signed contract often arrives after the bill
     // went out, so they're editable on any status — no payment lock.
@@ -1199,7 +1123,7 @@ export function registerFinanceRoutes(app: Express): void {
       // represented become collectible again (collectUnbilled keys off
       // invoice_id IS NULL). Only reachable pre-payment — the lock above already
       // rejected edits once money has been recorded.
-      if (body.items !== undefined) releaseBilledItems(inv.id);
+
       // Phase G #3: re-derive retainage cents against the (possibly new) total.
       // Explicit pct wins; an items/tax edit without a pct keeps the old cents.
       if (retainagePct !== undefined) {
@@ -1245,6 +1169,8 @@ export function registerFinanceRoutes(app: Express): void {
       return res.json(presentInvoice(inv, todayLocal()));
     }
 
+    const row=sqlite.transaction(()=>{
+
     const row = db.update(invoices).set(updates).where(eq(invoices.id, inv.id)).returning().get();
     if (body.status && body.status !== inv.status) {
       audit(req, "finance.invoice_status", {
@@ -1257,11 +1183,13 @@ export function registerFinanceRoutes(app: Express): void {
       if (body.status === "void") {
         releaseBilledItems(inv.id);
         unreleaseRetainage(inv);
+        queuePaidCloseLoop(req,row);
       }
       // Phase A #1: the transition INTO "sent" emails the customer the actual
       // invoice (deferred; a re-PATCH that stays "sent" doesn't re-send).
       if (body.status === "sent") queueInvoiceEmail(row);
     }
+    return row;})();
     // `emailedTo` rides along on the send transition so the UI can say who it
     // is going to — or that there is nobody to send to, which is the case that
     // used to pass silently as a green "Invoice marked sent".
@@ -1376,6 +1304,7 @@ export function registerFinanceRoutes(app: Express): void {
 
       // The re-derivation can also land on "paid" (e.g. reversing an overpaid
       // duplicate still leaves the total covered) — same newly-paid rule.
+      if(updated)queuePaidCloseLoop(req,updated);
       if (status === "paid" && inv.status !== "paid" && updated) queueReviewRequest(updated);
     }
     audit(req, "finance.payment_delete", {
@@ -1411,17 +1340,19 @@ export function registerFinanceRoutes(app: Express): void {
   // HR pay rate + markup, billable expenses at cost + markup.
   app.get("/api/finance/projects/:id/unbilled", requireElevated, (req, res) => {
     const projectId = pid(req.params.id);
-    const { expenses: exps, time } = collectUnbilled(projectId);
+    const { expenses: exps, time, stock } = collectUnbilled(projectId);
     const settings = getFinSettings();
     const laborCents = time.reduce(
-      (s, g) => s + withMarkup(Math.round((g.minutes / 60) * g.payRateCents), settings.laborMarkupBp), 0);
+      (s, g) => s + withMarkup(g.costCents, settings.laborMarkupBp), 0);
     const expenseCents = exps.reduce(
       (s, e) => s + withMarkup(e.amountCents, settings.expenseMarkupBp), 0);
     res.json({
       expenses: exps,
-      time,
+      time, stock,
       settings,
-      totals: { laborCents, expenseCents, totalCents: laborCents + expenseCents },
+      billingMode:(sqlite.prepare('SELECT billing_mode FROM projects WHERE id=?').get(projectId) as any)?.billing_mode,
+      incomplete:time.some(t=>t.missingRate)||stock.some(s=>s.missing>0),
+      totals: { laborCents, expenseCents, stockCents:stock.reduce((s,r)=>s+withMarkup(r.costCents,settings.expenseMarkupBp),0), totalCents: laborCents + expenseCents + stock.reduce((s,r)=>s+withMarkup(r.costCents,settings.expenseMarkupBp),0) },
     });
   });
 
@@ -1443,12 +1374,18 @@ export function registerFinanceRoutes(app: Express): void {
     const defaults = getFinSettings();
     const laborMarkupBp = body.laborMarkupBp ?? defaults.laborMarkupBp;
     const expenseMarkupBp = body.expenseMarkupBp ?? defaults.expenseMarkupBp;
-    const { expenses: exps, time } = collectUnbilled(body.projectId);
-    if (exps.length === 0 && time.length === 0) {
+    const job=sqlite.prepare('SELECT billing_mode FROM projects WHERE id=? AND deleted_at IS NULL').get(body.projectId) as any;
+    if (inv.projectId !== body.projectId) return res.status(409).json({message:'Choose the invoice linked to this job.'});
+    if (job?.billing_mode !== 'time_materials') return res.status(409).json({message:'This job is fixed-price or needs billing review. Use an approved change order for extras.'});
+    const { expenses: exps, time, stock } = collectUnbilled(body.projectId);
+    if (time.some(g=>g.missingRate)) return res.status(409).json({message:'Some hours have no historical rate. Review employee pay rates before billing.'});
+    if(stock.some(s=>s.missing>0))return res.status(409).json({message:'Some consumed stock has no recorded purchase cost. Review the material charge before billing.'});
+    if (exps.length === 0 && time.length === 0 && stock.length===0) {
       return res.status(400).json({ message: "Nothing unbilled on that job" });
     }
 
     const newItems = [
+      ...stock.filter(s=>s.costCents!==0).map(s=>({description:`Stock ${s.quantity<0?'returned credit':'used'} — ${s.name} (${Math.abs(s.quantity)} ${s.unit})`,qty:1,unitPriceCents:withMarkup(s.costCents,expenseMarkupBp)})),
       ...time.map((g) => {
         const hours = Math.round((g.minutes / 60) * 100) / 100;
         const rateCents = withMarkup(g.payRateCents, laborMarkupBp);
@@ -1456,7 +1393,7 @@ export function registerFinanceRoutes(app: Express): void {
         // the rounded labor cost. Rounding hours→2dp then ×rate drifts from the
         // preview, so charge the computed cents as a single line unit and keep
         // the hours/rate only in the human-readable description.
-        const amountCents = withMarkup(Math.round((g.minutes / 60) * g.payRateCents), laborMarkupBp);
+        const amountCents = withMarkup(g.costCents, laborMarkupBp);
         return {
           description: `Labor — ${g.userName} (${hours} hr @ $${(rateCents / 100).toFixed(2)}/hr)`,
           qty: 1,
@@ -1481,10 +1418,14 @@ export function registerFinanceRoutes(app: Express): void {
     }
 
     const row = db.transaction((tx) => {
+      for(const s of stock)for(const id of s.ids.split(','))sqlite.prepare('UPDATE suite_stock_costs SET invoice_id=? WHERE id=?').run(inv.id,Number(id));
       const stampExp = sqlite.prepare("UPDATE fin_expenses SET invoice_id = ? WHERE id = ?");
       for (const e of exps) stampExp.run(inv.id, e.id);
       const stampTime = sqlite.prepare("UPDATE pm_time_entries SET invoice_id = ? WHERE id = ?");
-      for (const g of time) for (const entryId of g.entryIds) stampTime.run(inv.id, entryId);
+      for (const g of time) {
+        for (const entryId of g.entryIds) stampTime.run(inv.id, entryId);
+        for (const correctionId of g.correctionIds) sqlite.prepare('UPDATE hr_time_corrections SET invoice_id=? WHERE id=?').run(inv.id,correctionId);
+      }
       return tx.update(invoices).set({ items: itemsJson, ...totals })
         .where(eq(invoices.id, inv.id)).returning().get();
     });
@@ -1509,7 +1450,8 @@ export function registerFinanceRoutes(app: Express): void {
       .where(and(isNull(invoices.deletedAt), eq(invoices.projectId, projectId)))
       .orderBy(desc(invoices.id))
       .all();
-    const live = invRows.filter((i) => i.status !== "void");
+    const drafts = invRows.filter(i=>i.status==='draft');
+    const live = invRows.filter((i) => i.status !== "void" && i.status !== "draft");
     // Phase G #3: a retainage-release invoice re-bills money already inside a
     // source invoice's total, so gross Σ totals would double-count it. Netting
     // out RELEASED retainage keeps billed-to-date equal to the sum of the
@@ -1522,34 +1464,15 @@ export function registerFinanceRoutes(app: Express): void {
     // invoice (a GC that ignored the withholding and paid in full holds $0).
     // Same predicate as the bill-retainage endpoint so card and button agree.
     const retainageHeldCents = live.reduce((s, i) => s + heldRetainageOf(i), 0);
-    const expenseCents = db.select({ s: sql<number>`coalesce(sum(${expenses.amountCents}), 0)` })
+    const grossExpenseCents = db.select({ s: sql<number>`coalesce(sum(${expenses.amountCents}), 0)` })
       .from(expenses)
       .where(and(isNull(expenses.deletedAt), eq(expenses.projectId, projectId)))
       .get()?.s ?? 0;
 
-    let laborMinutes = 0;
-    let laborCostCents = 0;
-    try {
-      const rows = sqlite.prepare(`
-        SELECT te.user_id AS userId, SUM(te.duration_min) AS minutes
-        FROM pm_time_entries te
-        WHERE te.project_id = ? AND te.ended_at IS NOT NULL
-        GROUP BY te.user_id
-      `).all(projectId) as { userId: number; minutes: number }[];
-      for (const r of rows) {
-        laborMinutes += r.minutes;
-        try {
-          const emp = sqlite.prepare(
-            "SELECT pay_type AS payType, pay_rate_cents AS rate FROM hr_employees WHERE user_id = ? AND deleted_at IS NULL",
-          ).get(r.userId) as { payType?: string; rate?: number } | undefined;
-          const hourly = emp
-            ? (emp.payType === "salary" ? Math.round((emp.rate ?? 0) / 2080) : (emp.rate ?? 0))
-            : 0;
-          laborCostCents += Math.round((r.minutes / 60) * hourly);
-        } catch { /* hr module absent — labor priced at 0 */ }
-      }
-    } catch { /* pm module absent — no time on the job */ }
-
+    const stock=jobStockCost(sqlite,projectId);
+    const expenseCents=grossExpenseCents-stock.stockPurchaseCents;
+    const labor=projectLabor(projectId);
+    const laborMinutes=labor.minutes, laborCostCents=labor.costCents;
     // Phase A #3: the signed contract's value vs what's actually been billed —
     // a done job with contract money left unbilled is the cash leak this
     // whole card exists to catch. pm_contracts belongs to pm → try/catch.
@@ -1565,6 +1488,7 @@ export function registerFinanceRoutes(app: Express): void {
         .get()?.s ?? 0;
     } catch { /* pm module absent — no contract to reconcile */ }
 
+    if(!contractCents)contractCents=(sqlite.prepare("SELECT q.total_cents n FROM projects p JOIN quotes q ON q.id=p.quote_id WHERE p.id=? AND q.status='accepted' AND q.deleted_at IS NULL").get(projectId) as any)?.n || 0;
     // Phase G #1: approved change orders move the goalposts — the job's
     // effective contract total is contractCents + changeOrderCents (signed;
     // deductive COs subtract). pm_change_orders belongs to pm → try/catch.
@@ -1584,17 +1508,23 @@ export function registerFinanceRoutes(app: Express): void {
     res.json({
       invoices: live.map((i) => presentInvoice(i, today)),
       totals: {
+        draftCents: drafts.reduce((sum,i)=>sum+i.totalCents,0),
+        missingRateMinutes: labor.missingRateMinutes,
+        salaryEstimated: labor.salaryEstimated,
         contractCents,
         changeOrderCents,
         invoicedCents,
         paidCents,
-        outstandingCents: invoicedCents - paidCents,
+        outstandingCents: Math.max(0,invoicedCents - paidCents),
+        dueNowCents: Math.max(0,invoicedCents-paidCents-retainageHeldCents),
+        creditCents: Math.max(0,paidCents-invoicedCents),
+        ...stock,
         retainageHeldCents,
         expenseCents,
         laborMinutes,
         laborCostCents,
         // What's left after materials + labor if everything billed gets paid.
-        marginCents: invoicedCents - expenseCents - laborCostCents,
+        marginCents: invoicedCents - expenseCents - laborCostCents - stock.stockCostCents,
       },
     });
   });
@@ -1679,20 +1609,11 @@ export function registerFinanceRoutes(app: Express): void {
     if (from) conds.push(sql`${expenses.date} >= ${from}`);
     if (to) conds.push(sql`${expenses.date} <= ${to}`);
 
-    let rows = db.select().from(expenses)
-      .where(and(...conds))
-      .orderBy(desc(expenses.date), desc(expenses.id))
-      .all();
-    if (q) {
-      const needle = q.toLowerCase();
-      rows = rows.filter(
-        (r) =>
-          (r.vendor ?? "").toLowerCase().includes(needle) ||
-          (r.notes ?? "").toLowerCase().includes(needle)
-      );
-    }
-    // Total is for the FILTERED set — the UI shows "you spent $X on fuel in June".
-    const totalCents = rows.reduce((sum, r) => sum + r.amountCents, 0);
+    if(q)conds.push(sql`(instr(lower(coalesce(${expenses.vendor},'')),lower(${q}))>0 OR instr(lower(coalesce(${expenses.notes},'')),lower(${q}))>0)`);
+    const window=listWindow(req);
+    const totals=db.select({n:sql<number>`count(*)`,cents:sql<number>`coalesce(sum(${expenses.amountCents}),0)`}).from(expenses).where(and(...conds)).get()!;
+    const rows=db.select().from(expenses).where(and(...conds)).orderBy(desc(expenses.date),desc(expenses.id)).limit(window.limit).offset(window.offset).all();
+    const totalCents=totals.cents;res.setHeader('X-Total-Count',String(totals.n));
     res.json({ rows, totalCents });
   });
 

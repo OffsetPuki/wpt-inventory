@@ -95,5 +95,7 @@ export async function shrinkAndUpload(file: File): Promise<string> {
   } catch {
     /* keep original */
   }
-  return uploadPhoto(toUpload);
+  const url=await uploadPhoto(toUpload);
+  try {const thumbnail=await downscaleImage(file,320,0.7);const thumbnailUrl=await uploadPhoto(thumbnail);const token=getAuthToken();await fetch('/api/suite/photo-preview',{method:'POST',headers:{'Content-Type':'application/json',...(token?{'X-Auth':token}:{})},body:JSON.stringify({url,thumbnailUrl})});}catch{/* Original remains available if preview generation fails. */}
+  return url;
 }

@@ -77,7 +77,7 @@ function Row({ r }) {
           </span>
         </span>
         <span className="line-field">
-          <label>Labor $ — quoted / actual</label>
+          <label>Labor $ — quoted / actual {r.actual?.missingRateMinutes>0 ? "(rate missing)" : ""}</label>
           <span>
             ${fmtMoney(r.quoted.laborCents / 100)}
             {' / '}
@@ -102,7 +102,7 @@ export default function Costing({ priceBook, onChangePriceBook }) {
   const suggestions = useMemo(() => {
     const byType = new Map();
     for (const r of rows) {
-      if (r.projectStatus !== 'done' || !r.actual) continue;
+      if (r.projectStatus !== 'done' || !r.actual || r.actual.incompleteStockCost || r.actual.missingRateMinutes>0) continue;
       // Calibration compares like with like. A Custom quote is a different job
       // every time (and has no per-type labor rates to scale), so it stays in
       // the table below but never suggests a price-book change.

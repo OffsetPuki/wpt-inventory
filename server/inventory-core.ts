@@ -1,3 +1,4 @@
+import { initializeStockCosts, recordStockCost } from './stock-cost';
 import type Database from "better-sqlite3";
 import {
   fractionalUnit,
@@ -78,6 +79,7 @@ export function inventoryMigrate(db: DB) {
     CREATE TABLE IF NOT EXISTS inventory_migrations (key TEXT PRIMARY KEY);
     CREATE INDEX IF NOT EXISTS idx_items_active_name ON items(name COLLATE NOCASE, id) WHERE deleted_at IS NULL;
   `);
+  initializeStockCosts(db);
   // Attribute only reservations already present in the old total; never invent
   // stock, increase reservations, or infer historical borrowers during migration.
   if (
@@ -439,6 +441,7 @@ export function moveStock(
             action,
           ).lastInsertRowid,
       );
+      if (!tool && action !== "receive") recordStockCost(db,id,item,data.projectId,data.quantity,type === "check_in");
       if (tool && type === "check_out")
         db.prepare(
           "INSERT INTO inventory_loans(id,item_id,borrower_id,project_id,quantity) VALUES(?,?,?,?,?)",

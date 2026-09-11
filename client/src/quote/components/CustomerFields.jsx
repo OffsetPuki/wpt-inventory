@@ -13,6 +13,7 @@ export default function CustomerFields({ customer = {}, onChange, compact = fals
     enabled: query.length > 0,
   });
   const pick = (client) => {
+    onChange('clientId', client.id);
     for (const key of ['name', 'company', 'phone', 'email']) onChange(key, client[key] || '');
     onChange('preferredLanguage', client.preferredLanguage || 'en');
     onChange('location', client.address || '');
@@ -32,6 +33,7 @@ export default function CustomerFields({ customer = {}, onChange, compact = fals
             : <p className="hint">No match. Enter a new customer below.</p>}
       {clients.length === 12 && <p className="hint">Showing 12 matches. Keep typing to narrow the search.</p>}
     </div>}
+    {customer.clientId && <p className="hint">Linked customer <button type="button" className="back-link" onClick={() => onChange('clientId', null)}>Use as a new customer</button></p>}
     <div className="fields two">
       {field('name', 'Customer name', { autoComplete: 'name' })}
       {field('company', 'Company (optional)', { autoComplete: 'organization' })}

@@ -1,9 +1,11 @@
+import { useRouteScroll } from '@/lib/route-scroll';
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import Logo from "./Logo";
 import SearchBar from "./SearchBar";
+import SuiteBar from "./SuiteBar";
 import { useTheme } from "./ThemeProvider";
 import {
   LayoutDashboard,
@@ -73,10 +75,10 @@ interface NavGroup {
 // The suite is organized by business function. Entry-level visibility mirrors
 // the API: workers get the floor tools (sales, projects, inventory, their own
 // HR self-service); the owner gets everything.
-const NAV_GROUPS: NavGroup[] = [
+const ALL_NAV_GROUPS: NavGroup[] = [
   {
     key: "crm",
-    label: "Sales",
+    label: "Customers",
     entries: [
       { to: "/crm/leads", label: "Leads", icon: UserPlus },
       { to: "/crm/clients", label: "Clients", icon: Contact },
@@ -88,7 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
     key: "projects",
     label: "Jobs",
     entries: [
-      { to: "/projects", label: "Projects", icon: FolderKanban },
+      { to: "/projects", label: "Jobs", icon: FolderKanban },
       { to: "/pm/board", label: "Tasks", icon: Kanban },
       { to: "/pm/schedule", label: "Schedule", icon: CalendarRange },
       { to: "/pm/time", label: "Time", icon: Timer },
@@ -146,6 +148,12 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+const NAV_GROUPS: NavGroup[] = [...ALL_NAV_GROUPS.slice(0,4),{key:'more',label:'More',entries:[
+  {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated'},
+  {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated'},
+  ...ALL_NAV_GROUPS.slice(4).flatMap(g=>g.entries.map(e=>({...e,needs:e.needs||g.needs})))
+]}];
+
 function groupForLocation(location: string): string | null {
   for (const g of NAV_GROUPS) {
     if (g.entries.some((e) => location === e.to || (e.to !== "/home" && location.startsWith(e.to)))) {
@@ -183,17 +191,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="flex flex-col gap-0.5 px-3">
-      {/* Dashboard stands alone above the groups */}
-      {isElevated && (
-        <Link
-          href="/dashboard"
-          onClick={onNavigate}
-          className={linkCls(location === "/dashboard")}
-        >
-          <LayoutDashboard className="h-[18px] w-[18px] shrink-0" />
-          <span>Dashboard</span>
-        </Link>
-      )}
+      <Link href="/today" onClick={onNavigate} className={linkCls(location === '/today')}><LayoutDashboard className="h-[18px] w-[18px]"/><span>Today</span></Link>
 
       {NAV_GROUPS.map((g) => {
         if (!canSee(g.needs)) return null;
@@ -295,6 +293,7 @@ function UserChip() {
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const scrollRef=useRouteScroll();
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -371,7 +370,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="page-enter flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <SuiteBar />
+        <main ref={scrollRef} className="page-enter flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           {children}
         </main>
       </div>

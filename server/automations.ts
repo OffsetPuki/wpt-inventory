@@ -1,3 +1,4 @@
+import { projectLabor } from './labor-cost';
 import type { Express } from "express";
 import fs from "fs";
 import path from "path";
@@ -178,7 +179,7 @@ function runBusinessSweep(): void {
             dueDate: String(inv.due_date ?? ""),
           });
           if (!msg) return;
-          const ok = await sendMail({ to: inv.email, ...msg });
+          const ok = await sendMail({ to: inv.email, ...msg,deliveryKey:`invoice-overdue:${inv.id}:${inv.reminded_at||0}`,condition:{kind:"invoice-overdue",id:inv.id} });
           if (ok) {
             sqlite.prepare("UPDATE fin_invoices SET reminded_at = ? WHERE id = ?")
               .run(Date.now(), inv.id);
@@ -258,7 +259,7 @@ function runBusinessSweep(): void {
       });
       if (!msg) continue; // switched off by the owner
       setImmediate(async () => {
-        const ok = await sendMail({ to: email!, ...msg });
+        const ok = await sendMail({ to: email!, ...msg,deliveryKey:`quote-followup:${q.id}:${stage}`,condition:{kind:"quote-pending",id:q.id} });
         if (!ok) return;
         sqlite.prepare(
           `UPDATE quotes SET ${stage === 1 ? "nudge_sent_at" : "fu2_sent_at"} = ? WHERE id = ?`,
@@ -322,26 +323,18 @@ function runBusinessSweep(): void {
   step("unbilled-work chaser", () => {
     const month = today.slice(0, 7); // "YYYY-MM"
     const projs = sqlite.prepare(
-      "SELECT id, name, status FROM projects WHERE deleted_at IS NULL",
+      "SELECT id, name, status FROM projects WHERE deleted_at IS NULL AND billing_mode='time_materials'",
     ).all() as any[];
     const expQ = sqlite.prepare(`
       SELECT COALESCE(SUM(amount_cents), 0) AS cents, MIN(created_at) AS oldest
       FROM fin_expenses
       WHERE deleted_at IS NULL AND billable = 1 AND invoice_id IS NULL AND project_id = ?
     `);
-    const timeQ = sqlite.prepare(`
-      SELECT COALESCE(SUM(CAST(te.duration_min AS REAL) / 60.0 *
-               CASE WHEN e.pay_type = 'salary' THEN COALESCE(e.pay_rate_cents, 0) / 2080.0
-                    ELSE COALESCE(e.pay_rate_cents, 0) END), 0) AS cents,
-             MIN(te.started_at) AS oldest
-      FROM pm_time_entries te
-      LEFT JOIN hr_employees e ON e.user_id = te.user_id AND e.deleted_at IS NULL
-      WHERE te.project_id = ? AND te.billable = 1 AND te.invoice_id IS NULL
-        AND te.ended_at IS NOT NULL AND te.duration_min > 0
-    `);
+    const timeQ=sqlite.prepare('SELECT min(started_at) oldest FROM pm_time_entries WHERE project_id=? AND billable=1 AND invoice_id IS NULL AND ended_at IS NOT NULL');
     for (const p of projs) {
       const ex = expQ.get(p.id) as any;
-      const tm = timeQ.get(p.id) as any;
+      const labor=projectLabor(p.id,true);
+      const tm={...(timeQ.get(p.id) as any),cents:labor.costCents};
       const cents = Math.round((ex?.cents ?? 0) + (tm?.cents ?? 0));
       if (cents <= 0) continue;
       const oldest = Math.min(ex?.oldest ?? Infinity, tm?.oldest ?? Infinity);
@@ -486,7 +479,7 @@ function runBusinessSweep(): void {
           reviewUrl: `${PUBLIC_SITE_URL}/review/${rr.token}`,
         });
         if (!msg) return; // switched off in the Emails section — respect it
-        const ok = await sendMail({ to: rr.email, ...msg });
+        const ok = await sendMail({ to: rr.email, ...msg,deliveryKey:`review-request:${rr.id}`,condition:{kind:"review-open",id:rr.id} });
         if (ok) {
           sqlite.prepare("UPDATE review_requests SET sent_at = ? WHERE id = ?")
             .run(Date.now(), rr.id);

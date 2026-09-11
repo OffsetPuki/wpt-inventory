@@ -38,3 +38,10 @@ Browser evidence and measured first-load resources are written to `test-results/
 - Cloudflare R2 was activated by the owner. The private `cjm-suite-backups` bucket has a 30-day lifecycle rule for `cjm-backups/`. Bucket-scoped credentials are saved in Railway. The actual application adapter uploaded and downloaded the current 112.6 MB production archive; an independent R2 download restored all 146 uploads and passed reconciliation.
 - Production has a live Stripe key; real test-mode event verification requires separate test credentials.
 - Railway now waits for GitHub checks on all five production branches. The new suite also started successfully against a disposable production-data copy with SQLite integrity intact and outbound requests blocked.
+
+
+## September 10 connected-suite release
+
+This later implementation is described in [SUITE-WORKFLOWS.md](SUITE-WORKFLOWS.md). It adds job/customer links, dated labor and FIFO stock costs, explicit billing mode, review controls, job workspaces, live updates, durable follow-ups and connected galleries for Concrete, Insulation and Trades. Existing jobs default to billing review; opening costs and ambiguous history remain unknown until reviewed. The owner separately approved pushing this batch live after reviewing the implementation summary.
+
+The suite and three sister-site repositories deploy through their existing GitHub checks and Railway gates. Expanded test scripts and browser workflows passed locally. The latest R2 archive restored all 151 uploads, and the new application started against an isolated production-data copy with SQLite integrity, record counts and payment rows preserved. Retain that backup and the recorded previous deployment IDs, and verify streaming through Railway and runtime gallery feeds after release. The additive tables and columns initialize at application startup. Existing `drizzle/` files were present before this work and were not included in it. One historical job needs link/billing review and one invoice has a customer-link conflict; no repairs were applied.

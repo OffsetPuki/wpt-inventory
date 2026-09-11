@@ -8,7 +8,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage, uploadsDir } from "./storage";
-import { mailEnabled, sendMail, sendOwnerMail, isOptedOut } from "./mailer";
+import { mailEnabled, sendMail, sendOwnerMail, queueMail, queueOwnerMail, isOptedOut } from "./mailer";
 import { renderTemplate, firstNameOf } from "./email-templates";
 import { leads, LEAD_SITES, SITE_DOMAINS, type LeadSource, type LeadSite } from "../shared/crm-schema";
 import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
@@ -525,11 +525,10 @@ export function registerPublicRoutes(app: Express): void {
         (body.designSpec ? `\nDesign spec:\n${body.designSpec}\n` : "") +
         `\nNotes:\n${body.message || "(none)"}\n` +
         `\nLang: ${body.lang ?? "en"} · Page: ${body.page || "?"} · Lead #${row.id}`;
-      setImmediate(() => {
-        void sendOwnerMail({
-          subject: `[CJM Suite] New lead from ${domain} — ${body.name}`,
-          text,
-        });
+      queueOwnerMail({
+        deliveryKey:`lead-intake-owner:${row.id}`,
+        subject: `[CJM Suite] New lead from ${domain} — ${body.name}`,
+        text,
       });
     }
 
@@ -544,9 +543,7 @@ export function registerPublicRoutes(app: Express): void {
         refLine: body.designRef ? (body.lang === "es" ? `Tu código de proyecto es ${body.designRef}.\n` : `Your project code is ${body.designRef}.\n`) : "",
       });
       if (msg) {
-        setImmediate(() => {
-          void sendMail({ to: body.email!, ...msg });
-        });
+        queueMail({ to: body.email!, ...msg, deliveryKey:`lead-intake-customer:${row.id}` });
       }
     }
 
@@ -597,7 +594,8 @@ export function registerPublicRoutes(app: Express): void {
     });
   });
 
-  app.get("/api/public/portfolio", feedLimiter, (_req, res) => {
+  app.get("/api/public/portfolio", feedLimiter, (req, res) => {
+    const site=z.enum(LEAD_SITES).safeParse(req.query.site||"metals");if(!site.success)return res.status(400).json({message:"Unknown trade."});
     feedHeaders(res);
     res.json({
       items: db.select({
@@ -606,7 +604,7 @@ export function registerPublicRoutes(app: Express): void {
         photoUrl: portfolioItems.photoUrl,
       })
         .from(portfolioItems)
-        .where(eq(portfolioItems.published, true))
+        .where(and(eq(portfolioItems.published, true),eq(portfolioItems.site,site.data)))
         .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt))
         .limit(60)
         .all(),

@@ -1,3 +1,5 @@
+import { projectLabor } from './labor-cost';
+import { jobStockCost } from './stock-cost';
 import { communicationContext, localizedLink } from "./communication";
 import type { Express } from "express";
 import crypto from "crypto";
@@ -109,7 +111,8 @@ function normalizePayload(body: Record<string, unknown>): void {
   if (typeof body.payload !== "string") {
     body.payload = JSON.stringify(body.payload);
   }
-  const parsed = parseJson<unknown>(body.payload as string, null);
+  const parsed = parseJson<any>(body.payload as string, null);
+  if (parsed?.customer?.clientId != null && (!Number.isInteger(parsed.customer.clientId) || !sqlite.prepare('SELECT 1 FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(parsed.customer.clientId))) throw new Error('Choose an active customer or remove the customer link.');
   if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("payload must be a JSON object");
   }
@@ -329,8 +332,8 @@ export function registerQuoteRoutes(app: Express): void {
         ) * 100);
 
         const project = sqlite.prepare(
-          "SELECT id, status FROM projects WHERE job_number = ? AND deleted_at IS NULL",
-        ).get(q.number) as { id: number; status: string } | undefined;
+          "SELECT id, status FROM projects WHERE quote_id = ? AND deleted_at IS NULL",
+        ).get(q.id) as { id: number; status: string } | undefined;
 
         let actual: any = null;
         if (project) {
@@ -340,25 +343,12 @@ export function registerQuoteRoutes(app: Express): void {
               COALESCE(SUM(CASE WHEN category != 'materials' THEN amount_cents ELSE 0 END), 0) AS other
             FROM fin_expenses WHERE project_id = ? AND deleted_at IS NULL
           `).get(project.id) as { materials: number; other: number };
-          const times = sqlite.prepare(`
-            SELECT user_id AS userId, COALESCE(SUM(duration_min), 0) AS minutes
-            FROM pm_time_entries
-            WHERE project_id = ? AND ended_at IS NOT NULL
-            GROUP BY user_id
-          `).all(project.id) as { userId: number; minutes: number }[];
-          let laborMinutes = 0;
-          let laborCostCents = 0;
-          for (const t of times) {
-            laborMinutes += t.minutes;
-            const emp = sqlite.prepare(
-              "SELECT pay_type, pay_rate_cents FROM hr_employees WHERE user_id = ?",
-            ).get(t.userId) as { pay_type?: string; pay_rate_cents?: number } | undefined;
-            const hourly = !emp?.pay_rate_cents ? 0
-              : emp.pay_type === "salary" ? emp.pay_rate_cents / 2080 : emp.pay_rate_cents;
-            laborCostCents += Math.round((t.minutes / 60) * hourly);
-          }
+          const labor=projectLabor(project.id),stock=jobStockCost(sqlite,project.id);
+          const laborMinutes=labor.minutes,laborCostCents=labor.costCents;
           actual = {
-            materialCents: exp.materials,
+            materialCents: exp.materials-stock.stockPurchaseCents+stock.stockCostCents,
+            missingRateMinutes: labor.missingRateMinutes,
+            incompleteStockCost: stock.unknownStockQuantity>0||stock.historicalMovementsWithoutCost>0,
             otherExpenseCents: exp.other,
             laborMinutes,
             laborCostCents,
@@ -439,6 +429,7 @@ export function registerQuoteRoutes(app: Express): void {
     const status = typeof req.query.status === 'string' ? req.query.status : '';
     const trade = typeof req.query.trade === 'string' ? req.query.trade : '';
     const conditions = [isNull(quotes.deletedAt)];
+    if (req.query.projectId) conditions.push(sql`${quotes.id} IN (SELECT quote_id FROM projects WHERE id=${Number(req.query.projectId)} AND deleted_at IS NULL)`);
     if (search) {
       const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
       conditions.push(or(

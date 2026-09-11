@@ -1,175 +1,139 @@
-import type { Express, Request } from "express";
-import { and, isNull, or, sql } from "drizzle-orm";
-import { db } from "./storage";
+import type { Express } from "express";
+import { sqlite } from "./storage";
 import { requireAuth } from "./auth";
-import { items, projects } from "../shared/schema";
-import { clients, leads } from "../shared/crm-schema";
-import { pmTasks, contracts } from "../shared/pm-schema";
-import { invoices, purchaseOrders, expenses } from "../shared/finance-schema";
-import { quotes } from "../shared/quote-schema";
-import { employees } from "../shared/hr-schema";
-import { campaigns } from "../shared/marketing-schema";
-import { escapeLike, isElevated } from "./http-util";
-
-// ─── Global search (top bar) ─────────────────────────────────────────────────
-// One LIKE sweep per source, 5 hits each, ~20 total. Sources the caller's role
-// can't open in the UI are skipped server-side so a worker never sees invoice
-// numbers or employee names in the dropdown.
-
-export interface SearchHit {
-  type: string; // section label shown in the dropdown
-  label: string;
-  sublabel?: string | null;
-  href: string; // hash route the client navigates to
-}
-
-const PER_SOURCE = 5;
-const TOTAL_CAP = 20;
-
-// LIKE condition that treats the (already-escaped, see http-util's escapeLike)
-// pattern's metacharacters as literals via `ESCAPE '\'`. Drop-in for drizzle's
-// `like`, which has no ESCAPE support. `col` may be a column or a raw sql
-// expression.
-const likeEsc = (col: any, pattern: string) => sql`${col} LIKE ${pattern} ESCAPE '\\'`;
-
-export function registerSearchRoutes(app: Express): void {
+import { isElevated } from "./http-util";
+export function registerSearchRoutes(app: Express) {
   app.get("/api/search", requireAuth, (req, res) => {
-    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-    if (q.length < 2) return res.json({ results: [] });
-    const p = `%${escapeLike(q)}%`;
-    const hits: SearchHit[] = [];
-    const isElev = isElevated(req);
-
-    // Each source is independent — a failure in one (e.g. a table missing on
-    // a partial install) must not blank the whole dropdown.
-    const source = (fn: () => void) => {
+    const q = String(req.query.q || "")
+      .trim()
+      .slice(0, 120);
+    if (q.length < 2) return res.json({ results: [], more: false });
+    const pattern = "%" + q.replace(/[\\%_]/g, "\\$&") + "%";
+    const sources = [
+      [
+        "Items",
+        "items",
+        "name",
+        "part_number",
+        "name,part_number,area,rack_letter,shelf,bin",
+        "/item/",
+      ],
+      [
+        "Jobs",
+        "projects",
+        "name",
+        "job_number",
+        "name,job_number,customer,site_address",
+        "/project/",
+      ],
+      [
+        "Clients",
+        "crm_clients",
+        "name",
+        "company",
+        "name,company,email,phone,address",
+        "/crm/clients?client=",
+      ],
+      [
+        "Leads",
+        "crm_leads",
+        "name",
+        "service_requested",
+        "name,service_requested,phone,email",
+        "/crm/leads?lead=",
+      ],
+      [
+        "Quotes",
+        "quotes",
+        "number",
+        "customer_name",
+        "number,customer_name,design_ref",
+        "/crm/quotes?quote=",
+      ],
+      [
+        "Tasks",
+        "pm_tasks",
+        "title",
+        "description",
+        "title,description",
+        "/pm/board?task=",
+      ],
+      [
+        "Contracts",
+        "pm_contracts",
+        "title",
+        "client_name",
+        "title,client_name,quote_ref",
+        "/pm/contracts?contract=",
+      ],
+      ...(isElevated(req)
+        ? [
+            [
+              "Invoices",
+              "fin_invoices",
+              "number",
+              "client_name",
+              "number,client_name",
+              "/finance/invoices?invoice=",
+            ],
+            [
+              "Purchase Orders",
+              "fin_purchase_orders",
+              "number",
+              "vendor",
+              "number,vendor",
+              "/finance/purchase-orders?po=",
+            ],
+            [
+              "Expenses",
+              "fin_expenses",
+              "coalesce(vendor,'Expense')",
+              "date",
+              "vendor,notes",
+              "/finance/expenses?expense=",
+            ],
+            [
+              "Employees",
+              "hr_employees",
+              "first_name||' '||last_name",
+              "job_title",
+              "first_name,last_name,email,phone",
+              "/hr/employees?employee=",
+            ],
+          ]
+        : []),
+    ].filter((s) => !req.query.type || s[0] === req.query.type);
+    const groups: any[][] = [],
+      errors: string[] = [];
+    for (const [type, table, label, sub, fieldText, href] of sources)
       try {
-        fn();
+        const fields = fieldText.split(",");
+        const rows = sqlite
+          .prepare(
+            `SELECT id,${label} AS label,${sub} AS sublabel,CASE WHEN lower(${label})=lower(?) OR lower(${sub})=lower(?) THEN 0 ELSE 1 END AS rank FROM ${table} WHERE deleted_at IS NULL AND (${fields.map((f) => `${f} LIKE ? ESCAPE '\\'`).join(" OR ")}) ORDER BY rank,id DESC LIMIT 6`,
+          )
+          .all(q, q, ...fields.map(() => pattern)) as any[];
+        groups.push(
+          rows.map((r) => ({
+            type,
+            label: r.label,
+            sublabel: r.sublabel,
+            href: href + r.id,
+            rank: r.rank,
+          })),
+        );
       } catch {
-        /* skip source */
+        errors.push(type);
       }
-    };
-
-    source(() => {
-      for (const r of db.select({ id: items.id, name: items.name, partNumber: items.partNumber })
-        .from(items)
-        .where(and(isNull(items.deletedAt), or(likeEsc(items.name, p), likeEsc(items.partNumber, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Items", label: r.name, sublabel: r.partNumber, href: `/item/${r.id}` });
-      }
+    const results = groups.flat().filter((r) => r.rank === 0);
+    for (let i = 0; i < 6; i++)
+      for (const group of groups)
+        if (group[i] && group[i].rank !== 0) results.push(group[i]);
+    const cap = req.query.all === "1" ? 72 : 20;
+    res.json({
+      results: results.slice(0, cap).map(({ rank, ...r }) => r),
+      more: results.length > cap || groups.some((g) => g.length === 6),
+      unavailable: errors,
     });
-
-    source(() => {
-      for (const r of db.select({ id: projects.id, name: projects.name, jobNumber: projects.jobNumber, customer: projects.customer })
-        .from(projects)
-        .where(and(isNull(projects.deletedAt), or(likeEsc(projects.name, p), likeEsc(projects.jobNumber, p), likeEsc(projects.customer, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Projects", label: r.name, sublabel: r.jobNumber, href: `/project/${r.id}` });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: clients.id, name: clients.name, company: clients.company })
-        .from(clients)
-        .where(and(isNull(clients.deletedAt), or(likeEsc(clients.name, p), likeEsc(clients.company, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Clients", label: r.name, sublabel: r.company, href: "/crm/clients" });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: leads.id, name: leads.name, service: leads.serviceRequested })
-        .from(leads)
-        .where(and(isNull(leads.deletedAt), or(likeEsc(leads.name, p), likeEsc(leads.serviceRequested, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Leads", label: r.name, sublabel: r.service, href: "/crm/leads" });
-      }
-    });
-
-    // Phase B #14: builder quotes — the number a customer reads over the phone.
-    source(() => {
-      for (const r of db.select({ id: quotes.id, number: quotes.number, customerName: quotes.customerName })
-        .from(quotes)
-        .where(and(isNull(quotes.deletedAt), or(likeEsc(quotes.number, p), likeEsc(quotes.customerName, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Quotes", label: r.number, sublabel: r.customerName, href: "/crm/quotes" });
-      }
-    });
-
-    // Phase B #14: contracts (their GET is requireAuth, so no role gate here).
-    source(() => {
-      for (const r of db.select({ id: contracts.id, title: contracts.title, kind: contracts.kind })
-        .from(contracts)
-        .where(and(isNull(contracts.deletedAt), or(likeEsc(contracts.title, p), likeEsc(contracts.kind, p))))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Contracts", label: r.title, sublabel: r.kind, href: "/pm/contracts" });
-      }
-    });
-
-    source(() => {
-      for (const r of db.select({ id: pmTasks.id, title: pmTasks.title })
-        .from(pmTasks)
-        .where(and(isNull(pmTasks.deletedAt), likeEsc(pmTasks.title, p)))
-        .limit(PER_SOURCE).all()) {
-        hits.push({ type: "Tasks", label: r.title, href: "/pm/board" });
-      }
-    });
-
-    if (isElev) {
-      source(() => {
-        for (const r of db.select({ id: invoices.id, number: invoices.number, clientName: invoices.clientName })
-          .from(invoices)
-          .where(and(isNull(invoices.deletedAt), or(likeEsc(invoices.number, p), likeEsc(invoices.clientName, p))))
-          .limit(PER_SOURCE).all()) {
-          hits.push({ type: "Invoices", label: r.number, sublabel: r.clientName, href: "/finance/invoices" });
-        }
-      });
-
-      source(() => {
-        for (const r of db.select({ id: purchaseOrders.id, number: purchaseOrders.number, vendor: purchaseOrders.vendor })
-          .from(purchaseOrders)
-          .where(and(isNull(purchaseOrders.deletedAt), or(likeEsc(purchaseOrders.number, p), likeEsc(purchaseOrders.vendor, p))))
-          .limit(PER_SOURCE).all()) {
-          hits.push({ type: "Purchase Orders", label: r.number, sublabel: r.vendor, href: "/finance/purchase-orders" });
-        }
-      });
-
-      source(() => {
-        for (const r of db.select({
-          id: employees.id,
-          name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
-          title: employees.jobTitle,
-        })
-          .from(employees)
-          .where(and(
-            isNull(employees.deletedAt),
-            likeEsc(sql`${employees.firstName} || ' ' || ${employees.lastName}`, p),
-          ))
-          .limit(PER_SOURCE).all()) {
-          hits.push({ type: "Employees", label: r.name, sublabel: r.title, href: "/hr/employees" });
-        }
-      });
-
-      // Phase B #14: expenses — money data, elevated only like invoices.
-      source(() => {
-        for (const r of db.select({ id: expenses.id, vendor: expenses.vendor, date: expenses.date })
-          .from(expenses)
-          .where(and(isNull(expenses.deletedAt), or(likeEsc(expenses.vendor, p), likeEsc(expenses.notes, p))))
-          .limit(PER_SOURCE).all()) {
-          hits.push({ type: "Expenses", label: r.vendor ?? "(no vendor)", sublabel: r.date, href: "/finance/expenses" });
-        }
-      });
-
-      source(() => {
-        for (const r of db.select({ id: campaigns.id, name: campaigns.name })
-          .from(campaigns)
-          .where(and(isNull(campaigns.deletedAt), likeEsc(campaigns.name, p)))
-          .limit(PER_SOURCE).all()) {
-          hits.push({ type: "Campaigns", label: r.name, href: "/marketing" });
-        }
-      });
-    }
-
-    res.json({ results: hits.slice(0, TOTAL_CAP) });
   });
 }

@@ -111,6 +111,8 @@ function migrateSession(sess, priceBook) {
     sid: sess.sid ?? newSid(),
   };
 }
+import { useRecordLink } from "@/lib/record-link";
+
 export default function QuoteBuilder({ initialSettings }) {
   const qc = useQueryClient();
   // Writing the SHARED price book is owner-only — the rates here price every
@@ -473,6 +475,7 @@ export default function QuoteBuilder({ initialSettings }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Reopen a saved quote from the suite — edits keep saving to the same number.
   const openSaved = (sess) => replaceDraft(migrateSession(sess, priceBook), true);
+  useRecordLink('quote','/api/quotes', row=>{const payload=JSON.parse(row.payload);openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status});});
   const duplicateSaved = (sess) => replaceDraft(duplicateSession(migrateSession(sess, priceBook), newSid()));
   // ── Price book ──────────────────────────────────────────────────────────────
   // Editing a material's COST also stamps materials.<id>.updatedAt — that

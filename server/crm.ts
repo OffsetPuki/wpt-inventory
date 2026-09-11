@@ -1,3 +1,4 @@
+import { listWindow } from './pagination';
 import { acceptQuote } from "./quote-lifecycle";
 import type { Express } from "express";
 import {
@@ -787,12 +788,9 @@ export function registerCrmRoutes(app: Express): void {
     if (to) conds.push(lte(leads.createdAt, new Date(`${to}T23:59:59.999`)));
     if (req.query.stale === "1") conds.push(eq(leads.stale, true));
 
-    res.json(
-      db.select().from(leads)
-        .where(and(...conds))
-        .orderBy(desc(leads.createdAt), desc(leads.id))
-        .all(),
-    );
+    const window=listWindow(req);
+    res.setHeader('X-Total-Count',String(db.select({n:sql<number>`count(*)`}).from(leads).where(and(...conds)).get()?.n||0));
+    res.json(db.select().from(leads).where(and(...conds)).orderBy(desc(leads.createdAt),desc(leads.id)).limit(window.limit).offset(window.offset).all());
   });
 
   registerCreate(app, "/api/crm/leads", requireAuth, {
@@ -984,7 +982,8 @@ export function registerCrmRoutes(app: Express): void {
         .where(and(...conds))
         .orderBy(desc(clients.createdAt), desc(clients.id))
         .$dynamic();
-    if (req.query.limit !== undefined) listing = listing.limit(Math.max(1, Math.min(50, Math.trunc(Number(req.query.limit)) || 12)));
+    const window=listWindow(req);listing=listing.limit(window.limit).offset(window.offset);
+    res.setHeader('X-Total-Count',String(db.select({n:sql<number>`count(*)`}).from(clients).where(and(...conds)).get()?.n||0));
     res.json(listing.all());
   });
 

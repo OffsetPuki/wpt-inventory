@@ -1,3 +1,5 @@
+import { useDialogDraft } from '@/lib/dialog-draft';
+import { useRecordLink, readContext } from "@/lib/record-link";
 import ReceiveDelivery from "@/components/inventory/ReceiveDelivery";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -192,6 +194,7 @@ function PoFormModal({
     }
   }, [open, po]);
 
+  const recovered=useDialogDraft(`PoFormModal:${po?.id||"new"}`,open,{vendor,expectedDate,projectId,drafts,notes},v=>{if(Object.hasOwn(v,"vendor"))setVendor(v.vendor);if(Object.hasOwn(v,"expectedDate"))setExpectedDate(v.expectedDate);if(Object.hasOwn(v,"projectId"))setProjectId(v.projectId);if(Object.hasOwn(v,"drafts"))setDrafts(v.drafts);if(Object.hasOwn(v,"notes"))setNotes(v.notes);},(po as any)?._version);
   const save = useApiMutation({
     request: () => {
       const body = {
@@ -202,13 +205,13 @@ function PoFormModal({
         notes: notes.trim() || null,
       };
       return po
-        ? { method: "PATCH", url: `/api/finance/purchase-orders/${po.id}`, body }
+        ? { method: "PATCH", expectedVersion:recovered.expectedVersion, url: `/api/finance/purchase-orders/${po.id}`, body }
         : { method: "POST", url: "/api/finance/purchase-orders", body };
     },
     invalidate: PO_KEYS,
     successTitle: po ? "Purchase order updated" : "Purchase order created",
     errorTitle: "Could not save",
-    onSuccess: onClose,
+    onSuccess:()=>{recovered.clear();onClose();},
   });
 
   const setStatus = useApiMutation<unknown, PoStatus>({
@@ -227,7 +230,7 @@ function PoFormModal({
   const editable = !po || (po.status === "open" && !!receiptStatus.data && !receiptStatus.data.lines.some((l:any)=>l.received>0));
 
   return (
-    <Modal
+    <Modal preservesDraft
       open={open}
       onClose={onClose}
       title={po ? po.number : "New purchase order"}
@@ -257,6 +260,7 @@ function PoFormModal({
           }}
           className="flex flex-col gap-4"
         >
+        {recovered.notice}
           <fieldset disabled={!editable} className="flex flex-col gap-4 disabled:opacity-70">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
@@ -365,6 +369,7 @@ export default function PurchaseOrdersPage() {
   const [q, setQ] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
+  useRecordLink("po", "/api/suite/orders", row=>{setEditing(row);setFormOpen(true);});
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ["projects"],

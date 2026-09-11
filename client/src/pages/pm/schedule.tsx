@@ -1,3 +1,5 @@
+import { useSuiteQuery } from '@/lib/suite-query';
+import { RetryBlock } from '@/components/RetryBlock';
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -70,16 +72,16 @@ export default function PmSchedulePage() {
   });
 
   const { data: tasks = [], isLoading } = useQuery<TaskRow[]>({
-    queryKey: ["pm-tasks"],
-    queryFn: async () => (await apiRequest("GET", "/api/pm/tasks")).json(),
+    queryKey: ["pm-tasks", "week", weekStart],
+    queryFn: async () => (await apiRequest("GET", `/api/pm/tasks?from=${weekStart}&to=${addDaysYmd(weekStart,6)}`)).json(),
   });
 
   // Approved HR leave, matched to assignees via userId — same feed the gantt
   // uses for its leave-clash markers (Phase D #24c). Non-elevated users only
   // receive their own requests; the view degrades gracefully.
   const { data: leave = [] } = useQuery<LeaveRow[]>({
-    queryKey: ["hr-leave"],
-    queryFn: async () => (await apiRequest("GET", "/api/hr/leave")).json(),
+    queryKey: ["hr-leave",weekStart],
+    queryFn: async () => (await apiRequest("GET", `/api/hr/leave?from=${weekStart}&to=${addDaysYmd(weekStart,6)}`)).json(),
     retry: false,
   });
   const approvedLeave = useMemo(
@@ -87,6 +89,7 @@ export default function PmSchedulePage() {
     [leave]
   );
 
+  const jobSchedule=useSuiteQuery<any[]>(["suite-schedule",weekStart],`/api/suite/schedule?from=${weekStart}&to=${addDaysYmd(weekStart,6)}`);
   const today = todayYmd();
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDaysYmd(weekStart, i)),
@@ -183,6 +186,7 @@ export default function PmSchedulePage() {
         )}
       </div>
 
+      <section className="mb-5 rounded-xl border p-4"><h2 className="mb-3 font-semibold">Job commitments this week</h2>{jobSchedule.isError?<RetryBlock query={jobSchedule}/>:jobSchedule.data?.map(j=><Link className="block border-t py-3" key={j.id} href={`/project/${j.id}?tab=work`}><strong>{j.name}</strong> · {j.schedule_state} · {j.start_date} to {j.due_date}<p className="text-sm">{j.ready?'Ready':j.blockers.map((b:any)=>b.label).join(' · ')}</p></Link>)}</section>
       {isLoading ? (
         <LoadingBlock />
       ) : weekTasks.length === 0 && crewOnLeave === 0 ? (

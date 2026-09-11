@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useRecordLink } from '@/lib/record-link';
 import { useDeepLink } from "@/lib/deep-link";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
@@ -71,12 +72,7 @@ export default function PmBoardPage() {
     queryFn: async () => (await apiRequest("GET", `/api/pm/tasks${qs ? `?${qs}` : ""}`)).json(),
   });
 
-  const taskId = useDeepLink("task");
-  const openedTask = useRef<string | null>(null);
-  useEffect(() => {
-    const task = tasks.find((t) => t.id === Number(taskId));
-    if (task && openedTask.current !== taskId) { openedTask.current = taskId; setEditing(task); setDialogOpen(true); }
-  }, [taskId, tasks]);
+  useRecordLink('task','/api/pm/tasks',task=>{setEditing(task);setDialogOpen(true);});
 
   const byStatus = useMemo(() => {
     const map: Record<TaskStatus, TaskRow[]> = { todo: [], in_progress: [], review: [], done: [] };

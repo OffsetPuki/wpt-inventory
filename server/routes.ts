@@ -1,4 +1,7 @@
 import { registerInventoryRoutes } from "./inventory";
+import { registerRecordVersions } from "./suite-versions";
+import { registerCreateOnce } from './suite-create-once';
+import { registerSuiteRoutes } from "./suite";
 import { inventoryOnce, reservationRows, loanRows } from "./inventory-core";
 import { setMediaCookie } from "./media";
 import { registerSecurityRoutes, verifySecondFactor, strongPassword } from "./security";
@@ -112,6 +115,9 @@ const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
+  registerRecordVersions(app);
+  registerCreateOnce(app);
+  registerSuiteRoutes(app);
   registerSecurityRoutes(app);
   registerInventoryRoutes(app);
   // ─── Auth ────────────────────────────────────────────────────────────────
@@ -487,6 +493,11 @@ export function registerRoutes(app: Express): void {
   app.patch("/api/projects/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const before = storage.getProjectById(id);
+    if(req.body.version !== undefined && req.body.version !== before?.version) return void res.status(409).json({message:"This job changed. Reload before saving."});
+    if(req.body.clientId!==undefined&&req.body.clientId!==before?.clientId){
+      if(before?.quoteId||sqlite.prepare("SELECT 1 FROM fin_invoices WHERE project_id=? AND deleted_at IS NULL AND status!='void' AND client_id IS NOT NULL AND client_id IS NOT ?").get(id,req.body.clientId))return void res.status(409).json({message:'This job has linked quotes or invoices. Review customer links from owner controls before changing them.'});
+      if(req.body.clientId!=null&&!storage.crmClientName(req.body.clientId))return void res.status(400).json({message:'Choose an active customer.'});
+    }
     const project = storage.updateProject(id, req.body);
     if (!project) return res.status(404).json({ message: "Project not found" });
     // Log status changes specifically; other field edits are less interesting.
@@ -835,6 +846,11 @@ export function registerRoutes(app: Express): void {
     const mediaSession = token ? getSession(token) : null;
     if(!publicImage && !hasLeadKey(req) && mediaSession && process.env.NODE_ENV === "production" && toPublicUser(storage.getUserById(mediaSession.userId)!).securitySetupRequired)
       return res.status(428).json({message:"Complete owner security setup before viewing private files."});
+    if(!publicImage&&mediaSession?.role!=='owner'){
+      const url=`/uploads/${safeName}`;
+      const original=(sqlite.prepare('SELECT url FROM suite_photo_previews WHERE thumbnail_url=?').get(url) as any)?.url||url;
+      if(sqlite.prepare("SELECT 1 FROM suite_comments c,json_each(c.attachments) a WHERE c.visibility='owner' AND a.value=? LIMIT 1").get(original))return res.status(403).json({message:'This attachment is restricted to owners.'});
+    }
     const filePath = path.join(uploadsDir, safeName);
     if (!fs.existsSync(filePath)) return next();
 

@@ -3,6 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 // ─── Persisted auth token ───────────────────────────────────────────────────
 // Stored in localStorage so a page refresh keeps the user signed in.
 
+const recordVersions = new Map<string,string>();
+const recordPath = (url:string) => url.split("?")[0].replace(/\/detail$/, "");
 const TOKEN_KEY = "wpt-auth-token";
 
 let authToken: string | null =
@@ -10,6 +12,7 @@ let authToken: string | null =
 
 export function setAuthToken(token: string | null) {
   authToken = token;
+  recordVersions.clear();
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEY, token);
   else window.localStorage.removeItem(TOKEN_KEY);
@@ -25,7 +28,7 @@ export async function apiRequest(
   method: string,
   url: string,
   body?: unknown,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; expectedVersion?: number; idempotencyKey?:string },
 ): Promise<Response> {
   const headers: Record<string, string> = {};
 
@@ -37,6 +40,9 @@ export async function apiRequest(
     headers["X-Auth"] = authToken;
   }
 
+  if (["PATCH","DELETE"].includes(method) && recordVersions.has(recordPath(url))) headers["If-Match"] = recordVersions.get(recordPath(url))!;
+  if(options?.expectedVersion!==undefined)headers['If-Match']=`"${options.expectedVersion}"`;
+  if(options?.idempotencyKey)headers['Idempotency-Key']=options.idempotencyKey;
   const res = await fetch(url, {
     signal: options?.signal,
     method,
@@ -64,6 +70,9 @@ export async function apiRequest(
     throw Object.assign(new Error(message), { status: res.status });
   }
 
+  if (method === "GET" && res.headers.get("ETag")) recordVersions.set(recordPath(url),res.headers.get("ETag")!);
+  if (method !== "GET") recordVersions.delete(recordPath(url));
+  if (method !== "GET" && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("suite-mutation", { detail: url }));
   return res;
 }
 

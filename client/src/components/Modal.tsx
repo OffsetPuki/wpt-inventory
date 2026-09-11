@@ -7,6 +7,7 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   maxWidth?: string;
+  preservesDraft?: boolean;
 }
 
 export default function Modal({
@@ -15,6 +16,7 @@ export default function Modal({
   title,
   children,
   maxWidth = "max-w-md",
+  preservesDraft = false,
 }: ModalProps) {
   const titleId = useId();
   const card = useRef<HTMLDivElement>(null);
@@ -22,7 +24,7 @@ export default function Modal({
   const close = useRef(onClose);
   close.current = onClose;
   const dismiss = () => {
-    if (!dirty.current || window.confirm("Discard your unsaved changes?"))
+    if (preservesDraft || !dirty.current || window.confirm("Discard your unsaved changes?"))
       close.current();
   };
   useEffect(() => {

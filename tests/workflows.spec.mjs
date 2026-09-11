@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { TOTP } from "otpauth";
 import { testApp } from "../scripts/test-app.mjs";
 import { inventoryWorkflow } from "./inventory-workflow.mjs";
+import { suiteWorkflow } from './suite-workflow.mjs';
 let app;
 
 test.beforeAll(async () => {
@@ -44,9 +45,9 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await page.getByRole("button", { name: "Secure my account" }).click();
   await page.getByLabel("I saved these codes somewhere private.").check();
   await page.getByRole("button", { name: "Continue to the suite" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Dashboard", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
+  await page.goto(app.base + '/#/dashboard');
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth + 1,
@@ -186,7 +187,7 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
   await expect(
     page.getByRole("heading", { name: "Dashboard", exact: true }),
   ).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
   const measurement = await page.evaluate(() => ({
     navigation: performance
       .getEntriesByType("navigation")
@@ -419,4 +420,9 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
 test("Inventory search, QR, drafts, stock counts, reservations and partial receiving on mobile", async ({ page }) => {
   test.setTimeout(120000);
   await inventoryWorkflow(page,app,expect);
+});
+
+test('Connected job workspace, two live sessions, exact search and recovered forms',async({page,browser})=>{
+ test.setTimeout(120000);
+ await suiteWorkflow(page,browser,app,expect);
 });

@@ -1,3 +1,7 @@
+import { useDialogDraft } from '@/lib/dialog-draft';
+import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import { RetryBlock } from '@/components/RetryBlock';
+import { useRecordLink, readContext } from "@/lib/record-link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -98,13 +102,14 @@ function ExpenseFormModal({
       setCategory("materials");
       setAmount("");
       setMethod("card");
-      setProjectId("");
+      setProjectId(readContext("projectId"));
       setBillable(false);
       setNotes("");
       setReceiptUrl(null);
     }
   }, [open, expense]);
 
+  const recovered=useDialogDraft(`ExpenseFormModal:${expense?.id||"new"}`,open,{date,vendor,category,amount,method,projectId,billable,notes,receiptUrl},v=>{if(Object.hasOwn(v,"date"))setDate(v.date);if(Object.hasOwn(v,"vendor"))setVendor(v.vendor);if(Object.hasOwn(v,"category"))setCategory(v.category);if(Object.hasOwn(v,"amount"))setAmount(v.amount);if(Object.hasOwn(v,"method"))setMethod(v.method);if(Object.hasOwn(v,"projectId"))setProjectId(v.projectId);if(Object.hasOwn(v,"billable"))setBillable(v.billable);if(Object.hasOwn(v,"notes"))setNotes(v.notes);if(Object.hasOwn(v,"receiptUrl"))setReceiptUrl(v.receiptUrl);},(expense as any)?._version);
   const save = useApiMutation({
     request: () => {
       const body = {
@@ -119,13 +124,13 @@ function ExpenseFormModal({
         receiptUrl,
       };
       return expense
-        ? { method: "PATCH", url: `/api/finance/expenses/${expense.id}`, body }
+        ? { method: "PATCH", expectedVersion:recovered.expectedVersion, url: `/api/finance/expenses/${expense.id}`, body }
         : { method: "POST", url: "/api/finance/expenses", body };
     },
     invalidate: EXPENSE_KEYS,
     successTitle: expense ? "Expense updated" : "Expense added",
     errorTitle: "Could not save",
-    onSuccess: onClose,
+    onSuccess:()=>{recovered.clear();onClose();},
   });
 
   const remove = useApiMutation({
@@ -155,7 +160,7 @@ function ExpenseFormModal({
   };
 
   return (
-    <Modal
+    <Modal preservesDraft
       open={open}
       onClose={onClose}
       title={expense ? "Edit expense" : "Add expense"}
@@ -176,6 +181,7 @@ function ExpenseFormModal({
         }}
         className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
       >
+        {recovered.notice}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Date</span>
@@ -344,13 +350,14 @@ function ExpenseFormModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ExpensesPage() {
-  const [category, setCategory] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [q, setQ] = useState("");
-  const [formOpen, setFormOpen] = useState(false);
+  const [category, setCategory] = useRememberedState("client/src/pages/finance/expenses.tsx:category","");
+  const [projectId, setProjectId] = useRememberedState("client/src/pages/finance/expenses.tsx:projectId","");
+  const [from, setFrom] = useRememberedState("client/src/pages/finance/expenses.tsx:from","");
+  const [to, setTo] = useRememberedState("client/src/pages/finance/expenses.tsx:to","");
+  const [q, setQ] = useRememberedState("client/src/pages/finance/expenses.tsx:q","");
+  const [formOpen, setFormOpen] = useState(()=>readContext("new")==="1");
   const [editing, setEditing] = useState<Expense | null>(null);
+  useRecordLink("expense", "/api/suite/expenses", row=>{setEditing(row);setFormOpen(true);});
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -362,8 +369,10 @@ export default function ExpensesPage() {
     return p ? p.jobNumber : `#${id}`;
   };
 
+  const {page,setPage}=useListPage('rows:client/src/pages/finance/expenses.tsx',[category,projectId,from,to,q]);
   const url = useMemo(() => {
     const params = new URLSearchParams();
+    params.set('page',String(page));params.set('limit','50');
     if (category) params.set("category", category);
     if (projectId) params.set("projectId", projectId);
     if (from) params.set("from", from);
@@ -371,10 +380,10 @@ export default function ExpensesPage() {
     if (q.trim()) params.set("q", q.trim());
     const s = params.toString();
     return `/api/finance/expenses${s ? `?${s}` : ""}`;
-  }, [category, projectId, from, to, q]);
+  }, [category, projectId, from, to, q,page]);
 
-  const { data, isLoading } = useQuery<{ rows: Expense[]; totalCents: number }>({
-    queryKey: ["finance-expenses", category, projectId, from, to, q],
+  const { data, isLoading,isError,error,refetch } = useQuery<{ rows: Expense[]; totalCents: number }>({
+    queryKey: ["finance-expenses", category, projectId, from, to, q,page],
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
   const rows = data?.rows ?? [];
@@ -457,7 +466,8 @@ export default function ExpensesPage() {
         </p>
       </div>
 
-      {isLoading ? (
+      <PageButtons page={page} setPage={setPage} count={rows.length}/>
+      {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
         <EmptyState

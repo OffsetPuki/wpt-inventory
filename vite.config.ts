@@ -9,8 +9,7 @@ export default defineConfig({
     // Pre-compress built JS/CSS/HTML/SVG so the server can ship them straight
     // from disk instead of re-gzipping per request. Brotli is ~20% smaller
     // than gzip on text assets; gzip is the fallback for older clients.
-    compression({ algorithm: "brotliCompress", exclude: [/\.(br|gz)$/, /\.(png|jpe?g|webp|woff2?)$/i] }),
-    compression({ algorithm: "gzip",          exclude: [/\.(br|gz)$/, /\.(png|jpe?g|webp|woff2?)$/i] }),
+    compression({ algorithms: ["brotliCompress","gzip"], exclude: [/\.(br|gz)$/, /\.(png|jpe?g|webp|woff2?)$/i] }),
   ],
   root: path.resolve(import.meta.dirname, "client"),
   resolve: {
@@ -22,26 +21,8 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist", "public"),
     emptyOutDir: true,
-    // Split vendor deps into stable chunks so they survive app-code updates in
-    // the browser cache. Recharts ships a lot of code that almost never changes
-    // between releases — pull it out of the main bundle. (There was a "radix"
-    // chunk here too; no @radix-ui package has ever been installed, so it only
-    // ever produced an empty rule.)
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return;
-          if (id.includes("recharts") || id.includes("/d3-")) return "recharts";
-          if (id.includes("lucide-react")) return "icons";
-          if (
-            id.includes("/react/") ||
-            id.includes("/react-dom/") ||
-            id.includes("@tanstack/react-query") ||
-            id.includes("/wouter/")
-          ) return "vendor";
-        },
-      },
-    },
+    // Let the bundler follow lazy route imports. Hand-assigned vendor chunks
+    // pulled chart dependencies into the shell and can create CommonJS cycles.
   },
   server: {
     // In dev mode the Express server will mount Vite middleware,

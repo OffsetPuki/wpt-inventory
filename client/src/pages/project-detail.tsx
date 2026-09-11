@@ -23,7 +23,7 @@ import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import ProjectChecklist from "@/components/ProjectChecklist";
 import DocumentsCard from "@/components/DocumentsCard";
-import { uploadPhoto } from "@/lib/uploadPhoto";
+import { shrinkAndUpload as uploadPhoto } from "@/lib/uploadPhoto";
 import {
   ArrowLeft,
   Ban,
@@ -65,7 +65,7 @@ interface Usage {
 // Publish the finished job to the cjmmetals.com "recent work" gallery.
 // Projects carry no photos of their own, so the dialog asks for one — the
 // server requires photoUrl and defaults the title to the project name.
-function PublishPortfolioDialog({ project, onClose }: { project: Project; onClose: () => void }) {
+export function PublishPortfolioDialog({ project, onClose }: { project: Project; onClose: () => void }) {
   const [title, setTitle] = useState(project.name);
   const [category, setCategory] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -164,7 +164,7 @@ function PublishPortfolioDialog({ project, onClose }: { project: Project; onClos
 // The project page is the job's home base: who it's for (client card), what's
 // left to do (open tasks), and whether it's making money (finances card).
 
-function ClientCard({ clientId }: { clientId: number | null }) {
+export function ClientCard({ clientId }: { clientId: number | null }) {
   const { data: client } = useQuery<Client>({
     queryKey: ["crm-client", clientId],
     queryFn: async () => (await apiRequest("GET", `/api/crm/clients/${clientId}`)).json(),
@@ -196,7 +196,7 @@ function ClientCard({ clientId }: { clientId: number | null }) {
           </span>
         )}
       </div>
-      <Link href="/crm/clients" className="mt-3 inline-block text-sm text-muted-foreground underline hover:text-foreground">
+      <Link href={`/crm/clients?client=${clientId}`} className="mt-3 inline-block text-sm text-muted-foreground underline hover:text-foreground">
         Open in CRM
       </Link>
     </div>
@@ -212,7 +212,7 @@ interface ProjectTaskRow {
   kind?: string; // Package C: follow-ups live on the board too
 }
 
-function OpenTasksCard({ projectId }: { projectId: number }) {
+export function OpenTasksCard({ projectId }: { projectId: number }) {
   // One task list (Package C): board cards AND the automation sink's chase
   // tasks (unbilled nags, "schedule the job", warranty callbacks…) all come
   // from pm_tasks now — follow-ups are labeled by their kind chip.
@@ -267,7 +267,7 @@ function OpenTasksCard({ projectId }: { projectId: number }) {
 // contract" that lands on the contracts page prefilled with this project /
 // client — and, when the job came from an online-accepted quote (jobNumber ==
 // quote.number), the quote ref and value too.
-function ContractsCard({ project }: { project: Project }) {
+export function ContractsCard({ project }: { project: Project }) {
   const { data: contracts = [] } = useQuery<
     { id: number; title: string; kind: ContractKind; status: ContractStatus; valueCents: number }[]
   >({
@@ -277,11 +277,11 @@ function ContractsCard({ project }: { project: Project }) {
     retry: false,
   });
   const { data: quotes = [] } = useQuery<{ number: string; totalCents: number }[]>({
-    queryKey: ["quotes"],
-    queryFn: async () => (await apiRequest("GET", "/api/quotes")).json(),
+    queryKey: ["quotes", "job", project.id],
+    queryFn: async () => (await apiRequest("GET", `/api/quotes?projectId=${project.id}`)).json(),
     retry: false,
   });
-  const quote = quotes.find((q) => q.number === project.jobNumber);
+  const quote = quotes[0];
   const params = new URLSearchParams({ new: "1", projectId: String(project.id) });
   params.set("title", project.name);
   if (project.clientId != null) params.set("clientId", String(project.clientId));
@@ -326,7 +326,7 @@ const CO_CHIP: Record<ChangeOrderStatus, string> = {
   void: "bg-zinc-500/10 text-zinc-500",
 };
 
-function ChangeOrdersCard({ projectId }: { projectId: number }) {
+export function ChangeOrdersCard({ projectId }: { projectId: number }) {
   const { isElevated } = useAuth();
   const [addOpen, setAddOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -521,7 +521,7 @@ const INV_CHIP: Record<string, string> = {
 };
 
 // Elevated-only (caller gates on isManager): billed vs collected vs cost.
-function JobFinancesCard({ projectId, projectStatus }: { projectId: number; projectStatus: string }) {
+export function JobFinancesCard({ projectId, projectStatus }: { projectId: number; projectStatus: string }) {
   const { data } = useQuery<ProjectFinSummary>({
     queryKey: ["project-fin-summary", projectId],
     queryFn: async () =>
@@ -576,6 +576,7 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
         </p>
       )}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {stat("Draft", formatMoney((t as any).draftCents || 0))}
         {stat("Billed", formatMoney(t.invoicedCents))}
         {stat("Collected", formatMoney(t.paidCents))}
         {stat(
@@ -627,8 +628,9 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
           ))}
         </ul>
       )}
+      {!!(t as any).missingRateMinutes && <p role="alert" className="text-amber-700">Labor cost is incomplete: some time has no historical pay rate.</p>}
       <p className="mt-3 text-xs text-muted-foreground">
-        Labor priced at each worker’s HR pay rate. Manage invoices in Finance → Invoices.
+        Labor uses dated pay rates; salary allocations are estimates. Missing historical rates require review.
       </p>
     </div>
   );
@@ -638,7 +640,7 @@ function JobFinancesCard({ projectId, projectStatus }: { projectId: number; proj
 // expenses + per-worker labor not yet pulled onto an invoice. Renders nothing
 // when there's nothing unbilled. Finance API is elevated-only, so the caller
 // gates on isManager; retry off so a 403 doesn't hammer.
-function UnbilledCard({ projectId }: { projectId: number }) {
+export function UnbilledCard({ projectId }: { projectId: number }) {
   const { data } = useQuery<{
     totals: { laborCents: number; expenseCents: number; totalCents: number };
   }>({

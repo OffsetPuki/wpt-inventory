@@ -1,3 +1,4 @@
+import { useRecordLink } from '@/lib/record-link';
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -98,7 +99,7 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
         userId: userId ? Number(userId) : null,
       };
       return employee
-        ? { method: "PATCH", url: `/api/hr/employees/${employee.id}`, body }
+        ? { method: "PATCH", expectedVersion:(employee as any)?._version, url: `/api/hr/employees/${employee.id}`, body }
         : { method: "POST", url: "/api/hr/employees", body };
     },
     invalidate: [["hr-employees"], ["hr-employee-detail"], ["hr-pay-rates"], ["hr-payroll-summary"]],
@@ -384,6 +385,7 @@ export default function HrEmployeesPage() {
     employee: null,
   });
   const [detailId, setDetailId] = useState<number | null>(null);
+  useRecordLink("employee","/api/hr/employees",row=>setDetailId(row.id));
 
   const { data: employees = [], isLoading } = useQuery<Employee[]>({
     queryKey: ["hr-employees"],

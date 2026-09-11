@@ -1,4 +1,5 @@
-import "dotenv/config"; // loads .env (e.g. ANTHROPIC_API_KEY) before anything reads env
+import "dotenv/config";
+import { startSuiteWorker } from "./suite-worker"; // loads .env (e.g. ANTHROPIC_API_KEY) before anything reads env
 import express from "express";
 import http from "http";
 import compression from "compression";
@@ -141,6 +142,7 @@ startBusinessAutomations();
 
 // ── Register routes ──
 registerRoutes(app);
+startSuiteWorker();
 // Dashboard "Needs attention" feed — reuses the sweep's queries (Phase D #20c).
 registerAttentionRoute(app);
 

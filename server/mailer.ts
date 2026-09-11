@@ -1,3 +1,4 @@
+import { storedMail, readMail, markMailAccepted } from "./mail-queue";
 import { sqlite, storage } from "./storage";
 
 // ─── Outbound mail ───────────────────────────────────────────────────────────
@@ -55,7 +56,8 @@ const normalizeEmail = (e: string): string => e.trim().toLowerCase();
 export function isOptedOut(email: string | null | undefined): boolean {
   if (!email || !email.trim()) return false;
   try {
-    return !!sqlite.prepare("SELECT 1 FROM email_optouts WHERE email = ?")
+    return !!sqlite
+      .prepare("SELECT 1 FROM email_optouts WHERE email = ?")
       .get(normalizeEmail(email));
   } catch {
     return false;
@@ -66,12 +68,21 @@ export function isOptedOut(email: string | null | undefined): boolean {
 export function optOutEmail(email: string): boolean {
   const norm = normalizeEmail(email);
   if (!norm) return false;
-  return sqlite.prepare(
-    "INSERT OR IGNORE INTO email_optouts (email, created_at) VALUES (?, ?)",
-  ).run(norm, Date.now()).changes > 0;
+  return (
+    sqlite
+      .prepare(
+        "INSERT OR IGNORE INTO email_optouts (email, created_at) VALUES (?, ?)",
+      )
+      .run(norm, Date.now()).changes > 0
+  );
 }
 
 export interface MailMessage {
+  deliveryKey?: string;
+  condition?: {
+    kind: "invoice-overdue" | "quote-pending" | "review-open";
+    id: number;
+  };
   to: string;
   subject: string;
   text: string;
@@ -88,12 +99,18 @@ export interface MailMessage {
 
 function mailFrom(): string | null {
   if (process.env.MAIL_FROM) return process.env.MAIL_FROM;
-  if (process.env.SMTP_USER) return `CJM Metals Suite <${process.env.SMTP_USER}>`;
+  if (process.env.SMTP_USER)
+    return `CJM Metals Suite <${process.env.SMTP_USER}>`;
   return null;
 }
 
 function ownerAddress(): string | null {
-  return process.env.OWNER_EMAIL || process.env.TO_EMAIL || process.env.SMTP_USER || null;
+  return (
+    process.env.OWNER_EMAIL ||
+    process.env.TO_EMAIL ||
+    process.env.SMTP_USER ||
+    null
+  );
 }
 
 /**
@@ -138,7 +155,9 @@ function recordSend(
         via: outcome.via,
         ...(msg.template ? { template: msg.template } : {}),
         ...(outcome.bcc ? { archivedTo: outcome.bcc } : {}),
-        ...(msg.attachments?.length ? { attachments: msg.attachments.map((a) => a.filename) } : {}),
+        ...(msg.attachments?.length
+          ? { attachments: msg.attachments.map((a) => a.filename) }
+          : {}),
         ...(outcome.error ? { error: outcome.error.slice(0, 300) } : {}),
       },
     });
@@ -147,22 +166,39 @@ function recordSend(
   }
 }
 
-const resendConfigured = (): boolean => !!(process.env.RESEND_API_KEY && mailFrom());
+const resendConfigured = (): boolean =>
+  !!(process.env.RESEND_API_KEY && mailFrom());
 
 /** Is the transport configured? Callers use this to skip email-only steps. */
 export function mailEnabled(): boolean {
   return resendConfigured();
 }
 
-async function sendViaResend(msg: MailMessage, bcc: string | null): Promise<boolean> {
+/** Persist before the business transaction commits; the worker delivers later. */
+export function queueMail(msg: MailMessage) {
+  return storedMail(msg, archiveFor(msg.to), mailFrom(), msg.deliveryKey).key;
+}
+export function queueOwnerMail(msg: Omit<MailMessage, "to">) {
+  const to = ownerAddress();
+  if (!to) throw new Error("Owner email is not configured.");
+  return queueMail({ ...msg, to });
+}
+
+async function sendViaResend(
+  msg: MailMessage,
+  bcc: string | null,
+  from: string | null,
+): Promise<string | null> {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
+    signal: AbortSignal.timeout(20000),
     headers: {
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       "Content-Type": "application/json",
+      ...(msg.deliveryKey ? { "Idempotency-Key": msg.deliveryKey } : {}),
     },
     body: JSON.stringify({
-      from: mailFrom(),
+      from,
       to: msg.to,
       subject: msg.subject,
       text: msg.text,
@@ -179,9 +215,12 @@ async function sendViaResend(msg: MailMessage, bcc: string | null): Promise<bool
     }),
   });
   if (!res.ok) {
-    throw new Error(`Resend responded ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    throw new Error(
+      `Resend responded ${res.status}: ${(await res.text()).slice(0, 300)}`,
+    );
   }
-  return true;
+  const data = typeof res.json === "function" ? await res.json() : {};
+  return data.id || null;
 }
 
 /**
@@ -191,16 +230,83 @@ async function sendViaResend(msg: MailMessage, bcc: string | null): Promise<bool
  */
 export async function sendMail(
   msg: MailMessage,
-  opts?: { archive?: boolean },
+  opts?: { archive?: boolean; deliveryKey?: string },
 ): Promise<boolean> {
+  let deliveryKey = opts?.deliveryKey || msg.deliveryKey;
   const bcc = opts?.archive === false ? null : archiveFor(msg.to);
   const via = resendConfigured() ? "resend" : "none";
   try {
+    const queued = storedMail(msg, bcc, mailFrom(), deliveryKey);
+    deliveryKey = queued.key;
+    if (queued.accepted_at) return true;
+    const state: any = sqlite
+      .prepare("SELECT status FROM suite_outbox WHERE event_key=?")
+      .get(`delivery:${deliveryKey}`);
+    if (["stopped", "review"].includes(state?.status)) return false;
+    const saved = readMail(deliveryKey!);
+    msg = saved.msg;
+    if (msg.condition) {
+      const c = msg.condition;
+      const current =
+        c.kind === "invoice-overdue"
+          ? sqlite
+              .prepare(
+                "SELECT 1 FROM fin_invoices WHERE id=? AND deleted_at IS NULL AND status IN ('sent','partial','overdue') AND total_cents-coalesce(retainage_cents,0)-paid_cents>0 AND due_date<date('now','localtime')",
+              )
+              .get(c.id)
+          : c.kind === "quote-pending"
+            ? sqlite
+                .prepare(
+                  "SELECT 1 FROM quotes WHERE id=? AND deleted_at IS NULL AND status='sent'",
+                )
+                .get(c.id)
+            : sqlite
+                .prepare(
+                  "SELECT 1 FROM review_requests r WHERE r.id=? AND r.submitted_at IS NULL AND (r.invoice_id IS NULL OR EXISTS (SELECT 1 FROM fin_invoices i WHERE i.id=r.invoice_id AND i.status='paid' AND i.deleted_at IS NULL))",
+                )
+                .get(c.id);
+      if (!current || isOptedOut(msg.to)) {
+        sqlite
+          .prepare(
+            "UPDATE suite_outbox SET status='stopped',last_error='Source condition cleared or recipient opted out' WHERE event_key=?",
+          )
+          .run(`delivery:${deliveryKey}`);
+        return false;
+      }
+    }
+    if (
+      queued.first_attempt_at &&
+      Date.now() - queued.first_attempt_at > 23 * 3600000
+    ) {
+      sqlite
+        .prepare(
+          "UPDATE suite_outbox SET status='review',last_error='Delivery outcome uncertain beyond the provider retry window; check provider history before a new send.' WHERE event_key=?",
+        )
+        .run(`delivery:${deliveryKey}`);
+      return false;
+    }
     if (via === "resend") {
-      await sendViaResend(msg, bcc);
+      sqlite
+        .prepare(
+          "UPDATE suite_mail SET first_attempt_at=coalesce(first_attempt_at,?) WHERE key=?",
+        )
+        .run(Date.now(), deliveryKey);
+      const providerId = await sendViaResend(
+        { ...msg, deliveryKey },
+        saved.bcc,
+        saved.from || mailFrom(),
+      );
+      markMailAccepted(deliveryKey!, providerId);
     } else {
-      console.warn(`[mailer] no transport configured — "${msg.subject}" to ${msg.to} not sent`);
-      recordSend(msg, { ok: false, via, bcc: null, error: "no transport configured" });
+      console.warn(
+        `[mailer] no transport configured — "${msg.subject}" to ${msg.to} not sent`,
+      );
+      recordSend(msg, {
+        ok: false,
+        via,
+        bcc: null,
+        error: "no transport configured",
+      });
       return false;
     }
     recordSend(msg, { ok: true, via, bcc });
@@ -208,16 +314,30 @@ export async function sendMail(
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.error("[mailer] send FAILED:", error);
+    if (deliveryKey)
+      sqlite
+        .prepare(
+          "UPDATE suite_outbox SET status='failed',last_error=?,available_at=? WHERE event_key=? AND status NOT IN ('review','stopped')",
+        )
+        .run(
+          error.slice(0, 300),
+          Date.now() + 60000,
+          `delivery:${deliveryKey}`,
+        );
     recordSend(msg, { ok: false, via, bcc, error });
     return false;
   }
 }
 
 /** Notify the owner (OWNER_EMAIL → TO_EMAIL → SMTP_USER). Same never-throws contract. */
-export async function sendOwnerMail(msg: Omit<MailMessage, "to">): Promise<boolean> {
+export async function sendOwnerMail(
+  msg: Omit<MailMessage, "to">,
+): Promise<boolean> {
   const to = ownerAddress();
   if (!to) {
-    console.warn(`[mailer] no owner address configured — "${msg.subject}" not sent`);
+    console.warn(
+      `[mailer] no owner address configured — "${msg.subject}" not sent`,
+    );
     return false;
   }
   // Never archived: the owner is already the recipient, and one of these

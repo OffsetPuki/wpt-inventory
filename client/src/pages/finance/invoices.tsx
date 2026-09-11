@@ -1,4 +1,8 @@
-import { useDeepLink } from "@/lib/deep-link";
+import { useDialogDraft } from '@/lib/dialog-draft';
+import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import { RetryBlock } from '@/components/RetryBlock';
+import { useRecordLink, readContext } from "@/lib/record-link";
+import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
@@ -320,6 +324,7 @@ function InvoiceFormModal({
   // kind, so a balance invoice is never offered "settle the whole job".
   const [kind, setKind] = useState<Invoice["kind"]>(null);
   const [pickQuote, setPickQuote] = useState("");
+  const [clientSearch,setClientSearch]=useState(""),[jobSearch,setJobSearch]=useState(""),[quoteSearch,setQuoteSearch]=useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -357,10 +362,10 @@ function InvoiceFormModal({
       setQuoteId(invoice.quoteId ?? null);
       setKind(invoice.kind ?? null);
     } else {
-      setClientId("");
+      setClientId(readContext("clientId"));
       setClientName("");
       setFreeText(false);
-      setProjectId("");
+      setProjectId(readContext("projectId"));
       setIssueDate(todayYmd());
       // Net-14, matching what the server stamps on send. Left blank, this field
       // looked optional and the invoice went out with no due date at all —
@@ -385,13 +390,13 @@ function InvoiceFormModal({
   }, [open, invoice]);
 
   const { data: clients = [] } = useQuery<Client[]>({
-    queryKey: ["crm-clients"],
-    queryFn: async () => (await apiRequest("GET", "/api/crm/clients")).json(),
+    queryKey: ["crm-client-picker",clientSearch,clientId],
+    queryFn: async ({signal}) => (await apiRequest("GET", `/api/suite/pickers/clients?q=${encodeURIComponent(clientSearch)}&id=${clientId}`,undefined,{signal})).json(),
     enabled: open,
   });
   const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
+    queryKey: ["projects-picker",jobSearch,projectId],
+    queryFn: async ({signal}) => (await apiRequest("GET", `/api/suite/pickers/jobs?q=${encodeURIComponent(jobSearch)}&id=${projectId}`,undefined,{signal})).json(),
     enabled: open,
   });
   // The shop's standard invoice terms, for "Insert standard terms": the saved
@@ -429,8 +434,8 @@ function InvoiceFormModal({
   const { data: quotesList = [] } = useQuery<
     { id: number; number: string; customerName: string; status: string; totalCents: number }[]
   >({
-    queryKey: ["quotes"],
-    queryFn: async () => (await apiRequest("GET", "/api/quotes")).json(),
+    queryKey: ["quotes-picker",quoteSearch,pickQuote],
+    queryFn: async ({signal}) => (await apiRequest("GET", `/api/suite/pickers/quotes?q=${encodeURIComponent(quoteSearch)}&id=${pickQuote}`,undefined,{signal})).json(),
     enabled: open && !invoice,
   });
   const billable = quotesList.filter((q) => q.status === "sent" || q.status === "accepted");
@@ -524,6 +529,7 @@ function InvoiceFormModal({
     ? Math.round((totalCents * (parseFloat(retainagePct) || 0)) / 100)
     : 0;
 
+  const recovered=useDialogDraft(`InvoiceFormModal:${invoice?.id||"new"}`,open,{clientId,clientName,freeText,projectId,issueDate,dueDate,drafts,taxPct,retainagePct,discountPct,discountAmt,notes,customerNote,terms,attachments,quoteId},v=>{if(Object.hasOwn(v,"clientId"))setClientId(v.clientId);if(Object.hasOwn(v,"clientName"))setClientName(v.clientName);if(Object.hasOwn(v,"freeText"))setFreeText(v.freeText);if(Object.hasOwn(v,"projectId"))setProjectId(v.projectId);if(Object.hasOwn(v,"issueDate"))setIssueDate(v.issueDate);if(Object.hasOwn(v,"dueDate"))setDueDate(v.dueDate);if(Object.hasOwn(v,"drafts"))setDrafts(v.drafts);if(Object.hasOwn(v,"taxPct"))setTaxPct(v.taxPct);if(Object.hasOwn(v,"retainagePct"))setRetainagePct(v.retainagePct);if(Object.hasOwn(v,"discountPct"))setDiscountPct(v.discountPct);if(Object.hasOwn(v,"discountAmt"))setDiscountAmt(v.discountAmt);if(Object.hasOwn(v,"notes"))setNotes(v.notes);if(Object.hasOwn(v,"customerNote"))setCustomerNote(v.customerNote);if(Object.hasOwn(v,"terms"))setTerms(v.terms);if(Object.hasOwn(v,"attachments"))setAttachments(v.attachments);if(Object.hasOwn(v,"quoteId"))setQuoteId(v.quoteId);},(invoice as any)?._version);
   const save = useApiMutation({
     request: () => {
       const body = {
@@ -548,17 +554,17 @@ function InvoiceFormModal({
         kind,
       };
       return invoice
-        ? { method: "PATCH", url: `/api/finance/invoices/${invoice.id}`, body }
+        ? { method: "PATCH", expectedVersion:recovered.expectedVersion, url: `/api/finance/invoices/${invoice.id}`, body }
         : { method: "POST", url: "/api/finance/invoices", body };
     },
     invalidate: INVOICE_KEYS,
     successTitle: invoice ? "Invoice updated" : "Invoice created",
     errorTitle: "Could not save",
-    onSuccess: onClose,
+    onSuccess:()=>{recovered.clear();onClose();},
   });
 
   return (
-    <Modal
+    <Modal preservesDraft
       open={open}
       onClose={onClose}
       title={invoice ? `Edit ${invoice.number}` : "New invoice"}
@@ -583,9 +589,10 @@ function InvoiceFormModal({
             editable afterwards; this only saves the retyping, and it is what
             lets the customer's invoice print the job, the quote reference and
             the full contract price behind a deposit. */}
-        {!invoice && billable.length > 0 && (
+        {recovered.notice}
+        {!invoice && (
           <div className="rounded-lg border border-border bg-muted/40 p-3">
-            <p className="text-sm font-semibold text-foreground">Bill against a quote</p>
+            <p className="text-sm font-semibold text-foreground">Bill against a quote</p><input aria-label="Find quote" className={inputCls} placeholder="Search quote number or customer" value={quoteSearch} onChange={e=>setQuoteSearch(e.target.value)}/>
             <p className="mt-1 text-xs text-muted-foreground">
               Pulls the customer, the job and the priced lines straight from the quote
               they accepted.
@@ -634,7 +641,7 @@ function InvoiceFormModal({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Client</span>
+            <span className="text-sm font-medium text-foreground">Client</span><input aria-label="Find customer" className={inputCls} placeholder="Search customers" value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
             <select
               className={inputCls}
               value={clientId}
@@ -676,11 +683,11 @@ function InvoiceFormModal({
               </button>
             ))}
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Project (optional)</span>
+            <span className="text-sm font-medium text-foreground">Job (optional)</span><input aria-label="Find job" className={inputCls} placeholder="Search jobs" value={jobSearch} onChange={e=>setJobSearch(e.target.value)}/>
             <select
               className={inputCls}
               value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              onChange={(e) => {setProjectId(e.target.value);const job=projects.find(p=>String(p.id)===e.target.value);if(job?.clientId)setClientId(String(job.clientId));}}
             >
               <option value="">— None —</option>
               {projects.map((p) => (
@@ -1101,6 +1108,7 @@ function InvoiceDetailModal({
 
   // Fix 4 (wiring plan): pull the job's billable-but-unbilled expenses and
   // per-worker labor onto this draft invoice as line items.
+  const unbilled=useQuery<any>({queryKey:['project-unbilled',data?.invoice.projectId],queryFn:async()=>(await apiRequest('GET',`/api/finance/projects/${data?.invoice.projectId}/unbilled`)).json(),enabled:!!data?.invoice.projectId&&data?.invoice.status==='draft'});
   const pullUnbilled = useApiMutation({
     request: () => ({
       method: "POST",
@@ -1414,14 +1422,14 @@ function InvoiceDetailModal({
                   {inv.projectId != null && (
                     <button
                       onClick={() => pullUnbilled.mutate()}
-                      disabled={pullUnbilled.isPending}
+                      disabled={pullUnbilled.isPending||!unbilled.data||unbilled.data.billingMode!=="time_materials"||unbilled.data.incomplete}
                       className={secondaryBtn}
-                      title="Add the job's unbilled billable expenses and labor as line items"
+                      title="Review job billing mode, recorded stock, labor and expenses before adding them to this draft"
                     >
                       {pullUnbilled.isPending
                         ? <Loader2 className="h-4 w-4 animate-spin" />
                         : <FolderInput className="h-4 w-4" />}
-                      Pull unbilled from job
+                      {unbilled.isError?"Unbilled preview unavailable":unbilled.data?.billingMode!=="time_materials"?"Review job billing mode":unbilled.data?.incomplete?"Review missing source costs":`Pull unbilled from job (${formatMoney(unbilled.data?.totals.totalCents||0)})`}
                     </button>
                   )}
                   {/* Opened synchronously — a tab opened from the async reply
@@ -1537,24 +1545,26 @@ const TABS: { key: string; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
-  const [tab, setTab] = useState("");
-  const [q, setQ] = useState("");
-  const [newOpen, setNewOpen] = useState(false);
+  const [tab, setTab] = useRememberedState("client/src/pages/finance/invoices.tsx:tab",readContext("status"));
+  const [q, setQ] = useRememberedState("client/src/pages/finance/invoices.tsx:q","");
+  const [newOpen, setNewOpen] = useState(()=>readContext("new")==="1");
   const invoiceLink = useDeepLink("invoice");
   const [detailId, setDetailId] = useState<number | null>(invoiceLink ? Number(invoiceLink) : null);
-  useEffect(() => { if (invoiceLink) setDetailId(Number(invoiceLink)); }, [invoiceLink]);
+  useEffect(() => { if (invoiceLink) {setDetailId(Number(invoiceLink));consumeRecordLink("invoice");} }, [invoiceLink]);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
 
+  const {page,setPage}=useListPage('rows:client/src/pages/finance/invoices.tsx',[tab,q]);
   const url = useMemo(() => {
     const params = new URLSearchParams();
+    params.set('page',String(page));params.set('limit','50');
     if (tab) params.set("status", tab);
     if (q.trim()) params.set("q", q.trim());
     const s = params.toString();
     return `/api/finance/invoices${s ? `?${s}` : ""}`;
-  }, [tab, q]);
+  }, [tab, q,page]);
 
-  const { data: rows = [], isLoading } = useQuery<InvoiceRow[]>({
-    queryKey: ["finance-invoices", tab, q],
+  const { data: rows = [], isLoading,isError,error,refetch } = useQuery<InvoiceRow[]>({
+    queryKey: ["finance-invoices", tab, q,page],
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
 
@@ -1594,7 +1604,8 @@ export default function InvoicesPage() {
         />
       </div>
 
-      {isLoading ? (
+      <PageButtons page={page} setPage={setPage} count={rows.length}/>
+      {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
         <EmptyState icon={FileText} message={`No invoices${tab ? " with this status" : " yet"}`}>

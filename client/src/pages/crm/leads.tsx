@@ -1,4 +1,6 @@
-import { useDeepLink } from "@/lib/deep-link";
+import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import { RetryBlock } from '@/components/RetryBlock';
+import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
@@ -366,6 +368,7 @@ function LeadDetailModal({
       return {
         method: "PATCH",
         url: `/api/crm/leads/${lead.id}`,
+        expectedVersion:(lead as any)._version,
         body: {
           leadId: lead.id,
           name: name.trim(),
@@ -723,32 +726,35 @@ export default function LeadsPage() {
   const { isElevated } = useAuth();
 
   const [view, setView] = useState<"board" | "list">("board");
-  const [q, setQ] = useState("");
-  const [source, setSource] = useState("");
-  const [site, setSite] = useState("");
-  const [stage, setStage] = useState("");
-  const [assignee, setAssignee] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [q, setQ] = useRememberedState("client/src/pages/crm/leads.tsx:q","");
+  const [source, setSource] = useRememberedState("client/src/pages/crm/leads.tsx:source","");
+  const [site, setSite] = useRememberedState("client/src/pages/crm/leads.tsx:site","");
+  const [stage, setStage] = useRememberedState("client/src/pages/crm/leads.tsx:stage","");
+  const [assignee, setAssignee] = useRememberedState("client/src/pages/crm/leads.tsx:assignee","");
+  const [from, setFrom] = useRememberedState("client/src/pages/crm/leads.tsx:from","");
+  const [to, setTo] = useRememberedState("client/src/pages/crm/leads.tsx:to","");
 
   const [newOpen, setNewOpen] = useState(false);
   const leadLink = useDeepLink("lead");
   const [detailId, setDetailId] = useState<number | null>(leadLink ? Number(leadLink) : null);
-  useEffect(() => { if (leadLink) setDetailId(Number(leadLink)); }, [leadLink]);
+  useEffect(() => { if (leadLink) {setDetailId(Number(leadLink));consumeRecordLink("lead");} }, [leadLink]);
   const [closing, setClosing] = useState<{ lead: Lead; to: "won" | "lost" } | null>(null);
   const [dragOverStage, setDragOverStage] = useState<LeadStage | null>(null);
 
+  const {page,setPage}=useListPage('leads:client/src/pages/crm/leads.tsx',[q.trim(),source,site,assignee,from,to,stage]);
   const params = new URLSearchParams();
+    params.set('page',String(page));params.set('limit','50');
   if (q.trim()) params.set("q", q.trim());
   if (source) params.set("source", source);
   if (site) params.set("site", site);
+  if(stage)params.set("stage",stage);
   if (assignee) params.set("assignedTo", assignee);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   const leadsUrl = `/api/crm/leads${params.toString() ? `?${params.toString()}` : ""}`;
 
-  const { data: leads = [], isLoading } = useQuery<Lead[]>({
-    queryKey: ["crm-leads", q.trim(), source, site, assignee, from, to],
+  const { data: leads = [], isLoading,isError,error,refetch } = useQuery<Lead[]>({
+    queryKey: ["crm-leads", q.trim(), source, site, assignee, from, to,page],
     queryFn: async () => (await apiRequest("GET", leadsUrl)).json(),
   });
 
@@ -869,7 +875,8 @@ export default function LeadsPage() {
         )}
       </div>
 
-      {isLoading ? (
+      <PageButtons page={page} setPage={setPage} count={leads.length}/>
+      {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : leads.length === 0 ? (
         <EmptyState icon={Users} message="No leads yet">

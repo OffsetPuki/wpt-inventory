@@ -83,6 +83,10 @@ export const reviews = sqliteTable("mk_reviews", {
 // "Recent work" gallery published to www.cjmmetals.com — photos uploaded via
 // the normal /api/upload flow, curated and ordered here.
 export const portfolioItems = sqliteTable("mk_portfolio", {
+  site: text("site").notNull().default("metals"),
+  projectId: integer("project_id"),
+  approvedBy: integer("approved_by"),
+  approvedAt: integer("approved_at"),
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   category: text("category"), // "Gates", "Fencing", … (free text)
@@ -121,6 +125,8 @@ export const insertReviewSchema = createInsertSchema(reviews).omit({
 });
 
 export const insertPortfolioItemSchema = createInsertSchema(portfolioItems).omit({
+  approvedBy: true,
+  approvedAt: true,
   id: true,
   createdAt: true,
 });
