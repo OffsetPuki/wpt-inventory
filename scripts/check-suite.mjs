@@ -13,6 +13,10 @@ const call = async (path, method = "GET", body, token = owner) => {
   return r.data;
 };
 try {
+  for (const site of ["metals", "concrete", "insulation", "trades"]) {
+    const feed = await call(`/api/public/portfolio?site=${site}`);
+    assert.equal(feed.site, site, "Portfolio confirms the filtered trade");
+  }
   await call("/api/suite/people");
   const job = await call("/api/projects", "POST", {
     jobNumber: "SUITE-1",

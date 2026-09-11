@@ -598,6 +598,7 @@ export function registerPublicRoutes(app: Express): void {
     const site=z.enum(LEAD_SITES).safeParse(req.query.site||"metals");if(!site.success)return res.status(400).json({message:"Unknown trade."});
     feedHeaders(res);
     res.json({
+      site: site.data,
       items: db.select({
         title: portfolioItems.title,
         category: portfolioItems.category,
