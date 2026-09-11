@@ -195,6 +195,23 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
   };
 }
 export function registerGrowthRoutes(app: Express) {
+  app.get("/api/marketing/growth/overview", requireElevated, (req, res) => {
+    const { current } = periods(req.query.end);
+    const includeTests = req.query.includeTests === "1";
+    const rows = (Object.keys(GOOGLE_SITES) as Site[]).map(site => {
+      const report = cohort(site, current.start, current.end, includeTests);
+      const organic = report.bySource.filter(row => row.medium.toLowerCase() === "organic")
+        .reduce((total, row) => ({ leads: total.leads + row.leads, qualified: total.qualified + row.qualified,
+          quoted: total.quoted + row.quoted, won: total.won + row.won, bookedCents: total.bookedCents + row.bookedCents }),
+          {leads:0,qualified:0,quoted:0,won:0,bookedCents:0});
+      const search = googleReport(site, current.start, current.end, "searchTotals");
+      return { site, name: GOOGLE_SITES[site].name, ...organic,
+        sessions: report.traffic ? report.traffic.rows.filter((row:any) => row.medium.toLowerCase() === "organic").reduce((n:number,row:any)=>n+row.sessions,0) : null,
+        clicks: search?.totals?.clicks ?? null, impressions: search?.totals?.impressions ?? null,
+        trafficUpdatedAt: report.traffic?.fetchedAt ?? null, searchUpdatedAt: search?.fetchedAt ?? null };
+    });
+    res.json({ ...current, rows });
+  });
   app.get("/api/marketing/growth", requireElevated, (req, res) => {
     const site = siteSchema.safeParse(req.query.site);
     if (!site.success)

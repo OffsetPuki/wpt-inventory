@@ -46,7 +46,12 @@ export function googleReport(
       "SELECT payload,fetched_at FROM mk_google_reports WHERE site=? AND start_date=? AND end_date=? AND kind=?",
     )
     .get(site, start, end, kind) as any;
-  return row ? { ...JSON.parse(row.payload), fetchedAt: row.fetched_at } : null;
+  if (!row) return null;
+  const payload = JSON.parse(row.payload);
+  // Older cached traffic includes preview hosts. Refresh it before displaying totals.
+  if (kind === "traffic" && payload.productionHost !== GOOGLE_SITES[site].domain)
+    return null;
+  return { ...payload, fetchedAt: row.fetched_at };
 }
 const jobs = new Set<string>();
 export async function refreshGoogleReports(
@@ -91,19 +96,22 @@ export async function refreshGoogleReports(
             metrics: [{ name: "sessions" }],
             limit: 10000,
             dimensionFilter: {
-              notExpression: {
-                filter: {
-                  fieldName: "sessionSource",
-                  inListFilter: {
-                    values: ["release_check", "qa"],
-                    caseSensitive: false,
-                  },
-                },
+              andGroup: {
+                expressions: [
+                  { filter: { fieldName: "hostName", stringFilter: {
+                    matchType: "EXACT", value: config.domain, caseSensitive: false,
+                  } } },
+                  { notExpression: { filter: {
+                    fieldName: "sessionSource",
+                    inListFilter: { values: ["release_check", "qa"], caseSensitive: false },
+                  } } },
+                ],
               },
             },
           },
         );
         return {
+          productionHost: config.domain,
           rows: (r.rows || []).map((row: any) => ({
             date: row.dimensionValues[0].value,
             source: row.dimensionValues[1].value,
@@ -164,6 +172,14 @@ export async function refreshGoogleReports(
           })),
           partial: (r.rows?.length || 0) >= 25000,
         };
+      }),
+      run("searchTotals", async () => {
+        const r = await googlePost(
+          `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent("https://" + config.domain + "/")}/searchAnalytics/query`,
+          { startDate: start, endDate: end, dimensions: [], type: "web", dataState: "final" },
+        );
+        // Property totals must not be inferred by adding page or query rows.
+        return { totals: r.rows?.[0] ? { clicks: r.rows[0].clicks, impressions: r.rows[0].impressions } : null };
       }),
       run("queries", async () => {
         const r = await googlePost(

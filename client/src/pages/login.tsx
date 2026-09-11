@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
@@ -10,7 +10,6 @@ export default function LoginPage() {
   const { login } = useAuth();
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
-  const [otp,setOtp]=useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // The username autocomplete used to call an unauthenticated endpoint
@@ -27,7 +26,7 @@ export default function LoginPage() {
     if (submitting || !name.trim() || pin.length < 4) return;
     setSubmitting(true);
     try {
-      await login(name.trim(), pin, otp);
+      await login(name.trim(), pin);
       // App re-renders to the authenticated router; "/" redirects by role.
     } catch (err: any) {
       toast({
@@ -103,9 +102,6 @@ export default function LoginPage() {
             />
           </div>
 
-          <label className="flex flex-col gap-2">Authenticator or recovery code (if enabled)
-            <input className="h-12 rounded-xl border border-input bg-background px-4" autoComplete="one-time-code" value={otp} onChange={e=>setOtp(e.target.value)} />
-          </label>
           <button
             type="submit"
             disabled={submitting}

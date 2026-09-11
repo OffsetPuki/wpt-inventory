@@ -91,6 +91,10 @@ export default function GrowthReport() {
         )
       ).json(),
   });
+  const overview = useQuery<{start:string;end:string;rows:{site:Site;name:string;sessions:number|null;clicks:number|null;impressions:number|null;leads:number;qualified:number;quoted:number;won:number;bookedCents:number}[]}>({
+    queryKey: ["marketing-growth", "overview", end, includeTests],
+    queryFn: async () => (await apiRequest("GET", `/api/marketing/growth/overview?end=${end}&includeTests=${includeTests ? "1" : "0"}`)).json(),
+  });
   async function action(url: string, body: object) {
     setBusy(true);
     setMessage("");
@@ -195,6 +199,18 @@ export default function GrowthReport() {
             are shown to date. Business dates use Central Time; Google uses each
             property's reporting timezone and may revise recent days.
           </p>
+          <section aria-label="All websites organic comparison" className="border rounded-xl p-4 space-y-3 min-w-0">
+            <h3 className="font-semibold">Organic results across your websites</h3>
+            <p className="text-sm text-muted-foreground">Choose a business to see its details below. Google appearances and clicks come from Search Console; visits come from Analytics; inquiry outcomes come from saved business records. A dash means Google data is not available for this period.</p>
+            {overview.isError ? <button className={secondaryBtn} onClick={()=>overview.refetch()}>Retry website comparison</button> : !overview.data ? <p role="status">Loading website comparison…</p> : <div className="overflow-x-auto">
+              <table className="w-full text-sm"><thead><tr>{["Business","Google appearances","Google clicks","Organic visits","Inquiries","Qualified","Quoted","Won","Won value"].map(label=><th key={label} scope="col" className={cell}>{label}</th>)}</tr></thead>
+                <tbody>{overview.data.rows.map(row=><tr key={row.site} className={row.site===site?"bg-muted/50":""}>
+                  <th scope="row" className={cell}><button className="underline underline-offset-4" aria-pressed={row.site===site} onClick={()=>{setSite(row.site);setMessage("");}}>{row.name}</button></th>
+                  {[row.impressions??"—",row.clicks??"—",row.sessions??"—",row.leads,row.qualified,row.quoted,row.won,formatMoney(row.bookedCents)].map((value,index)=><td key={index} className={cell}>{value}</td>)}
+                </tr>)}</tbody></table>
+            </div>}
+            <p className="text-sm text-muted-foreground">Refresh Google data for each selected website to update its visits and search totals. These stages overlap: a won inquiry may also appear under Qualified and Quoted.</p>
+          </section>
           <section aria-label="Organic search results" className="border rounded-xl p-4 space-y-3">
             <h3 className="font-semibold">Jobs from organic search</h3>
             <p className="text-sm text-muted-foreground">Saved inquiries attributed to organic search, including tagged Google Business Profile links. Outcomes belong to the inquiry cohorts above. These are business records; Analytics sessions and confirmation-page visits are counted separately.</p>
@@ -330,7 +346,7 @@ export default function GrowthReport() {
                 <>
                   <p className="text-3xl font-semibold my-2">
                     {c.traffic.rows.reduce((n, row) => n + row.sessions, 0)}{" "}
-                    sessions
+                    production website sessions
                   </p>
                   <p className="text-sm">
                     {c.traffic.rows.filter(row => row.medium === 'organic').reduce((n,row)=>n+row.sessions,0)} organic search sessions · all search engines

@@ -86,9 +86,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
   req.user = { ...session, token };
   const user = storage.getUserById(session.userId)!;
-  if (process.env.NODE_ENV === "production" && user.role !== "worker" && (user.credentialType !== "password" || !user.totpSecret)
+  if (process.env.NODE_ENV === "production" && user.role !== "worker" && user.credentialType !== "password"
     && !req.path.startsWith("/api/security/") && !["/api/auth/me","/api/auth/logout"].includes(req.path)) {
-    res.status(428).json({message:"Complete owner security setup before using the suite.",securitySetupRequired:true}); return;
+    res.status(428).json({message:"Set your owner password before using the suite.",securitySetupRequired:true}); return;
   }
   next();
 }

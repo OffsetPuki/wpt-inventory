@@ -19,7 +19,7 @@ interface AuthContextValue {
   // Anything above worker: the owner (plus the legacy manager/technician
   // roles a not-yet-refreshed session may still carry).
   isElevated: boolean;
-  login: (name: string, pin: string, otp?: string) => Promise<void>;
+  login: (name: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -74,10 +74,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("auth-invalidated", onInvalidated);
   }, []);
 
-  const login = useCallback(async (name: string, pin: string, otp?: string) => {
+  const login = useCallback(async (name: string, pin: string) => {
     setIsLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/auth/login", { name, pin, otp });
+      const res = await apiRequest("POST", "/api/auth/login", { name, pin });
       const data = await res.json();
       const newToken: string = data.token;
       const loggedInUser: PublicUser = data.user;

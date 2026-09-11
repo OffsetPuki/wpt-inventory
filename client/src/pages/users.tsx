@@ -74,10 +74,10 @@ export default function UsersPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <Header title="Users" description="Who can sign in and what they can do" />
-      <Link href="/security" className="mb-4 inline-block underline">My password, authenticator and devices</Link>
+      <Link href="/security" className="mb-4 inline-block underline">My password and devices</Link>
       {resetUser && <Modal open title={`Reset ${resetUser.name}'s sign-in`} onClose={()=>setResetUser(null)}>
         <form className="space-y-4" onSubmit={async e=>{e.preventDefault();try{await apiRequest("POST",`/api/users/${resetUser.id}/reset-credential`,{credential});setResetUser(null);setCredential("");toast({title:"Credential reset. Existing sessions signed out."});if(resetUser.id===me?.id)location.reload();}catch(error:any){toast({variant:"destructive",title:"Could not reset",description:error.message});}}}>
-          <p className="text-sm">This signs out existing sessions and preserves their work history. An enabled authenticator remains required.</p>
+          <p className="text-sm">This signs out existing sessions and preserves their work history.</p>
           <label className="block">{resetUser.role==="worker"?"New PIN (4–12 digits)":"New password (12+ characters)"}<input required className={inputCls} type="password" autoComplete="new-password" value={credential} onChange={e=>setCredential(e.target.value)}/></label>
           <button className="h-11 rounded-lg bg-primary px-4 text-primary-foreground">Reset and sign out sessions</button>
         </form>

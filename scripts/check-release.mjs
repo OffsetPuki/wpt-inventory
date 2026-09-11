@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { TOTP } from "otpauth";
+
 import { testApp } from "./test-app.mjs";
 const t = await testApp();
 const { api, owner, sqlite, event, sessions, uploadsDir } = t;
@@ -621,53 +621,41 @@ try {
   setDraftUser(null);assert.equal(loadSession(),null);assert.equal(saveSession({private:'signed out'}),false);delete globalThis.localStorage;
   check('A shared browser never loads another user’s draft or the unowned legacy draft');
 
-  const enroll = await api(
-    "/api/security/enroll",
-    "POST",
-    { currentPassword: "1234" },
-    owner,
-  );
-  assert.equal(enroll.status, 200);
-  const otp = new TOTP({ secret: enroll.data.secret }).generate();
-  const complete = await api(
-    "/api/security/complete",
-    "POST",
-    { password: "Synthetic password 2026", otp },
-    owner,
-  );
-  assert.equal(complete.status, 200);
-  assert.equal(complete.data.recoveryCodes.length, 10);
-  assert.equal(
-    (await api("/api/auth/me", "GET", undefined, owner)).status,
-    401,
-  );
-  const recovery = complete.data.recoveryCodes[0];
-  const login = await api("/api/auth/login", "POST", {
-    name: "Owner",
-    pin: "Synthetic password 2026",
-    otp: recovery,
-  });
-  assert.equal(login.status, 200);
-  assert.equal(
-    (
-      await api("/api/auth/login", "POST", {
-        name: "Owner",
-        pin: "Synthetic password 2026",
-        otp: recovery,
-      })
-    ).status,
-    401,
-  );
-  sqlite
-    .prepare("UPDATE sessions SET created_at=? WHERE token=?")
-    .run(Date.now() - 13 * 3600000, login.data.token);
-  assert.equal(
-    (await api("/api/auth/me", "GET", undefined, login.data.token)).status,
-    401,
-  );
-  check(
-    "Owner password and MFA enrollment, old-session revocation, one-use recovery codes, and absolute session expiry",
-  );
+  // Existing authenticator records must not obstruct password-only access.
+  sqlite.prepare("UPDATE users SET totp_secret='JBSWY3DPEHPK3PXP' WHERE id=1").run();
+  const legacyLogin = await api('/api/auth/login','POST',{name:'Owner',pin:'1234'});
+  assert.equal(legacyLogin.status,200);
+  assert.equal(legacyLogin.data.user.mfaEnabled,false);
+  assert.equal(legacyLogin.data.user.totpSecret,undefined);
+  process.env.NODE_ENV='production';
+  assert.equal((await api('/api/items','GET',undefined,legacyLogin.data.token)).status,428);
+  assert.equal((await api('/api/security/password','POST',{currentPassword:'1234',password:'Synthetic password 2026'})).status,401);
+  assert.equal((await api('/api/security/password','POST',{currentPassword:'wrong',password:'Synthetic password 2026'},owner)).status,403);
+  assert.equal((await api('/api/security/password','POST',{currentPassword:'1234',password:'short'},owner)).status,400);
+  const complete=await api('/api/security/password','POST',{currentPassword:'1234',password:'Synthetic password 2026'},owner);
+  assert.equal(complete.status,200);
+  assert.equal(complete.data.user.securitySetupRequired,false);
+  assert.equal(complete.data.user.mfaEnabled,false);
+  assert.equal(complete.data.recoveryCodes,undefined);
+  assert.equal((await api('/api/auth/me','GET',undefined,owner)).status,401);
+  assert.equal((await api('/api/auth/me','GET',undefined,legacyLogin.data.token)).status,401);
+  assert.equal((await api('/api/items','GET',undefined,complete.data.token)).status,200);
+  assert.equal((await api('/api/security/enroll','POST',{currentPassword:'Synthetic password 2026'},complete.data.token)).status,410);
+  assert.equal((await api('/api/security/complete','POST',{},complete.data.token)).status,410);
+  // Retained legacy secrets on old accounts are ignored, including in production.
+  sqlite.prepare("UPDATE users SET totp_secret='JBSWY3DPEHPK3PXP' WHERE id=1").run();
+  const login=await api('/api/auth/login','POST',{name:'Owner',pin:'Synthetic password 2026'});
+  assert.equal(login.status,200);
+  assert.equal(login.data.user.securitySetupRequired,false);
+  assert.equal((await api('/api/items','GET',undefined,login.data.token)).status,200);
+  assert.equal((await api('/api/auth/login','POST',{name:'Owner',pin:'1234'})).status,401);
+  assert.equal((await api('/api/auth/login','POST',{name:'Owner',pin:'wrong password',otp:'123456'})).status,401);
+  assert.equal((await api('/api/security/revoke-sessions','POST',{},login.data.token)).status,200);
+  assert.equal((await api('/api/auth/me','GET',undefined,complete.data.token)).status,401);
+  sqlite.prepare('UPDATE sessions SET created_at=? WHERE token=?').run(Date.now()-13*3600000,login.data.token);
+  assert.equal((await api('/api/auth/me','GET',undefined,login.data.token)).status,401);
+  process.env.NODE_ENV='development';
+  check('Password-only owner sign-in, legacy-authenticator compatibility, password setup, invalid credentials, session revocation, and absolute expiry');
   console.log("ALL RELEASE REGRESSIONS PASSED");
 } finally {
   await t.close();

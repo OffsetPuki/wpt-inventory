@@ -30,6 +30,10 @@ test("Marketing report works on mobile and desktop without Google credentials", 
   await expect(
     page.getByText("Saved inquiries", { exact: true }),
   ).toBeVisible();
+  const comparison = page.getByRole("region", { name: "All websites organic comparison" });
+  await expect(comparison.getByRole("row")).toHaveCount(5);
+  await comparison.getByRole("button", {name:"CJM Concrete",exact:true}).click();
+  await expect(page.getByLabel(/^Website/)).toHaveValue("concrete");
   await expect(
     page.getByRole("button", { name: "Refresh Google data" }),
   ).toBeDisabled();

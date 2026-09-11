@@ -3,7 +3,7 @@ import { testApp } from "./test-app.mjs";
 const app = await testApp();
 try {
   const { businessMidnight } = await import("../server/growth.ts");
-  const { safeGooglePage } = await import("../server/google-reporting.ts");
+  const { safeGooglePage, googleReport, refreshGoogleReports } = await import("../server/google-reporting.ts");
   assert.equal(
     safeGooglePage("/services/steel-gates?email=private@example.test"),
     "/services/steel-gates",
@@ -66,6 +66,37 @@ try {
     "www.cjmtrades.com",
   );
   const id = lead.data.id;
+  let projectLead;
+  for (const page of ["/work/17", "/es/work/17", "/work", "/es/work/"]) {
+    projectLead = app.sqlite.prepare("INSERT INTO crm_leads(name,site) VALUES('Synthetic project attribution','metals')").run().lastInsertRowid;
+    saveLeadAttribution(projectLead, "metals", {...attribution, first: {...touch, page}, landingPage: page});
+    assert.equal(app.sqlite.prepare("SELECT landing_page FROM mk_lead_attribution WHERE lead_id=?").get(projectLead).landing_page, page);
+  }
+  for (const page of ["/work/private-token", "/work/0", "/es/invoice/private-token"]) {
+    saveLeadAttribution(projectLead, "metals", {...attribution, first: {...touch, page}, landingPage: page});
+    assert.equal(app.sqlite.prepare("SELECT landing_page FROM mk_lead_attribution WHERE lead_id=?").get(projectLead).landing_page, "/es/work/", "Invalid input must not replace recorded attribution");
+  }
+  saveLeadAttribution(id, "metals", attribution);
+
+  // Old preview-contaminated cache must be hidden until refreshed, without deleting history.
+  const cache = app.sqlite.prepare("INSERT OR REPLACE INTO mk_google_reports(site,start_date,end_date,kind,payload,fetched_at) VALUES(?,?,?,?,?,?)");
+  cache.run("metals", "2026-08-01", "2026-08-28", "traffic", JSON.stringify({rows:[{sessions:99}]}), Date.now());
+  assert.equal(googleReport("metals", "2026-08-01", "2026-08-28", "traffic"), null);
+  const previousFetch = globalThis.fetch;
+  const requestsToGoogle = [];
+  process.env.GOOGLE_REPORTING_OAUTH_JSON = JSON.stringify({type:"authorized_user",client_id:"fixture-client",client_secret:"fixture-secret",refresh_token:"fixture-refresh"});
+  globalThis.fetch = async (url, options) => {
+    if (url === "https://oauth2.googleapis.com/token") return new Response(JSON.stringify({access_token:"fixture-access",expires_in:3600}));
+    assert.match(url, /^https:\/\/(analyticsdata|www)\.googleapis\.com\//);
+    requestsToGoogle.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({rows:[]}));
+  };
+  try { await refreshGoogleReports("metals", "2026-08-01", "2026-08-28"); }
+  finally { globalThis.fetch = previousFetch; delete process.env.GOOGLE_REPORTING_OAUTH_JSON; }
+  const trafficRequest = requestsToGoogle.find(r=>r.metrics?.some(m=>m.name==="sessions"));
+  assert.deepEqual(trafficRequest.dimensionFilter.andGroup.expressions[0], {filter:{fieldName:"hostName",stringFilter:{matchType:"EXACT",value:"www.cjmmetals.com",caseSensitive:false}}});
+  assert.deepEqual(trafficRequest.dimensionFilter.andGroup.expressions[1].notExpression.filter.inListFilter.values, ["release_check","qa"]);
+  assert.equal(googleReport("metals", "2026-08-01", "2026-08-28", "traffic").productionHost, "www.cjmmetals.com");
   queueLeadOutcome(id, "qualify_lead");
   queueLeadOutcome(id, "qualify_lead");
   assert.equal(
@@ -181,6 +212,16 @@ try {
   assert.equal(cohort.data.current.totals.bookedCents, 250000);
   assert.equal(cohort.data.current.costPerQualifiedPaidLeadCents, 10000);
   assert.equal(cohort.data.current.bySource[0].page, "/plan");
+  assert.equal((await app.api("/api/marketing/growth/overview")).status, 401);
+  app.sqlite.prepare("UPDATE mk_lead_attribution SET first_touch=? WHERE lead_id=?").run(JSON.stringify({...touch,medium:"organic"}), id);
+  cache.run("metals", cohort.data.current.start, cohort.data.current.end, "searchTotals", JSON.stringify({totals:{clicks:7,impressions:100}}), Date.now());
+  cache.run("metals", cohort.data.current.start, cohort.data.current.end, "traffic", JSON.stringify({productionHost:"www.cjmmetals.com",rows:[{medium:"organic",sessions:3},{medium:"cpc",sessions:4}]}), Date.now());
+  const summary = await app.api("/api/marketing/growth/overview", "GET", undefined, token);
+  assert.equal(summary.data.rows.length, 4);
+  const metals = summary.data.rows.find(row=>row.site==="metals");
+  assert.deepEqual([metals.leads,metals.qualified,metals.quoted,metals.won,metals.clicks,metals.impressions,metals.sessions], [1,1,1,1,7,100,3]);
+  assert.equal(summary.data.rows.find(row=>row.site==="concrete").sessions, null, "Missing Google data is not zero");
+  app.sqlite.prepare("UPDATE mk_lead_attribution SET first_touch=? WHERE lead_id=?").run(JSON.stringify(touch), id);
   const invalid = await app.api(
     "/api/marketing/growth/spend",
     "POST",

@@ -9,6 +9,7 @@ const TOKEN_KEY = "wpt-auth-token";
 
 let authToken: string | null =
   typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
+let sessionReplacement: Promise<void> | null = null;
 
 export function setAuthToken(token: string | null) {
   authToken = token;
@@ -28,16 +29,23 @@ export async function apiRequest(
   method: string,
   url: string,
   body?: unknown,
-  options?: { signal?: AbortSignal; expectedVersion?: number; idempotencyKey?:string },
+  options?: { signal?: AbortSignal; expectedVersion?: number; idempotencyKey?:string; replacesSession?: boolean },
 ): Promise<Response> {
+  const requestToken = authToken;
+  let finishReplacement: (() => void) | undefined;
+  if (options?.replacesSession) {
+    if (sessionReplacement) throw new Error("A password change is already in progress.");
+    sessionReplacement = new Promise(resolve => { finishReplacement = resolve; });
+  }
+  try {
   const headers: Record<string, string> = {};
 
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
 
-  if (authToken) {
-    headers["X-Auth"] = authToken;
+  if (requestToken) {
+    headers["X-Auth"] = requestToken;
   }
 
   if (["PATCH","DELETE"].includes(method) && recordVersions.has(recordPath(url))) headers["If-Match"] = recordVersions.get(recordPath(url))!;
@@ -54,7 +62,10 @@ export async function apiRequest(
     // Server says the token is gone/invalid (e.g. server was restarted): drop the
     // local token and let AuthProvider react so the user sees the login screen
     // instead of an endless stream of 401s from background polling.
-    if (res.status === 401 && authToken) {
+    // Requests already in flight can finish with the session that a password
+    // change just revoked. Wait for its replacement before deciding to sign out.
+    if (res.status === 401 && !options?.replacesSession && sessionReplacement) await sessionReplacement;
+    if (res.status === 401 && requestToken && authToken === requestToken) {
       setAuthToken(null);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("auth-invalidated"));
@@ -70,10 +81,21 @@ export async function apiRequest(
     throw Object.assign(new Error(message), { status: res.status });
   }
 
+  if (options?.replacesSession) {
+    const data = await res.clone().json();
+    if (typeof data.token !== "string" || !data.token) throw new Error("Sign in again to finish your password change.");
+    setAuthToken(data.token);
+  }
   if (method === "GET" && res.headers.get("ETag")) recordVersions.set(recordPath(url),res.headers.get("ETag")!);
   if (method !== "GET") recordVersions.delete(recordPath(url));
   if (method !== "GET" && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("suite-mutation", { detail: url }));
   return res;
+  } finally {
+    if (finishReplacement) {
+      sessionReplacement = null;
+      finishReplacement();
+    }
+  }
 }
 
 // ─── Query client ───────────────────────────────────────────────────────────

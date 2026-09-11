@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
-import { TOTP } from "otpauth";
 import { testApp } from "../scripts/test-app.mjs";
 import { inventoryWorkflow } from "./inventory-workflow.mjs";
 import { suiteWorkflow } from './suite-workflow.mjs';
@@ -12,7 +11,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await app.close();
 });
-test("Owner enrollment, dashboard recovery, dialog access, drafts and task navigation on mobile", async ({
+test("Owner password setup, dashboard recovery, dialog access, drafts and task navigation on mobile", async ({
   page,
 }) => {
   test.setTimeout(120000);
@@ -25,25 +24,20 @@ test("Owner enrollment, dashboard recovery, dialog access, drafts and task navig
     console.error("BROWSER ERROR", e.message);
   });
   await page.goto(app.base);
+  await expect(page.getByLabel(/Authenticator|recovery code/i)).toHaveCount(0);
   await page.getByLabel("Your name", { exact: true }).fill("Owner");
   await page.getByLabel(/Password or PIN/i).fill("1234");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Protect your account" }),
+    page.getByRole("heading", { name: "Set your password" }),
   ).toBeVisible();
   await page.getByLabel("Current password or PIN").fill("1234");
-  await page.getByRole("button", { name: "Set up authenticator" }).click();
-  await page.getByText("Enter a setup key instead").click();
-  const secret = await page.locator("details code").textContent();
   await page
-    .getByLabel("2. New password (12+ characters)")
+    .getByLabel("New password (12+ characters)")
     .fill("Synthetic UI password 2026");
   await page.getByLabel("Confirm password").fill("Synthetic UI password 2026");
-  await page
-    .getByLabel("3. Six-digit authenticator code")
-    .fill(new TOTP({ secret }).generate());
-  await page.getByRole("button", { name: "Secure my account" }).click();
-  await page.getByLabel("I saved these codes somewhere private.").check();
+  await page.getByRole("button", { name: "Save password" }).click();
+  await expect(page.getByRole("status")).toContainText("Password saved");
   await page.getByRole("button", { name: "Continue to the suite" }).click();
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
   await page.goto(app.base + '/#/dashboard');

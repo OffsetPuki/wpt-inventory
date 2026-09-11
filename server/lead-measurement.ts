@@ -38,7 +38,7 @@ const publicPath = z
   .string()
   .max(180)
   .regex(
-    /^\/(?:es\/?)?(?:(?:services|customize|faq|areas|service-area|concepts)\/[a-z0-9-]+\/?|services\/?|customize\/?|faq\/?|plan\/?|price\/?|calculator\/?|materials\/?|about\/?|service-area\/?)?$/,
+    /^\/(?:es\/?)?(?:(?:services|customize|faq|areas|service-area|concepts)\/[a-z0-9-]+\/?|work\/[1-9][0-9]{0,14}\/?|work\/?|services\/?|customize\/?|faq\/?|plan\/?|price\/?|calculator\/?|materials\/?|about\/?|service-area\/?)?$/,
   );
 const host = z
   .string()

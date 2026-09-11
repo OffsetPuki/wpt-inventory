@@ -5,7 +5,7 @@ import { registerCreateOnce } from './suite-create-once';
 import { registerSuiteRoutes } from "./suite";
 import { inventoryOnce, reservationRows, loanRows } from "./inventory-core";
 import { setMediaCookie } from "./media";
-import { registerSecurityRoutes, verifySecondFactor, strongPassword } from "./security";
+import { registerSecurityRoutes, strongPassword } from "./security";
 import type { Express } from "express";
 import multer from "multer";
 import path from "path";
@@ -151,7 +151,7 @@ export function registerRoutes(app: Express): void {
     // during the ~80ms hash so concurrent logins don't queue behind it.
     const hashToCheck = user ? user.pin : DUMMY_BCRYPT_HASH;
     const matched = await bcrypt.compare(body.pin, hashToCheck);
-    const ok = !!user && matched && storage.userCanSignIn(user.id) && verifySecondFactor(user.id, user.totpSecret, body.otp);
+    const ok = !!user && matched && storage.userCanSignIn(user.id);
 
     if (!ok) {
       // Only track failures for known usernames — counting bogus usernames
@@ -172,7 +172,7 @@ export function registerRoutes(app: Express): void {
           });
         }
       }
-      return res.status(401).json({ message: "Invalid sign-in details. Check your password/PIN and authenticator or recovery code." });
+      return res.status(401).json({ message: "Invalid sign-in details. Check your name and password or PIN." });
     }
 
     storage.clearLoginAttempts(body.name);
@@ -847,7 +847,7 @@ export function registerRoutes(app: Express): void {
     if(!publicImage && !hasLeadKey(req) && (!token || !getSession(token))) return res.status(401).json({message:"Sign in to view this private image."});
     const mediaSession = token ? getSession(token) : null;
     if(!publicImage && !hasLeadKey(req) && mediaSession && process.env.NODE_ENV === "production" && toPublicUser(storage.getUserById(mediaSession.userId)!).securitySetupRequired)
-      return res.status(428).json({message:"Complete owner security setup before viewing private files."});
+      return res.status(428).json({message:"Set your owner password before viewing private files."});
     if(!publicImage&&mediaSession?.role!=='owner'){
       const url=`/uploads/${safeName}`;
       const original=(sqlite.prepare('SELECT url FROM suite_photo_previews WHERE thumbnail_url=?').get(url) as any)?.url||url;

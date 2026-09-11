@@ -316,7 +316,6 @@ export const fromTemplateSchema = z.object({
 export const loginSchema = z.object({
   name: z.string().min(1),
   pin: z.string().min(4).max(128),
-  otp: z.string().max(80).optional(),
 });
 
 // ─── TypeScript Types ────────────────────────────────────────────────────────

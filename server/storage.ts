@@ -324,7 +324,9 @@ addColumnIfMissing("settings", "template_catalog_version", "template_catalog_ver
 
 export function toPublicUser(u: User): PublicUser {
   const { pin, totpSecret, ...pub } = u;
-  return { ...pub, mfaEnabled: !!totpSecret, securitySetupRequired: u.role !== "worker" && (u.credentialType !== "password" || !totpSecret) };
+  // Keep the legacy flag false for already-open clients. Old secrets are never
+  // returned or used for sign-in; owners only need a password now.
+  return { ...pub, mfaEnabled: false, securitySetupRequired: u.role !== "worker" && u.credentialType !== "password" };
 }
 
 // ─── Storage API ─────────────────────────────────────────────────────────────
