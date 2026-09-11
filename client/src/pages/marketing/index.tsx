@@ -1,3 +1,5 @@
+import PublicWorkEditor from '@/components/PublicWorkEditor';
+import { portfolioDomains } from '@shared/portfolio';
 import { useState } from "react";
 import GrowthReport from '@/components/GrowthReport';
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -347,107 +349,7 @@ function ReviewsTab() {
 
 // One dialog for both: pass `item` to edit an existing photo's title, category
 // or picture (PATCH); leave it out to add a new one (POST).
-function PortfolioDialog({
-  open,
-  onClose,
-  item,
-}: {
-  open: boolean;
-  onClose: () => void;
-  item?: PortfolioItem;
-}) {
-  const [title, setTitle] = useState(item?.title ?? "");
-  const [category, setCategory] = useState(item?.category ?? "");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(item?.photoUrl ?? null);
-  const [uploading, setUploading] = useState(false);
-
-  const create = useApiMutation({
-    request: () => ({
-      method: item ? "PATCH" : "POST",
-      url: item ? `/api/marketing/portfolio/${item.id}` : "/api/marketing/portfolio",
-      body: {
-        title: title.trim(),
-        category: category.trim() || null,
-        photoUrl,
-        // Editing leaves Live/Hidden exactly as the owner set it.
-        ...(item ? {} : { published: false }),
-      },
-    }),
-    invalidate: [["marketing", "portfolio"]],
-    successTitle: item ? "Photo updated — the site picks it up within ~5 minutes" : "Added to the portfolio",
-    errorTitle: item ? "Could not save changes" : "Could not add photo",
-    onSuccess: onClose,
-  });
-
-  const pickPhoto = async (file: File) => {
-    setUploading(true);
-    try {
-      setPhotoUrl(await uploadPhoto(file));
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Upload failed", description: e?.message });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title={item ? "Edit work photo" : "Add work photo"}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!title.trim() || !photoUrl) {
-            toast({ variant: "destructive", title: "A title and a photo are required" });
-            return;
-          }
-          create.mutate();
-        }}
-        className="flex flex-col gap-4"
-      >
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Title</span>
-          <input
-            className={inputCls}
-            placeholder="e.g. Horizontal slat fence — Mansfield"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Category (optional)</span>
-          <input
-            className={inputCls}
-            placeholder="Gates, Fencing, Carports, Railings, Furniture…"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          />
-        </label>
-        <div className="flex items-center gap-4">
-          {photoUrl ? (
-            <img src={photoUrl} alt="" className="h-24 w-24 rounded-lg border border-border object-cover" />
-          ) : (
-            <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground">
-              <ImageIcon className="h-8 w-8" />
-            </div>
-          )}
-          <label className={cn(secondaryBtn, "cursor-pointer")}>
-            {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-            {photoUrl ? "Replace photo" : "Upload photo"}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && pickPhoto(e.target.files[0])}
-            />
-          </label>
-        </div>
-        <button type="submit" disabled={create.isPending || uploading} className={cn(primaryBtn, "mt-1 justify-center")}>
-          {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          {item ? "Save changes" : "Add to portfolio"}
-        </button>
-      </form>
-    </Modal>
-  );
-}
+function PortfolioDialog({open,onClose,item}:{open:boolean;onClose:()=>void;item?:PortfolioItem}) { return open ? <PublicWorkEditor item={item} onClose={onClose}/> : null; }
 
 function PortfolioTab() {
   const [addOpen, setAddOpen] = useState(false);
@@ -462,10 +364,10 @@ function PortfolioTab() {
     request: (it) => ({
       method: "PATCH",
       url: `/api/marketing/portfolio/${it.id}`,
-      body: { published: !it.published },
+      body: { published: !it.published, approved: !it.published },
     }),
     invalidate: [["marketing", "portfolio"]],
-    successTitle: (row) => (row.published ? "Shown on cjmmetals.com" : "Hidden from the website"),
+    successTitle: (row) => (row.published ? `Shown on ${portfolioDomains[row.site]}` : "Hidden from the website"),
     errorTitle: "Could not update",
   });
 
@@ -480,11 +382,11 @@ function PortfolioTab() {
     <div>
       <div className="mb-6 flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Add photos of completed CJM work, review the image and caption, then choose Publish. New uploads stay private until published.
+          Prepare photos and project pages for each trade. Review the public details before publishing. Drafts stay private.
         </p>
         <button onClick={() => setAddOpen(true)} className={cn(primaryBtn, "shrink-0")}>
           <Plus className="h-5 w-5" />
-          Add photo
+          Add work
         </button>
       </div>
 
@@ -501,10 +403,10 @@ function PortfolioTab() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((it) => (
             <div key={it.id} className="overflow-hidden rounded-xl border border-border bg-card">
-              <img src={it.photoUrl} alt={it.title} className="aspect-square w-full object-cover" />
+              {it.photoUrl ? <img src={it.photoUrl} alt={it.title} className="aspect-square w-full object-cover" /> : <div className="aspect-square w-full grid place-items-center text-sm text-muted-foreground bg-muted">Add a photo to publish</div>}
               <div className="flex flex-col gap-2 p-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{it.title}</p>
+                  <p className="text-xs text-muted-foreground">CJM {it.site} · {it.published ? "Published" : "Draft"}</p><p className="truncate text-sm font-medium text-foreground">{it.title}</p>{it.city && <p className="text-xs">{it.city}</p>}{it.published && it.projectPage && <a className="text-xs underline" target="_blank" rel="noreferrer" href={`${portfolioDomains[it.site]}/work/${it.id}`}>View project page</a>}
                   {it.category && <p className="text-xs text-muted-foreground">{it.category}</p>}
                 </div>
                 {/* flex-wrap: in the phone's two-column grid the three buttons
@@ -512,7 +414,7 @@ function PortfolioTab() {
                     Delete button. The icon pair drops to its own line instead. */}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
-                    onClick={() => togglePublished.mutate(it)}
+                    onClick={() => it.published ? togglePublished.mutate(it) : setEditing(it)}
                     disabled={togglePublished.isPending}
                     className={cn(
                       smallBtn,
@@ -521,14 +423,14 @@ function PortfolioTab() {
                     )}
                   >
                     <Globe className="h-3.5 w-3.5" />
-                    {it.published ? "Unpublish" : "Publish approved photo"}
+                    {it.published ? "Unpublish" : "Review and publish"}
                   </button>
                   <div className="ml-auto flex items-center gap-1.5">
                     <button
                       onClick={() => setEditing(it)}
                       className={smallBtn}
                       aria-label="Edit"
-                      title="Edit title, category or photo"
+                      title="Review photo and project details"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>

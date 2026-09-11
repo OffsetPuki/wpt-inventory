@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { testApp } from './test-app.mjs';
+const app=await testApp();
+const {api,owner,uploadsDir}=app;
+const photo='/uploads/public-project-test.png';
+fs.writeFileSync(path.join(uploadsDir,path.basename(photo)),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64'));
+try {
+ const body={site:'concrete',title:'Synthetic patio project',photoUrl:photo,workType:'completed',city:'Arlington',scope:'Synthetic test scope',materials:'Synthetic test materials',serviceSlug:'concrete-patios',projectPage:true};
+ let r=await api('/api/marketing/portfolio','POST',body,owner);assert.equal(r.status,201);assert.equal(r.data.published,false);const id=r.data.id;
+ let feed=await api('/api/public/portfolio?site=concrete');assert.equal(feed.data.items.length,0,'Draft stays private');
+ assert.equal((await api(`/api/marketing/portfolio/${id}`,'PATCH',{published:true},owner)).status,400,'Publishing requires explicit approval');
+ assert.equal((await api(`/api/marketing/portfolio/${id}`,'PATCH',{published:true,approved:true,city:''},owner)).status,400,'Public project requires a city');
+ assert.equal((await api(`/api/marketing/portfolio/${id}`,'PATCH',{published:true,approved:true,serviceSlug:'carports'},owner)).status,400,'Cannot mix service trades');
+ r=await api(`/api/marketing/portfolio/${id}`,'PATCH',{published:true,approved:true},owner);assert.equal(r.status,200);assert.ok(r.data.approvedAt);
+ feed=await api('/api/public/portfolio?site=concrete');assert.equal(feed.data.items[0].scope,body.scope);assert.equal(feed.data.items[0].id,id);assert.equal(feed.data.items[0].projectPage,true);assert.equal(feed.data.items[0].approvedBy,undefined);assert.equal(feed.data.items[0].projectId,undefined);
+ assert.equal((await api('/api/public/portfolio?site=metals')).data.items.length,0,'Trade isolation');
+ assert.equal((await api(`/api/marketing/portfolio/${id}`,'PATCH',{scope:'Changed public description'},owner)).status,400,'Changed public content requires approval');
+ assert.equal((await api(`/api/marketing/portfolio/${id}`,'PATCH',{published:false},owner)).status,200);
+ assert.equal((await api('/api/public/portfolio?site=concrete')).data.items.length,0,'Unpublishing removes the page from its feed');
+ assert.equal((await api('/api/marketing/portfolio','POST',{...body,photoUrl:'/uploads/missing.png',published:true,approved:true},owner)).status,400);
+ assert.equal((await api('/api/marketing/portfolio','POST',{...body,workType:'concept',published:true,approved:true},owner)).status,400,'Concept cannot become a completed-project page');
+ const key={'Idempotency-Key':'synthetic-portfolio-retry'};
+ const first=await api('/api/marketing/portfolio','POST',body,owner,key);
+ const retry=await api('/api/marketing/portfolio','POST',body,owner,key);
+ assert.equal(first.status,201);assert.equal(retry.data.id,first.data.id,'A retry does not duplicate a project');
+ assert.equal((await api('/api/marketing/portfolio','POST',{...body,title:'Different project'},owner,key)).status,400,'Request key cannot be reused for different work');
+ for(let i=0;i<65;i++)app.sqlite.prepare("INSERT INTO mk_portfolio(title,photo_url,site,published) VALUES(?,?,'concrete',1)").run('Synthetic pagination '+i,photo);
+ const page1=(await api('/api/public/portfolio?site=concrete')).data;
+ const page2=(await api('/api/public/portfolio?site=concrete&offset='+page1.nextOffset)).data;
+ assert.equal(page1.items.length,60);assert.equal(page2.items.length,5);assert.equal(page2.nextOffset,null);
+ assert.equal(new Set([...page1.items,...page2.items].map(p=>p.id)).size,65,'Stable paging retains older published work');
+ assert.equal((await api('/api/public/portfolio?site=concrete&offset=-1')).status,400);
+ console.log('PASS: private drafts, approval, public field allowlist, required details, safe photos, trade isolation and unpublishing');
+} finally { await app.close(); }

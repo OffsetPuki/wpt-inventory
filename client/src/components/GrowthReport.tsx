@@ -44,7 +44,7 @@ type Period = {
   spendSource: string | null;
   costPerQualifiedPaidLeadCents: number | null;
   traffic: {
-    rows: { sessions: number }[];
+    rows: { sessions: number; medium?: string }[];
     fetchedAt: number;
     partial: boolean;
   } | null;
@@ -123,6 +123,13 @@ export default function GrowthReport() {
   const r = query.data,
     c = r?.current,
     p = r?.previous;
+  const organicTotals = (period?: Period) => (period?.bySource || [])
+    .filter(row => row.medium.toLowerCase() === 'organic')
+    .reduce((total, row) => ({
+      leads: total.leads + row.leads, qualified: total.qualified + row.qualified,
+      quoted: total.quoted + row.quoted, won: total.won + row.won,
+    }), {leads:0,qualified:0,quoted:0,won:0});
+  const organic = organicTotals(c), previousOrganic = organicTotals(p);
   const channels: Record<string, [string, string]> = {
     google_business: ["google", "organic"],
     google_ads: ["google", "cpc"],
@@ -188,6 +195,15 @@ export default function GrowthReport() {
             are shown to date. Business dates use Central Time; Google uses each
             property's reporting timezone and may revise recent days.
           </p>
+          <section aria-label="Organic search results" className="border rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold">Jobs from organic search</h3>
+            <p className="text-sm text-muted-foreground">Saved inquiries attributed to organic search, including tagged Google Business Profile links. Outcomes belong to the inquiry cohorts above. These are business records; Analytics sessions and confirmation-page visits are counted separately.</p>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {(["leads", "qualified", "quoted", "won"] as const).map((key,i) => <Metric key={key}
+                label={["Organic inquiries","Qualified","Quoted","Won jobs"][i]}
+                value={String(organic[key])} detail={`Previous cohort: ${previousOrganic[key]}`} />)}
+            </div>
+          </section>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {(["leads", "qualified", "quoted", "won"] as const).map(
               (key, i) => (
@@ -317,6 +333,9 @@ export default function GrowthReport() {
                     sessions
                   </p>
                   <p className="text-sm">
+                    {c.traffic.rows.filter(row => row.medium === 'organic').reduce((n,row)=>n+row.sessions,0)} organic search sessions · all search engines
+                  </p>
+                  <p className="text-sm">
                     Updated {new Date(c.traffic.fetchedAt).toLocaleString()}
                     {c.traffic.partial ? " · Partial Google result" : ""}
                   </p>
@@ -343,7 +362,8 @@ export default function GrowthReport() {
                       <li key={row.page} className="py-2 break-words">
                         {row.page} · {row.impressions} impressions ·{" "}
                         {row.clicks} clicks · {(row.ctr * 100).toFixed(1)}%
-                        click rate
+                        click rate · average position {row.position.toFixed(1)}
+                        <span className="block text-muted-foreground">{row.position > 20 ? 'Improve service relevance, project evidence and links.' : row.position > 10 ? 'Strengthen useful details and links from related pages.' : 'Review search intent, title and description.'}</span>
                       </li>
                     ))}
                 </ul>

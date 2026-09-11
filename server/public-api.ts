@@ -611,19 +611,27 @@ export function registerPublicRoutes(app: Express): void {
 
   app.get("/api/public/portfolio", feedLimiter, (req, res) => {
     const site=z.enum(LEAD_SITES).safeParse(req.query.site||"metals");if(!site.success)return res.status(400).json({message:"Unknown trade."});
+    const offset=z.coerce.number().int().min(0).max(1000000).safeParse(req.query.offset||0);
+    if(!offset.success)return res.status(400).json({message:'Invalid portfolio offset.'});
     feedHeaders(res);
-    res.json({
-      site: site.data,
-      items: db.select({
+    const items = db.select({
+        id: portfolioItems.id,
+        city: portfolioItems.city,
+        scope: portfolioItems.scope,
+        materials: portfolioItems.materials,
+        titleEs: portfolioItems.titleEs,
+        scopeEs: portfolioItems.scopeEs,
+        serviceSlug: portfolioItems.serviceSlug,
+        workType: portfolioItems.workType,
+        projectPage: portfolioItems.projectPage,
         title: portfolioItems.title,
         category: portfolioItems.category,
         photoUrl: portfolioItems.photoUrl,
       })
         .from(portfolioItems)
         .where(and(eq(portfolioItems.published, true),eq(portfolioItems.site,site.data)))
-        .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt))
-        .limit(60)
-        .all(),
-    });
+        .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt), desc(portfolioItems.id))
+        .offset(offset.data).limit(61).all();
+    res.json({site:site.data,items:items.slice(0,60),nextOffset:items.length>60?offset.data+60:null});
   });
 }

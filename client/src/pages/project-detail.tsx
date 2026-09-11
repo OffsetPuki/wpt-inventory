@@ -1,3 +1,4 @@
+import PublicWorkEditor from '@/components/PublicWorkEditor';
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -65,100 +66,7 @@ interface Usage {
 // Publish the finished job to the cjmmetals.com "recent work" gallery.
 // Projects carry no photos of their own, so the dialog asks for one — the
 // server requires photoUrl and defaults the title to the project name.
-export function PublishPortfolioDialog({ project, onClose }: { project: Project; onClose: () => void }) {
-  const [title, setTitle] = useState(project.name);
-  const [category, setCategory] = useState("");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-
-  const publish = useApiMutation({
-    request: () => ({
-      method: "POST",
-      url: `/api/projects/${project.id}/publish-portfolio`,
-      body: {
-        title: title.trim() || undefined,
-        category: category.trim() || null,
-        photoUrl,
-      },
-    }),
-    invalidate: [["marketing", "portfolio"]],
-    successTitle: "Published — live on cjmmetals.com within ~5 minutes.",
-    errorTitle: "Could not publish",
-    onSuccess: onClose,
-  });
-
-  const pickPhoto = async (file: File) => {
-    setUploading(true);
-    try {
-      setPhotoUrl(await uploadPhoto(file));
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Upload failed", description: e?.message });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <Modal open onClose={onClose} title="Publish to website portfolio">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!photoUrl) {
-            toast({ variant: "destructive", title: "A photo of the finished work is required" });
-            return;
-          }
-          publish.mutate();
-        }}
-        className="flex flex-col gap-4"
-      >
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Title</span>
-          <input
-            className="h-11 w-full rounded-xl border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Category (optional)</span>
-          <input
-            className="h-11 w-full rounded-xl border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary"
-            placeholder="Gates, Fencing, Carports, Railings…"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          />
-        </label>
-        <div className="flex items-center gap-4">
-          {photoUrl ? (
-            <img src={photoUrl} alt="" className="h-24 w-24 rounded-lg border border-border object-cover" />
-          ) : (
-            <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground">
-              <ImageIcon className="h-8 w-8" />
-            </div>
-          )}
-          <label className="flex h-11 cursor-pointer items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:bg-accent">
-            {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-            {photoUrl ? "Replace photo" : "Upload photo"}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && pickPhoto(e.target.files[0])}
-            />
-          </label>
-        </div>
-        <button
-          type="submit"
-          disabled={publish.isPending || uploading}
-          className="mt-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
-        >
-          {publish.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-          Publish to website
-        </button>
-      </form>
-    </Modal>
-  );
-}
+export function PublishPortfolioDialog({ project, onClose }: { project: Project; onClose: () => void }) { return <PublicWorkEditor project={project} onClose={onClose}/>; }
 
 // ─── Job hub cards ───────────────────────────────────────────────────────────
 // The project page is the job's home base: who it's for (client card), what's

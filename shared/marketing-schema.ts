@@ -84,6 +84,14 @@ export const reviews = sqliteTable("mk_reviews", {
 // "Recent work" gallery published to www.cjmmetals.com — photos uploaded via
 // the normal /api/upload flow, curated and ordered here.
 export const portfolioItems = sqliteTable("mk_portfolio", {
+  city: text("city").notNull().default(""),
+  scope: text("scope").notNull().default(""),
+  materials: text("materials").notNull().default(""),
+  titleEs: text("title_es").notNull().default(""),
+  scopeEs: text("scope_es").notNull().default(""),
+  serviceSlug: text("service_slug").notNull().default(""),
+  workType: text("work_type").notNull().default("unspecified"),
+  projectPage: integer("project_page", { mode: "boolean" }).notNull().default(false),
   site: text("site").notNull().default("metals"),
   projectId: integer("project_id"),
   approvedBy: integer("approved_by"),
@@ -130,6 +138,19 @@ export const insertPortfolioItemSchema = createInsertSchema(portfolioItems).omit
   approvedAt: true,
   id: true,
   createdAt: true,
+}).extend({
+  title: z.string().trim().min(1).max(160),
+  site: z.enum(["metals", "concrete", "insulation", "trades"]).default("metals"),
+  photoUrl: z.string().max(500),
+  category: z.string().max(100).nullable().optional(),
+  city: z.string().trim().max(100).default(""),
+  scope: z.string().trim().max(2000).default(""),
+  materials: z.string().trim().max(500).default(""),
+  titleEs: z.string().trim().max(160).default(""),
+  scopeEs: z.string().trim().max(2000).default(""),
+  serviceSlug: z.string().regex(/^[a-z0-9-]*$/).max(100).default(""),
+  workType: z.enum(["unspecified", "completed", "process", "concept"]).default("unspecified"),
+  projectPage: z.boolean().default(false),
 });
 
 export const updateMarketingSettingsSchema = z.object({

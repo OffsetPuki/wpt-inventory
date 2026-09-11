@@ -22,6 +22,7 @@ import { pmTasks, type TaskKind } from "../shared/pm-schema";
 // Marketing only reads them for source/attribution reporting.
 import { leads, clients } from "../shared/crm-schema";
 import { pid, qstr, todayLocal, registerCreate } from "./http-util";
+import { projectReadiness, portfolioServices } from '../shared/portfolio';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -145,7 +146,7 @@ try {
   /* column already exists */
 }
 
-for(const [column,definition] of Object.entries({site:"TEXT NOT NULL DEFAULT 'metals'",project_id:'INTEGER',approved_by:'INTEGER',approved_at:'INTEGER'})){
+for(const [column,definition] of Object.entries({site:"TEXT NOT NULL DEFAULT 'metals'",project_id:'INTEGER',approved_by:'INTEGER',approved_at:'INTEGER',city:"TEXT NOT NULL DEFAULT ''",scope:"TEXT NOT NULL DEFAULT ''",materials:"TEXT NOT NULL DEFAULT ''",title_es:"TEXT NOT NULL DEFAULT ''",scope_es:"TEXT NOT NULL DEFAULT ''",service_slug:"TEXT NOT NULL DEFAULT ''",work_type:"TEXT NOT NULL DEFAULT 'unspecified'",project_page:'INTEGER NOT NULL DEFAULT 0'})){
  if(!(sqlite.prepare('PRAGMA table_info(mk_portfolio)').all() as any[]).some(c=>c.name===column))sqlite.exec(`ALTER TABLE mk_portfolio ADD COLUMN ${column} ${definition}`);
 }
 // Additive migration: mk_settings.lead_time_weeks (website banner) — same deal.
@@ -590,10 +591,26 @@ export function registerMarketingRoutes(app: Express): void {
     );
   });
 
-  registerCreate(app, "/api/marketing/portfolio", requireElevated, {
-    table: portfolioItems, schema: insertPortfolioItemSchema.extend({published: z.boolean().default(false)}),
-    action: "marketing.portfolio_create", targetType: "portfolio",
-    name: (r) => r.title, audit,
+  const validatePublication = (body: any, approved: unknown) => {
+    if(body.serviceSlug && !portfolioServices[body.site]?.[body.serviceSlug]) throw new Error('Choose a service for this trade.');
+    if(!body.published) return;
+    if(approved !== true) throw new Error('Confirm approval of the public photo and details.');
+    if(!/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(body.photoUrl) || !fs.existsSync(path.join(uploadsDir,path.basename(body.photoUrl)))) throw new Error('Choose an uploaded public photo.');
+    if(body.projectPage && projectReadiness(body).length) throw new Error('Complete the project page: '+projectReadiness(body).join(', ')+'.');
+  };
+  app.post('/api/marketing/portfolio', requireElevated, (req,res) => {
+    try {
+      const body=insertPortfolioItemSchema.parse({...req.body,published:req.body?.published===true});
+      validatePublication(body,req.body?.approved);
+      const create=()=>{
+        const row=db.insert(portfolioItems).values({...body,...(body.published?{approvedBy:req.user!.userId,approvedAt:Date.now()}:{})}).returning().get();
+        audit(req,'marketing.portfolio_create',{targetType:'portfolio',targetId:row.id,targetName:row.title});
+        return row;
+      };
+      const key=req.get('Idempotency-Key');
+      const row=key ? inventoryOnce(sqlite,req.user!.userId,z.string().min(8).max(100).parse(key),{action:'create-portfolio',...body},create) : create();
+      res.status(201).json(row);
+    } catch(e:any) { res.status(400).json({message:e.message}); }
   });
 
   app.patch("/api/marketing/portfolio/:id", requireElevated, (req, res) => {
@@ -603,11 +620,12 @@ export function registerMarketingRoutes(app: Express): void {
     let body;
     try {
       body = insertPortfolioItemSchema.partial().parse(req.body);
+      validatePublication({...before,...body},req.body?.approved);
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
     if (Object.keys(body).length === 0) return res.json(before);
-    const row = db.update(portfolioItems).set(body).where(eq(portfolioItems.id, id)).returning().get();
+    const row = db.update(portfolioItems).set({...body,...((body.published ?? before.published)?{approvedBy:req.user!.userId,approvedAt:Date.now()}:{})}).where(eq(portfolioItems.id, id)).returning().get();
     if (body.published !== undefined && body.published !== before.published) {
       audit(req, "marketing.portfolio_publish", {
         targetType: "portfolio", targetId: id, targetName: before.title,
@@ -616,7 +634,7 @@ export function registerMarketingRoutes(app: Express): void {
     }
     // What the website shows changed — log old and new, like create/delete
     // already do, so a bad edit can be traced and undone.
-    const changed = (["title", "category", "photoUrl"] as const).filter(
+    const changed = (["title", "category", "photoUrl", "site", "city", "scope", "materials", "titleEs", "scopeEs", "serviceSlug", "workType", "projectPage"] as const).filter(
       (k) => body[k] !== undefined && body[k] !== before[k],
     );
     if (changed.length) {
@@ -649,22 +667,24 @@ export function registerMarketingRoutes(app: Express): void {
     let body;
     try {
       body = insertPortfolioItemSchema.parse({
+        ...req.body,
         title: req.body?.title || project.name,
         category: req.body?.category ?? null,
         photoUrl: req.body?.photoUrl,
-        published: true,
+        published: req.body?.draft !== true,
+        site: project.site,
       });
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
     try {
-      if(project.status!=='done')throw new Error('Complete the job before publishing finished work.');
-      if(req.body.approved!==true)throw new Error('Confirm approval to publish this title and photo publicly.');
+      if(body.published && project.status!=='done')throw new Error('Complete the job before publishing finished work.');
+      validatePublication(body,req.body.approved);
       if(req.body.site!==project.site)throw new Error('The destination must match the job trade.');
-      if(!/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(body.photoUrl)||!fs.existsSync(path.join(uploadsDir,path.basename(body.photoUrl))))throw new Error('Choose an uploaded job photo.');
+      if(body.photoUrl && (!/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(body.photoUrl)||!fs.existsSync(path.join(uploadsDir,path.basename(body.photoUrl)))))throw new Error('Choose an uploaded job photo.');
       const requestKey=z.string().min(8).max(100).parse(req.body.requestKey);
       const row=inventoryOnce(sqlite,req.user!.userId,requestKey,{action:'publish-job',projectId:project.id,...body},()=>{
-        const row=db.insert(portfolioItems).values({...body,site:project.site,projectId:project.id,approvedBy:req.user!.userId,approvedAt:Date.now()}).returning().get();
+        const row=db.insert(portfolioItems).values({...body,site:project.site,projectId:project.id,approvedBy:body.published?req.user!.userId:null,approvedAt:body.published?Date.now():null}).returning().get();
         audit(req,'marketing.portfolio_create',{targetType:'project',targetId:project.id,targetName:row.title,details:{portfolioId:row.id,site:project.site,publicPhoto:row.photoUrl}});return row;
       });res.status(201).json(row);
     }catch(e:any){res.status(400).json({message:e.message});}
