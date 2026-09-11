@@ -1,4 +1,5 @@
 import { useState } from "react";
+import GrowthReport from '@/components/GrowthReport';
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useApiMutation } from "@/hooks/useApiMutation";
@@ -115,67 +116,8 @@ const tdRight = "px-3 py-2.5 text-right tabular-nums";
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab() {
-  const { data, isLoading } = useQuery<OverviewPayload>({
-    queryKey: ["marketing", "overview"],
-    queryFn: async () => (await apiRequest("GET", "/api/marketing/overview")).json(),
-  });
-  const { data: attribution } = useQuery<AttributionPayload>({
-    queryKey: ["marketing", "attribution"],
-    queryFn: async () => (await apiRequest("GET", "/api/marketing/attribution")).json(),
-  });
-
-  if (isLoading || !data) return <LoadingBlock />;
-
-  const w = data.thisWeek;
-  const bySource = attribution?.bySource ?? [];
-
-  return (
-    <div>
-      <AlertBanners alerts={data.alerts} />
-
-      <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <KpiCard label="Leads this week" value={w.leads} />
-        <KpiCard label="Quotes sent" value={w.quotesSent} sub="last 7 days" />
-        <KpiCard label="Close rate" value={formatPercent(w.closeRate, 0)} sub="this month" />
-        <KpiCard label="Revenue" value={formatMoney(w.revenueCents)} sub="this month" />
-        <KpiCard
-          label="Best source"
-          value={<span className="text-lg">{w.bestSource ? sourceLabel(w.bestSource.source) : "—"}</span>}
-          sub={w.bestSource ? `${w.bestSource.leads} lead${w.bestSource.leads === 1 ? "" : "s"} this week` : undefined}
-        />
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-5">
-        <SectionTitle>Where leads come from (all-time)</SectionTitle>
-        {bySource.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">No leads to attribute yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr>
-                  <th className={thCls}>Source</th>
-                  <th className={thRight}>Leads</th>
-                  <th className={thRight}>Won</th>
-                  <th className={thRight}>Revenue</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {bySource.map((s) => (
-                  <tr key={s.source}>
-                    <td className={cn(tdCls, "font-medium text-foreground")}>{sourceLabel(s.source)}</td>
-                    <td className={tdRight}>{s.leads}</td>
-                    <td className={tdRight}>{s.won}</td>
-                    <td className={cn(tdRight, "font-medium text-foreground")}>{formatMoney(s.revenueCents)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  const {data}=useQuery<MarketingStats>({queryKey:['marketing','stats'],queryFn:async()=>(await apiRequest('GET','/api/marketing/stats')).json()});
+  return <><AlertBanners alerts={data?.alerts||[]}/><GrowthReport/></>;
 }
 
 // ─── Reviews tab ──────────────────────────────────────────────────────────────
@@ -735,7 +677,7 @@ export default function MarketingPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Marketing" description="Reviews, the website portfolio, and where leads come from" />
+      <Header title="Marketing" description="Website inquiries, job outcomes, reviews and approved project photos" />
 
       <div className="mb-6 flex flex-wrap gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1">
         {TABS.map((t) => (

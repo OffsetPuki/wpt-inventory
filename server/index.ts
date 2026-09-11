@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { startLeadMeasurement } from './lead-measurement';
+import { startGrowthReporting } from './growth';
 import { startSuiteWorker } from "./suite-worker"; // loads .env (e.g. ANTHROPIC_API_KEY) before anything reads env
 import express from "express";
 import http from "http";
@@ -142,6 +144,8 @@ startBusinessAutomations();
 
 // ── Register routes ──
 registerRoutes(app);
+  startLeadMeasurement();
+  startGrowthReporting();
 startSuiteWorker();
 // Dashboard "Needs attention" feed — reuses the sweep's queries (Phase D #20c).
 registerAttentionRoute(app);

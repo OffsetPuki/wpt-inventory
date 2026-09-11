@@ -691,18 +691,28 @@ export function registerPublicPortalRoutes(app: Express): void {
     email: string | null;
     invoice_id: number | null;
     client_id: number | null;
+    lead_id: number | null;
     submitted_at: number | null;
   }
   const findReviewRequest = (token: string): ReviewRequestRow | undefined =>
     sqlite.prepare(
-      "SELECT id, token, name, email, invoice_id, client_id, submitted_at FROM review_requests WHERE token = ?",
+      "SELECT id, token, name, email, invoice_id, client_id, lead_id, submitted_at FROM review_requests WHERE token = ?",
     ).get(String(token)) as ReviewRequestRow | undefined;
 
   app.get("/api/public/review-request/:token", publicLimiter(60), (req, res) => {
     const rr = findReviewRequest(String(req.params.token));
     if (!rr) return res.json({ ok: false, reason: "unknown" });
-    if (rr.submitted_at != null) return res.json({ ok: false, reason: "used" });
-    res.json({ ok: true, name: (rr.name ?? "").trim().split(/\s+/)[0] || "" });
+    const leadId=rr.lead_id ?? (rr.invoice_id == null ? null : (sqlite.prepare('SELECT COALESCE(i.lead_id,p.lead_id,q.lead_id) lead_id FROM fin_invoices i LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN quotes q ON q.id=i.quote_id WHERE i.id=?').get(rr.invoice_id) as any)?.lead_id);
+    const site=leadId == null ? null : (sqlite.prepare('SELECT site FROM crm_leads WHERE id=?').get(leadId) as any)?.site;
+    const profiles:Record<string,{brand:string;googleProfileUrl:string}>={
+      metals:{brand:'CJM Metals',googleProfileUrl:'https://maps.google.com/?cid=15884306771721707171'},
+      concrete:{brand:'CJM Concrete',googleProfileUrl:'https://share.google/lzboKjzQ5ozdqaEjP'},
+    };
+    // Every rating gets the same optional Google link, including used invitations.
+    // Unknown trades and unverified profiles never inherit another shop's link.
+    const profile=profiles[site] || {};
+    if (rr.submitted_at != null) return res.json({ ok: false, reason: "used",...profile });
+    res.json({ ok: true, name: (rr.name ?? "").trim().split(/\s+/)[0] || "",...profile });
   });
 
   const reviewSubmitSchema = z.object({

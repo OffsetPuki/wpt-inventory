@@ -1,4 +1,5 @@
 import { qualificationSchema, saveLeadIntake, hasLeadReceipt, registerLeadExperience } from './lead-experience';
+import { saveLeadAttribution } from './lead-measurement';
 import { saveLeadPhoto } from "./media";
 import type { Express } from "express";
 import path from "path";
@@ -100,6 +101,7 @@ function saveDesignPng(designPng: unknown): string | null {
 // The website form (name/phone/email/service/city + message) plus attribution
 // context the form controller collects: page path, language, UTM params.
 const intakeSchema = z.object({
+  attribution: z.unknown().optional(),
   receiptToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   qualification: qualificationSchema.optional(),
   name: z.string().trim().min(1).max(200),
@@ -449,6 +451,7 @@ export function registerPublicRoutes(app: Express): void {
     }
 
     saveLeadIntake(row.id, site, body);
+    saveLeadAttribution(row.id, site, body.attribution);
 
     // The saved snapshot doubles as the lead's first photo — it shows up in
     // the CRM photo strip like any shop-floor upload.

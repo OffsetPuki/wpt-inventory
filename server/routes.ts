@@ -1,4 +1,5 @@
 import { registerInventoryRoutes } from "./inventory";
+import { registerGrowthRoutes } from './growth';
 import { registerRecordVersions } from "./suite-versions";
 import { registerCreateOnce } from './suite-create-once';
 import { registerSuiteRoutes } from "./suite";
@@ -816,6 +817,7 @@ export function registerRoutes(app: Express): void {
   // ─── Business suite modules ────────────────────────────────────────────
 
   registerMarketingRoutes(app);
+  registerGrowthRoutes(app);
   registerCrmRoutes(app);
   registerPmRoutes(app);
   registerHrRoutes(app);
