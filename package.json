@@ -8,7 +8,7 @@
     "build": "vite build && esbuild server/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --packages=external",
     "start": "node dist/index.cjs",
     "db:push": "drizzle-kit push",
-    "test": "tsx scripts/check-suite.mjs && tsx scripts/check-suite-connections.mjs && tsx scripts/check-suite-recovery.mjs && tsx scripts/check-inventory.mjs && node scripts/check-draft-saves.mjs && node scripts/quote-engine-smoke.mjs && node scripts/check-quote-trades.mjs && node scripts/quote-number-check.mjs && tsx scripts/mailer-archive-check.mjs && tsx scripts/email-templates-check.mjs && tsx scripts/check-lead-quote-close.mjs && tsx scripts/check-release.mjs",
+    "test": "tsx scripts/check-lead-experience.mjs && tsx scripts/check-suite.mjs && tsx scripts/check-suite-connections.mjs && tsx scripts/check-suite-recovery.mjs && tsx scripts/check-inventory.mjs && node scripts/check-draft-saves.mjs && node scripts/quote-engine-smoke.mjs && node scripts/check-quote-trades.mjs && node scripts/quote-number-check.mjs && tsx scripts/mailer-archive-check.mjs && tsx scripts/email-templates-check.mjs && tsx scripts/check-lead-quote-close.mjs && tsx scripts/check-release.mjs",
     "check": "tsc --noEmit",
     "test:browser": "playwright test"
   },

@@ -1,3 +1,4 @@
+import { LeadQueue } from '@/components/LeadIntake';
 import { TimeReview } from "./suite-reviews";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -59,6 +60,7 @@ export default function TodayPage() {
           </>
         )}
       </div>
+      {isElevated && <LeadQueue />}
       {data.isError ? (
         <RetryBlock query={data} />
       ) : data.isPending ? (

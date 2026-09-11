@@ -1,3 +1,4 @@
+import { qualificationSchema, saveLeadIntake, hasLeadReceipt, registerLeadExperience } from './lead-experience';
 import { saveLeadPhoto } from "./media";
 import type { Express } from "express";
 import path from "path";
@@ -99,6 +100,8 @@ function saveDesignPng(designPng: unknown): string | null {
 // The website form (name/phone/email/service/city + message) plus attribution
 // context the form controller collects: page path, language, UTM params.
 const intakeSchema = z.object({
+  receiptToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  qualification: qualificationSchema.optional(),
   name: z.string().trim().min(1).max(200),
   // Which family website is submitting; absent = the original metals site.
   site: z.enum(LEAD_SITES).optional(),
@@ -326,6 +329,7 @@ function noteBadIntakeKey(): void {
 }
 
 export function registerPublicRoutes(app: Express): void {
+  registerLeadExperience(app, hasLeadKey);
   app.post("/api/public/leads", intakeLimiter, (req, res) => {
     // Shared secret: the website's server sends X-Lead-Key. Unset env means
     // the pipe is intentionally closed (e.g. local dev) — 503, not 401, so
@@ -348,8 +352,11 @@ export function registerPublicRoutes(app: Express): void {
     }
 
     if(body.submissionId) {
-      const receipt=sqlite.prepare("SELECT lead_id FROM web_lead_receipts WHERE submission_id=?").get(body.submissionId) as any;
-      if(receipt)return res.status(200).json({ok:true,id:receipt.lead_id,deduped:true});
+      const receipt=sqlite.prepare("SELECT r.lead_id,l.site FROM web_lead_receipts r JOIN crm_leads l ON l.id=r.lead_id WHERE submission_id=? AND l.deleted_at IS NULL").get(body.submissionId) as any;
+      if(receipt) {
+        if(receipt.site!==(body.site||'metals'))return res.status(409).json({message:'Submission belongs to another trade.'});
+        return res.status(200).json({ok:true,id:receipt.lead_id,deduped:true,receiptEnabled:hasLeadReceipt(receipt.lead_id,receipt.site,body.receiptToken)});
+      }
     }
     let photoUrls:string[]=[];
     try {photoUrls=(body.photos || []).map(saveLeadPhoto);}
@@ -367,6 +374,7 @@ export function registerPublicRoutes(app: Express): void {
     // form captured is ever lost.
     const noteLines = [
       body.message,
+      ...Object.entries(body.qualification || {}).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`),
       "—",
       `From ${domain}${body.page ?? ""}${body.lang === "es" ? " (Español)" : ""}`,
       body.timeline ? `Timeline: ${body.timeline}` : null,
@@ -439,6 +447,8 @@ export function registerPublicRoutes(app: Express): void {
         stage: "new",
       }).returning().get();
     }
+
+    saveLeadIntake(row.id, site, body);
 
     // The saved snapshot doubles as the lead's first photo — it shows up in
     // the CRM photo strip like any shop-floor upload.
@@ -551,7 +561,7 @@ export function registerPublicRoutes(app: Express): void {
     return {row,dupe};
     })();
     res.status(201).json(
-      dupe ? { ok: true, id: row.id, deduped: true } : { ok: true, id: row.id },
+      { ok: true, id: row.id, deduped: !!dupe, receiptEnabled: hasLeadReceipt(row.id, body.site || 'metals', body.receiptToken) },
     );
   });
 
@@ -576,9 +586,11 @@ export function registerPublicRoutes(app: Express): void {
     message: { message: "rate limited" },
   });
 
-  app.get("/api/public/reviews", feedLimiter, (_req, res) => {
+  app.get("/api/public/reviews", feedLimiter, (req, res) => {
+    const site=z.enum(LEAD_SITES).safeParse(req.query.site||"metals");if(!site.success)return res.status(400).json({message:"Unknown trade."});
     feedHeaders(res);
     res.json({
+      site: site.data,
       reviews: db.select({
         author: reviews.author,
         rating: reviews.rating,
@@ -587,7 +599,7 @@ export function registerPublicRoutes(app: Express): void {
         date: reviews.reviewDate,
       })
         .from(reviews)
-        .where(eq(reviews.published, true))
+        .where(and(eq(reviews.published, true),eq(reviews.site,site.data)))
         .orderBy(desc(reviews.reviewDate), desc(reviews.id))
         .limit(50)
         .all(),

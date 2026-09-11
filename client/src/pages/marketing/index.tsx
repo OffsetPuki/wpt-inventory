@@ -197,6 +197,7 @@ function Stars({ rating }: { rating: number }) {
 }
 
 function ReviewDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [reviewSite,setReviewSite]=useState("metals");
   const [source, setSource] = useState<ReviewSource>("google");
   const [author, setAuthor] = useState("");
   const [rating, setRating] = useState("5");
@@ -209,6 +210,7 @@ function ReviewDialog({ open, onClose }: { open: boolean; onClose: () => void })
       url: "/api/marketing/reviews",
       body: {
         source,
+        site:reviewSite,
         author: author.trim() || null,
         rating: parseInt(rating, 10),
         reviewDate: date || null,
@@ -230,6 +232,7 @@ function ReviewDialog({ open, onClose }: { open: boolean; onClose: () => void })
         }}
         className="flex flex-col gap-4"
       >
+        <label className="flex flex-col gap-1.5">Trade<select className={inputCls} value={reviewSite} onChange={e=>setReviewSite(e.target.value)}>{["metals","concrete","insulation","trades"].map(site=><option key={site}>{site}</option>)}</select></label>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Source</span>
@@ -309,7 +312,7 @@ function ReviewsTab() {
       qc.invalidateQueries({ queryKey: ["marketing"] });
       toast({
         variant: "success",
-        title: row.published ? "Published to cjmmetals.com" : "Removed from the website",
+        title: row.published ? `Published to CJM ${row.site}` : "Removed from the website",
         description: row.published ? "The site picks it up within ~5 minutes." : undefined,
       });
     },
@@ -348,7 +351,7 @@ function ReviewsTab() {
             <div key={r.id} className="rounded-xl border border-border bg-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3">
-                  <Stars rating={r.rating} />
+                  <Stars rating={r.rating} /><span className={cn(chipCls, neutralChip)}>CJM {r.site}</span>
                   <span className={cn(chipCls, neutralChip)}>{REVIEW_SOURCE_LABELS[r.source]}</span>
                   {r.author && <span className="text-sm font-medium text-foreground">{r.author}</span>}
                   {r.clientName && r.clientName !== r.author && (
@@ -362,7 +365,7 @@ function ReviewsTab() {
                   <button
                     onClick={() => togglePublished.mutate(r)}
                     disabled={togglePublished.isPending}
-                    title={r.published ? "Shown on cjmmetals.com — click to unpublish" : "Publish to the website testimonials"}
+                    title={`Publish only to CJM ${r.site} — confirm the review belongs to this trade`}
                     className={cn(
                       smallBtn,
                       r.published &&

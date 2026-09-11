@@ -257,3 +257,13 @@ export const suiteStockLots = sqliteTable(
     unique().on(t.receiptId),
   ],
 );
+
+export const crmLeadIntake = sqliteTable('crm_lead_intake', {
+ leadId:integer('lead_id').primaryKey(), context:text('context').notNull().default('{}'), firstContactAt:integer('first_contact_at'), qualifiedAt:integer('qualified_at'), surveyAt:integer('survey_at'), updatedAt:integer('updated_at').notNull(),
+});
+export const webLeadAccess = sqliteTable('web_lead_access', {
+ tokenHash:text('token_hash').primaryKey(), leadId:integer('lead_id').notNull(), site:text('site').notNull(), expiresAt:integer('expires_at').notNull(),
+},t=>[index('idx_web_lead_access_lead').on(t.leadId)]);
+export const webLeadSupplements = sqliteTable('web_lead_supplements', {
+ submissionId:text('submission_id').primaryKey(), tokenHash:text('token_hash').notNull(), payloadHash:text('payload_hash').notNull(), createdAt:integer('created_at').notNull(),
+});

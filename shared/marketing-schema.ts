@@ -54,6 +54,7 @@ export const campaigns = sqliteTable("mk_campaigns", {
 });
 
 export const reviews = sqliteTable("mk_reviews", {
+  site: text("site", {enum:["metals","concrete","insulation","trades"]}).notNull().default("metals"),
   id: integer("id").primaryKey({ autoIncrement: true }),
   source: text("source", { enum: REVIEW_SOURCES }).notNull().default("google"),
   author: text("author"),

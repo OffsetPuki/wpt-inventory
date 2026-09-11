@@ -59,6 +59,7 @@ export function initializeSuite() {
       "crm_clients",
       "crm_leads",
       "crm_activities",
+      "crm_lead_intake",
       "quotes",
       "quote_settings",
     ],

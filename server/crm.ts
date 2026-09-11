@@ -1,3 +1,4 @@
+import { recordHumanContact } from './lead-experience';
 import { listWindow } from './pagination';
 import { acceptQuote } from "./quote-lifecycle";
 import type { Express } from "express";
@@ -799,6 +800,11 @@ export function registerCrmRoutes(app: Express): void {
     name: (r) => r.name, details: (r) => ({ source: r.source }), audit,
   });
 
+  app.get('/api/crm/leads/:id', requireAuth, (req,res)=>{
+    const row=db.select().from(leads).where(and(eq(leads.id,Number(req.params.id)),isNull(leads.deletedAt))).get();
+    return row?res.json(row):res.status(404).json({message:'Lead not found'});
+  });
+
   // Convert a lead into a client record. Idempotent: if the lead was already
   // converted (clientId set and the client still exists), return that client
   // instead of minting a duplicate.
@@ -1119,7 +1125,8 @@ export function registerCrmRoutes(app: Express): void {
       }).returning().get();
       // Logging contact against a lead is contact: refresh lastContactAt and
       // clear the stale flag the marketing sweep may have set.
-      if (data.entityType === "lead") {
+      if (data.entityType === "lead" && ["call", "email", "meeting"].includes(data.kind)) {
+        recordHumanContact(data.entityId);
         db.update(leads)
           .set({ lastContactAt: Date.now(), stale: false })
           .where(and(eq(leads.id, data.entityId), isNull(leads.deletedAt)))

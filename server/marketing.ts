@@ -136,6 +136,7 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_review_requests_created ON review_requests(created_at);
 `);
 
+if (!(sqlite.pragma('table_info(mk_reviews)') as {name:string}[]).some(c=>c.name==='site')) sqlite.exec("ALTER TABLE mk_reviews ADD COLUMN site TEXT NOT NULL DEFAULT 'metals'");
 // Additive migration: mk_reviews.published arrived after installs existed.
 // SQLite has no IF NOT EXISTS for columns — the throw on re-run is expected.
 try {

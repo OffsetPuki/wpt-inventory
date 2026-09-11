@@ -1,3 +1,4 @@
+import { LeadIntake } from '@/components/LeadIntake';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
@@ -78,6 +79,8 @@ const STAGE_TONE: Record<LeadStage, ChipTone> = {
 // Closing a lead also closes its open quotes server-side (crm.ts,
 // closeQuotesForLead), so the Saved list and the dashboard tile go with it.
 const LEAD_KEYS: QueryKey[] = [
+  ["crm-lead-funnel"],
+  ["crm-lead-intake"],
   ["crm-leads"],
   ["crm-stats"],
   ["crm-reports"],
@@ -457,6 +460,7 @@ function LeadDetailModal({
   return (
     <Modal open onClose={onClose} title={lead.name} maxWidth="max-w-2xl">
       <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto pr-1">
+        {isElevated && <LeadIntake id={lead.id} />}
         <section className="rounded-xl border border-border p-4">
           <h3 className="font-semibold">This job</h3>
           {detailFailed && <p role="alert">Linked records could not load. <button className="underline" onClick={() => retryDetail()}>Retry</button></p>}
@@ -797,7 +801,8 @@ export default function LeadsPage() {
   };
 
   const listLeads = stage ? leads.filter((l) => l.stage === stage) : leads;
-  const detailLead = detailId != null ? leads.find((l) => l.id === detailId) : undefined;
+  const linkedLead = useQuery<Lead>({queryKey:['crm-lead',detailId],queryFn:async()=>(await apiRequest('GET',`/api/crm/leads/${detailId}`)).json(),enabled:detailId!==null&&!leads.some(l=>l.id===detailId)});
+  const detailLead = detailId != null ? leads.find((l) => l.id === detailId) ?? linkedLead.data : undefined;
 
   const selectCls =
     "h-11 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
