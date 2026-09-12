@@ -1,4 +1,5 @@
 import {esc,round,wallLength,ridgeHeight,framePositions,WALLS} from './model.js';
+import {wallFramingLayout} from './wall-framing.js';
 const points = a => a.map(p=>p.map(round).join(',')).join(' ');
 const poly=(a,fill,extra='')=>`<polygon points="${points(a)}" fill="${fill}" ${/\bstroke=/.test(extra)?'':'stroke="#43494b"'} ${/\bstroke-width=/.test(extra)?'':'stroke-width="1"'} ${extra}/>`;
 const line=(a,b,extra='')=>`<line x1="${round(a[0])}" y1="${round(a[1])}" x2="${round(b[0])}" y2="${round(b[1])}" ${/\bstroke=/.test(extra)?'':'stroke="#45545a"'} ${extra}/>`;
@@ -6,7 +7,18 @@ const text=(x,y,s,extra='')=>`<text x="${round(x)}" y="${round(y)}" font-family=
 export function wallPoint(s,wall,u,y,out=0){return wall==='front'?[u,y,-out]:wall==='right'?[s.width+out,y,u]:wall==='back'?[s.width-u,y,s.depth+out]:[-out,y,s.depth-u];}
 export function elevationTransform(s,wall){const length=wallLength(s,wall),top=ridgeHeight(s),scale=Math.min(740/length,360/top);return {scale,left:(900-length*scale)/2,base:440};}
 function dim(a,b,label){return line(a,b,'stroke-width="0.7"')+line([a[0]-4,a[1]-4],[a[0]+4,a[1]+4])+line([b[0]-4,b[1]-4],[b[0]+4,b[1]+4])+text((a[0]+b[0])/2,(a[1]+b[1])/2+19,label,'text-anchor="middle"');}
-export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',interactive=false}={}){
+function drawWallFraming(s,wall,p){
+ const {frames,girts,scale}=wallFramingLayout(s,wall);let out='';
+ const rect=(a,b,c,d)=>poly([p(a,b),p(c,b),p(c,d),p(a,d)],s.trimColor,'stroke-width=".5"');
+ for(const g of girts){out+=line(p(g.a,g.y),p(g.b,g.y),'stroke="#597a87" stroke-width="2"');for(const j of g.joints)out+=rect(j.face,g.y-.07*scale,j.face+j.dir*.2*scale,g.y+.07*scale);}
+ for(const f of frames){
+  for(const j of f.jambs)out+=rect(j.web,j.lower,j.web+j.sign*j.width,j.upper);
+  out+=rect(f.jambs[0].hi,f.top,f.jambs[1].lo,f.top+f.headWidth);
+  if(f.sillWidth)out+=rect(f.jambs[0].hi,f.opening.sill-f.sillWidth,f.jambs[1].lo,f.opening.sill);
+ }
+ return out;
+}
+export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',interactive=false,rotation=0}={}){
  const W=s.width,D=s.depth,H=s.height,R=ridgeHeight(s),es=lang==='es';
  let out='<rect width="900" height="540" fill="#f2f0e9"/>';
  const framed=mode==='frame';
@@ -19,8 +31,7 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   if(framed){
    const cols=['front','back'].includes(view)?[0,L]:framePositions(s).map(z=>view==='right'?z:D-z);
    for(const u of cols)out+=line(p(u,0),p(u,H),'stroke-width="5"');
-   const rows=Math.ceil(H/s.wallSpacing);
-   for(let i=1;i<=rows;i++){const y=i*H/rows;let x=0;for(const o of s.openings.filter(o=>o.wall===view&&y>o.sill&&y<o.sill+o.height).sort((a,b)=>a.x-b.x)){out+=line(p(x,y),p(o.x,y),'stroke="#89754c" stroke-width="2"');x=o.x+o.width;}out+=line(p(x,y),p(L,y),'stroke="#89754c" stroke-width="2"');}
+   out+=drawWallFraming(s,view,p);
    if(['front','back'].includes(view))out+=line(p(0,H),p(L/2,R),'stroke-width="5"')+line(p(L/2,R),p(L,H),'stroke-width="5"');
   }
   for(const porch of s.porches.filter(p=>p.wall===view)){
@@ -50,12 +61,17 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   out+=text(30,30,es?'Planta exterior · sin distribución interior':'Shell plan · no interior layout');
  }else{
   // Orthographic axonometric projection: all components share world coordinates.
-  const raw=([x,y,z])=>[(x-W/2)*.84+(z-D/2)*.57,(x-W/2)*.28-(z-D/2)*.38-y];
+  const angle=(34+rotation)*Math.PI/180,c=Math.cos(angle),sn=Math.sin(angle);
+  const raw=([x,y,z])=>[(x-W/2)*c+(z-D/2)*sn,((x-W/2)*sn-(z-D/2)*c)*.47-y];
+  const facing={front:c,right:sn,back:-c,left:-sn},visible=WALLS.filter(w=>facing[w]>1e-7);
   const pad=Math.max(s.overhang,...s.porches.map(p=>p.depth),1),corners=[];
   for(const x of [-pad,W+pad])for(const z of [-pad,D+pad])for(const y of [0,R])corners.push(raw([x,y,z]));
   const minX=Math.min(...corners.map(p=>p[0])),maxX=Math.max(...corners.map(p=>p[0])),minY=Math.min(...corners.map(p=>p[1])),maxY=Math.max(...corners.map(p=>p[1]));
   const k=Math.min(790/(maxX-minX),420/(maxY-minY)),p=v=>{const r=raw(v);return [450+(r[0]-(minX+maxX)/2)*k,267+(r[1]-(minY+maxY)/2)*k];};
   const path=a=>'M'+a.map(v=>p(v).map(round).join(',')).join('L')+'Z';
+  const drawPorch=porch=>{let markup='';const outer=porch.height-porch.depth*porch.pitch/12,wp=(u,y,d=0)=>wallPoint(s,porch.wall,u,y,d),n=Math.ceil(porch.width/10);for(let i=0;i<=n;i++){const u=porch.x+i*porch.width/n;markup+=line(p(wp(u,0,porch.depth)),p(wp(u,outer,porch.depth)),'stroke-width="4"')+line(p(wp(u,outer,porch.depth)),p(wp(u,porch.height)),'stroke-width="3"');}return markup+poly([wp(porch.x,porch.height),wp(porch.x+porch.width,porch.height),wp(porch.x+porch.width,outer,porch.depth),wp(porch.x,outer,porch.depth)].map(p),framed?'none':s.roofColor);};
+  // Far porches are covered by the building, near porches cover its walls.
+  for(const porch of s.porches.filter(p=>!visible.includes(p.wall)))out+=drawPorch(porch);
   out+=poly([p([0,0,0]),p([W,0,0]),p([W,0,D]),p([0,0,D])],'#ded9cc');
   for(const z of framePositions(s)){
    for(const x of [0,W])out+=line(p([x,0,z]),p([x,H,z]),`stroke-width="${s.frame==='ibeam'?5:4}"`);
@@ -64,7 +80,7 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   const rows=Math.ceil((W/2)*Math.hypot(1,s.pitch/12)/s.roofSpacing);
   for(let i=0;i<=rows;i++)for(const side of [0,1]){const x=side?W-i*W/2/rows:i*W/2/rows,y=H+Math.min(x,W-x)*s.pitch/12;out+=line(p([x,y,0]),p([x,y,D]),'stroke="#9b783b" stroke-width="2"');}
   // Rear faces are hidden in shell view; in frame view show all girt runs.
-  for(const wall of (framed?WALLS:['right','front'])){
+  for(const wall of (framed||!s.wallPanel?WALLS:visible)){
    const L=wallLength(s,wall),wp=(u,y)=>wallPoint(s,wall,u,y),shape=[wp(0,0),wp(L,0),wp(L,H),...(['front','back'].includes(wall)?[wp(L/2,R)]:[]),wp(0,H)];
    const holes=s.openings.filter(o=>o.wall===wall);
    if(!framed&&s.wallPanel){
@@ -72,13 +88,14 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
     out+=`<path d="${d}" fill="${mode==='insulation'&&s.wallInsulation!=='none'?'#ddd0a1':s.wallColor}" fill-rule="evenodd" stroke="${s.trimColor}"/>`;
     for(let u=1;u<L;u+=1){let bottom=0;const top=['front','back'].includes(wall)?H+Math.min(u,L-u)*s.pitch/12:H;for(const o of holes.filter(o=>u>o.x&&u<o.x+o.width).sort((a,b)=>a.sill-b.sill)){out+=line(p(wp(u,bottom)),p(wp(u,o.sill)),'stroke-opacity=".18"');bottom=o.sill+o.height;}out+=line(p(wp(u,bottom)),p(wp(u,top)),'stroke-opacity=".18"');}
    }
-   if(framed||!s.wallPanel){const count=Math.ceil(H/s.wallSpacing);for(let i=1;i<=count;i++){const y=i*H/count;let x=0;for(const o of holes.filter(o=>y>o.sill&&y<o.sill+o.height).sort((a,b)=>a.x-b.x)){out+=line(p(wp(x,y)),p(wp(o.x,y)),'stroke="#89754c" stroke-width="2"');x=o.x+o.width;}out+=line(p(wp(x,y)),p(wp(L,y)),'stroke="#89754c" stroke-width="2"');}}
+   if(framed||!s.wallPanel)out+=drawWallFraming(s,wall,(u,y)=>p(wp(u,y)));
    for(const o of holes){const coords=[wp(o.x,o.sill),wp(o.x+o.width,o.sill),wp(o.x+o.width,o.sill+o.height),wp(o.x,o.sill+o.height)];out+=poly(coords.map(p),framed?'none':o.kind==='window'?'#aec7d1':'#e8e4da','stroke-width="3"');if(!framed&&o.kind==='window')out+=line(p(wp(o.x+o.width/2,o.sill)),p(wp(o.x+o.width/2,o.sill+o.height)));if(!framed&&o.kind==='overhead')for(let y=1;y<o.height;y++)out+=line(p(wp(o.x,o.sill+y)),p(wp(o.x+o.width,o.sill+y)),'stroke-opacity=".45"');}
-   if(interactive&&['front','right'].includes(wall))out+=poly(shape.map(p),'transparent',`${wallAttrs(wall)} style="stroke:transparent;pointer-events:all"`);
+   if(interactive&&visible.includes(wall))out+=poly(shape.map(p),'transparent',`${wallAttrs(wall)} style="stroke:transparent;pointer-events:all"`);
   }
-  if(!framed&&s.roofPanel){const e=s.overhang,edge=H-e*s.pitch/12;for(const [a,b] of [[W/2,W+e],[-e,W/2]]){const ya=a===W/2?R:edge,yb=b===W/2?R:edge;out+=poly([p([a,ya,-e]),p([b,yb,-e]),p([b,yb,D+e]),p([a,ya,D+e])],mode==='insulation'&&s.roofInsulation!=='none'?'#d6be84':s.roofColor);for(let z=-e;z<=D+e;z+=1)out+=line(p([a,ya,z]),p([b,yb,z]),'stroke="#fff" stroke-opacity=".24"');}}
-  for(const porch of s.porches){const outer=porch.height-porch.depth*porch.pitch/12,wp=(u,y,d=0)=>wallPoint(s,porch.wall,u,y,d),n=Math.ceil(porch.width/10);for(let i=0;i<=n;i++){const u=porch.x+i*porch.width/n;out+=line(p(wp(u,0,porch.depth)),p(wp(u,outer,porch.depth)),'stroke-width="4"')+line(p(wp(u,outer,porch.depth)),p(wp(u,porch.height)),'stroke-width="3"');}out+=poly([wp(porch.x,porch.height),wp(porch.x+porch.width,porch.height),wp(porch.x+porch.width,outer,porch.depth),wp(porch.x,outer,porch.depth)].map(p),framed?'none':s.roofColor);}
-  out+=dim(p([0,0,-2]),p([W,0,-2]),`${W} ft`)+text(28,34,es?'Vista axonométrica a escala':'Scaled axonometric view')+text(28,59,`${W} × ${D} ft · ${H} ft ${es?'alero':'eave'} · ${s.pitch}:12`);
+  if(!framed&&s.roofPanel){const e=s.overhang,edge=H-e*s.pitch/12,slopes=[[-e,W/2],[W/2,W+e]];if(sn<0)slopes.reverse();for(const [a,b] of slopes){const ya=a===W/2?R:edge,yb=b===W/2?R:edge;out+=poly([p([a,ya,-e]),p([b,yb,-e]),p([b,yb,D+e]),p([a,ya,D+e])],mode==='insulation'&&s.roofInsulation!=='none'?'#d6be84':s.roofColor);for(let z=-e;z<=D+e;z+=1)out+=line(p([a,ya,z]),p([b,yb,z]),'stroke="#fff" stroke-opacity=".24"');}}
+  for(const porch of s.porches.filter(p=>visible.includes(p.wall)))out+=drawPorch(porch);
+  const dz=c>=0?-2:D+2;
+  out+=dim(p([0,0,dz]),p([W,0,dz]),`${W} ft`)+text(28,34,es?'Vista axonométrica a escala':'Scaled axonometric view')+text(28,59,`${W} × ${D} ft · ${H} ft ${es?'alero':'eave'} · ${s.pitch}:12`);
  }
  out+=text(24,525,es?'Concepto exterior · dimensiones en pies · no es un plano estructural':'Exterior concept · dimensions in feet · not a structural drawing');
  return out;

@@ -13,8 +13,16 @@ test('Website design imports, edits, persists and produces a quote specification
  await page.goto(app.base+'/#/crm/quotes');await page.getByRole('button',{name:'Find design',exact:true}).click();
  await page.getByRole('button',{name:/Start barndominium quote from this design/}).click();
  const editor=page.locator('.barndo');await expect(editor.locator('[data-key="depth"]')).toHaveValue('64');
+ await editor.locator('[data-action="rotate-left"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','30');
+ await editor.locator('[data-action="reset-drawing"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','0');
  await editor.locator('[data-action="mode"][data-value="frame"]').click();await expect(editor.locator('[data-action="mode"][data-value="frame"]')).toHaveAttribute('aria-pressed','true');
+ await editor.locator('[data-action="view"][data-value="home"]').click();
+ await expect(editor.locator('.bd-home3d canvas')).toBeVisible({timeout:20000});
+ await editor.locator('.bd-home3d canvas').screenshot({path:'test-results/barndominium-zee-frame.png'});
  await editor.locator('[data-action="mode"][data-value="shell"]').click();
+ await expect(editor.locator('.bd-home3d canvas')).toHaveCount(1);
+ await editor.locator('.bd-home3d canvas').screenshot({path:'test-results/barndominium-porch-fascia.png'});
+ await editor.locator('[data-action="view"][data-value="iso"]').click();
  await editor.locator('[data-action="step"][data-value="finish"]').click();await editor.locator('[data-key="roofInsulation"]').selectOption('fiberglass');await expect(editor.locator('[data-key="wallInsulation"]')).toBeVisible();
  await editor.locator('[data-action="step"][data-value="building"]').click();
  await editor.locator('[data-key="depth"]').fill('68');await editor.locator('[data-key="depth"]').press('Tab');

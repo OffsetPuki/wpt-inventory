@@ -85,6 +85,7 @@ export function mergeByMaterial(buckets) {
     if (!merged) continue;
     const mesh = new THREE.Mesh(merged, material);
     mesh.castShadow = true;
+    mesh.receiveShadow = true;
     group.add(mesh);
   }
   return group;
@@ -154,6 +155,50 @@ function organic(geo, amt, seed) {
 
 // Renderer + camera + controls + lights + shadow ground. Returns null when
 // WebGL is unavailable — callers fall back to the 2D preview.
+// Shared daylight: one shadow-casting sun and neutral reflected light.
+// Keep the shadow camera around the product, including large custom buildings.
+export function setupDaylight(renderer, scene) {
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
+  const environment = pmrem.fromScene(room, 0.04);
+  room.dispose(); pmrem.dispose();
+  scene.environment = environment.texture;
+  scene.environmentIntensity = 0.55;
+  scene.add(new THREE.HemisphereLight(0xf5f8ff, 0xaaa69e, 0.65));
+  const sun = new THREE.DirectionalLight(0xfff7ed, 3.2);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(coarse ? 1024 : 2048, coarse ? 1024 : 2048);
+  sun.shadow.bias = -0.00008;
+  sun.shadow.normalBias = 0.025;
+  scene.add(sun, sun.target);
+  function fit(x, y, z, radius) {
+    const r = Math.max(12, radius * 1.25);
+    sun.target.position.set(x, y, z);
+    sun.position.set(x-r, y+r*1.7, z+r*.8);
+    Object.assign(sun.shadow.camera, {left:-r, right:r, top:r, bottom:-r, near:.1, far:r*5});
+    sun.shadow.camera.updateProjectionMatrix();
+  }
+  fit(0, 0, 0, 60);
+  return {sun, fit, dispose(){environment.dispose(); sun.shadow.dispose();}};
+}
+
+// Small linear roughness map adds a subtle powder-coat grain without changing
+// the selected paint color or downloading texture files.
+export function finishTexture(renderer) {
+  const canvas=document.createElement('canvas'); canvas.width=canvas.height=128;
+  const ctx=canvas.getContext('2d'), pixels=ctx.createImageData(128,128), random=lcg(37);
+  for(let i=0;i<pixels.data.length;i+=4){const v=210+Math.floor(random()*40);pixels.data.set([v,v,v,255],i);}
+  ctx.putImageData(pixels,0,0);
+  const texture=new THREE.CanvasTexture(canvas);
+  texture.wrapS=texture.wrapT=THREE.RepeatWrapping; texture.repeat.set(8,8);
+  texture.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());
+  return texture;
+}
+
 export function createViewer(wrap) {
   const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
   const dpr = window.devicePixelRatio || 1;
@@ -176,9 +221,8 @@ export function createViewer(wrap) {
   wrap.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.65;
+  const daylight = setupDaylight(renderer, scene);
+  const finish = finishTexture(renderer);
 
   const camera = new THREE.PerspectiveCamera(35, 16 / 9, 0.1, 600);
   camera.position.set(30, 20, 45);
@@ -193,28 +237,16 @@ export function createViewer(wrap) {
   // One finger orbits (OrbitControls' default) — the preview is capped at
   // 32vh and sticks to the top, so the page still scrolls everywhere below it.
 
-  scene.add(new THREE.HemisphereLight(0xfff8ee, 0x8a8478, 1.1));
-  const key = new THREE.DirectionalLight(0xfff2e2, 1.9);
-  key.position.set(28, 42, 18);
-  key.castShadow = true;
-  key.shadow.mapSize.set(coarse ? 1024 : 2048, coarse ? 1024 : 2048);
-  key.shadow.camera.left = -80;
-  key.shadow.camera.right = 80;
-  key.shadow.camera.top = 80;
-  key.shadow.camera.bottom = -80;
-  key.shadow.camera.far = 200;
-  key.shadow.bias = -0.0005;
-  scene.add(key);
-
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(400, 400),
-    new THREE.ShadowMaterial({ opacity: 0.13 }),
+    new THREE.ShadowMaterial({ opacity: 0.3 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
-  let active = true;
+  let active = true, dirty = true;
+  controls.addEventListener('change', () => { dirty = true; });
   const resize = () => {
     const w = wrap.clientWidth;
     const h = wrap.clientHeight;
@@ -222,15 +254,16 @@ export function createViewer(wrap) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    dirty = true;
   };
   resize();
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(wrap);
   else window.addEventListener('resize', resize);
 
   renderer.setAnimationLoop(() => {
-    if (!active) return;
+    if (!active || document.hidden) return;
     controls.update();
-    renderer.render(scene, camera);
+    if (dirty) { renderer.render(scene, camera); dirty = false; }
   });
 
   // Aim the camera at (cx,cy,cz) fitting `radius`. initial=true sets the
@@ -240,6 +273,11 @@ export function createViewer(wrap) {
   // still move with the design, so update() pulls them out only if the new
   // size no longer fits where they were standing.
   function frame(cx, cy, cz, radius, initial) {
+    dirty = true;
+    daylight.fit(cx, cy, cz, Math.max(35, radius));
+    scene.traverse(o=>{if(o.isMesh){o.receiveShadow=true;for(const m of Array.isArray(o.material)?o.material:[o.material]){
+      if(m.isMeshStandardMaterial && m.metalness>.2 && m.roughness>.2 && !m.roughnessMap){m.roughnessMap=finish;m.needsUpdate=true;}
+    }}});
     const dist = (radius / Math.tan(((camera.fov * Math.PI) / 180) / 2)) * 1.15;
     const held = camera.position.clone().sub(controls.target);
     controls.target.set(cx, cy, cz);
@@ -253,7 +291,7 @@ export function createViewer(wrap) {
 
   return {
     THREE, renderer, scene, camera, controls, frame,
-    setActive(v) { active = v; },
+    setActive(v) { active = v; if (v) { dirty = true; resize(); } },
   };
 }
 

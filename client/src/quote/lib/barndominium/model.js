@@ -39,7 +39,11 @@ export function validate(s) {
  for(const p of s.porches){
   if(ids.has(p.id)||!p.id)errors.push({code:'id',id:p.id});ids.add(p.id);
   if(p.x<0||p.width<=0||p.x+p.width>wallLength(s,p.wall)||p.depth<1||p.depth>30||p.pitch<1||p.pitch>5||!Number.isInteger(p.pitch)||p.height>=s.height||p.height-p.depth*p.pitch/12<=0)errors.push({code:'porch-bounds',id:p.id});
+  if(s.roofPanel&&['left','right'].includes(p.wall)&&s.pitch>p.pitch&&p.height>=s.height-Math.min(s.overhang,p.depth)*(s.pitch-p.pitch)/12-.25)errors.push({code:'porch-eave',id:p.id});
   for(const o of s.openings)if(o.wall===p.wall&&o.x<p.x+p.width&&o.x+o.width>p.x&&o.sill+o.height>=p.height-0.25)errors.push({code:'porch-opening',id:o.id});
+  const k=p.pitch/12,scale=Math.min(1,s.width/4,s.depth/4,s.height/4,p.width/2,p.depth/2,(p.height-p.depth*k)/2);
+  const clearHeight=p.height-(.4*k+1.03*Math.hypot(1,k)+.325)*scale-.05;
+  for(const o of s.openings)if(o.wall===p.wall&&o.x<p.x+p.width&&o.x+o.width>p.x&&o.sill+o.height< p.height-.25&&o.sill+o.height>=clearHeight)errors.push({code:'porch-clearance',id:o.id});
  }
  for(let i=0;i<s.porches.length;i++)for(const b of s.porches.slice(i+1)){const a=s.porches[i];if(a.wall===b.wall&&a.x<b.x+b.width&&a.x+a.width>b.x)errors.push({code:'porch-overlap',id:a.id});}
  return errors;
@@ -92,7 +96,7 @@ export function spec(s,lang='en',{technical=true}={}) {
  [es?'Estructura':'Frame',`${s.frame==='ibeam'?'I-beam':'Steel post'} · ${t.frames} ${es?'marcos':'frames'} · ${round(s.depth/(t.frames-1))} ft ${es?'entre marcos':'bay spacing'}`],
  [es?'Correas':'Secondary framing',`CEE ${es?'techo':'roof'} @ ≤${s.roofSpacing} ft · ZEE ${es?'muros':'walls'} @ ≤${s.wallSpacing} ft`],
  ]:[]),
- [es?'Lámina':'Panels',`${es?'Techo':'Roof'}: ${s.roofPanel?'corrugated':'none'} ${s.roofColor} · ${es?'Muros':'Walls'}: ${s.wallPanel?'corrugated':'none'} ${s.wallColor}`],
+ [es?'Lámina':'Panels',`${es?'Techo':'Roof'}: ${s.roofPanel?'R-panel':'none'} ${s.roofColor} · ${es?'Muros':'Walls'}: ${s.wallPanel?'R-panel':'none'} ${s.wallColor}`],
  ...(technical?[[es?'Aislamiento':'Insulation',`${es?'Techo':'Roof'}: ${s.roofInsulation} · ${es?'Muros':'Walls'}: ${s.wallInsulation}`]]:[]),
  ...s.openings.map((o,i)=>[`${kind(o.kind)} ${i+1}`,`${wall(o.wall)} · ${o.width} × ${o.height} ft · ${es?'desde izquierda':'from left'} ${o.x} ft · ${es?'antepecho':'sill'} ${o.sill} ft`]),
  ...s.porches.map((p,i)=>[`${es?'Porche':'Porch'} ${i+1}`,`${wall(p.wall)} · ${p.width} × ${p.depth} ft · ${es?'desde izquierda':'from left'} ${p.x} ft · ${p.height} ft ${es?'adosado':'attachment'} · ${p.pitch}:12`]),

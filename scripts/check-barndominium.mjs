@@ -26,5 +26,5 @@ const ls=buildLineState('barndominium',s,DEFAULT_PRICE_BOOK,{});assert.ok(ls.ite
 const insulated={...s,wallInsulation:'fiberglass',roofInsulation:'spray-foam'};const edited=buildLineState('barndominium',insulated,DEFAULT_PRICE_BOOK,{items:{'building-cee':{rate:4.5}}});assert.equal(edited.items.find(i=>i.key==='building-cee').rate,4.5);assert.ok(edited.items.some(i=>i.key==='building-wall-insulation'));
 // Both deployments own copies, with a release check preventing geometry drift.
 const website=new URL('../../CJM/src/lib/barndominium/',import.meta.url);
-if(fs.existsSync(website))for(const name of ['model.js','drawing.js','editor.js','editor.css','home3d.js','scenery.js'])assert.equal(fs.readFileSync(new URL(name,website),'utf8'),fs.readFileSync(new URL('../client/src/quote/lib/barndominium/'+name,import.meta.url),'utf8'),name+' must match between apps');
+if(fs.existsSync(website))for(const name of ['model.js','drawing.js','editor.js','editor.css','home3d.js','scenery.js','panels.js','framing3d.js','wall-framing.js'])assert.equal(fs.readFileSync(new URL(name,website),'utf8'),fs.readFileSync(new URL('../client/src/quote/lib/barndominium/'+name,import.meta.url),'utf8'),name+' must match between apps');
 console.log('Barndominium geometry, constraints, takeoff, import, rates and shared-code parity passed.');

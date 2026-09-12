@@ -922,13 +922,13 @@ function estimateBarndominium(s) {
  add('building-rafters','Main roof rafters — section by engineering','length',t.rafterFeet);
  add('building-cee','CEE roof purlins — net run, laps and waste to review','length',t.ceeFeet);
  add('building-zee','ZEE wall girts — net run, laps and waste to review','length',t.zeeFeet);
- if(s.roofPanel)add('building-roof','Corrugated roof panels — net slope area, including overhangs','area',t.roof);
- if(s.wallPanel)add('building-walls','Corrugated wall panels — net area after openings','area',t.wallNet);
+ if(s.roofPanel)add('building-roof','R-panel roof panels — net slope area, including overhangs','area',t.roof);
+ if(s.wallPanel)add('building-walls','R-panel wall panels — net area after openings','area',t.wallNet);
  if(s.roofInsulation!=='none')add('building-roof-insulation','Roof insulation: '+s.roofInsulation+' — thickness to confirm','area',round2(s.width*s.depth*Math.hypot(1,s.pitch/12)));
  if(s.wallInsulation!=='none')add('building-wall-insulation','Wall insulation: '+s.wallInsulation+' — thickness to confirm','area',t.wallNet);
  add('building-opening-frames','Opening jambs, headers and window sills — section to confirm','length',t.openingTrim);
  for(const o of s.openings)add('building-opening-'+o.id,o.kind+' — '+o.width+' × '+o.height+' ft ('+o.wall+')','unit',1);
- for(const p of s.porches){add('building-porch-'+p.id,'Porch steel package — '+p.width+' × '+p.depth+' ft ('+p.wall+'), posts / beams / CEE','unit',1);add('building-porch-roof-'+p.id,'Porch corrugated roof — '+p.wall,'area',round2(p.width*p.depth*Math.hypot(1,p.pitch/12)));}
+ for(const p of s.porches){add('building-porch-'+p.id,'Porch steel package — '+p.width+' × '+p.depth+' ft ('+p.wall+'), posts / beams / CEE','unit',1);add('building-porch-roof-'+p.id,'Porch R-panel roof — '+p.wall,'area',round2(p.width*p.depth*Math.hypot(1,p.pitch/12)));}
  add('building-trim','Ridge, eave and corner trim / closures / flashing — confirm scope','flat',1);
  add('building-connections','Base plates, anchors, connections and bracing — engineering allowance','flat',1);
  return {items,laborHours:0,installHours:0};
