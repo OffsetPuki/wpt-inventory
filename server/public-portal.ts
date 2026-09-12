@@ -1,4 +1,6 @@
 import { acceptQuote } from "./quote-lifecycle";
+import {quoteOptionLink} from './quote-options';
+import {customerBarndoSpecs,cleanBarndoQuote} from '../client/src/quote/lib/barndoQuote.js';
 import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -231,8 +233,11 @@ export function quoteDocument(quote: Quote): QuoteDoc | null {
         label: typeLabel(quote.type),
         summary: str(summaryLine(quote.type, sess.state), 300),
       },
-      specs: (specRows(quote.type, sess.state) as { label: string; value: string }[])
-        .slice(0, 30)
+      specs: [...(specRows(quote.type, sess.state) as { label: string; value: string }[])
+        .filter(sp=>!(quote.type==='barndominium'&&cleanBarndoQuote(sess.overrides?.barndoQuote).scopeEnabled&&sp.label==='Scope')),
+        ...(quote.type==='barndominium'?customerBarndoSpecs(sess.overrides,sess.customer?.preferredLanguage||'en'):[]),
+        ...(quoteOptionLink(quote.id)?[{label:sess.customer?.preferredLanguage==='es'?'Opción':'Option',value:`${quoteOptionLink(quote.id)!.position} — ${quoteOptionLink(quote.id)!.title}${quoteOptionLink(quote.id)!.recommended?' · CJM recommended':''}` }]:[])]
+        .slice(0, 85)
         .map((sp) => ({ label: str(sp.label, 60), value: str(sp.value, 160) })),
       notes: str(sess.notes, 2000),
       materials,
@@ -513,6 +518,7 @@ export function registerPublicPortalRoutes(app: Express): void {
       quote: {
         number: quote.number,
         type: quote.type,
+        options:quoteOptionLink(quote.id),
         typeLabel: QUOTE_TYPE_LABELS[quote.type],
         customerName: quote.customerName,
         status: quote.status,
@@ -653,7 +659,8 @@ export function registerPublicPortalRoutes(app: Express): void {
     const cust = parseJson<{ customer?: { email?: string; phone?: string } }>(
       quote.payload, {},
     ).customer ?? {};
-    onQuoteEvent("declined", {
+    const otherOptionOpen=sqlite.prepare("SELECT 1 FROM quote_option_members a JOIN quote_option_members b ON b.set_id=a.set_id JOIN quotes q ON q.id=b.quote_id WHERE a.quote_id=? AND q.id!=? AND q.status IN ('sent','accepted') LIMIT 1").get(quote.id,quote.id);
+    if(!otherOptionOpen)onQuoteEvent("declined", {
       quoteNumber: quote.number,
       name: quote.customerName,
       email: cust.email,
@@ -671,7 +678,7 @@ export function registerPublicPortalRoutes(app: Express): void {
         `Total:     $${(quote.totalCents / 100).toFixed(2)}\n` +
         `Reason:    ${WIN_LOSS_REASON_LABELS[reason]}\n` +
         (note ? `\nCustomer note:\n${note}\n` : "") +
-        `\nThe lead is marked lost in CRM with that reason.`;
+        (otherOptionOpen?`\nAnother option remains available or accepted; the job was not marked lost.`:`\nThe lead is marked lost in CRM with that reason.`);
       setImmediate(() => {
         void sendOwnerMail({ subject: `[CJM Suite] Quote declined — ${quote.number}`, text });
       });

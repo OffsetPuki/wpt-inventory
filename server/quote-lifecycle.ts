@@ -38,6 +38,8 @@ export function acceptQuote(
   const result = sqlite.transaction(() => {
     const quote = db.select().from(quotes).where(eq(quotes.id, id)).get();
     if (!quote || quote.deletedAt != null) throw new Error("Quote not found");
+    const optionSet=sqlite.prepare('SELECT s.* FROM quote_option_sets s JOIN quote_option_members m ON m.set_id=s.id WHERE m.quote_id=?').get(id) as any;
+    if(optionSet?.accepted_quote_id&&optionSet.accepted_quote_id!==id)throw new Error('Another option has already been accepted for this job.');
     if (quote.status === "declined")
       throw new Error("This quote was declined. Request a new revision.");
     const alreadyAccepted = quote.status === "accepted";
@@ -108,6 +110,11 @@ export function acceptQuote(
         );
     }
     const now = Date.now();
+    if(optionSet){
+      sqlite.prepare('UPDATE quote_option_sets SET accepted_quote_id=? WHERE id=?').run(id,optionSet.id);
+      sqlite.prepare("UPDATE quotes SET status='declined',declined_at=?,decline_reason='scope_changed',decline_note=? WHERE id IN (SELECT quote_id FROM quote_option_members WHERE set_id=? AND quote_id!=?) AND status='sent'")
+        .run(now,`Customer selected alternative ${quote.number}`,optionSet.id,id);
+    }
     db.update(quotes)
       .set({
         leadId,

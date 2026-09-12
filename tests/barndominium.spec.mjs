@@ -1,0 +1,34 @@
+import {test,expect} from '@playwright/test';
+import {testApp} from '../scripts/test-app.mjs';
+import {fresh,spec} from '../client/src/quote/lib/barndominium/model.js';
+let app,token;
+test.beforeAll(async()=>{app=await testApp({serve:true});const response=await app.api('/api/security/password','POST',{currentPassword:'1234',password:'Barndominium fixture 2026'},app.owner);expect(response.status).toBe(200);token=response.data.token;});
+test.afterAll(async()=>app.close());
+test('Website design imports, edits, persists and produces a quote specification',async({page})=>{
+ await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ const state=fresh();state.depth=64;state.porches=[{id:'porch-site',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];
+ const lead=await app.api('/api/public/leads','POST',{site:'metals',name:'Barndo customer',email:'barndo@example.test',service:'Barndominium',designRef:'CJM-B123ABC',designSource:'configurator-barndominium',designSpec:spec(state).map(r=>r.join(': ')).join('\n'),designState:JSON.stringify({type:'barndominium',state})},undefined,{'X-Lead-Key':'test-intake-key'});
+ expect(lead.status).toBe(201);
+ await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);
+ await page.goto(app.base+'/#/crm/quotes');await page.getByRole('button',{name:'Find design',exact:true}).click();
+ await page.getByRole('button',{name:/Start barndominium quote from this design/}).click();
+ const editor=page.locator('.barndo');await expect(editor.locator('[data-key="depth"]')).toHaveValue('64');
+ await editor.locator('[data-action="mode"][data-value="frame"]').click();await expect(editor.locator('[data-action="mode"][data-value="frame"]')).toHaveAttribute('aria-pressed','true');
+ await editor.locator('[data-action="mode"][data-value="shell"]').click();
+ await editor.locator('[data-action="step"][data-value="finish"]').click();await editor.locator('[data-key="roofInsulation"]').selectOption('fiberglass');await expect(editor.locator('[data-key="wallInsulation"]')).toBeVisible();
+ await editor.locator('[data-action="step"][data-value="building"]').click();
+ await editor.locator('[data-key="depth"]').fill('68');await editor.locator('[data-key="depth"]').press('Tab');
+ await expect.poll(()=>{const row=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();return row?JSON.parse(row.payload).state.depth:null;}).toBe(68);
+ await page.getByText('Edit pricing',{exact:false}).first().click();
+ await page.getByLabel('CEE roof purlins — net run, laps and waste to review rate',{exact:true}).fill('4.5');
+ await expect.poll(()=>{const q=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();return q?Number(JSON.parse(q.payload).overrides?.items?.['building-cee']?.rate):null;}).toBe(4.5);
+ const row=app.sqlite.prepare("SELECT * FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();const saved=JSON.parse(row.payload);expect(saved.state.porches).toEqual(state.porches);expect(saved.state.openings).toEqual(state.openings);expect(saved.state.roofInsulation).toBe('fiberglass');
+ await page.reload();await page.getByRole('button',{name:/Continue draft/}).click();await expect(page.locator('[data-key="depth"]')).toHaveValue('68');
+ for(const [key,value] of [['width','20'],['depth','25']]){await editor.locator(`[data-key="${key}"]`).fill(value);await editor.locator(`[data-key="${key}"]`).press('Tab');await expect(editor.locator(`[data-key="${key}"]`)).toHaveValue(value);}
+ await expect.poll(()=>{const q=app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(row.id);const s=JSON.parse(q.payload).state;return [s.width,s.depth,s.openings[1].x];}).toEqual([20,25,15.75]);
+ await page.reload();await page.getByRole('button',{name:/Continue draft/}).click();await expect(editor.locator('[data-key="width"]')).toHaveValue('20');await expect(editor.locator('[data-key="depth"]')).toHaveValue('25');
+ const share='ba'.repeat(24);app.sqlite.prepare('UPDATE quotes SET share_token=? WHERE id=?').run(share,row.id);const doc=await(await fetch(app.base+'/api/public/quote/'+share+'?preview=1')).json();expect(doc.quote.doc.project.label).toBe('Barndominium');expect(JSON.stringify(doc.quote.doc.specs)).toContain('CEE');expect(JSON.stringify(doc.quote.doc.specs)).toContain('Porch');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ await page.screenshot({path:'test-results/barndominium-suite-mobile.png',animations:'disabled'});
+ const invalid={...saved,state:{...saved.state,width:3}};const rejected=await app.api('/api/quotes','POST',{type:'barndominium',payload:invalid},token);expect(rejected.status).toBe(400);
+});

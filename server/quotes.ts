@@ -1,3 +1,8 @@
+import {normalize as normalizeBarndo,validate as validateBarndo} from '../client/src/quote/lib/barndominium/model.js';
+import {cleanBarndoQuote,purchasing,scopeIssues} from '../client/src/quote/lib/barndoQuote.js';
+import {computeTotals} from '../client/src/quote/lib/quote.js';
+import {duplicateSession} from '../client/src/quote/lib/store.js';
+import {registerQuoteOptionRoutes} from './quote-options';
 import { projectLabor } from './labor-cost';
 import { jobStockCost } from './stock-cost';
 import { communicationContext, localizedLink } from "./communication";
@@ -57,7 +62,31 @@ sqlite.exec(`
     shop TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS barndominium_quote_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    state TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS quote_option_sets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    request_key TEXT NOT NULL UNIQUE,
+    recommended_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    accepted_quote_id INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS quote_option_members (
+    quote_id INTEGER PRIMARY KEY REFERENCES quotes(id),
+    set_id INTEGER NOT NULL REFERENCES quote_option_sets(id),
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    UNIQUE(set_id,position)
+  );
 `);
+try{sqlite.exec("ALTER TABLE quote_option_sets ADD COLUMN language TEXT NOT NULL DEFAULT 'en'");}catch{/* Existing installations already have the column. */}
 
 // Additive migration: the share/accept lifecycle arrived after installs
 // existed. Existing rows default to 'draft' — exactly right, since none of
@@ -112,6 +141,14 @@ function normalizePayload(body: Record<string, unknown>): void {
     body.payload = JSON.stringify(body.payload);
   }
   const parsed = parseJson<any>(body.payload as string, null);
+  if (body.type === 'barndominium' || parsed?.type === 'barndominium') {
+    if(parsed?.type !== 'barndominium' || !parsed.state || !Array.isArray(parsed.state.openings) || !Array.isArray(parsed.state.porches) || parsed.state.openings.length>40 || parsed.state.porches.length>8) throw new Error('Invalid barndominium design.');
+    const clean=normalizeBarndo(parsed.state);
+    if(validateBarndo(clean).length) throw new Error('Review building dimensions, openings and porch clearances before saving.');
+    parsed.state=clean;
+    if(parsed.overrides?.barndoQuote)parsed.overrides.barndoQuote=cleanBarndoQuote(parsed.overrides.barndoQuote);
+    body.payload=JSON.stringify(parsed);
+  }
   if (parsed?.customer?.clientId != null && (!Number.isInteger(parsed.customer.clientId) || !sqlite.prepare('SELECT 1 FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(parsed.customer.clientId))) throw new Error('Choose an active customer or remove the customer link.');
   if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("payload must be a JSON object");
@@ -176,6 +213,25 @@ function insertQuoteWithNumber(
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerQuoteRoutes(app: Express): void {
+  registerQuoteOptionRoutes(app);
+  app.get('/api/quotes/barndominium-templates', requireAuth, (_req, res) => {
+    const rows=sqlite.prepare('SELECT id,name,state,created_at AS createdAt FROM barndominium_quote_templates ORDER BY name COLLATE NOCASE').all() as {id:number;name:string;state:string;createdAt:number}[];
+    res.json(rows.map(row=>({...row,state:JSON.parse(row.state)})));
+  });
+  app.post('/api/quotes/barndominium-templates', requireAuth, (req, res) => {
+    try {
+      const name=typeof req.body?.name==='string'?req.body.name.trim():'';
+      if(!name||name.length>80)return res.status(400).json({message:'Enter a template name of 1–80 characters.'});
+      const body:Record<string,unknown>={type:'barndominium',payload:{type:'barndominium',state:req.body?.state}};
+      normalizePayload(body);
+      const state=JSON.parse(body.payload as string).state;
+      const row=sqlite.prepare('INSERT INTO barndominium_quote_templates(name,state,created_by,created_at) VALUES(?,?,?,?) RETURNING id,name,state,created_at AS createdAt').get(name,JSON.stringify(state),req.user!.userId,Date.now()) as {id:number;name:string;state:string;createdAt:number};
+      audit(req,'quote.template_create',{targetType:'quote_template',targetId:row.id,targetName:row.name});
+      res.status(201).json({...row,state:JSON.parse(row.state)});
+    } catch(error:any){
+      res.status(error.code==='SQLITE_CONSTRAINT_UNIQUE'?409:400).json({message:error.code==='SQLITE_CONSTRAINT_UNIQUE'?'That template name already exists. Choose another name to keep both designs.':error.message});
+    }
+  });
   const pid = (v: string | string[]): number => parseInt(v as string, 10);
 
   // ─── Settings (literal path — registered before /:id) ────────────────────
@@ -386,6 +442,12 @@ export function registerQuoteRoutes(app: Express): void {
       .filter((n) => Number.isFinite(n) && n > 0)
       .slice(0, 50);
     if (ids.length === 0) return res.status(400).json({ message: "ids required" });
+    const selectedOptionSets=new Set<number>();
+    for(const id of ids){const option=sqlite.prepare('SELECT m.set_id,s.accepted_quote_id FROM quote_option_members m JOIN quote_option_sets s ON s.id=m.set_id WHERE m.quote_id=?').get(id) as any;if(!option)continue;
+      if(selectedOptionSets.has(option.set_id))return res.status(400).json({message:'Choose only one alternative per job for the buy list. Option 1 and Option 2 must not be added together.'});
+      if(option.accepted_quote_id&&option.accepted_quote_id!==id)return res.status(400).json({message:'Use the accepted option for this job’s buy list.'});
+      selectedOptionSets.add(option.set_id);
+    }
 
     const agg = new Map<string, { id: string; name: string; unit: string; qty: number }>();
     const perQuote: any[] = [];
@@ -401,9 +463,16 @@ export function registerQuoteRoutes(app: Express): void {
         const ls = buildLineState(q.type, sess.state, book, sess.overrides) as any;
         const mats = materialTotals(ls.items, book) as
           { id: string; name: string; unit: string; qty: number }[];
+        const buy=q.type==='barndominium'?purchasing(sess.state,sess.overrides?.barndoQuote):null;
+        if(buy)for(const item of buy.rows){
+          const specKey=item.key.startsWith('building-walls-')?'walls':item.key.startsWith('building-porch-roof-')?'roof':item.key.replace('building-','');
+          const spec=(cleanBarndoQuote(sess.overrides?.barndoQuote).specs as Record<string,string>)[specKey]||'';
+          const name=[item.name,spec,item.detail].filter(Boolean).join(' — ');
+          mats.push({id:`barndo:${name}`,name,unit:item.unit,qty:item.qty});
+        }
         perQuote.push({
           quoteId: q.id, number: q.number, type: q.type,
-          customerName: q.customerName, materials: mats,
+          customerName: q.customerName, materials: mats, purchasingIssues:buy?.issues||[],
         });
         for (const m of mats) {
           const cur = agg.get(m.id) || { ...m, qty: 0 };
@@ -440,7 +509,7 @@ export function registerQuoteRoutes(app: Express): void {
       )!);
     }
     if ((QUOTE_STATUSES as readonly string[]).includes(status)) conditions.push(eq(quotes.status, status as typeof QUOTE_STATUSES[number]));
-    if (trade === 'metals') conditions.push(inArray(quotes.type, ['fence','gate','carport','railing','pergola','table','custom']));
+    if (trade === 'metals') conditions.push(inArray(quotes.type, ['barndominium','fence','gate','carport','railing','pergola','table','custom']));
     else if (trade === 'concrete' || trade === 'insulation') conditions.push(eq(quotes.type, trade));
     const where = and(...conditions);
     const total = paged ? db.select({ n: sql<number>`count(*)` }).from(quotes).where(where).get()!.n : 0;
@@ -525,6 +594,22 @@ export function registerQuoteRoutes(app: Express): void {
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
+  });
+
+  app.post('/api/quotes/:id/alternative',requireAuth,(req,res)=>{
+    try {
+      const original=db.select().from(quotes).where(and(eq(quotes.id,pid(req.params.id)),isNull(quotes.deletedAt))).get();
+      if(!original||original.type!=='barndominium')return res.status(404).json({message:'Building quote not found.'});
+      if(original.status!=='draft')return res.status(409).json({message:'Create alternatives before issuing the quotes.'});
+      if(req.body?.version!==original.version)return res.status(409).json({message:'The quote changed. Reopen it before making an alternative.'});
+      const source=parseJson<any>(original.payload,{}),key=typeof req.body?.requestKey==='string'?req.body.requestKey:'';
+      if(!/^[a-zA-Z0-9-]{16,80}$/.test(key))throw new Error('A copy request key is required.');
+      const draftKey=`${req.user!.userId}:alternative:${original.id}:${key}`;
+      const prior=db.select().from(quotes).where(eq(quotes.draftKey,draftKey)).get();if(prior)return res.json(prior);
+      const copy={...duplicateSession(source,crypto.randomUUID()),customer:source.customer,leadId:original.leadId,copiedFromNumber:original.number,alternativeOf:original.id,priceBookSnapshot:source.priceBookSnapshot,priceBookSnapshotAt:source.priceBookSnapshotAt};
+      const row=insertQuoteWithNumber({type:'barndominium',customerName:original.customerName,leadId:original.leadId,totalCents:original.totalCents,payload:JSON.stringify(copy),draftKey});
+      audit(req,'quote.alternative_create',{targetType:'quote',targetId:row.id,targetName:row.number,details:{originalId:original.id}});res.status(201).json(row);
+    }catch(error:any){res.status(400).json({message:error.message});}
   });
 
   app.post("/api/quotes/:id/revision", requireAuth, (req, res) => {
@@ -614,6 +699,12 @@ export function registerQuoteRoutes(app: Express): void {
       }
       return res.json({ url: localizedLink(`${PUBLIC_SITE_URL}/quote/${token}?preview=1`, communicationContext({quoteNumber:quote.number}).lang), emailed: false });
     }
+
+    const scopeSession=parseJson<any>(quote.payload,{});
+    const scopeBook=effectiveBook(scopeSession);
+    const issues=quote.type==='barndominium'&&scopeSession.state&&scopeSession.overrides?.barndoQuote?.scopeEnabled
+      ?scopeIssues(scopeSession,computeTotals(buildLineState(quote.type,scopeSession.state,scopeBook,scopeSession.overrides),{...scopeSession,minJobCharge:scopeBook.minJobCharge})):[];
+    if(issues.length)return res.status(400).json({message:issues.join(' ')});
 
     const updates: Partial<typeof quotes.$inferInsert> = { shareToken: token };
     if (quote.status === "draft") {

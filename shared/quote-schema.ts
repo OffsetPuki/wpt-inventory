@@ -15,7 +15,7 @@ import { z } from "zod";
 // "concrete" and "insulation" are the sister shops' trades (flatwork and
 // industrial insulation) quoted through the same builder — their configurator
 // schemas + estimators live beside the metals ones in client/src/quote.
-export const QUOTE_TYPES = ["fence", "gate", "carport", "railing", "pergola", "table", "concrete", "insulation", "custom"] as const;
+export const QUOTE_TYPES = ["barndominium", "fence", "gate", "carport", "railing", "pergola", "table", "concrete", "insulation", "custom"] as const;
 export type QuoteType = (typeof QUOTE_TYPES)[number];
 
 // Share/accept lifecycle: draft (builder only) → sent (share link created) →
@@ -129,6 +129,7 @@ export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
   fence: "Fence",
   gate: "Gate",
   carport: "Carport",
+  barndominium: "Barndominium",
   railing: "Railing",
   pergola: "Pergola",
   table: "Table",

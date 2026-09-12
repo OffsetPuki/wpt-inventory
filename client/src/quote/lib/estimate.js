@@ -1,3 +1,4 @@
+import {takeoff as barndoTakeoff,validate as validateBarndo} from './barndominium/model.js';
 // =============================================================================
 //  Estimate — the bridge between a design and a price.
 //
@@ -914,7 +915,26 @@ function estimateCustom() {
   return { items: [], laborHours: 0, installHours: 0 };
 }
 
-const ESTIMATORS = { fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable, concrete: estimateConcrete, insulation: estimateInsulation, custom: estimateCustom };
+function estimateBarndominium(s) {
+ const t=barndoTakeoff(s),items=[];
+ const add=(key,name,kind,qty)=>{if(qty>0)items.push({key,name,kind,qty,rate:0,unpriced:true});};
+ add('building-columns',s.frame==='ibeam'?'I-beam columns — section by engineering':'Steel posts — section by engineering','length',t.columnFeet);
+ add('building-rafters','Main roof rafters — section by engineering','length',t.rafterFeet);
+ add('building-cee','CEE roof purlins — net run, laps and waste to review','length',t.ceeFeet);
+ add('building-zee','ZEE wall girts — net run, laps and waste to review','length',t.zeeFeet);
+ if(s.roofPanel)add('building-roof','Corrugated roof panels — net slope area, including overhangs','area',t.roof);
+ if(s.wallPanel)add('building-walls','Corrugated wall panels — net area after openings','area',t.wallNet);
+ if(s.roofInsulation!=='none')add('building-roof-insulation','Roof insulation: '+s.roofInsulation+' — thickness to confirm','area',round2(s.width*s.depth*Math.hypot(1,s.pitch/12)));
+ if(s.wallInsulation!=='none')add('building-wall-insulation','Wall insulation: '+s.wallInsulation+' — thickness to confirm','area',t.wallNet);
+ add('building-opening-frames','Opening jambs, headers and window sills — section to confirm','length',t.openingTrim);
+ for(const o of s.openings)add('building-opening-'+o.id,o.kind+' — '+o.width+' × '+o.height+' ft ('+o.wall+')','unit',1);
+ for(const p of s.porches){add('building-porch-'+p.id,'Porch steel package — '+p.width+' × '+p.depth+' ft ('+p.wall+'), posts / beams / CEE','unit',1);add('building-porch-roof-'+p.id,'Porch corrugated roof — '+p.wall,'area',round2(p.width*p.depth*Math.hypot(1,p.pitch/12)));}
+ add('building-trim','Ridge, eave and corner trim / closures / flashing — confirm scope','flat',1);
+ add('building-connections','Base plates, anchors, connections and bracing — engineering allowance','flat',1);
+ return {items,laborHours:0,installHours:0};
+}
+
+const ESTIMATORS = { barndominium: estimateBarndominium, fence: estimateFence, gate: estimateGate, carport: estimateCarport, railing: estimateRailing, pergola: estimatePergola, table: estimateTable, concrete: estimateConcrete, insulation: estimateInsulation, custom: estimateCustom };
 
 /**
  * Consumables (wire, gas, discs, primer/paint, fasteners) scale with FABRICATED
@@ -1135,6 +1155,11 @@ export function deriveWarnings(type, state, lineState, pricing) {
   const info = (msg) => out.push({ level: 'info', msg });
   const has = (key) => ls.items.some((it) => it.key === key && lineCost(it) > 0);
 
+  if(type === 'barndominium') {
+    if(validateBarndo(s).length) warn('Building layout has invalid dimensions or opening conflicts. Review it before sharing.');
+    info('Preliminary net quantities: confirm engineered sections, bracing, laps, waste, fasteners, trims and opening installation costs.');
+    info('Foundation, engineering, permits and interior fit-out are excluded unless added as explicit lines.');
+  }
   const metalSet = type === 'fence' || type === 'gate';
   const embedded = metalSet || s.anchor === 'embedded';
 

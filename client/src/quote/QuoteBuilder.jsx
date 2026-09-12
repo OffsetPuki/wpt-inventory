@@ -34,9 +34,12 @@ import {
 } from "./lib/store.js";
 import useDraftSave from "./lib/useDraftSave.js";
 import { fmtMoney } from "./lib/format.js";
+import {scopeIssues} from './lib/barndoQuote.js';
 import Home from "./components/Home.jsx";
 import Configurator from "./components/Configurator.jsx";
+import BarndominiumTemplates, {BarndominiumQuoteTools} from './components/BarndominiumTemplates.jsx';
 const QuoteForm = lazy(() => import("./components/QuoteForm.jsx"));
+const QuoteOptions = lazy(() => import('./components/QuoteOptions.jsx'));
 const PriceBookPanel = lazy(() => import("./components/PriceBookPanel.jsx"));
 const FindDesign = lazy(() => import("./components/FindDesign.jsx"));
 const SavedQuotes = lazy(() => import("./components/SavedQuotes.jsx"));
@@ -231,15 +234,15 @@ export default function QuoteBuilder({ initialSettings }) {
   const warnings = useMemo(
     () =>
       session && lineState
-        ? deriveWarnings(session.type, session.state, lineState, {
+        ? [...deriveWarnings(session.type, session.state, lineState, {
             materialMarkupPct: session.materialMarkupPct,
             laborMarkupPct: session.laborMarkupPct,
             taxPct: session.taxPct,
             deliveryMiles: session.deliveryMiles,
             discountPct: session.discountPct,
-          })
+          }).filter(w=>!(session.type==='barndominium'&&session.overrides?.barndoQuote?.scopeEnabled&&w.msg.startsWith('Foundation, engineering'))),...scopeIssues(session,totals).map(msg=>({level:'warn',msg}))]
         : [],
-    [session?.type, session?.state, lineState, session?.materialMarkupPct, session?.laborMarkupPct, session?.taxPct, session?.deliveryMiles, session?.discountPct],
+    [session?.type, session?.state, lineState, totals, session?.overrides, session?.materialMarkupPct, session?.laborMarkupPct, session?.taxPct, session?.deliveryMiles, session?.discountPct],
   );
   const materialsSummary = useMemo(
     () => (lineState ? materialTotals(lineState.items, effectiveBook) : []),
@@ -247,6 +250,7 @@ export default function QuoteBuilder({ initialSettings }) {
   );
   const draft = useDraftSave(session, setSession, effectiveBook, totals);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
   const flushQuote = () => draft.flush();
   const showSaveError = (error) => toast({ variant: "destructive", title: "Keep this draft open", description: error.message });
   const reviewQuote = async () => {
@@ -267,7 +271,7 @@ export default function QuoteBuilder({ initialSettings }) {
   // Switching drafts waits for the current draft. A failed/offline save leaves
   // the recovery copy intact instead of replacing it with a different quote.
   const replaceDraft = async (next, saved = false) => {
-    if (session) { try { await flushQuote(); } catch (error) { showSaveError(error); return; } }
+    if (session) { try { await flushQuote(); } catch (error) { showSaveError(error); return false; } }
     draft.reset();
     setSession(next);
     if (saved) {
@@ -278,6 +282,7 @@ export default function QuoteBuilder({ initialSettings }) {
     }
     setView("configure");
     window.scrollTo({ top: 0 });
+    return true;
   };
   // ── Session mutators ────────────────────────────────────────────────────────
   const patchSession = (patch) => setSession((s) => ({ ...s, ...patch }));
@@ -389,8 +394,9 @@ export default function QuoteBuilder({ initialSettings }) {
   const pendingCustomer = useRef(null);
   const [startingCustomer, setStartingCustomer] = useState({});
   const pendingLead = useRef(null);
-  const startConfig = (type) => {
+  const startConfig = (type, templateState = null) => {
     const sess = newSession(type, priceBook);
+    if (templateState) sess.state = structuredClone(templateState);
     sess.customer = { ...sess.customer, ...startingCustomer };
     sess.leadId = pendingLead.current;
     pendingLead.current = null;
@@ -398,7 +404,7 @@ export default function QuoteBuilder({ initialSettings }) {
       sess.customer = { ...sess.customer, ...pendingCustomer.current };
       pendingCustomer.current = null;
     }
-    replaceDraft(sess);
+    return replaceDraft(sess);
   };
   const goHome = () => setView("home");
   // A looked-up website design becomes a quote: the customer's options overlay
@@ -477,6 +483,31 @@ export default function QuoteBuilder({ initialSettings }) {
   const openSaved = (sess) => replaceDraft(migrateSession(sess, priceBook), true);
   useRecordLink('quote','/api/quotes', row=>{const payload=JSON.parse(row.payload);openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status});});
   const duplicateSaved = (sess) => replaceDraft(duplicateSession(migrateSession(sess, priceBook), newSid()));
+  const alternativeRequest=useRef(null);
+  const createAlternative=async()=>{
+    setCopyBusy(true);
+    try{
+      const saved=await flushQuote();
+      if(alternativeRequest.current?.id!==saved.id)alternativeRequest.current={id:saved.id,key:crypto.randomUUID()};
+      const row=await (await apiRequest('POST',`/api/quotes/${saved.id}/alternative`,{version:saved.version,requestKey:alternativeRequest.current.key})).json();
+      if(await replaceDraft({...migrateSession(JSON.parse(row.payload),priceBook),quoteId:row.id,number:row.number,version:row.version,quoteStatus:row.status},true)){
+        alternativeRequest.current=null;
+        toast({title:'Alternative created',description:'The customer and prices were copied. Change the material specifications and costs, then compare both options.'});
+      }
+    }catch(error){showSaveError(error);}finally{setCopyBusy(false);}
+  };
+  const compareOptions=async()=>{try{await flushQuote();setView('options');}catch(error){showSaveError(error);}};
+  const duplicateCurrent = async () => {
+    setCopyBusy(true);
+    try {
+      const saved=await flushQuote();
+      const row=await (await apiRequest('GET',`/api/quotes/${saved.id}`)).json();
+      const copy=duplicateSession(migrateSession(JSON.parse(row.payload),priceBook),newSid());
+      copy.copiedFromNumber=row.number;
+      if (!await replaceDraft(copy)) return;
+      toast({title:'Separate quote copy created',description:`${row.number} is unchanged. Add the customer for this copy.`});
+    } catch(error){showSaveError(error);} finally {setCopyBusy(false);}
+  };
   // ── Price book ──────────────────────────────────────────────────────────────
   // Editing a material's COST also stamps materials.<id>.updatedAt — that
   // feeds the staleness badges here and the hourly "review material prices"
@@ -531,6 +562,7 @@ export default function QuoteBuilder({ initialSettings }) {
             >
               Saved
             </button>
+            <button className={view==='templates'?'active':''} onClick={()=>setView('templates')}>Barndominium templates</button>
             <button
               className={view === "costing" ? "active" : ""}
               onClick={() => setView("costing")}
@@ -559,16 +591,21 @@ export default function QuoteBuilder({ initialSettings }) {
           />
         )}
         {activeView === "find" && <FindDesign onStartQuote={startFromLead} />}
+        {activeView === 'templates' && <BarndominiumTemplates onBack={goHome} onUse={state=>startConfig('barndominium',state)} />}
         {activeView === "saved" && (
           <SavedQuotes onOpen={openSaved} onDuplicate={duplicateSaved} />
         )}
         {activeView === "costing" && (
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
+        {activeView==='options'&&session?.quoteId&&<QuoteOptions quoteId={session.quoteId} onBack={()=>setView('configure')} onShared={()=>setSession(s=>({...s,quoteStatus:'sent'}))} onDone={issued} />}
+        {session?.type==='barndominium' && ['configure','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} onTemplates={()=>setView('templates')} busy={copyBusy} />}
         {activeView === "configure" && session && (
           <Configurator
-            key={session.sid}
+            key={`configure-${session.sid}`}
             customer={session.customer}
+            barndoQuote={session.overrides?.barndoQuote}
+            onChangeBarndoQuote={barndoQuote=>setSession(s=>({...s,overrides:{...s.overrides,barndoQuote}}))}
             onChangeCustomer={setCustomer}
             type={session.type}
             state={session.state}
@@ -589,6 +626,7 @@ export default function QuoteBuilder({ initialSettings }) {
             deliveryMiles={session.deliveryMiles}
             deliveryRate={session.deliveryPerMile}
             onChangeOption={setStateField}
+            onChangeState={state => setSession(s => ({...s,state}))}
             onEditItem={editItem}
             onEditLabor={editLabor}
             onEditInstall={editInstall}
@@ -612,7 +650,7 @@ export default function QuoteBuilder({ initialSettings }) {
         )}
         {activeView === "details" && session && (
           <QuoteForm
-            key={session.sid}
+            key={`details-${session.sid}`}
             type={session.type}
             state={session.state}
             totals={totals}

@@ -31,8 +31,8 @@ export function normalizeRef(input) {
     // Carport codes can legitimately start with 'CJM' (CJM-CJM2K), so a bare
     // body like 'CJM2K' is ambiguous — prefer the reading that leaves a valid
     // tool letter (F/G/C/R/P/T) up front.
-    if (/^[FGCRPT][A-Z0-9]+$/.test(body)) return `CJM-${body}`;
-    if (/^[FGCRPT][A-Z0-9]+$/.test(flat)) return `CJM-${flat}`;
+    if (/^[FGCRPTB][A-Z0-9]+$/.test(body)) return `CJM-${body}`;
+    if (/^[FGCRPTB][A-Z0-9]+$/.test(flat)) return `CJM-${flat}`;
     return `CJM-${body}`;
   }
 
@@ -60,8 +60,8 @@ export function normalizeRef(input) {
 /** The configurator tool a design code came from, or null. */
 export function refTool(ref) {
   const r = String(ref || '').trim().toUpperCase();
-  const m = /^CJM-([FGCRPT])/.exec(r);
-  if (m) return { F: 'fence', G: 'gate', C: 'carport', R: 'railing', P: 'pergola', T: 'table' }[m[1]] || null;
+  const m = /^CJM-([FGCRPTB])/.exec(r);
+  if (m) return { B: 'barndominium', F: 'fence', G: 'gate', C: 'carport', R: 'railing', P: 'pergola', T: 'table' }[m[1]] || null;
   if (r.startsWith('CJC-')) return 'concrete';
   if (r.startsWith('CJI-')) return 'insulation';
   // CJT- (trades planner) spans multiple shops — no single configurator.

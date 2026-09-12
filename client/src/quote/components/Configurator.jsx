@@ -1,3 +1,5 @@
+import Barndominium from './Barndominium.jsx';
+import BarndoQuoteDetails from './BarndoQuoteDetails.jsx';
 import { visibleControls, typeLabel } from '../data/configurators.js';
 import Control from './Controls.jsx';
 import Preview from './Preview.jsx';
@@ -16,7 +18,7 @@ export default function Configurator({
   onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onMoveLine, onUnlockPrices, onResetOverrides,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
-  customer, onChangeCustomer,
+  customer, onChangeCustomer, onChangeState, barndoQuote, onChangeBarndoQuote,
 }) {
   const controls = visibleControls(type, state).filter(c => c.kind !== 'segment' || c.options.length > 1);
   const [pricingOpen, setPricingOpen] = useState(type === 'custom');
@@ -43,6 +45,8 @@ export default function Configurator({
           <h1 className="display">{typeLabel(type)}</h1>
         </div>
 
+        {type === 'barndominium' && <Barndominium state={state} onChange={onChangeState} />}
+        {type === 'barndominium' && <BarndoQuoteDetails state={state} value={barndoQuote} onChange={onChangeBarndoQuote} />}
         <div className="cfg">
           <form className="cfg-controls" onSubmit={(e) => e.preventDefault()}>
             <details className="quote-section" open={customerOpen} onToggle={e => setCustomerOpen(e.currentTarget.open)}>
@@ -59,7 +63,7 @@ export default function Configurator({
           </form>
 
           <div className="cfg-right">
-            <Preview type={type} state={state} />
+            {type !== 'barndominium' && <Preview type={type} state={state} />}
             {missing.length > 0 && <div className="pricing-attention"><strong>{missing.length} {missing.length === 1 ? 'cost needs' : 'costs need'} attention</strong><p>{missing.map(it => it.name).join(', ')}</p><button className="back-link" onClick={() => setPricingOpen(true)}>Edit missing costs</button></div>}
             <details className="quote-section pricing-section" open={pricingOpen} onToggle={e => setPricingOpen(e.currentTarget.open)}>
               <summary>Edit pricing <span>Materials, labor, delivery &amp; buy list</span></summary>

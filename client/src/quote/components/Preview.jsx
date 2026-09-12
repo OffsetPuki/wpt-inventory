@@ -1,3 +1,4 @@
+import {renderDrawing} from '../lib/barndominium/drawing.js';
 import { memo, useMemo } from 'react';
 import { renderFence } from '../lib/preview/fence.js';
 import { renderGate } from '../lib/preview/gate.js';
@@ -9,8 +10,8 @@ import { renderConcrete } from '../lib/preview/concrete.js';
 import { renderInsulation } from '../lib/preview/insulation.js';
 import { summaryLine } from '../data/configurators.js';
 
-const RENDERERS = { fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing, pergola: renderPergola, table: renderTable, concrete: renderConcrete, insulation: renderInsulation };
-const ARIA = { fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview', table: 'Table preview', concrete: 'Slab plan preview', insulation: 'Insulation section preview' };
+const RENDERERS = { barndominium: s => '<svg width="800" height="450" viewBox="0 0 900 540">'+renderDrawing(s)+'</svg>', fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing, pergola: renderPergola, table: renderTable, concrete: renderConcrete, insulation: renderInsulation };
+const ARIA = { barndominium: 'Barndominium preview', fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview', table: 'Table preview', concrete: 'Slab plan preview', insulation: 'Insulation section preview' };
 
 /** Live SVG preview driven by the same config state as the price estimate. */
 function Preview({ type, state }) {

@@ -57,12 +57,14 @@ export function deepMerge(base, over) {
  *     you typed BY HAND stay typed; only book-driven lines move.
  */
 export function duplicateSession(sess, sid) {
-  const copy = { ...sess };
+  const copy = structuredClone(sess);
   delete copy.designRef;
   delete copy.leadId;
   delete copy.version;
   delete copy.quoteStatus;
-  delete copy.revisionOf;
+    delete copy.revisionOf;
+    delete copy.alternativeOf;
+    delete copy.copiedFromNumber;
   return {
     ...copy,
     sid,

@@ -203,6 +203,7 @@ function runBusinessSweep(): void {
     const rows = sqlite.prepare(`
       SELECT number, customer_name FROM quotes
       WHERE deleted_at IS NULL AND status = 'sent' AND sent_at IS NOT NULL AND sent_at < ?
+      AND (id NOT IN (SELECT quote_id FROM quote_option_members) OR id=(SELECT MIN(b.quote_id) FROM quote_option_members a JOIN quote_option_members b ON b.set_id=a.set_id JOIN quotes other ON other.id=b.quote_id WHERE a.quote_id=quotes.id AND other.status='sent'))
     `).all(cutoff) as any[];
     for (const q of rows) {
       ensureTask(`auto:quote-follow-up:${q.number}`,
@@ -223,6 +224,7 @@ function runBusinessSweep(): void {
              share_token, sent_at, nudge_sent_at
       FROM quotes
       WHERE deleted_at IS NULL AND status = 'sent' AND share_token IS NOT NULL
+        AND (id NOT IN (SELECT quote_id FROM quote_option_members) OR id=(SELECT MIN(b.quote_id) FROM quote_option_members a JOIN quote_option_members b ON b.set_id=a.set_id JOIN quotes other ON other.id=b.quote_id WHERE a.quote_id=quotes.id AND other.status='sent'))
         AND sent_at IS NOT NULL AND sent_at < ?
         AND (nudge_sent_at IS NULL OR (fu2_sent_at IS NULL AND sent_at < ?))
     `).all(now - 2 * DAY_MS, now - 7 * DAY_MS) as any[];
@@ -245,7 +247,8 @@ function runBusinessSweep(): void {
         email = d?.email || undefined;
       }
       if (!email || isOptedOut(email)) continue;
-      const url = `${PUBLIC_SITE_URL}/quote/${q.share_token}`;
+      const options=sqlite.prepare('SELECT s.token FROM quote_option_sets s JOIN quote_option_members m ON m.set_id=s.id WHERE m.quote_id=?').get(q.id) as any;
+      const url = options?`${process.env.PUBLIC_APP_URL||'https://flipnob.com'}/quote-options/${options.token}`:`${PUBLIC_SITE_URL}/quote/${q.share_token}`;
       const first = firstNameOf(q.customer_name);
       // Both rungs of the ladder are owner-editable in the Emails section; the
       // unsubscribe link is re-attached there if it was deleted.

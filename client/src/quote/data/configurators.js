@@ -1,3 +1,4 @@
+import {fresh as freshBarndo, spec as barndoSpec} from '../lib/barndominium/model.js';
 // =============================================================================
 //  Configurator option schemas — fence / gate / carport / railing.
 //
@@ -86,6 +87,7 @@ const bagsControl = {
 // -----------------------------------------------------------------------------
 
 export const TYPES = [
+  {key:'barndominium',label:'Barndominium',tagline:'Steel shell, doors, windows and porches'},
   { key: 'fence',   label: 'Fence',   tagline: 'Perimeter fencing, by the run' },
   { key: 'gate',    label: 'Gate',    tagline: 'Swing or sliding entry gate' },
   { key: 'carport', label: 'Carport', tagline: 'Free-standing or attached cover' },
@@ -733,6 +735,7 @@ export function optionLabel(type, name, value) {
 
 /** Default state for a build type (a fresh copy). */
 export function defaultState(type) {
+  if(type === 'barndominium') return freshBarndo();
   return { ...(CONFIG[type]?.defaults || {}) };
 }
 
@@ -743,6 +746,7 @@ export function visibleControls(type, state) {
 
 /** One-line human summary of a configuration (preview header + PDF spec line). */
 export function summaryLine(type, s) {
+  if(type === 'barndominium') return `${s.width} × ${s.depth} ft · ${s.height} ft eave · ${s.openings?.length || 0} openings`;
   const fin = finishLabel(s.color);
   if (type === 'custom') {
     const title = String(s.title || '').trim();
@@ -800,6 +804,7 @@ export function summaryLine(type, s) {
 
 /** Spec rows for the printable quote (label / value pairs). */
 export function specRows(type, s) {
+  if(type === 'barndominium') return barndoSpec(s).map(([label,value])=>({label,value}));
   const fin = finishLabel(s.color);
   if (type === 'custom') {
     // The itemized lines carry the detail here — the spec block just says what

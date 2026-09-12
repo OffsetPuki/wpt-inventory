@@ -2,6 +2,7 @@ import CustomerFields from "./CustomerFields.jsx";
 import { TYPES } from "../data/configurators.js";
 
 const ICONS = {
+ barndominium: <svg viewBox="0 0 320 180" className="art" fill="none" stroke="currentColor" strokeWidth="2"><path d="M25 75L110 25L200 75V160H25ZM110 25L220 10L300 60L200 75M300 60V145L200 160"/><path d="M55 160V100H90V160M125 95H170V125H125Z"/></svg>,
   fence: (
     <svg
       viewBox="0 0 320 180"

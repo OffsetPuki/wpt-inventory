@@ -92,6 +92,7 @@ function BuyList({ ids, onClose }) {
         </p>
       )}
       {isLoading && <p className="hint">Adding up materials…</p>}
+      {data?.quotes?.some(q=>q.purchasingIssues?.length>0)&&<div className="pricing-attention"><strong>Purchasing list is incomplete</strong>{data.quotes.filter(q=>q.purchasingIssues?.length).map(q=><details key={q.quoteId}><summary>{q.number}: {q.purchasingIssues.length} items to review</summary><ul>{q.purchasingIssues.map((issue,i)=><li key={i}>{issue}</li>)}</ul></details>)}</div>}
       {error && <p className="find-error">{error.message || 'Could not build the buy list.'}</p>}
       {data && data.combined.length === 0 && (
         <p className="hint">No material lines found in the selected quotes.</p>

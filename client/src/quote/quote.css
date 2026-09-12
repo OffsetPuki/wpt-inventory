@@ -905,3 +905,18 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   .qa .quote-review + .quote-actionbar .draft-status { flex: 0; }
   .qa #quote-send-actions .btn { padding-inline: 10px; font-size: .65rem; }
 }
+.qa .barndo-quote-tools{padding-top:20px;padding-bottom:0}.qa .barndo-template-actions{display:flex;gap:10px;flex-wrap:wrap}.qa .barndo-template-form{max-width:560px;border:1px solid var(--line);padding:20px;margin-top:16px}.qa .barndo-template-form label{display:grid;gap:8px}.qa .barndo-template-form input{width:100%;min-height:44px;padding:10px;border:1px solid var(--line);background:var(--paper,#fff)}.qa .barndo-templates h1{font-size:32px;margin:24px 0 12px}.qa .barndo-templates h2{font-size:22px;margin:28px 0 16px}.qa .barndo-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.qa .barndo-template-card{border:1px solid var(--line);padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0}.qa .barndo-template-card h3{font-size:20px;overflow-wrap:anywhere}.qa .barndo-template-card .btn{margin-top:auto;white-space:normal}.qa .barndo-template-form [role=alert]{color:#9d2222;margin:10px 0}.qa .barndo-template-actions .btn{min-height:44px}
+.qa .barndo-detail-grid,.qa .barndo-option-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.qa .barndo-business-details{margin:20px 0}
+.qa .barndo-scope-row{display:grid;grid-template-columns:minmax(160px,1fr) 2fr;gap:14px;padding:12px 0;border-bottom:1px solid #ddd}
+.qa .barndo-check{display:flex;align-items:flex-start;gap:10px;padding:12px 0;line-height:1.5}
+.qa .barndo-check input{width:20px;height:20px;flex-shrink:0;margin-top:3px}
+.qa .barndo-purchase-list>div{padding:10px 0;border-bottom:1px solid #ddd}
+.qa .barndo-purchase-list span{display:block;color:#555}
+.qa .barndo-options-fields{border:0;padding:0;margin-bottom:24px;min-width:0}
+.qa .barndo-option-drawing svg{width:100%;height:auto}
+.qa .barndo-comparison-table{overflow-x:auto;margin:18px 0}
+.qa .barndo-comparison-table table{width:100%;table-layout:fixed;border-collapse:collapse}
+.qa .barndo-comparison-table td,.qa .barndo-comparison-table th{border:1px solid #ccc;padding:10px;text-align:left;overflow-wrap:anywhere;vertical-align:top}
+.qa .barndo-options .field input,.qa .barndo-options .field select,.qa .barndo-options .field textarea,.qa .barndo-business-details .field input,.qa .barndo-business-details .field select{width:100%;min-height:44px;box-sizing:border-box}
+@media(max-width:650px){.qa .barndo-detail-grid,.qa .barndo-option-grid,.qa .barndo-scope-row{grid-template-columns:1fr}.qa .barndo-comparison-table td,.qa .barndo-comparison-table th{padding:6px;font-size:13px}}

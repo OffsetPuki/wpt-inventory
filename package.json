@@ -8,7 +8,7 @@
     "build": "vite build && esbuild server/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --packages=external",
     "start": "node dist/index.cjs",
     "db:push": "drizzle-kit push",
-    "test": "tsx scripts/check-public-projects.mjs && tsx scripts/check-google-auth.mjs && tsx scripts/check-growth.mjs && tsx scripts/check-lead-experience.mjs && tsx scripts/check-suite.mjs && tsx scripts/check-suite-connections.mjs && tsx scripts/check-suite-recovery.mjs && tsx scripts/check-inventory.mjs && node scripts/check-draft-saves.mjs && node scripts/quote-engine-smoke.mjs && node scripts/check-quote-trades.mjs && node scripts/quote-number-check.mjs && tsx scripts/mailer-archive-check.mjs && tsx scripts/email-templates-check.mjs && tsx scripts/check-lead-quote-close.mjs && tsx scripts/check-release.mjs",
+    "test": "node scripts/check-barndominium.mjs && tsx scripts/check-public-projects.mjs && tsx scripts/check-google-auth.mjs && tsx scripts/check-growth.mjs && tsx scripts/check-lead-experience.mjs && tsx scripts/check-suite.mjs && tsx scripts/check-suite-connections.mjs && tsx scripts/check-suite-recovery.mjs && tsx scripts/check-inventory.mjs && node scripts/check-draft-saves.mjs && node scripts/quote-engine-smoke.mjs && node scripts/check-quote-trades.mjs && node scripts/quote-number-check.mjs && tsx scripts/mailer-archive-check.mjs && tsx scripts/email-templates-check.mjs && tsx scripts/check-lead-quote-close.mjs && tsx scripts/check-release.mjs",
     "check": "tsc --noEmit",
     "test:browser": "playwright test"
   },
@@ -36,6 +36,7 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "tar": "^7.5.22",
+    "three": "0.166.1",
     "wouter": "^3.5.0",
     "zod": "^3.24.1"
   },
