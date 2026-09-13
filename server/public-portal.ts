@@ -1,3 +1,4 @@
+import {documentActivityRevision} from './document-activity';
 import { acceptQuote } from "./quote-lifecycle";
 import {quoteOptionLink} from './quote-options';
 import {customerBarndoSpecs,cleanBarndoQuote} from '../client/src/quote/lib/barndoQuote.js';
@@ -518,6 +519,7 @@ export function registerPublicPortalRoutes(app: Express): void {
       ok: true,
       quote: {
         number: quote.number,
+        activityRevision: documentActivityRevision('quote', quote),
         type: quote.type,
         options:quoteOptionLink(quote.id),
         typeLabel: QUOTE_TYPE_LABELS[quote.type],

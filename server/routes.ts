@@ -1,4 +1,5 @@
 import { registerCustomerPreviews } from "./customer-previews";
+import { registerDocumentActivity } from "./document-activity";
 import { registerInventoryRoutes } from "./inventory";
 import { registerGrowthRoutes } from './growth';
 import { registerRecordVersions } from "./suite-versions";
@@ -118,6 +119,7 @@ const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
   registerCustomerPreviews(app);
+  registerDocumentActivity(app);
   registerRecordVersions(app);
   registerCreateOnce(app);
   registerSuiteRoutes(app);

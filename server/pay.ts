@@ -1,3 +1,4 @@
+import {documentActivityRevision} from './document-activity';
 import type { Express, Request } from "express";
 import crypto from "crypto";
 import rateLimit from "express-rate-limit";
@@ -411,6 +412,7 @@ export function registerPayRoutes(app: Express): void {
       ok: true,
       invoice: {
         number: inv.number,
+        activityRevision: documentActivityRevision('invoice', inv),
         status: view.status,
         customerName: inv.clientName,
         issueDate: inv.issueDate,

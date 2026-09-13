@@ -1,3 +1,4 @@
+import DocumentActivityButton from '@/components/DocumentActivity';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -1366,6 +1367,8 @@ function InvoiceDetailModal({
               </div>
             </div>
           )}
+
+          <DocumentActivityButton kind="invoice" id={id}/>
 
           {/* The customer's copy. Minted on the first send — or early, if the
               owner previewed a draft. Already in the invoice email; this is for

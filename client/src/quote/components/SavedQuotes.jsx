@@ -1,3 +1,4 @@
+import DocumentActivityButton from '@/components/DocumentActivity';
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -262,6 +263,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                   </div>
                   <div className="line-cost">${fmtMoney((q.totalCents || 0) / 100)}</div>
                   <div className="line-controls">
+                    <DocumentActivityButton kind="quote" id={q.id} className="btn ghost sq-btn"/>
                     <button className="btn ghost sq-btn" onClick={() => q.status === 'draft' ? openQuote.mutate({ id: q.id }) : viewQuote.mutate(q.id)} disabled={openQuote.isPending || viewQuote.isPending}>
                       {q.status === 'draft' ? 'Edit draft' : 'View issued quote'}
                     </button>

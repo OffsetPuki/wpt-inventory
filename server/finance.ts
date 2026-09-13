@@ -1060,7 +1060,9 @@ export function registerFinanceRoutes(app: Express): void {
           .where(eq(invoices.id, inv.id))
           .returning()
           .get();
-    res.json({ url: invoicePayLink(fresh) });
+    const ownerUrl = new URL(invoicePayLink(fresh)!);
+    ownerUrl.searchParams.set('owner', '1');
+    res.json({ url: ownerUrl.toString() });
   });
 
   app.patch("/api/finance/invoices/:id", requireElevated, (req, res) => {
