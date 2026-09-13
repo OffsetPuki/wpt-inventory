@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getAuthToken, queryClient } from "./queryClient";
 
 export const TOPIC_KEYS: Record<string, string[]> = {
+  previews: ["customer-previews"],
   inventory: [
     "project-unbilled",
     "quote-costing",
@@ -73,6 +74,7 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "suite-today",
   ],
   communication: [
+    "customer-previews",
     "suite-timeline",
     "suite-notifications",
     "suite-activity",
@@ -156,7 +158,9 @@ export function useSuiteSync() {
     const mutate = (event: Event) => {
       const url = (event as CustomEvent<string>).detail;
       const topics =
-        url.includes("/inventory") || url.includes("/items")
+        url.includes("/customer-previews")
+          ? ["previews"]
+          : url.includes("/inventory") || url.includes("/items")
           ? ["inventory", "jobs"]
           : url.includes("/finance")
             ? ["finance", "inventory", "jobs"]

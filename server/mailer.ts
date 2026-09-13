@@ -174,6 +174,12 @@ export function mailEnabled(): boolean {
   return resendConfigured();
 }
 
+/** Configuration shown only in authenticated owner workflows. */
+export function ownerMailStatus() {
+  const recipient = ownerAddress();
+  return { enabled: mailEnabled() && !!recipient, recipient };
+}
+
 /** Persist before the business transaction commits; the worker delivers later. */
 export function queueMail(msg: MailMessage) {
   return storedMail(msg, archiveFor(msg.to), mailFrom(), msg.deliveryKey).key;

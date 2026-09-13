@@ -29,6 +29,7 @@ export function initializeSuite() {
       UPDATE suite_notifications SET resolved_at=unixepoch()*1000 WHERE event_key LIKE 'task:'||NEW.id||':%'; END;
   `);
   const topics: Record<string, string[]> = {
+    previews: ["customer_previews", "customer_preview_models", "customer_preview_feedback"],
     inventory: [
       "items",
       "transactions",

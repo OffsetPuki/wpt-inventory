@@ -8,6 +8,8 @@ import { sqlite } from './storage';
 import { requireElevated } from './auth';
 import { hasLeadKey } from './public-api';
 import { audit } from './audit';
+import { enqueueFollowup } from './outbox';
+import { ownerMailStatus } from './mailer';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_OPTIONS = 6;
@@ -41,7 +43,8 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS customer_preview_feedback (
  id INTEGER PRIMARY KEY AUTOINCREMENT, preview_id INTEGER NOT NULL REFERENCES customer_previews(id),
  submission_id TEXT NOT NULL, option_label TEXT NOT NULL DEFAULT '', message TEXT NOT NULL, created_at INTEGER NOT NULL,
  UNIQUE(preview_id,submission_id)
-);`);
+);
+CREATE INDEX IF NOT EXISTS customer_preview_feedback_recent ON customer_preview_feedback(preview_id,created_at DESC,id DESC);`);
 
 export function validatePreviewGlb(bytes: Buffer): void {
   if (bytes.length < 24 || bytes.length > MAX_BYTES || bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length)
@@ -83,7 +86,15 @@ function view(p: Preview) {
   return { id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width, height:p.height,
     finish:p.finish, note:p.note, published:!!p.published, version:p.version, createdAt:p.created_at, updatedAt:p.updated_at,
     url:`https://www.cjmmetals.com/preview/${p.token}`, options:modelList(p.id),
-    feedback:sqlite.prepare('SELECT id,option_label AS optionLabel,message,created_at AS createdAt FROM customer_preview_feedback WHERE preview_id=? ORDER BY created_at DESC,id DESC LIMIT 50').all(p.id) };
+    feedback:sqlite.prepare(`SELECT f.id,f.option_label AS optionLabel,f.message,f.created_at AS createdAt,
+      CASE WHEN m.accepted_at IS NOT NULL THEN 'sent'
+        WHEN coalesce(d.status,o.status) IN ('failed','review','stopped') THEN 'attention'
+        WHEN o.id IS NOT NULL THEN 'queued' ELSE 'not_requested' END AS emailStatus
+      FROM customer_preview_feedback f
+      LEFT JOIN suite_outbox o ON o.event_key='preview-feedback-owner:'||f.id
+      LEFT JOIN suite_mail m ON m.key=o.event_key
+      LEFT JOIN suite_outbox d ON d.event_key='delivery:'||o.event_key
+      WHERE f.preview_id=? ORDER BY f.created_at DESC,f.id DESC LIMIT 50`).all(p.id) };
 }
 function record(req: Request, res: Response): Preview | undefined {
   const id = Number(req.params.id);
@@ -156,10 +167,17 @@ export function registerCustomerPreviews(app: Express): void {
     if(sqlite.prepare('SELECT 1 FROM customer_preview_feedback WHERE preview_id=? AND submission_id=?').get(p.id,parsed.data.submissionId)){res.json({ok:true});return;}
     const recent=sqlite.prepare('SELECT COUNT(*) AS n FROM customer_preview_feedback WHERE preview_id=? AND created_at>?').get(p.id,Date.now()-3600000) as {n:number};
     if(recent.n>=10){res.status(429).json({message:'Please wait a little before sending more feedback.'});return;}
-    sqlite.prepare('INSERT INTO customer_preview_feedback(preview_id,submission_id,option_label,message,created_at) VALUES(?,?,?,?,?)')
-      .run(p.id,parsed.data.submissionId,option.label,parsed.data.message,Date.now());
+    sqlite.transaction(()=>{
+      const row=sqlite.prepare('INSERT INTO customer_preview_feedback(preview_id,submission_id,option_label,message,created_at) VALUES(?,?,?,?,?)')
+        .run(p.id,parsed.data.submissionId,option.label,parsed.data.message,Date.now());
+      enqueueFollowup(`preview-feedback-owner:${row.lastInsertRowid}`,'preview-feedback-owner',{
+        subject:`[CJM Metals] Design feedback — ${p.title.replace(/[\r\n]+/g,' ')}`,
+        text:`New feedback on your customer design preview.\n\nProject: ${p.title}\n${p.customer?`Customer / job: ${p.customer}\n`:''}Selected option: ${option.label}\n\nCustomer feedback:\n${parsed.data.message}\n\nReview in the Business Suite:\nhttps://flipnob.com/#/crm/previews\n\nCustomer preview:\nhttps://www.cjmmetals.com/preview/${p.token}\n\nThis is feedback before a quote, not approval to begin fabrication.`,
+      });
+    })();
     res.status(201).json({ok:true});
   });
+  app.get('/api/customer-previews/notifications',requireElevated,(_req,res)=>res.json(ownerMailStatus()));
   app.get('/api/customer-previews',requireElevated,(_req,res) => {
     const ps=sqlite.prepare('SELECT * FROM customer_previews ORDER BY updated_at DESC,id DESC').all() as Preview[];
     res.json(ps.map(view));

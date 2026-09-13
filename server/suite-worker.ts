@@ -35,6 +35,8 @@ export async function runSuiteFollowups() {
           ok =
             !!saved.row.accepted_at ||
             (await sendMail(saved.msg, { deliveryKey: data.key }));
+        } else if (row.kind === "preview-feedback-owner") {
+          ok = await sendOwnerMail({subject:data.subject,text:data.text,deliveryKey:row.event_key});
         } else if (row.kind.startsWith("queue")) {
           const finance = await import("./finance");
           if (row.kind === "queueReviewRequest") {
@@ -97,7 +99,7 @@ export async function runSuiteFollowups() {
         } else throw new Error("Unknown follow-up type.");
         if (
           !ok &&
-          row.kind.startsWith("quote-accepted") &&
+          (row.kind.startsWith("quote-accepted") || row.kind === "preview-feedback-owner") &&
           sqlite
             .prepare("SELECT 1 FROM suite_mail WHERE key=?")
             .get(row.event_key)
