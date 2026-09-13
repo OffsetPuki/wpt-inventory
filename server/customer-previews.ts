@@ -50,8 +50,7 @@ const responseColumns=new Set((sqlite.pragma('table_info(customer_preview_feedba
 for(const [name,definition] of [['kind',"TEXT NOT NULL DEFAULT 'feedback'"],['option_id',"TEXT NOT NULL DEFAULT ''"],['design_version','INTEGER']]) {
   if(!responseColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_feedback ADD COLUMN ${name} ${definition}`);
 }
-sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS customer_preview_acceptance_once
-  ON customer_preview_feedback(preview_id,option_id,design_version) WHERE kind='approval';`);
+sqlite.exec('DROP INDEX IF EXISTS customer_preview_acceptance_once;');
 
 export function validatePreviewGlb(bytes: Buffer): void {
   if (bytes.length < 24 || bytes.length > MAX_BYTES || bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length)
@@ -178,7 +177,8 @@ export function registerCustomerPreviews(app: Express): void {
     if(kind==='approval'&&parsed.data.version!==p.version){res.status(409).json({message:'This design has changed. Reload the preview and review it before requesting a quote.'});return;}
     const option=modelList(p.id).find(m=>m.id===parsed.data.optionId);
     if(!option){res.status(400).json({message:'Choose one of the current design options.'});return;}
-    if(kind==='approval'&&sqlite.prepare("SELECT 1 FROM customer_preview_feedback WHERE preview_id=? AND option_id=? AND design_version=? AND kind='approval'").get(p.id,option.id,p.version)){res.json({ok:true});return;}
+    const latest=sqlite.prepare('SELECT kind,option_id,design_version FROM customer_preview_feedback WHERE preview_id=? ORDER BY created_at DESC,id DESC LIMIT 1').get(p.id) as {kind:string;option_id:string;design_version:number}|undefined;
+    if(kind==='approval'&&latest?.kind==='approval'&&latest.option_id===option.id&&latest.design_version===p.version){res.json({ok:true});return;}
     const recent=sqlite.prepare('SELECT COUNT(*) AS n FROM customer_preview_feedback WHERE preview_id=? AND created_at>?').get(p.id,Date.now()-3600000) as {n:number};
     if(recent.n>=10){res.status(429).json({message:'Please wait a little before sending another response.'});return;}
     sqlite.transaction(()=>{

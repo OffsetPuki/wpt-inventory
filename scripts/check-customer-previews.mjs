@@ -132,6 +132,11 @@ try{
   assert.equal((await api(publicPath+'/feedback','POST',{...feedback,submissionId:crypto.randomUUID()},undefined,key)).status,404);
   assert.equal((await api(publicPath+'/accept','POST',{...acceptance,submissionId:crypto.randomUUID()},undefined,key)).status,404,'Disabled previews cannot be accepted');
   assert.equal((await api(`/api/customer-previews/${p.id}`,'PATCH',{...fields,title:'Overwrite',version:p.version-1},owner)).status,409);
+  const variants=(await api('/api/customer-previews','GET',undefined,owner)).data.find(x=>x.options.length===2),variantPath='/api/public/customer-previews/'+variants.url.split('/').at(-1)+'/accept';
+  for(const index of [0,1,0])assert.equal((await api(variantPath,'POST',{submissionId:crypto.randomUUID(),optionId:variants.options[index].id,version:variants.version},undefined,key)).status,201,'A deliberate change of variant is recorded, including returning to an earlier choice');
+  assert.equal((await api(variantPath,'POST',{submissionId:crypto.randomUUID(),optionId:variants.options[0].id,version:variants.version},undefined,key)).status,200);
+  const choices=(await api('/api/customer-previews','GET',undefined,owner)).data.find(x=>x.id===variants.id).feedback;
+  assert.equal(choices.length,3);assert.equal(choices[0].optionId,variants.options[0].id);
   assert.equal(sqlite.pragma('integrity_check',{simple:true}),'ok');
   console.log('PASS: authenticated management, scoped sharing, GLB validation, private metadata, live feedback, atomic owner email queue, transport recovery, duplicate protection and immediate link revocation');
 }finally{await app.close();}
