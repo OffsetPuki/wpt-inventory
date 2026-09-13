@@ -10,6 +10,7 @@ import { hasLeadKey } from './public-api';
 import { audit } from './audit';
 import { enqueueFollowup } from './outbox';
 import { ownerMailStatus } from './mailer';
+import { savePreviewActivity, previewActivity } from './preview-activity';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_OPTIONS = 6;
@@ -193,6 +194,16 @@ export function registerCustomerPreviews(app: Express): void {
   };
   app.post('/api/public/customer-previews/:token/feedback',(req,res)=>receiveResponse(req,res,'feedback'));
   app.post('/api/public/customer-previews/:token/accept',(req,res)=>receiveResponse(req,res,'approval'));
+  app.post('/api/public/customer-previews/:token/activity',(req,res)=>{
+    const p=readShared(req,res);if(!p)return;
+    const status=savePreviewActivity(p,req.body,String(req.headers['x-preview-user-agent']||'').slice(0,500));
+    res.status(status).json({ok:status<300});
+  });
+  app.get('/api/customer-previews/:id/activity',requireElevated,(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    const p=record(req,res);if(!p)return;
+    res.json(previewActivity(p.id));
+  });
   app.get('/api/customer-previews/notifications',requireElevated,(_req,res)=>res.json(ownerMailStatus()));
   app.get('/api/customer-previews',requireElevated,(_req,res) => {
     const ps=sqlite.prepare('SELECT * FROM customer_previews ORDER BY updated_at DESC,id DESC').all() as Preview[];

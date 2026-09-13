@@ -41,6 +41,21 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   await dialog.getByRole('button',{name:'Close',exact:true}).click();
   await expect(card).toContainText('Ready for a quote · 5 pipes');
   await expect(card).toContainText('2 customer responses');
+  await expect(card.getByRole('link',{name:'Open preview'})).toHaveAttribute('href',p.url+'?owner=1');
+  const activity={visitId:crypto.randomUUID(),version:p.version,seq:1,activeMs:12000,variants:[{id:p.options[0].id,views:1,activeMs:10000,loads:1,loadMs:300,errors:0,gateOpens:2,gateCloses:1,drags:3,zooms:1}],links:{main:1,concrete:0,insulation:0,phone:0,email:0},webglFailed:0,contextLost:0};
+  expect((await app.api('/api/public/customer-previews/'+token+'/activity','POST',activity,undefined,{'X-Lead-Key':'test-intake-key','X-Preview-User-Agent':'Chrome/130'})).status).toBe(201);
+  await card.getByRole('button',{name:'Customer activity',exact:true}).click();
+  await expect(dialog.getByText('Active viewing time',{exact:true}).locator('..')).toContainText('12s');
+  await expect(dialog.getByText('Preview visits',{exact:true}).locator('..')).toContainText('1');
+  await expect(dialog.locator('section').filter({has:page.getByRole('heading',{name:'Variant interest & interactions'})}).getByText('Gate opens / closes: 2 / 1')).toBeVisible();
+  await expect(dialog.getByText('Design accepted for quoting · 5 pipes')).toBeVisible();
+  await expect(dialog.getByText('Please enlarge the lettering.')).toBeVisible();
+  await dialog.locator('summary').click();
+  await expect(dialog.getByText('Links: CJM Metals (1)')).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.screenshot({path:'test-results/customer-preview-activity.png',fullPage:true});
+  await dialog.getByRole('button',{name:'Close',exact:true}).click();
+
   await card.getByRole('button',{name:'Manage',exact:true}).click();
   await dialog.getByRole('button',{name:'Disable link',exact:true}).click();
   expect((await app.api(`/api/public/customer-previews/${token}`,'GET',undefined,undefined,{'X-Lead-Key':'test-intake-key'})).status).toBe(404);
