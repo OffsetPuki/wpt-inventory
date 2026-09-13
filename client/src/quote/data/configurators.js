@@ -274,7 +274,7 @@ export const CONFIG = {
         options: [{ value: 'flat', label: 'Flat' }, { value: 'arched', label: 'Arched' }],
       },
       { kind: 'range', name: 'height', label: 'Height', unit: 'ft', min: 4, max: 10, step: 1, display: ftDisplay },
-      { kind: 'range', name: 'width', label: 'Width', unit: 'ft', min: 3, max: 20, step: 1, display: ftDisplay },
+      { kind: 'number', name: 'width', label: 'Width', unit: 'ft', positive: true, exact: true, note: 'Enter any positive width in feet, or feet and inches.' },
       {
         kind: 'segment', name: 'woodDir', label: 'Wood grain', cols: 2,
         options: [{ value: 'horizontal', label: 'Horizontal' }, { value: 'vertical', label: 'Vertical' }],
