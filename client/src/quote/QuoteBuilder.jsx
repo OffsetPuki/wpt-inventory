@@ -274,10 +274,17 @@ export default function QuoteBuilder({ initialSettings }) {
       description: result?.emailed ? "The customer email was sent. The issued copy is locked."
         : "The issued copy is locked. Its link is available under Send on the saved quote." });
   };
-  // Switching drafts waits for the current draft. A failed/offline save leaves
-  // the recovery copy intact instead of replacing it with a different quote.
+  // A missing old quote must not block starting/opening another quote. Keep a
+  // separate device backup, without recreating the deleted server record.
+  // Other save failures still protect the active draft from being replaced.
   const replaceDraft = async (next, saved = false) => {
-    if (session) { try { await flushQuote(); } catch (error) { showSaveError(error); return false; } }
+    if (session) {
+      try { await flushQuote(); }
+      catch (error) {
+        if (error.status !== 404) { showSaveError(error); return false; }
+        draft.archive();
+      }
+    }
     draft.reset();
     setSession(next);
     if (saved) {
@@ -586,7 +593,7 @@ export default function QuoteBuilder({ initialSettings }) {
         {session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
           <div className="container draft-recovery no-print" data-draft-recovery role="alert">
             <strong>{draft.error?.status === 404 ? 'This saved quote is no longer available' : 'This quote has changed elsewhere'}</strong>
-            <p>Your edits are still here. Save them as a new quote to continue, keeping your customer details, design and pricing. The original quote stays unchanged.</p>
+            <p>{draft.error?.status === 404 ? 'To start fresh, choose a quote type below. Or keep the old draft’s details with the button here.' : 'Your edits are still here. Save them as a new quote to continue, keeping your customer details, design and pricing. The original quote stays unchanged.'}</p>
             <button className="btn" onClick={recoverDraft}>Keep edits as new quote</button>
           </div>
         )}

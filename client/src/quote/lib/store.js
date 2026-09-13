@@ -88,6 +88,7 @@ export function captureDraftStorage() {
   const key = sessionKey();
   return {
     save: (sess) => !!key && key === sessionKey() && !!sess && safeSet(key, sess),
+    archive: (sess) => !!key && key === sessionKey() && !!sess?.sid && safeSet(`${key}.recovery.${sess.sid}`, sess),
     clear: () => { try { if (key && key === sessionKey()) localStorage.removeItem(key); } catch { /* unavailable */ } },
   };
 }
