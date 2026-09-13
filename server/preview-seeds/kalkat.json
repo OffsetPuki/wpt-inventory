@@ -1,0 +1,20 @@
+{
+  "token": "e2f1118403f5f46202a658d4d501caad184a56368157fa2c",
+  "title": "KalKat driveway gate",
+  "description": "Explore your custom double-swing driveway gate. Compare the two rail layouts and let us know what you would like to change before we prepare your quote.",
+  "customer": "KalKat",
+  "width": "26 ft",
+  "height": "6 ft",
+  "finish": "Matte black",
+  "note": "26 ft closed span with a 1/2 in center gap. Each leaf is 12 ft 11 3/4 in wide. Manual operation. Dimensions and final construction details will be confirmed before fabrication.",
+  "options": [
+    {
+      "label": "5 horizontal pipes",
+      "file": "kalkat-5.glb"
+    },
+    {
+      "label": "7 horizontal pipes",
+      "file": "kalkat-7.glb"
+    }
+  ]
+}

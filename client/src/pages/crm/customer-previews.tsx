@@ -1,0 +1,70 @@
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Copy, ExternalLink, Pencil, Box, MessageSquare } from 'lucide-react';
+import Header from '@/components/Header';
+import Modal from '@/components/Modal';
+import { apiRequest, getAuthToken } from '@/lib/queryClient';
+import { primaryBtn, secondaryBtn, inputCls } from '@/lib/ui-styles';
+import { toast } from '@/components/ui/toaster';
+
+type Preview = {id:number;title:string;description:string;customer:string;width:string;height:string;finish:string;note:string;published:boolean;version:number;url:string;updatedAt:number;options:{id:string;label:string;size:number}[];feedback:{id:number;optionLabel:string;message:string;createdAt:number}[]};
+const blank = {title:'',description:'',customer:'',width:'',height:'',finish:'',note:''};
+
+function PreviewEditor({initial,onClose}:{initial:Preview|null;onClose:()=>void}) {
+  const query=useQueryClient();
+  const [preview,setPreview]=useState(initial);
+  const [form,setForm]=useState(initial?{title:initial.title,description:initial.description,customer:initial.customer,width:initial.width,height:initial.height,finish:initial.finish,note:initial.note}:blank);
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[label,setLabel]=useState(''),[file,setFile]=useState<File|null>(null);
+  const refresh=(p:Preview)=>{setPreview(p);query.invalidateQueries({queryKey:['customer-previews']});};
+  const run=async(fn:()=>Promise<void>)=>{setError('');setBusy(true);try{await fn();}catch(e){setError(e instanceof Error?e.message:'Could not save this preview.');}finally{setBusy(false);}};
+  const save=async()=>{const p=await (await apiRequest(preview?'PATCH':'POST',preview?`/api/customer-previews/${preview.id}`:'/api/customer-previews',{...form,...(preview?{version:preview.version}:{})})).json();refresh(p);toast({title:'Design details saved'});};
+  const dirty=Object.entries(form).some(([key,value])=>value!==(preview||blank)[key as keyof typeof blank]);
+  const upload=async()=>{
+    if(!preview||!file)return;if(file.size>25*1024*1024)throw new Error('Choose a model smaller than 25 MB.');
+    const data=new FormData();data.append('model',file);data.append('label',label.trim()||file.name.replace(/\.glb$/i,''));data.append('version',String(preview.version));
+    const response=await fetch(`/api/customer-previews/${preview.id}/models`,{method:'POST',headers:{'X-Auth':getAuthToken()||''},body:data});
+    const body=await response.json();if(!response.ok)throw new Error(body.message||'Could not upload the model.');
+    refresh(body);setFile(null);setLabel('');const input=document.getElementById('preview-model-file') as HTMLInputElement|null;if(input)input.value='';
+  };
+  const sharing=async()=>{if(!preview)return;refresh(await (await apiRequest('POST',`/api/customer-previews/${preview.id}/sharing`,{published:!preview.published,version:preview.version})).json());};
+  const copy=async()=>{if(!preview)return;try{await navigator.clipboard.writeText(preview.url);toast({title:'Customer link copied'});}catch{setError('Copy the customer link from the field below.');}};
+  return <Modal open onClose={()=>{if(!busy)onClose();}} title={initial?'Edit customer preview':'New customer preview'} maxWidth="max-w-3xl" preservesDraft={!dirty&&!file&&!label.trim()}>
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">Share a design and collect changes before preparing a quote. Customer links contain no prices or payment steps.</p>
+      <form onSubmit={e=>{e.preventDefault();run(save);}} className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="space-y-1 text-sm">Project title<input required maxLength={120} className={inputCls} value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+          <label className="space-y-1 text-sm">Customer / job reference <span className="text-muted-foreground">(only in the suite)</span><input maxLength={120} className={inputCls} value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})}/></label>
+        </div>
+        <label className="block space-y-1 text-sm">Short description<textarea maxLength={600} className={inputCls+' h-20 py-2'} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+        <div className="grid gap-3 sm:grid-cols-3">{(['width','height','finish'] as const).map(key=><label key={key} className="space-y-1 text-sm capitalize">{key}<input maxLength={key==='finish'?60:40} placeholder={key==='width'?'26 ft':key==='height'?'6 ft':'Matte black'} className={inputCls} value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/></label>)}</div>
+        <label className="block space-y-1 text-sm">Details for the customer <span className="text-muted-foreground">(optional)</span><textarea maxLength={1200} className={inputCls+' h-24 py-2'} value={form.note} onChange={e=>setForm({...form,note:e.target.value})}/></label>
+        <button className={primaryBtn} disabled={busy||!form.title.trim()}>{busy?'Saving…':preview?'Save details':'Create preview'}</button>
+      </form>
+      {preview&&<>
+        <section className="space-y-3 border-t border-border pt-5"><h3 className="font-semibold">Design options</h3>
+          <p className="text-sm text-muted-foreground">Upload GLB models from your design software. Include animations to give the customer an open/close button. Up to six options, 25 MB each.</p>
+          {preview.options.map(o=><div key={o.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"><div><p className="font-medium">{o.label}</p><p className="text-xs text-muted-foreground">{(o.size/1024/1024).toFixed(1)} MB</p></div><button className="text-sm underline disabled:opacity-50" disabled={busy||(preview.published&&preview.options.length===1)} onClick={()=>run(async()=>refresh(await(await apiRequest('DELETE',`/api/customer-previews/${preview.id}/models/${o.id}`,{version:preview.version})).json()))}>Remove</button></div>)}
+          {preview.options.length<6&&<div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 text-sm">Option name<input maxLength={60} className={inputCls} placeholder="For example: 5 horizontal pipes" value={label} onChange={e=>setLabel(e.target.value)}/></label><label className="space-y-1 text-sm">3D model<input id="preview-model-file" className={inputCls+' py-2'} type="file" accept=".glb" onChange={e=>setFile(e.target.files?.[0]||null)}/></label><button className={secondaryBtn} disabled={busy||!file} onClick={()=>run(upload)}>{busy?'Working…':'Add option'}</button></div>}
+        </section>
+        <section className="space-y-3 border-t border-border pt-5"><h3 className="font-semibold">Customer link</h3><p className="text-sm text-muted-foreground">{preview.published?'Anyone with this link can view the design and send feedback. It is excluded from search engines.':'Enable the link when the design is ready to review.'}</p>
+          <div className="flex flex-wrap gap-2"><button className={preview.published?secondaryBtn:primaryBtn} disabled={busy||!!dirty||!preview.options.length} onClick={()=>run(sharing)}>{preview.published?'Disable link':'Enable customer link'}</button>{preview.published&&<><button className={secondaryBtn} onClick={copy}><Copy size={16}/>Copy link</button><a href={preview.url} target="_blank" rel="noopener noreferrer" className={secondaryBtn}><ExternalLink size={16}/>Open preview</a></>}</div>
+          {dirty&&<p className="text-sm text-muted-foreground">Save your design details before changing sharing.</p>}
+          {preview.published&&<input aria-label="Customer preview link" className={inputCls+' text-sm'} readOnly value={preview.url} onFocus={e=>e.target.select()}/>}
+        </section>
+        {!!preview.feedback.length&&<section className="space-y-3 border-t border-border pt-5"><h3 className="font-semibold">Customer feedback</h3>{preview.feedback.map(f=><article key={f.id} className="rounded-lg border border-border p-4"><p className="text-xs text-muted-foreground">{f.optionLabel} · {new Date(f.createdAt).toLocaleString()}</p><p className="mt-2 whitespace-pre-wrap text-sm">{f.message}</p></article>)}</section>}
+      </>}
+      {error&&<p role="alert" className="rounded-lg border border-destructive p-3 text-sm text-destructive">{error}</p>}
+    </div>
+  </Modal>;
+}
+
+export default function CustomerPreviewsPage(){
+  const [editing,setEditing]=useState<Preview|null|undefined>(undefined);
+  const query=useQuery<Preview[]>({queryKey:['customer-previews'],queryFn:async()=>(await apiRequest('GET','/api/customer-previews')).json()});
+  const copy=async(p:Preview)=>{try{await navigator.clipboard.writeText(p.url);toast({title:'Customer link copied'});}catch{setEditing(p);}};
+  return <div className="mx-auto max-w-6xl p-4 sm:p-6"><Header title="Customer previews" description="Review the design with your customer before creating a quote."><button className={primaryBtn} onClick={()=>setEditing(null)}><Plus size={18}/>New preview</button></Header>
+    {query.isPending?<p className="text-muted-foreground">Loading previews…</p>:query.isError?<div role="alert"><p>Could not load previews.</p><button className={secondaryBtn} onClick={()=>query.refetch()}>Try again</button></div>:!query.data?.length?<div className="rounded-xl border border-dashed border-border p-10 text-center"><Box className="mx-auto mb-3 text-muted-foreground"/><p className="font-medium">Start with a design your customer can explore.</p><p className="mt-2 text-sm text-muted-foreground">Add a 3D model, name the options, and share a CJM Metals link.</p></div>:<div className="grid gap-4 md:grid-cols-2">{query.data.map(p=><article key={p.id} className="rounded-xl border border-border bg-card p-5"><div className="flex justify-between gap-3"><div><h2 className="font-semibold">{p.title}</h2><p className="text-sm text-muted-foreground">{p.customer||'No customer reference'} · {p.options.length} {p.options.length===1?'option':'options'}</p></div><span className="text-xs text-muted-foreground">{p.published?'Link enabled':'Draft'}</span></div>{!!p.feedback.length&&<p className="mt-3 flex items-center gap-2 text-sm"><MessageSquare size={16}/>{p.feedback.length} customer {p.feedback.length===1?'comment':'comments'}</p>}<div className="mt-4 flex flex-wrap gap-2"><button className={secondaryBtn} onClick={()=>setEditing(p)}><Pencil size={16}/>Manage</button>{p.published&&<><button className={secondaryBtn} onClick={()=>copy(p)}><Copy size={16}/>Copy link</button><a className={secondaryBtn} href={p.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={16}/>Open preview</a></>}</div></article>)}</div>}
+    {editing!==undefined&&<PreviewEditor initial={editing} onClose={()=>setEditing(undefined)}/>}
+  </div>;
+}

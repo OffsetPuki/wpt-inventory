@@ -31,6 +31,7 @@ const NotFoundPage = lazy(() => import("./pages/not-found"));
 
 // Business-suite modules
 const CrmOverviewPage = lazy(() => import("./pages/crm/index"));
+const CustomerPreviewsPage = lazy(() => import("./pages/crm/customer-previews"));
 const CrmLeadsPage = lazy(() => import("./pages/crm/leads"));
 const CrmClientsPage = lazy(() => import("./pages/crm/clients"));
 const CrmQuoteBuilderPage = lazy(() => import("./pages/crm/quotes"));
@@ -160,6 +161,9 @@ export default function App() {
           </Route>
           <Route path="/crm/quotes">
             <CrmQuoteBuilderPage />
+          </Route>
+          <Route path="/crm/previews">
+            <ElevatedRoute><CustomerPreviewsPage /></ElevatedRoute>
           </Route>
 
           {/* Marketing control center — management view */}
