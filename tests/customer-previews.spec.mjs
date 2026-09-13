@@ -9,7 +9,7 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
   await page.goto(app.base+'/#/crm/previews');
-  await expect(page.getByText('New feedback emails go to')).toContainText('owner@example.test');
+  await expect(page.getByText('Feedback and design acceptance emails go to')).toContainText('owner@example.test');
   await page.getByRole('button',{name:'New preview',exact:true}).click();
   const dialog=page.getByRole('dialog');
   await dialog.getByLabel('Project title',{exact:true}).fill(' Synthetic test gate ');
@@ -33,9 +33,15 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   await dialog.getByLabel('Project title',{exact:true}).fill('Synthetic test gate');
   await dialog.getByRole('button',{name:'Close',exact:true}).click();
   const card=page.getByRole('article').filter({hasText:'Synthetic test gate'});
-  await expect(card).toContainText('1 customer comment');
+  await expect(card).toContainText('1 customer response');
   await card.getByRole('button',{name:'Manage',exact:true}).click();
   await expect(dialog.getByText('Please enlarge the lettering.')).toBeVisible();
+  expect((await app.api(`/api/public/customer-previews/${token}/accept`,'POST',{submissionId:crypto.randomUUID(),optionId:p.options[0].id,version:p.version},undefined,{'X-Lead-Key':'test-intake-key'})).status).toBe(201);
+  await expect(dialog.getByText('Design accepted for quoting',{exact:true})).toBeVisible({timeout:10000});
+  await dialog.getByRole('button',{name:'Close',exact:true}).click();
+  await expect(card).toContainText('Ready for a quote · 5 pipes');
+  await expect(card).toContainText('2 customer responses');
+  await card.getByRole('button',{name:'Manage',exact:true}).click();
   await dialog.getByRole('button',{name:'Disable link',exact:true}).click();
   expect((await app.api(`/api/public/customer-previews/${token}`,'GET',undefined,undefined,{'X-Lead-Key':'test-intake-key'})).status).toBe(404);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);

@@ -24,7 +24,7 @@ try{
   assert.equal((await upload(model,p.version-1)).status,409,'Stale upload does not create an option');
   r=await api(`/api/customer-previews/${p.id}/sharing`,'POST',{published:true,version:p.version},owner);assert.equal(r.status,200);p=r.data;
   assert.equal((await api(publicPath)).status,404,'Only website proxy gets the shared metadata');
-  r=await api(publicPath,'GET',undefined,undefined,key);assert.equal(r.status,200);assert.equal(r.data.customer,undefined);assert.equal(r.data.feedback,undefined);assert.equal(r.data.version,undefined);assert.equal(r.data.title,fields.title);
+  r=await api(publicPath,'GET',undefined,undefined,key);assert.equal(r.status,200);assert.equal(r.data.customer,undefined);assert.equal(r.data.feedback,undefined);assert.equal(r.data.version,p.version);assert.equal(r.data.title,fields.title);
   const rr=await fetch(base+publicPath+'/models/'+p.options[0].id,{headers:key});assert.equal(rr.status,200);assert.deepEqual(Buffer.from(await rr.arrayBuffer()),model);assert.match(rr.headers.get('cache-control'),/no-store/);
   assert.equal((await api(publicPath+'/models/'+'0'.repeat(32),'GET',undefined,undefined,key)).status,404);
   const second=(await api('/api/customer-previews','POST',{title:'Other synthetic'},owner)).data;
@@ -74,6 +74,52 @@ try{
     assert.equal((await api(publicPath+'/feedback','POST',feedback,undefined,key)).status,200);
     await runSuiteFollowups();assert.equal(deliveries.length,2,'A lost HTTP response cannot email the owner twice');
   }finally{globalThis.fetch=previousFetch;for(const [k,value]of Object.entries(previousEnv)){if(value===undefined)delete process.env[k];else process.env[k]=value;}}
+  const acceptance={submissionId:crypto.randomUUID(),optionId:p.options[0].id,version:p.version};
+  const quotesBefore=sqlite.prepare('SELECT count(*) n FROM quotes').get().n;
+  assert.equal((await api(publicPath+'/accept','POST',acceptance)).status,404,'Acceptance requires website access');
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,version:undefined},undefined,key)).status,400);
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,version:p.version-1},undefined,key)).status,409,'A stale design cannot be accepted');
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,optionId:'0'.repeat(32)},undefined,key)).status,400);
+  assert.equal((await api(publicPath+'/accept','POST',acceptance,undefined,key)).status,201);
+  assert.equal((await api(publicPath+'/accept','POST',acceptance,undefined,key)).status,200);
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,submissionId:crypto.randomUUID()},undefined,key)).status,200,'Reloading and accepting again does not create another notice');
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,submissionId:feedback.submissionId},undefined,key)).status,409,'A comment submission cannot become an acceptance');
+  const accepted=(await api('/api/customer-previews','GET',undefined,owner)).data.find(x=>x.id===p.id).feedback[0];
+  assert.equal(accepted.kind,'approval');assert.equal(accepted.optionId,acceptance.optionId);assert.equal(accepted.designVersion,p.version);assert.equal(accepted.emailStatus,'queued');
+  const acceptanceKey=`preview-feedback-owner:${accepted.id}`,acceptanceMail=[];
+  const acceptEnv=Object.fromEntries(['OWNER_EMAIL','MAIL_FROM','RESEND_API_KEY'].map(k=>[k,process.env[k]])),acceptFetch=globalThis.fetch;
+  try{
+    Object.assign(process.env,{OWNER_EMAIL:'owner@example.test',MAIL_FROM:'preview@example.test',RESEND_API_KEY:'test-only-key'});
+    globalThis.fetch=async(url,init)=>{
+      if(String(url)!=='https://api.resend.com/emails')return acceptFetch(url,init);
+      acceptanceMail.push({body:JSON.parse(init.body),key:init.headers['Idempotency-Key']});
+      if(acceptanceMail.length===1)throw new Error('Synthetic acceptance email interruption');
+      return new Response(JSON.stringify({id:'acceptance-provider-test'}),{headers:{'Content-Type':'application/json'}});
+    };
+    await runSuiteFollowups();
+    assert.equal((await api('/api/customer-previews','GET',undefined,owner)).data.find(x=>x.id===p.id).feedback[0].emailStatus,'attention');
+    sqlite.prepare('UPDATE suite_outbox SET available_at=0 WHERE event_key=?').run(`delivery:${acceptanceKey}`);
+    await runSuiteFollowups();await runSuiteFollowups();
+    assert.equal(acceptanceMail.length,2);assert.deepEqual(acceptanceMail[0],acceptanceMail[1]);
+    assert.equal(acceptanceMail[1].body.to,'owner@example.test');assert.match(acceptanceMail[1].body.subject,/Design accepted — quote requested/);
+    assert.ok(acceptanceMail[1].body.text.includes('Customer / job: PRIVATE reference'));
+    assert.ok(acceptanceMail[1].body.text.includes('Selected option: 5 pipes'));
+    assert.ok(acceptanceMail[1].body.text.includes(`Design version: ${p.version}`));
+    assert.ok(acceptanceMail[1].body.text.includes('Prepare and send a quote'));
+    assert.equal((await api(publicPath+'/accept','POST',{...acceptance,submissionId:crypto.randomUUID()},undefined,key)).status,200);
+    await runSuiteFollowups();assert.equal(acceptanceMail.length,2,'Repeated acceptance cannot send another email');
+    assert.equal((await api('/api/customer-previews','GET',undefined,owner)).data.find(x=>x.id===p.id).feedback[0].emailStatus,'sent');
+  }finally{globalThis.fetch=acceptFetch;for(const [k,value]of Object.entries(acceptEnv)){if(value===undefined)delete process.env[k];else process.env[k]=value;}}
+  r=await api(`/api/customer-previews/${p.id}`,'PATCH',{...fields,note:'Revised design details',version:p.version},owner);assert.equal(r.status,200);p=r.data;
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,submissionId:crypto.randomUUID()},undefined,key)).status,409,'A later revision requires a fresh review');
+  const revisedAcceptance={...acceptance,version:p.version,submissionId:crypto.randomUUID()};
+  sqlite.exec("CREATE TEMP TRIGGER fail_acceptance_notice BEFORE INSERT ON suite_outbox WHEN NEW.kind='preview-feedback-owner' BEGIN SELECT RAISE(ABORT,'Synthetic acceptance queue failure'); END;");
+  assert.equal((await api(publicPath+'/accept','POST',revisedAcceptance,undefined,key)).status,500);
+  assert.equal(sqlite.prepare('SELECT count(*) n FROM customer_preview_feedback WHERE submission_id=?').get(revisedAcceptance.submissionId).n,0,'Acceptance rolls back when its email cannot be queued');
+  sqlite.exec('DROP TRIGGER fail_acceptance_notice');
+  assert.equal((await api(publicPath+'/accept','POST',revisedAcceptance,undefined,key)).status,201);
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM customer_preview_feedback WHERE preview_id=? AND kind='approval'").get(p.id).n,2,'A revised preview can receive its own acceptance');
+  assert.equal(sqlite.prepare('SELECT count(*) n FROM quotes').get().n,quotesBefore,'The owner prepares the quote; design acceptance does not create or accept a quote');
   const atomicFeedback={...feedback,submissionId:crypto.randomUUID(),message:'Atomic feedback test'};
   sqlite.exec("CREATE TEMP TRIGGER fail_preview_notice BEFORE INSERT ON suite_outbox WHEN NEW.kind='preview-feedback-owner' BEGIN SELECT RAISE(ABORT,'Synthetic preview queue failure'); END;");
   assert.equal((await api(publicPath+'/feedback','POST',atomicFeedback,undefined,key)).status,500);
@@ -84,6 +130,7 @@ try{
   assert.equal((await api(publicPath,'GET',undefined,undefined,key)).status,404);
   assert.equal((await api(publicPath+'/models/'+p.options[0].id,'GET',undefined,undefined,key)).status,404,'Disabled link also revokes model access');
   assert.equal((await api(publicPath+'/feedback','POST',{...feedback,submissionId:crypto.randomUUID()},undefined,key)).status,404);
+  assert.equal((await api(publicPath+'/accept','POST',{...acceptance,submissionId:crypto.randomUUID()},undefined,key)).status,404,'Disabled previews cannot be accepted');
   assert.equal((await api(`/api/customer-previews/${p.id}`,'PATCH',{...fields,title:'Overwrite',version:p.version-1},owner)).status,409);
   assert.equal(sqlite.pragma('integrity_check',{simple:true}),'ok');
   console.log('PASS: authenticated management, scoped sharing, GLB validation, private metadata, live feedback, atomic owner email queue, transport recovery, duplicate protection and immediate link revocation');

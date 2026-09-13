@@ -45,6 +45,13 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS customer_preview_feedback (
  UNIQUE(preview_id,submission_id)
 );
 CREATE INDEX IF NOT EXISTS customer_preview_feedback_recent ON customer_preview_feedback(preview_id,created_at DESC,id DESC);`);
+// Keep existing customer comments when adding design decisions to their history.
+const responseColumns=new Set((sqlite.pragma('table_info(customer_preview_feedback)') as {name:string}[]).map(c=>c.name));
+for(const [name,definition] of [['kind',"TEXT NOT NULL DEFAULT 'feedback'"],['option_id',"TEXT NOT NULL DEFAULT ''"],['design_version','INTEGER']]) {
+  if(!responseColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_feedback ADD COLUMN ${name} ${definition}`);
+}
+sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS customer_preview_acceptance_once
+  ON customer_preview_feedback(preview_id,option_id,design_version) WHERE kind='approval';`);
 
 export function validatePreviewGlb(bytes: Buffer): void {
   if (bytes.length < 24 || bytes.length > MAX_BYTES || bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length)
@@ -86,7 +93,7 @@ function view(p: Preview) {
   return { id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width, height:p.height,
     finish:p.finish, note:p.note, published:!!p.published, version:p.version, createdAt:p.created_at, updatedAt:p.updated_at,
     url:`https://www.cjmmetals.com/preview/${p.token}`, options:modelList(p.id),
-    feedback:sqlite.prepare(`SELECT f.id,f.option_label AS optionLabel,f.message,f.created_at AS createdAt,
+    feedback:sqlite.prepare(`SELECT f.id,f.kind,f.option_id AS optionId,f.design_version AS designVersion,f.option_label AS optionLabel,f.message,f.created_at AS createdAt,
       CASE WHEN m.accepted_at IS NOT NULL THEN 'sent'
         WHEN coalesce(d.status,o.status) IN ('failed','review','stopped') THEN 'attention'
         WHEN o.id IS NOT NULL THEN 'queued' ELSE 'not_requested' END AS emailStatus
@@ -150,7 +157,7 @@ export function registerCustomerPreviews(app: Express): void {
   };
   app.get('/api/public/customer-previews/:token',(req,res) => {
     const p=readShared(req,res);if(!p)return;
-    res.json({title:p.title,description:p.description,width:p.width,height:p.height,finish:p.finish,note:p.note,options:modelList(p.id)});
+    res.json({title:p.title,description:p.description,width:p.width,height:p.height,finish:p.finish,note:p.note,version:p.version,options:modelList(p.id)});
   });
   app.get('/api/public/customer-previews/:token/models/:modelId',(req,res) => {
     const p=readShared(req,res);if(!p)return;
@@ -158,25 +165,34 @@ export function registerCustomerPreviews(app: Express): void {
     if(!m){res.status(404).end();return;}
     res.setHeader('Content-Type','model/gltf-binary');res.setHeader('X-Content-Type-Options','nosniff');res.send(m.bytes);
   });
-  app.post('/api/public/customer-previews/:token/feedback',(req,res) => {
+  const receiveResponse=(req:Request,res:Response,kind:'feedback'|'approval') => {
     const p=readShared(req,res);if(!p)return;
-    const parsed=z.object({submissionId:z.string().uuid(),optionId:z.string().regex(/^[a-f0-9]{32}$/),message:z.string().trim().min(1).max(2000)}).safeParse(req.body);
-    if(!parsed.success){res.status(400).json({message:'Enter your design feedback (up to 2,000 characters).'});return;}
+    const parsed=z.object({submissionId:z.string().uuid(),optionId:z.string().regex(/^[a-f0-9]{32}$/),message:z.string().trim().max(2000).default(''),version:z.number().int().positive().optional()}).safeParse(req.body);
+    if(!parsed.success||(kind==='feedback'&&!parsed.data.message)||(kind==='approval'&&!parsed.data.version)){res.status(400).json({message:kind==='approval'?'Choose a current design to request a quote.':'Enter your design feedback (up to 2,000 characters).'});return;}
+    const message=kind==='approval'?'I like this design. Please prepare a quote.':parsed.data.message;
+    const previous=sqlite.prepare('SELECT kind,option_id,option_label,message,design_version FROM customer_preview_feedback WHERE preview_id=? AND submission_id=?').get(p.id,parsed.data.submissionId) as {kind:string;option_id:string;option_label:string;message:string;design_version:number|null}|undefined;
+    if(previous){
+      if(previous.kind!==kind||previous.message!==message||(previous.option_id&&previous.option_id!==parsed.data.optionId)||(kind==='approval'&&previous.design_version!==parsed.data.version)){res.status(409).json({message:'This response was already used for a different selection. Reload the preview and try again.'});return;}
+      res.json({ok:true});return;
+    }
+    if(kind==='approval'&&parsed.data.version!==p.version){res.status(409).json({message:'This design has changed. Reload the preview and review it before requesting a quote.'});return;}
     const option=modelList(p.id).find(m=>m.id===parsed.data.optionId);
     if(!option){res.status(400).json({message:'Choose one of the current design options.'});return;}
-    if(sqlite.prepare('SELECT 1 FROM customer_preview_feedback WHERE preview_id=? AND submission_id=?').get(p.id,parsed.data.submissionId)){res.json({ok:true});return;}
+    if(kind==='approval'&&sqlite.prepare("SELECT 1 FROM customer_preview_feedback WHERE preview_id=? AND option_id=? AND design_version=? AND kind='approval'").get(p.id,option.id,p.version)){res.json({ok:true});return;}
     const recent=sqlite.prepare('SELECT COUNT(*) AS n FROM customer_preview_feedback WHERE preview_id=? AND created_at>?').get(p.id,Date.now()-3600000) as {n:number};
-    if(recent.n>=10){res.status(429).json({message:'Please wait a little before sending more feedback.'});return;}
+    if(recent.n>=10){res.status(429).json({message:'Please wait a little before sending another response.'});return;}
     sqlite.transaction(()=>{
-      const row=sqlite.prepare('INSERT INTO customer_preview_feedback(preview_id,submission_id,option_label,message,created_at) VALUES(?,?,?,?,?)')
-        .run(p.id,parsed.data.submissionId,option.label,parsed.data.message,Date.now());
+      const row=sqlite.prepare('INSERT INTO customer_preview_feedback(preview_id,submission_id,option_label,message,created_at,kind,option_id,design_version) VALUES(?,?,?,?,?,?,?,?)')
+        .run(p.id,parsed.data.submissionId,option.label,message,Date.now(),kind,option.id,p.version);
       enqueueFollowup(`preview-feedback-owner:${row.lastInsertRowid}`,'preview-feedback-owner',{
-        subject:`[CJM Metals] Design feedback — ${p.title.replace(/[\r\n]+/g,' ')}`,
-        text:`New feedback on your customer design preview.\n\nProject: ${p.title}\n${p.customer?`Customer / job: ${p.customer}\n`:''}Selected option: ${option.label}\n\nCustomer feedback:\n${parsed.data.message}\n\nReview in the Business Suite:\nhttps://flipnob.com/#/crm/previews\n\nCustomer preview:\nhttps://www.cjmmetals.com/preview/${p.token}\n\nThis is feedback before a quote, not approval to begin fabrication.`,
+        subject:`[CJM Metals] ${kind==='approval'?'Design accepted — quote requested':'Design feedback'} — ${p.title.replace(/[\r\n]+/g,' ')}`,
+        text:`${kind==='approval'?'The customer selected "I like this design" and is ready for a quote.':'New feedback on your customer design preview.'}\n\nProject: ${p.title}\n${p.customer?`Customer / job: ${p.customer}\n`:''}Selected option: ${option.label}\nDesign version: ${p.version}\n\nCustomer response:\n${message}\n\n${kind==='approval'?'Next step: Prepare and send a quote for this selected design.\n\n':''}Review in the Business Suite:\nhttps://flipnob.com/#/crm/previews\n\nCustomer preview:\nhttps://www.cjmmetals.com/preview/${p.token}\n\n${kind==='approval'?'This confirms the preview design for quoting only. Pricing and fabrication still require the normal quote approval.':'This is feedback before a quote, not approval to begin fabrication.'}`,
       });
     })();
     res.status(201).json({ok:true});
-  });
+  };
+  app.post('/api/public/customer-previews/:token/feedback',(req,res)=>receiveResponse(req,res,'feedback'));
+  app.post('/api/public/customer-previews/:token/accept',(req,res)=>receiveResponse(req,res,'approval'));
   app.get('/api/customer-previews/notifications',requireElevated,(_req,res)=>res.json(ownerMailStatus()));
   app.get('/api/customer-previews',requireElevated,(_req,res) => {
     const ps=sqlite.prepare('SELECT * FROM customer_previews ORDER BY updated_at DESC,id DESC').all() as Preview[];
