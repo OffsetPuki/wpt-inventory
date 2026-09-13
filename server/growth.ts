@@ -3,6 +3,8 @@ import { z } from "zod";
 import { sqlite } from "./storage";
 import { requireElevated } from "./auth";
 import { audit } from "./audit";
+import {bingConfigured,bingReport,refreshBingReports} from './bing-reporting';
+import {searchConnections} from './search-connections';
 import {
   GOOGLE_SITES,
   deliverLeadOutcomes,
@@ -192,6 +194,7 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
     traffic: googleReport(site, start, end, "traffic"),
     search: googleReport(site, start, end, "search"),
     queries: googleReport(site, start, end, "queries"),
+    bing: bingReport(site,start,end),
   };
 }
 export function registerGrowthRoutes(app: Express) {
@@ -208,6 +211,7 @@ export function registerGrowthRoutes(app: Express) {
       return { site, name: GOOGLE_SITES[site].name, ...organic,
         sessions: report.traffic ? report.traffic.rows.filter((row:any) => row.medium.toLowerCase() === "organic").reduce((n:number,row:any)=>n+row.sessions,0) : null,
         clicks: search?.totals?.clicks ?? null, impressions: search?.totals?.impressions ?? null,
+        bingClicks:report.bing.totals?.clicks??null,bingImpressions:report.bing.totals?.impressions??null,
         trafficUpdatedAt: report.traffic?.fetchedAt ?? null, searchUpdatedAt: search?.fetchedAt ?? null };
     });
     res.json({ ...current, rows });
@@ -240,9 +244,11 @@ export function registerGrowthRoutes(app: Express) {
       ),
       connection: {
         reportingEmail: reportingIdentity(),
+        bingConfigured:bingConfigured(),
         outcomesConfigured:
           !!process.env[`GA4_${site.data.toUpperCase()}_API_SECRET`],
       },
+      searchConnections:searchConnections(site.data,range.current.start,range.current.end),
       queue,
       includeTests,
     });
@@ -254,34 +260,35 @@ export function registerGrowthRoutes(app: Express) {
       const parsed = siteSchema.safeParse(req.body.site);
       if (!parsed.success)
         return res.status(400).json({ message: "Choose a trade" });
-      if (!reportingIdentity())
+      if (!reportingIdentity() && !bingConfigured())
         return res
           .status(409)
           .json({
-            message: "Connect the read-only Google reporting account first.",
+            message: "Connect Google or Bing reporting first.",
           });
       const range = periods(req.body.end);
       try {
-        const result = await refreshGoogleReports(
+        const result = reportingIdentity() ? await refreshGoogleReports(
           parsed.data,
           range.current.start,
           range.current.end,
-        );
-        const previous = await refreshGoogleReports(
+        ) : {};
+        const previous = reportingIdentity() ? await refreshGoogleReports(
           parsed.data,
           range.previous.start,
           range.previous.end,
-        );
-        audit(req, "marketing.google_refresh", {
+        ) : {};
+        const bing=bingConfigured()?await refreshBingReports(parsed.data):{};
+        audit(req, "marketing.search_refresh", {
           details: { site: parsed.data },
         });
-        res.json({ current: result, previous });
+        res.json({ current: {...result,...Object.fromEntries(Object.entries(bing).map(([key,value])=>['Bing '+key,value]))}, previous });
       } catch {
         res
           .status(502)
           .json({
             message:
-              "Google reports could not be refreshed. Saved business results are still available.",
+              "Search reports could not be refreshed. Saved business results are still available.",
           });
       }
     },
@@ -331,20 +338,25 @@ export function registerGrowthRoutes(app: Express) {
 let refreshing = false;
 export function startGrowthReporting() {
   const tick = async () => {
-    if (refreshing || !reportingIdentity()) return;
+    if (refreshing || (!reportingIdentity() && !bingConfigured())) return;
     refreshing = true;
     try {
       const range = periods(undefined);
       for (const site of Object.keys(GOOGLE_SITES) as Site[]) {
+        if(bingConfigured()){
+          const cached=bingReport(site,range.current.start,range.current.end);
+          if(!cached.fetchedAt||Date.now()-cached.fetchedAt>=6*3600000||cached.errors.length)await refreshBingReports(site);
+        }
+        if(!reportingIdentity())continue;
         for (const period of [range.current, range.previous]) {
           const cache = googleReport(site, period.start, period.end, "traffic");
-          if (cache && Date.now() - cache.fetchedAt < 6 * 3600000) continue;
+          if (cache && Date.now() - cache.fetchedAt < 6 * 3600000 && googleReport(site,period.start,period.end,'sitemaps') && googleReport(site,period.start,period.end,'indexing')) continue;
           await refreshGoogleReports(site, period.start, period.end);
         }
       }
     } catch {
       console.error(
-        "[marketing] Google report refresh failed; previous cache retained",
+        "[marketing] Search report refresh failed; previous cache retained",
       );
     } finally {
       refreshing = false;

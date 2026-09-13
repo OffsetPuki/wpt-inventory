@@ -320,7 +320,7 @@ export default function PriceBookPanel({ priceBook, onChange, shop, onChangeShop
             <div style={{ marginTop: 18 }}>
               <span className="pb-label">Quote terms</span>
               <p className="note" style={{ margin: '4px 0 8px' }}>
-                The small print at the foot of every quote — one term per line. Shows on
+                New and revised quotes are valid for 5 days from issue. Any older validity sentence below is replaced when issuing a new quote. Other terms — one per line — show on
                 the PDF and on the customer&rsquo;s online quote.
               </p>
               <textarea

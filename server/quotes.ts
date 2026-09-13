@@ -2,6 +2,7 @@ import {normalize as normalizeBarndo,validate as validateBarndo} from '../client
 import {cleanBarndoQuote,purchasing,scopeIssues} from '../client/src/quote/lib/barndoQuote.js';
 import {computeTotals} from '../client/src/quote/lib/quote.js';
 import {duplicateSession} from '../client/src/quote/lib/store.js';
+import { issuedPayload, preserveLegacyQuoteTerms } from './quote-policy';
 import {registerQuoteOptionRoutes} from './quote-options';
 import { projectLabor } from './labor-cost';
 import { jobStockCost } from './stock-cost';
@@ -213,6 +214,7 @@ function insertQuoteWithNumber(
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerQuoteRoutes(app: Express): void {
+  preserveLegacyQuoteTerms();
   registerQuoteOptionRoutes(app);
   app.get('/api/quotes/barndominium-templates', requireAuth, (_req, res) => {
     const rows=sqlite.prepare('SELECT id,name,state,created_at AS createdAt FROM barndominium_quote_templates ORDER BY name COLLATE NOCASE').all() as {id:number;name:string;state:string;createdAt:number}[];
@@ -710,6 +712,7 @@ export function registerQuoteRoutes(app: Express): void {
     if (quote.status === "draft") {
       updates.status = "sent";
       updates.sentAt = Date.now();
+      updates.payload = issuedPayload(quote, updates.sentAt);
     }
     db.update(quotes).set(updates).where(eq(quotes.id, id)).run();
 

@@ -15,7 +15,7 @@ const LEGAL = {
   contactEmail: "support@cjmmetals.com",
   // Used by the EULA's governing law / exclusive-jurisdiction clause.
   governingLaw: "the State of Texas, United States",
-  effectiveDate: "July 5, 2026",
+  effectiveDate: "September 12, 2026",
 };
 // ▲▲▲ EDIT THESE before going to production ▲▲▲
 
@@ -110,10 +110,10 @@ function privacyBody(): string {
   <h2 id="info">1. Information we collect</h2>
 
   <h3>Account &amp; authentication</h3>
-  <p>When an administrator creates your account, we store your display name, assigned role (e.g. owner, worker), and a one-way <strong>bcrypt hash</strong> of your numeric PIN. We never store your PIN in plain text and cannot recover it. We create a session token when you sign in to keep you logged in.</p>
+  <p>When an administrator creates your account, we store your display name, assigned role (e.g. owner, worker), and a one-way <strong>bcrypt hash</strong> of your password or PIN. Owners use passwords; worker accounts may use PINs. We do not store these sign-in credentials in plain text. We create a session token when you sign in to keep you logged in.</p>
 
   <h3>Inventory &amp; operational data</h3>
-  <p>The Service stores the business records you enter: items and their quantities, locations, part numbers, notes and photos; projects, job numbers and checklists; and the check-out, check-in, and stock-adjustment transactions you record.</p>
+  <p>The Service stores the business records you enter: items and their quantities, locations, part numbers, notes and photos; projects, job numbers and checklists; and the check-out, check-in, and stock-adjustment transactions you record. It also stores customer inquiries and contacts, quotes and acceptance activity, contracts, invoices, payment references, job files, employee time and payroll records, internal communications and related audit history.</p>
 
   <h3>Photos and images</h3>
   <p>Photos you attach to items are stored by the Service. If you use the optional "Identify by photo" feature, a downscaled copy of the image is sent to our AI provider for processing — see <a href="#ai">Section 3</a>.</p>
@@ -122,11 +122,11 @@ function privacyBody(): string {
   <p>To protect the Service and maintain an accurate record of sensitive actions, we keep an audit log of privileged events (such as item deletion, account changes, settings changes, and sign-in outcomes). Each entry may include the acting user, the action, a timestamp, and the originating IP address. We also apply rate limiting and account-lockout protections that temporarily record failed sign-in attempts.</p>
 
   <h3>Technical data</h3>
-  <p>The Service stores a sign-in token in your browser's local storage and a small cookie recording your light/dark theme preference. We do not use third-party advertising or analytics trackers.</p>
+  <p>The Service stores a sign-in token in your browser's local storage and a small cookie recording your light/dark theme preference. The internal application does not load third-party advertising trackers. Connected public websites use optional Analytics and campaign/outcome measurement as described in their notices; related permissions and identifiers may be stored in this suite.</p>
 
   <h2 id="use">2. How we use information</h2>
   <ul>
-    <li>To authenticate you and provide the inventory, project, and reporting features of the Service.</li>
+    <li>To authenticate users and provide customer, quoting, contracting, job, inventory, finance, payroll, communication and reporting functions.</li>
     <li>To generate suggested item names and categories when you choose to identify an item by photo.</li>
     <li>To secure the Service, prevent abuse, troubleshoot problems, and maintain an audit trail of sensitive actions.</li>
   </ul>
@@ -136,17 +136,20 @@ function privacyBody(): string {
   <p>The optional "Identify by photo" feature sends a downscaled copy of the photo you capture to <strong>Anthropic, PBC</strong> (the Claude API) to generate a suggested item name, category, and short description. We send only the image for that request; we do not send your inventory database or account credentials. Anthropic processes the image to return a result and, under its commercial API terms, does not use API inputs to train its models. If you prefer not to use this feature, simply enter item details manually.</p>
 
   <h2 id="share">4. How we share information</h2>
-  <p>We share information only with the service providers needed to operate the Service, and only as necessary:</p>
+  <p>We share information as described below and as needed to operate the Service and carry out your project:</p>
   <ul>
     <li><strong>Anthropic, PBC</strong> — to process photos you submit for AI identification (Section 3).</li>
-    <li><strong>Hosting / infrastructure</strong> — the server and storage on which your administrator runs the Service.</li>
+    <li><strong>Hosting, storage and backups</strong> — infrastructure providers hosting the suite, uploaded files and backup archives.</li>
+    <li><strong>Email and payment providers</strong> — customer communications and invoice payments; Stripe processes online payments and supplies payment status and transaction references.</li>
+    <li><strong>Google services, when connected</strong> — authorized reporting and consent-based website outcome measurement.</li>
+    <li><strong>Customers and the public</strong> — customer quote/invoice links expose the associated document to anyone with that link. Specifically approved project photos or reviews may be published on CJM websites.</li>
     <li><strong>Legal</strong> — where required by law, regulation, or valid legal process, or to protect the rights, safety, and security of the Company and its users.</li>
   </ul>
-  <p>We do not sell personal information and do not share it with advertisers or data brokers. We do <strong>not</strong> share, combine, or expose one organization's data with or to any other organization or customer.</p>
-  <p>Any third-party service provider that processes data on our behalf is bound by a written agreement requiring confidentiality and data-protection safeguards at least as protective as those described in this policy.</p>
+  <p>We do not sell personal information. Optional website campaign and outcome measurement may send permitted identifiers to Google under the choices described in the website privacy notice. Authorized CJM personnel use shared records across the involved trades; customer document links and approved public content are shared as described above.</p>
+  <p>Third-party providers process information under their applicable service agreements and privacy terms. Contact us for questions about a provider used for your project.</p>
 
   <h2 id="security">5. Storage &amp; security</h2>
-  <p>The Service stores data in a database on the server operated by your organization. We apply reasonable technical and organizational safeguards, including: one-way hashing of PINs; role-based access controls; session expiry; login rate limiting and account lockout; HTTP security headers and a content security policy; and validation of uploaded files. When the Service is deployed for production use it is served over HTTPS so data is encrypted in transit (TLS). No method of transmission or storage is completely secure, and we cannot guarantee absolute security.</p>
+  <p>The Service stores data in a database on the server operated by your organization. We apply reasonable technical and organizational safeguards, including: one-way hashing of passwords and PINs; role-based access controls; session expiry; login rate limiting and account lockout; HTTP security headers and a content security policy; and validation of uploaded files. When the Service is deployed for production use it is served over HTTPS so data is encrypted in transit (TLS). No method of transmission or storage is completely secure, and we cannot guarantee absolute security.</p>
   <p><strong>Breach handling.</strong> In the event of a security incident affecting personal information, we will investigate, take appropriate remedial action, and notify affected users without undue delay, as required by applicable law.</p>
 
   <h2 id="retention">6. Data retention</h2>
@@ -158,7 +161,7 @@ function privacyBody(): string {
 
   <h2 id="rights">7. Your rights &amp; choices</h2>
   <p>Because the Service is administered by your organization, your employer is the controller of most data within it. You may ask your administrator to access, correct, or delete records about you. Depending on where you live, you may have rights to access, correct, delete, or restrict processing of your personal information; to exercise these rights, or if you have questions, contact us using the details below. We will not discriminate against you for exercising your privacy rights.</p>
-  <p>We comply with applicable data-protection laws, including, as relevant, the EU/UK General Data Protection Regulation (GDPR), the California Consumer Privacy Act as amended by the CPRA (CCPA/CPRA), and Canada's Personal Information Protection and Electronic Documents Act (PIPEDA), and we honor the data-subject rights those laws provide.</p>
+  <p>We review privacy requests under applicable law. Recordkeeping obligations, security, dispute preservation and backup retention may limit immediate deletion. Contact us using the details below to request a review.</p>
 
   <h2 id="cookies">8. Cookies &amp; local storage</h2>
   <p>The Service uses only what it needs to function: a sign-in token kept in your browser's local storage, and a cookie that remembers your light/dark theme. These are strictly necessary for the Service and are not used for tracking or advertising. Clearing them will sign you out and reset your theme.</p>
@@ -167,7 +170,7 @@ function privacyBody(): string {
   <p>The Service is a workplace tool intended for use by employees and authorized personnel. It is not directed to children under 16, and we do not knowingly collect personal information from children.</p>
 
   <h2 id="changes">10. Changes to this policy</h2>
-  <p>We may update this Privacy Policy from time to time. When we do, we will revise the "Effective" date above and, where appropriate, provide additional notice. Continued use of the Service after an update constitutes acceptance of the revised policy.</p>
+  <p>We may update this Privacy Policy from time to time. When we do, we will revise the "Effective" date above and, where appropriate, provide additional notice. We will seek consent where required for a new use of personal information.</p>
 
   <h2 id="contact">11. Contact</h2>
   <p>Questions, requests, or concerns about this Privacy Policy or your data can be directed to:</p>
@@ -212,7 +215,7 @@ function eulaBody(): string {
   </ul>
 
   <h2 id="accounts">3. Accounts &amp; responsibilities</h2>
-  <p>You are responsible for activity that occurs under your account. Keep your PIN confidential, do not share your account, and notify your administrator promptly of any suspected unauthorized use. Your administrator is responsible for provisioning accounts and assigning roles appropriately.</p>
+  <p>You are responsible for activity that occurs under your account. Keep your password or PIN confidential, do not share your account, and notify your administrator promptly of any suspected unauthorized use. Your administrator is responsible for provisioning accounts and assigning roles appropriately.</p>
 
   <h2 id="third">4. Third-party services</h2>
   <p>The Service integrates with third-party services, including <strong>Anthropic's Claude API</strong> (optional AI photo identification). Your use of those features may also be subject to the third party's own terms and policies. The Company is not responsible for third-party services, and their availability or behavior may change. References to third parties do not imply endorsement or partnership.</p>

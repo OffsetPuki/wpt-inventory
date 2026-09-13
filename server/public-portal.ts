@@ -33,6 +33,7 @@ import { distributeToTotal } from "../client/src/quote/lib/calc.js";
 // The same three helpers the builder uses to describe the design, so the
 // customer's web page and their PDF word the project identically.
 import { specRows, summaryLine, typeLabel } from "../client/src/quote/data/configurators.js";
+import { quoteShop, quotePolicy, isQuoteExpired } from './quote-policy';
 import { deepMerge, DEFAULT_SHOP, termLines, invoiceTermLines, bankBlock } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 
@@ -527,7 +528,10 @@ export function registerPublicPortalRoutes(app: Express): void {
         sentAt: iso(quote.sentAt),
         acceptedAt: iso(quote.acceptedAt),
         declinedAt: iso(quote.declinedAt),
-        shop: currentShop(),
+        shop: quoteShop(quote),
+        issuedAt: quotePolicy(quote)?.issuedAt ?? null,
+        expiresAt: quotePolicy(quote)?.expiresAt ?? null,
+        expired: isQuoteExpired(quote),
         lines: bestEffortLines(doc),
         // The whole printed document — spec, grouped rows, totals ladder — so
         // the customer's web page renders exactly what their PDF shows.
@@ -603,6 +607,7 @@ export function registerPublicPortalRoutes(app: Express): void {
   app.post("/api/public/quote/:token/accept", publicLimiter(30), (req, res) => {
     const quote = findSharedQuote(String(req.params.token));
     if (!quote) return res.status(404).json({ ok: false });
+    if (isQuoteExpired(quote)) return res.status(409).json({ ok:false, reason:"expired" });
     if (quote.status === "draft" || quote.status === "declined") return res.status(409).json({ ok: false, reason: "not_available" });
     try {
       const result = acceptQuote(quote.id, typeof req.body?.note === "string" ? req.body.note : "", req.ip ?? null);

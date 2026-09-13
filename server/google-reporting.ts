@@ -2,6 +2,7 @@ import { reportingAccessToken } from "./google-auth";
 export { reportingIdentity } from "./google-auth";
 import { sqlite } from "./storage";
 import { GOOGLE_SITES, type Site } from "./lead-measurement";
+import { recordReportingStatus } from './reporting-status';
 
 sqlite.exec(
   `CREATE TABLE IF NOT EXISTS mk_google_reports (site TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,fetched_at INTEGER NOT NULL,PRIMARY KEY(site,start_date,end_date,kind));`,
@@ -14,7 +15,7 @@ export function safeGooglePage(value: string): string {
     return "/other";
   }
   if (
-    /^\/(?:es\/)?(?:quote|quotes|review|invoice|invoices|api|admin|account|auth)(?:\/|$)/i.test(
+    /^\/(?:es\/)?(?:quote|quotes|review|invoice|invoices|api|admin|account|auth|concepts|status)(?:\/|$)/i.test(
       page,
     )
   )
@@ -34,6 +35,12 @@ async function googlePost(url: string, body: unknown) {
   });
   if (!r.ok) throw new Error(`Google report returned HTTP ${r.status}`);
   return r.json();
+}
+async function googleGet(url:string) {
+  const token=await reportingAccessToken();
+  const response=await fetch(url,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(25000)});
+  if(!response.ok)throw new Error(`Google report returned HTTP ${response.status}`);
+  return response.json();
 }
 export function googleReport(
   site: Site,
@@ -74,13 +81,27 @@ export async function refreshGoogleReports(
     const run = async (kind: string, fn: () => Promise<unknown>) => {
       try {
         save(kind, await fn());
+        recordReportingStatus('google',site,kind,null);
         results[kind] = "updated";
       } catch (error) {
         results[kind] =
           error instanceof Error ? error.message : "Unable to refresh";
+        recordReportingStatus('google',site,kind,results[kind]);
       }
     };
     await Promise.all([
+      run('sitemaps',async()=>{
+        const data=await googleGet(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent('https://'+config.domain+'/')}/sitemaps`);
+        return {rows:(data.sitemap||[]).map((r:any)=>({path:r.path,pending:!!r.isPending,errors:Number(r.errors)||0,warnings:Number(r.warnings)||0,lastDownloaded:r.lastDownloaded||null,submitted:(r.contents||[]).reduce((n:number,c:any)=>n+(Number(c.submitted)||0),0)}))};
+      }),
+      run('indexing',async()=>{
+        const data=await googlePost('https://searchconsole.googleapis.com/v1/urlInspection/index:inspect',{
+          inspectionUrl:'https://'+config.domain+'/',siteUrl:'https://'+config.domain+'/',languageCode:'en-US',
+        });
+        const result=data.inspectionResult?.indexStatusResult;
+        if(!result)throw new Error('Google homepage indexing report is not available.');
+        return {verdict:result.verdict||'UNKNOWN',coverage:result.coverageState||'Unknown',lastCrawl:result.lastCrawlTime||null};
+      }),
       run("traffic", async () => {
         const r = await googlePost(
           `https://analyticsdata.googleapis.com/v1beta/properties/${config.property}:runReport`,

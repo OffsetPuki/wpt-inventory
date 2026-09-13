@@ -3,6 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
 import { formatMoney, parseMoney } from "@/lib/format";
+import { aiReferralProvider } from "@shared/ai-referrals";
+import SearchConnections from './SearchConnections';
+import type {BingReport, SearchConnections as ConnectionReport} from '@shared/search-reporting';
 
 const brands = {
   metals: "CJM Metals",
@@ -36,6 +39,7 @@ type Row = {
   collectedCents: number;
 };
 type Period = {
+  bing: BingReport;
   start: string;
   end: string;
   totals: Totals;
@@ -44,7 +48,7 @@ type Period = {
   spendSource: string | null;
   costPerQualifiedPaidLeadCents: number | null;
   traffic: {
-    rows: { sessions: number; medium?: string }[];
+    rows: { sessions: number; source?: string; medium?: string }[];
     fetchedAt: number;
     partial: boolean;
   } | null;
@@ -67,7 +71,8 @@ type Report = {
   brand: { domain: string };
   current: Period;
   previous: Period;
-  connection: { reportingEmail: string | null; outcomesConfigured: boolean };
+  connection: { reportingEmail: string | null; outcomesConfigured: boolean; bingConfigured:boolean };
+  searchConnections: ConnectionReport;
   queue: { site: Site; state: string; count: number }[];
 };
 const cell = "px-3 py-3 text-left whitespace-nowrap";
@@ -91,7 +96,7 @@ export default function GrowthReport() {
         )
       ).json(),
   });
-  const overview = useQuery<{start:string;end:string;rows:{site:Site;name:string;sessions:number|null;clicks:number|null;impressions:number|null;leads:number;qualified:number;quoted:number;won:number;bookedCents:number}[]}>({
+  const overview = useQuery<{start:string;end:string;rows:{site:Site;name:string;sessions:number|null;clicks:number|null;impressions:number|null;bingClicks:number|null;bingImpressions:number|null;leads:number;qualified:number;quoted:number;won:number;bookedCents:number}[]}>({
     queryKey: ["marketing-growth", "overview", end, includeTests],
     queryFn: async () => (await apiRequest("GET", `/api/marketing/growth/overview?end=${end}&includeTests=${includeTests ? "1" : "0"}`)).json(),
   });
@@ -104,9 +109,9 @@ export default function GrowthReport() {
       await client.invalidateQueries({ queryKey: ["marketing-growth"] });
       setMessage(
         data.current
-          ? Object.entries(data.current)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join(" · ")
+          ? Object.values({...data.current,...data.previous}).some(value => value !== 'updated')
+            ? 'Some reports could not refresh. Check connection details below; saved data is retained.'
+            : 'Search reports updated.'
           : "Saved.",
       );
     } catch (e) {
@@ -134,8 +139,16 @@ export default function GrowthReport() {
       quoted: total.quoted + row.quoted, won: total.won + row.won,
     }), {leads:0,qualified:0,quoted:0,won:0});
   const organic = organicTotals(c), previousOrganic = organicTotals(p);
+  const aiTotals = (period?: Period) => (period?.bySource || [])
+    .filter(row => aiReferralProvider(row.source, row.medium))
+    .reduce((total, row) => ({leads:total.leads+row.leads,qualified:total.qualified+row.qualified,
+      quoted:total.quoted+row.quoted,won:total.won+row.won}), {leads:0,qualified:0,quoted:0,won:0});
+  const ai = aiTotals(c), previousAi = aiTotals(p);
+  const aiSessions = c?.traffic ? c.traffic.rows
+    .filter(row => aiReferralProvider(row.source, row.medium)).reduce((n,row)=>n+row.sessions,0) : null;
   const channels: Record<string, [string, string]> = {
     google_business: ["google", "organic"],
+    bing_places: ["bing", "organic"],
     google_ads: ["google", "cpc"],
     facebook: ["facebook", "social"],
     instagram: ["instagram", "social"],
@@ -181,12 +194,12 @@ export default function GrowthReport() {
         </label>
         <button
           className={secondaryBtn}
-          disabled={busy || !r?.connection.reportingEmail}
+          disabled={busy || (!r?.connection.reportingEmail && !r?.connection.bingConfigured)}
           onClick={() =>
             action("/api/marketing/growth/refresh", { site, end: c?.end })
           }
         >
-          {busy ? "Updating…" : "Refresh Google data"}
+          {busy ? "Updating…" : "Refresh search data"}
         </button>
       </div>
       {!c || !p ? (
@@ -201,15 +214,15 @@ export default function GrowthReport() {
           </p>
           <section aria-label="All websites organic comparison" className="border rounded-xl p-4 space-y-3 min-w-0">
             <h3 className="font-semibold">Organic results across your websites</h3>
-            <p className="text-sm text-muted-foreground">Choose a business to see its details below. Google appearances and clicks come from Search Console; visits come from Analytics; inquiry outcomes come from saved business records. A dash means Google data is not available for this period.</p>
+            <p className="text-sm text-muted-foreground">Choose a business to see its details below. Google and Bing provide their own search appearances and clicks; visits come from Analytics; inquiry outcomes come from saved business records. A dash means the provider has no report for this period.</p>
             {overview.isError ? <button className={secondaryBtn} onClick={()=>overview.refetch()}>Retry website comparison</button> : !overview.data ? <p role="status">Loading website comparison…</p> : <div className="overflow-x-auto">
-              <table className="w-full text-sm"><thead><tr>{["Business","Google appearances","Google clicks","Organic visits","Inquiries","Qualified","Quoted","Won","Won value"].map(label=><th key={label} scope="col" className={cell}>{label}</th>)}</tr></thead>
+              <table className="w-full text-sm"><thead><tr>{["Business","Google appearances","Google clicks","Bing appearances","Bing clicks","Organic visits","Inquiries","Qualified","Quoted","Won","Won value"].map(label=><th key={label} scope="col" className={cell}>{label}</th>)}</tr></thead>
                 <tbody>{overview.data.rows.map(row=><tr key={row.site} className={row.site===site?"bg-muted/50":""}>
                   <th scope="row" className={cell}><button className="underline underline-offset-4" aria-pressed={row.site===site} onClick={()=>{setSite(row.site);setMessage("");}}>{row.name}</button></th>
-                  {[row.impressions??"—",row.clicks??"—",row.sessions??"—",row.leads,row.qualified,row.quoted,row.won,formatMoney(row.bookedCents)].map((value,index)=><td key={index} className={cell}>{value}</td>)}
+                  {[row.impressions??"—",row.clicks??"—",row.bingImpressions??"—",row.bingClicks??"—",row.sessions??"—",row.leads,row.qualified,row.quoted,row.won,formatMoney(row.bookedCents)].map((value,index)=><td key={index} className={cell}>{value}</td>)}
                 </tr>)}</tbody></table>
             </div>}
-            <p className="text-sm text-muted-foreground">Refresh Google data for each selected website to update its visits and search totals. These stages overlap: a won inquiry may also appear under Qualified and Quoted.</p>
+            <p className="text-sm text-muted-foreground">Refresh search data for each selected website to update its visits and search totals. These stages overlap: a won inquiry may also appear under Qualified and Quoted.</p>
           </section>
           <section aria-label="Organic search results" className="border rounded-xl p-4 space-y-3">
             <h3 className="font-semibold">Jobs from organic search</h3>
@@ -219,6 +232,17 @@ export default function GrowthReport() {
                 label={["Organic inquiries","Qualified","Quoted","Won jobs"][i]}
                 value={String(organic[key])} detail={`Previous cohort: ${previousOrganic[key]}`} />)}
             </div>
+          </section>
+          {r?.searchConnections && <SearchConnections connection={r.searchConnections} bing={c.bing} previousBing={p.bing} />}
+          <section aria-label="AI referral results" className="border rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold">Visits and jobs from AI assistants</h3>
+            <p className="text-sm text-muted-foreground">{aiSessions === null ? 'Analytics visits unavailable' : `${aiSessions} Analytics visits from recognized AI sources`}{c.traffic?.partial ? ' (partial report)' : ''}. Includes recognized ChatGPT, Perplexity, Claude, Gemini and Copilot referral sources. Google AI answers remain part of Google search; visits without a referrer cannot be identified here.</p>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {(["leads", "qualified", "quoted", "won"] as const).map((key,i) => <Metric key={key}
+                label={["AI-referred inquiries","Qualified","Quoted","Won jobs"][i]}
+                value={String(ai[key])} detail={`Previous cohort: ${previousAi[key]}`} />)}
+            </div>
+            <p className="text-sm text-muted-foreground">Inquiries and outcomes come from saved business records. These counts measure attributed visits and jobs, not how often an AI mentions or recommends CJM.</p>
           </section>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {(["leads", "qualified", "quoted", "won"] as const).map(
@@ -535,11 +559,7 @@ export default function GrowthReport() {
                 exact period. Include all paid campaigns being compared.
               </p>
               <p className="text-sm">
-                Google reporting:{" "}
-                {r.connection.reportingEmail
-                  ? "Reporting credentials configured"
-                  : "Not connected yet"}
-                . Lead outcome delivery:{" "}
+                Lead outcome delivery:{" "}
                 {r.connection.outcomesConfigured
                   ? "Configured"
                   : "Not connected yet"}

@@ -1,3 +1,4 @@
+import { isQuoteExpired } from './quote-policy';
 import { enqueueFollowup } from "./outbox";
 import { reserveStock } from "./inventory-core";
 import { normalizeStockUnit, fractionalUnit, stockRound } from "../shared/inventory";
@@ -42,6 +43,7 @@ export function acceptQuote(
     if(optionSet?.accepted_quote_id&&optionSet.accepted_quote_id!==id)throw new Error('Another option has already been accepted for this job.');
     if (quote.status === "declined")
       throw new Error("This quote was declined. Request a new revision.");
+    if (isQuoteExpired(quote)) throw new Error("This quote has expired. Request a new revision before accepting.");
     const alreadyAccepted = quote.status === "accepted";
     const session = parseJson<any>(quote.payload, {});
     const design = quote.designRef

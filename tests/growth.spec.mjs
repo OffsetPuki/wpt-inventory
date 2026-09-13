@@ -30,14 +30,24 @@ test("Marketing report works on mobile and desktop without Google credentials", 
   await expect(
     page.getByText("Saved inquiries", { exact: true }),
   ).toBeVisible();
+  const ai = page.getByRole('region', {name:'AI referral results'});
+  await expect(ai.getByText(/Analytics visits unavailable/)).toBeVisible();
+  await expect(ai.getByText('AI-referred inquiries', {exact:true})).toBeVisible();
   const comparison = page.getByRole("region", { name: "All websites organic comparison" });
   await expect(comparison.getByRole("row")).toHaveCount(5);
   await comparison.getByRole("button", {name:"CJM Concrete",exact:true}).click();
   await expect(page.getByLabel(/^Website/)).toHaveValue("concrete");
   await expect(
-    page.getByRole("button", { name: "Refresh Google data" }),
+    page.getByRole("button", { name: "Refresh search data" }),
   ).toBeDisabled();
   await page.getByLabel(/^Website/).selectOption("trades");
+  const connections=page.getByRole('region',{name:'Search connections and visibility'});
+  await expect(connections.getByText('Not connected',{exact:true})).toHaveCount(3);
+  await expect(connections.getByRole('link',{name:'Open Bing',exact:false})).toHaveAttribute('href',/siteUrl=https%3A%2F%2Fwww.cjmtrades.com%2F/);
+  await expect(connections.getByRole('region',{name:'Bing search results'}).getByText('Unavailable',{exact:true})).toHaveCount(2);
+  await connections.getByText('Indexing, sitemaps and search tools',{exact:true}).click();
+  await expect(connections.getByRole('link',{name:'Manage Google sitemaps'})).toHaveAttribute('href',/www.cjmtrades.com/);
+  await expect(connections.getByText(/Homepage inspection not available yet/)).toBeVisible();
   await expect(
     page.getByText("No inquiries arrived in this period."),
   ).toBeVisible();

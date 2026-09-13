@@ -61,6 +61,8 @@ export function duplicateSession(sess, sid) {
   delete copy.designRef;
   delete copy.leadId;
   delete copy.version;
+  delete copy.quotePolicy;
+  delete copy.legacyShopSnapshot;
   delete copy.quoteStatus;
     delete copy.revisionOf;
     delete copy.alternativeOf;
@@ -97,7 +99,7 @@ export const DEFAULT_SHOP = {
   email: 'support@cjmmetals.com',
   // The small print at the foot of every quote — one term per line, edited in
   // the Price Book. Printed on the PDF and on the customer's web page.
-  terms: 'Quote valid for 30 days. Final price confirmed after an on-site measure.\n'
+  terms: 'Quote valid for 5 days from the issue date and time shown. Final price confirmed after an on-site measure.\n'
     + 'Permit, engineering and HOA approval by others unless itemized above.',
   // The small print at the foot of an INVOICE — a bill, not an offer, so it
   // says nothing about the price still standing. One term per line.

@@ -87,8 +87,10 @@ try {
   process.env.GOOGLE_REPORTING_OAUTH_JSON = JSON.stringify({type:"authorized_user",client_id:"fixture-client",client_secret:"fixture-secret",refresh_token:"fixture-refresh"});
   globalThis.fetch = async (url, options) => {
     if (url === "https://oauth2.googleapis.com/token") return new Response(JSON.stringify({access_token:"fixture-access",expires_in:3600}));
-    assert.match(url, /^https:\/\/(analyticsdata|www)\.googleapis\.com\//);
+    assert.match(url, /^https:\/\/(analyticsdata|www|searchconsole)\.googleapis\.com\//);
+    if(url.endsWith('/sitemaps')) return new Response(JSON.stringify({sitemap:[{path:'https://www.cjmmetals.com/sitemap-index.xml',isPending:false,errors:'0',warnings:'1',contents:[{submitted:'82'}]}]}));
     requestsToGoogle.push(JSON.parse(options.body));
+    if(url.includes('urlInspection')) return new Response(JSON.stringify({inspectionResult:{indexStatusResult:{verdict:'PASS',coverageState:'Submitted and indexed',lastCrawlTime:'2026-08-26T00:00:00Z'}}}));
     return new Response(JSON.stringify({rows:[]}));
   };
   try { await refreshGoogleReports("metals", "2026-08-01", "2026-08-28"); }
@@ -97,6 +99,8 @@ try {
   assert.deepEqual(trafficRequest.dimensionFilter.andGroup.expressions[0], {filter:{fieldName:"hostName",stringFilter:{matchType:"EXACT",value:"www.cjmmetals.com",caseSensitive:false}}});
   assert.deepEqual(trafficRequest.dimensionFilter.andGroup.expressions[1].notExpression.filter.inListFilter.values, ["release_check","qa"]);
   assert.equal(googleReport("metals", "2026-08-01", "2026-08-28", "traffic").productionHost, "www.cjmmetals.com");
+  assert.equal(googleReport('metals','2026-08-01','2026-08-28','indexing').verdict,'PASS');
+  assert.deepEqual(googleReport('metals','2026-08-01','2026-08-28','sitemaps').rows[0],{path:'https://www.cjmmetals.com/sitemap-index.xml',pending:false,errors:0,warnings:1,lastDownloaded:null,submitted:82});
   queueLeadOutcome(id, "qualify_lead");
   queueLeadOutcome(id, "qualify_lead");
   assert.equal(

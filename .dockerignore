@@ -9,3 +9,9 @@ data
 *.db-wal
 *.log
 .DS_Store
+
+# Local-only connection setup and preview servers
+scripts/connect-bing-local.mjs
+scripts/preview-search-report.mjs
+scripts/preview-ai-report.mjs
+scripts/check-marketing-preview.mjs
