@@ -252,7 +252,13 @@ export default function QuoteBuilder({ initialSettings }) {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [copyBusy, setCopyBusy] = useState(false);
   const flushQuote = () => draft.flush();
-  const showSaveError = (error) => toast({ variant: "destructive", title: "Keep this draft open", description: error.message });
+  const showSaveError = (error) => toast({ variant: "destructive", title: "Keep this draft open", description: error.status === 404 ? 'The saved quote is no longer available. Choose “Keep edits as new quote” to save your work.' : error.message });
+  const recoverDraft = () => {
+    const { quotePolicy, revisionOf, alternativeOf, copiedFromNumber, ...content } = session;
+    draft.reset();
+    setSession({ ...content, sid: newSid(), quoteId: null, number: null, version: 1, quoteStatus: 'draft', priceBookSnapshot: effectiveBook, createdAt: new Date().toISOString() });
+    setView('configure');
+  };
   const reviewQuote = async () => {
     setReviewBusy(true);
     try { await flushQuote(); setView("details"); window.scrollTo({ top: 0 }); }
@@ -577,6 +583,13 @@ export default function QuoteBuilder({ initialSettings }) {
             </button>
           </nav>
         </header>
+        {session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
+          <div className="container draft-recovery no-print" data-draft-recovery role="alert">
+            <strong>{draft.error?.status === 404 ? 'This saved quote is no longer available' : 'This quote has changed elsewhere'}</strong>
+            <p>Your edits are still here. Save them as a new quote to continue, keeping your customer details, design and pricing. The original quote stays unchanged.</p>
+            <button className="btn" onClick={recoverDraft}>Keep edits as new quote</button>
+          </div>
+        )}
         <Suspense fallback={<p className="container hint" role="status">Loading…</p>}>
         {activeView === "home" && (
           <Home
@@ -696,12 +709,7 @@ export default function QuoteBuilder({ initialSettings }) {
               {!draft.localSaved && <small>Device backup unavailable. Keep this page open until saved.</small>}
               {draft.status === 'Offline' && <small>Sync resumes when connected</small>}
               {draft.error && draft.status !== 'Offline' && <small>{draft.error.message}</small>}
-              {['Not saved', 'Offline'].includes(draft.status) && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
-              {(draft.status === 'Conflict' || draft.error?.status === 404) && <button className="back-link" onClick={() => {
-                if (!window.confirm('Keep these edits as a new draft? The other saved version will stay unchanged.')) return;
-                const copy = { ...session, sid: newSid(), quoteId: null, number: null, version: 1, quoteStatus: 'draft', createdAt: new Date().toISOString() };
-                draft.reset(); setSession(copy);
-              }}>Keep edits as new quote</button>}
+              {['Not saved', 'Offline'].includes(draft.status) && draft.error?.status !== 404 && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
             </div>
             {activeView === "configure" ? <button className="btn" disabled={reviewBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
               : <div id="quote-send-actions" />}

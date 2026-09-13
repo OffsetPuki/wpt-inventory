@@ -29,6 +29,10 @@
   min-height: calc(100vh - 4rem);
 }
 
+.qa .draft-recovery { margin-block: 20px; padding: 20px; border: 1px solid var(--line-strong); background: var(--cream-dark); }
+.qa .draft-recovery p { margin: 8px 0 16px; }
+.qa .draft-recovery .btn { max-width: 100%; white-space: normal; }
+
 /* Compact workbench: configure first, expand detailed pricing when needed. */
 
 /* The quote page opts out of the suite shell's content padding and paints the
