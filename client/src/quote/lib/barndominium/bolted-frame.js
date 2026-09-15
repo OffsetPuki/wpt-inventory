@@ -163,11 +163,11 @@ function fastener(group,a,b,r=.025){
   }
  }
  focus.base=[inset,.2,zs[0]];
- function purlinCleat(x,y,z,slope,direction){
-  const u=new THREE.Vector3(1,slope,0).normalize(),v=new THREE.Vector3(-slope,1,0).normalize(),w=new THREE.Vector3(0,0,1);
+ function purlinCleat(x,y,z,slope,direction,facing){
+  const u=new THREE.Vector3(1,slope,0).normalize().multiplyScalar(facing),v=new THREE.Vector3(-slope,1,0).normalize(),w=new THREE.Vector3(0,0,facing);
   const basis=new THREE.Matrix4().makeBasis(u,v,w),origin=new THREE.Vector3(x,y,z);
   const point=(a,b,c)=>origin.clone().addScaledVector(u,a).addScaledVector(v,b).addScaledVector(w,c).toArray();
-  const t=.016,web=-2.5/24,base=-8/24,zc=direction*.14,tabWidth=direction===0?.5:.22;
+  const t=.016,web=-2.5/24,base=-8/24,zc=direction*.14*facing,tabWidth=direction===0?.5:.22;
   const tab=plate(group,point(web-t/2,base+.2,zc),[t,.4,tabWidth],basis);
   tab.userData={connection:'cee-rafter-tab',shared:direction===0};
   plate(group,point(web-.13,base+t/2,zc),[.26,t,tabWidth],basis);
@@ -186,10 +186,12 @@ function fastener(group,a,b,r=.025){
   const y=roof(x)-(8/24+.05)/roofCos;
   if(side<0&&i===Math.min(1,rows))focus.cee=[x,y,jointZ];
   for(let j=1;j<zs.length;j++){
-   beam(group,[x,y,zs[j-1]+.012],[x,y,zs[j]-.012],2,[-slope,1,0]);
+   const a=[x,y,zs[j-1]+.012],b=[x,y,zs[j]-.012];
+   // Mirror the CEE opening and its cleat across the roof ridge.
+   beam(group,side<0?a:b,side<0?b:a,2,[-slope,1,0]);
   }
   // One shared cleat at an interior rafter, spanning both adjoining CEE ends.
-  zs.forEach((z,j)=>purlinCleat(x,y,z,slope,j===0?1:j===zs.length-1?-1:0));
+  zs.forEach((z,j)=>purlinCleat(x,y,z,slope,j===0?1:j===zs.length-1?-1:0,side<0?1:-1));
  }
  // Existing opening-aware jambs, headers and coped ZEE girts stay connected
  // to the actual saved design. Do not span doors/windows with a stock model.
