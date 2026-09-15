@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createDraftSaver } from '../client/src/quote/lib/draftSaver.js';
+import {fresh,normalize} from '../client/src/quote/lib/barndominium/model.js';
+import {cleanBarndoQuote} from '../client/src/quote/lib/barndoQuote.js';
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
 function fixture(write, isOnline = () => true) {
   let current = {session:{sid:'one',type:'table',state:{height:12},customer:{name:'First'},version:1},book:{rate:5},totalCents:500};
@@ -9,6 +11,27 @@ function fixture(write, isOnline = () => true) {
   return {saver,statuses,get:()=>current,edit:patch=>{current={...current,session:{...current.session,...patch}};}};
 }
 const row=(sess,totalCents,version=1)=>({id:71,version,totalCents,payload:JSON.stringify(sess)});
+
+let normalizedWrites=0;
+const normalized=fixture(async(sess,total)=>{
+  if(++normalizedWrites>3)throw new Error('Repeated unchanged save after server normalization');
+  return row({...sess,state:normalize(sess.state),overrides:{...sess.overrides,barndoQuote:cleanBarndoQuote(sess.overrides.barndoQuote)}},total,normalizedWrites);
+});
+normalized.edit({type:'barndominium',state:fresh(),overrides:{barndoQuote:{specs:{cee:'8 inch CEE'}}}});
+await normalized.saver.flush();
+assert.equal(normalizedWrites,1,'A normalized building quote finishes saving once');
+await normalized.saver.flush();assert.equal(normalizedWrites,1);
+normalized.saver.dispose();
+
+let mismatchedWrites=0;
+const mismatched=fixture(async(sess,total)=>{
+  mismatchedWrites++;
+  return row({...sess,notes:'Server returned stale content'},total,mismatchedWrites);
+});
+await assert.rejects(mismatched.saver.flush(),/did not confirm your latest edits/);
+assert.equal(mismatchedWrites,2,'Repeated mismatches stop instead of looping forever');
+assert.equal(mismatched.statuses.at(-1),'Not saved');
+mismatched.saver.dispose();
 
 let release, calls=[];
 const slow=fixture(async(sess,total)=>{

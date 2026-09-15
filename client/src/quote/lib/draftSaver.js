@@ -1,9 +1,21 @@
 // Serialized saves with a trailing save for edits made during a request.
 // Kept independent of React so delayed responses and recovery can be tested.
+import { normalize } from './barndominium/model.js';
+import { cleanBarndoQuote } from './barndoQuote.js';
+
 export function draftSignature({ session, book, totalCents }) {
   const { sid, quoteId, number, version, quoteStatus, priceBookSnapshot,
     priceBookSnapshotAt, ...content } = session;
-  return JSON.stringify([content, book, totalCents]);
+  // Compare the same normalized content the API stores, independent of key order.
+  if (content.type === 'barndominium') {
+    content.state = normalize(content.state);
+    if (content.overrides?.barndoQuote) content.overrides = {
+      ...content.overrides, barndoQuote: cleanBarndoQuote(content.overrides.barndoQuote),
+    };
+  }
+  return JSON.stringify([content, book, totalCents], (_key, value) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 }
 
 export function createDraftSaver({ getCurrent, write, acknowledge, onStatus, online = () => true, delay = 900 }) {
@@ -11,6 +23,7 @@ export function createDraftSaver({ getCurrent, write, acknowledge, onStatus, onl
   const saved = new Map();
   const editable = (s) => s && (!s.quoteStatus || s.quoteStatus === 'draft');
   const run = async () => {
+    let lastMismatch;
     while (!stopped) {
       const current = getCurrent();
       if (!editable(current?.session)) return current?.session?.quoteId;
@@ -32,6 +45,11 @@ export function createDraftSaver({ getCurrent, write, acknowledge, onStatus, onl
       const acknowledgedKey = draftSignature({ session: payload, book: payload.priceBookSnapshot || current.book, totalCents: row.totalCents });
       saved.set(sess.sid, { key: acknowledgedKey, row });
       acknowledge(row, sess, current);
+      if (acknowledgedKey !== key) {
+        if (lastMismatch?.sid === sess.sid && lastMismatch.key === key && lastMismatch.received === acknowledgedKey)
+          throw new Error('The server did not confirm your latest edits. Your draft is still here. Please retry saving.');
+        lastMismatch = { sid: sess.sid, key, received: acknowledgedKey };
+      } else lastMismatch = null;
       // getCurrent reads the latest edit, never the stale request's closure.
     }
   };

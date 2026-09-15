@@ -20,7 +20,24 @@ test('Templates validate designs and store no quote or customer fields',async()=
  expect(original.state.openings[0].x).toBe(7);expect(original.overrides.items.cee.rate).toBe(8);expect(copied.quoteId).toBeNull();expect(copied.customer.name).toBe('');
 });
 
+test('Save Quote finishes for a restored draft normalized by the server',async({page})=>{
+ const session={sid:'normalized-save-regression',type:'barndominium',state:fresh(),customer:{name:'Save regression'},overrides:{barndoQuote:{specs:{cee:'8 inch CEE'}}}};
+ await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ await page.addInitScript(({token,session})=>{localStorage.setItem('wpt-auth-token',token);localStorage.setItem('cjm.session.v2.user.1',JSON.stringify(session));},{token,session});
+ let writes=0;page.on('request',r=>{if(/\/api\/quotes(?:\/\d+)?$/.test(r.url())&&['POST','PATCH'].includes(r.method()))writes++;});
+ await page.goto(app.base+'/#/crm/quotes');
+ await page.getByRole('button',{name:/Continue draft/}).click();
+ const save=page.getByRole('button',{name:'Save Quote',exact:true});
+ await save.click();await expect(page.getByText('Quote saved',{exact:true})).toBeVisible();
+ await expect(save).toBeEnabled();
+ const count=writes;await save.click();await expect(save).toBeEnabled();expect(writes).toBe(count);
+ expect(writes).toBeLessThanOrEqual(2);
+ const stored=app.sqlite.prepare("SELECT payload FROM quotes WHERE customer_name='Save regression'").get();
+ expect(JSON.parse(stored.payload).state.width).toBe(session.state.width);
+});
+
 test('Save Quote persists edits and Duplicate recovers a conflicting draft without changing its source',async({page})=>{
+ const initialCount=app.sqlite.prepare("SELECT count(*) n FROM quotes WHERE type='barndominium'").get().n;
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);
  await page.goto(app.base+'/#/crm/quotes');
@@ -41,7 +58,7 @@ test('Save Quote persists edits and Duplicate recovers a conflicting draft witho
  const row=page.locator('.saved-quotes .line-row').filter({hasText:original.number});
  const duplicate=page.getByRole('button',{name:'Duplicate',exact:true});
  await duplicate.last().click();await expect(page.locator('.barndo')).toBeVisible();
- await expect.poll(()=>app.sqlite.prepare("SELECT count(*) n FROM quotes WHERE type='barndominium'").get().n).toBe(3);
+ await expect.poll(()=>app.sqlite.prepare("SELECT count(*) n FROM quotes WHERE type='barndominium'").get().n).toBe(initialCount+3);
  await expect(page.getByRole('button',{name:'Save Quote',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
 });
