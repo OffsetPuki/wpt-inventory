@@ -138,5 +138,5 @@ if(!framing)add(flatWall(openingFrameGeometry(o),w),steel);
  }
  update(initial);reset();resize();
  const visibility=()=>{if(!document.hidden)draw();};document.addEventListener('visibilitychange',visibility);
- return {update,reset,setActive(v){active=v;if(v)resize();},destroy(){disposed=true;inspector.destroy();cancelAnimationFrame(frame);observer.disconnect();controls.dispose();document.removeEventListener('visibilitychange',visibility);daylight.dispose();disposeGroup(scene,true);scene.background?.dispose?.();scene.environment?.dispose?.();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
+ return {getProduct:()=>group,update,reset,setActive(v){active=v;if(v)resize();},destroy(){disposed=true;inspector.destroy();cancelAnimationFrame(frame);observer.disconnect();controls.dispose();document.removeEventListener('visibilitychange',visibility);daylight.dispose();disposeGroup(scene,true);scene.background?.dispose?.();scene.environment?.dispose?.();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
 }

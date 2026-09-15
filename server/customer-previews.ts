@@ -216,6 +216,25 @@ export function registerCustomerPreviews(app: Express): void {
       .run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.height,p.finish,p.note,now,now);
     const id=Number(r.lastInsertRowid);audit(req,'preview.created',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
   });
+  app.post('/api/customer-previews/from-model',requireElevated,(req,res)=>{
+    upload(req,res,(err:any)=>{
+      if(err||!req.file){res.status(400).json({message:'Choose a model up to 25 MB.'});return;}
+      let raw;try{raw=JSON.parse(req.body.details||'{}');}catch{res.status(400).json({message:'Invalid preview details.'});return;}
+      const parsed=metadata.safeParse(raw),key=z.string().uuid().safeParse(req.body.requestId);
+      if(!parsed.success||!key.success){res.status(400).json({message:'Enter a preview title.'});return;}
+      const source='quote-model:'+key.data;
+      const existing=sqlite.prepare('SELECT * FROM customer_previews WHERE source_key=?').get(source) as Preview|undefined;
+      if(existing){res.json(view(existing));return;}
+      try{
+        validatePreviewGlb(req.file.buffer);const p=parsed.data,now=Date.now();
+        const id=sqlite.transaction(()=>{
+          const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,height,finish,note,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.height,p.finish,p.note,source,now,now);
+          const id=Number(r.lastInsertRowid);insertModel(id,'Design from quote',req.file!.buffer);return id;
+        })();
+        audit(req,'preview.created_from_quote_model',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
+      }catch(e){res.status(400).json({message:e instanceof Error?e.message:'Could not create the preview.'});}
+    });
+  });
   app.patch('/api/customer-previews/:id',requireElevated,(req,res) => {
     const p=record(req,res);if(!p||!current(req,res,p))return;
     const parsed=metadata.safeParse(req.body);if(!parsed.success){res.status(400).json({message:'Enter a project title and keep the description and notes within the allowed lengths.'});return;}

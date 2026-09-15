@@ -1,54 +1,10 @@
-import WebsitePreview, {websitePreviewAvailable} from './WebsitePreview.jsx';
+import {memo,useRef} from 'react';
+import WebsitePreview,{websitePreviewAvailable} from './WebsitePreview.jsx';
+import ProductStudio from './ProductStudio.jsx';
 import FullscreenButton from './FullscreenButton.jsx';
-import {renderDrawing} from '../lib/barndominium/drawing.js';
-import { memo, useMemo, useRef } from 'react';
-import { renderFence } from '../lib/preview/fence.js';
-import { renderGate } from '../lib/preview/gate.js';
-import { renderCarport } from '../lib/preview/carport.js';
-import { renderRailing } from '../lib/preview/railing.js';
-import { renderPergola } from '../lib/preview/pergola.js';
-import { renderTable } from '../lib/preview/table.js';
-import { renderConcrete } from '../lib/preview/concrete.js';
-import { renderInsulation } from '../lib/preview/insulation.js';
-import { summaryLine } from '../data/configurators.js';
-
-const RENDERERS = { barndominium: s => '<svg width="800" height="450" viewBox="0 0 900 540">'+renderDrawing(s)+'</svg>', fence: renderFence, gate: renderGate, carport: renderCarport, railing: renderRailing, pergola: renderPergola, table: renderTable, concrete: renderConcrete, insulation: renderInsulation };
-const ARIA = { barndominium: 'Barndominium preview', fence: 'Fence preview', gate: 'Gate preview', carport: 'Carport preview', railing: 'Railing preview', pergola: 'Pergola preview', table: 'Table preview', concrete: 'Slab plan preview', insulation: 'Insulation section preview' };
-
-/** Live SVG preview driven by the same config state as the price estimate. */
-function Preview({ type, state }) {
-  const root=useRef(null);
-  const html = useMemo(() => {
-    const fn = RENDERERS[type];
-    try { return fn ? fn(state) : ''; }
-    catch (err) { console.error('preview render failed', err); return ''; }
-  }, [type, state]);
-
-  const summary = useMemo(() => summaryLine(type, state), [type, state]);
-
-  // A Custom build has no drawing to render — an empty stage would just be a
-  // hole in the page, so the line items move up into its place.
-  if (!RENDERERS[type]) return null;
-
-  return (
-    <div className="preview" ref={root}>
-      <div className="preview-top">
-        <span className="eyebrow">Your design</span>
-        <span className="preview-summary">{summary}</span>
-      </div>
-      <FullscreenButton target={()=>root.current}/>
-      {websitePreviewAvailable(type)?<WebsitePreview type={type} state={state}/>:<div className="preview-stage">
-        <svg
-          viewBox="0 0 800 450"
-          role="img"
-          aria-label={ARIA[type] || 'Preview'}
-          preserveAspectRatio="xMidYMid meet"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
-      </div>
-      }
-      <div className="preview-caption">Live preview</div>
-    </div>
-  );
+import {summaryLine} from '../data/configurators.js';
+function Preview({type,state,customer}){
+ const root=useRef(null);if(!websitePreviewAvailable(type)&&!['barndominium','concrete','insulation'].includes(type))return null;
+ return <div className="preview" ref={root}><div className="preview-top"><span className="eyebrow">Your design</span><span className="preview-summary">{summaryLine(type,state)}</span></div><FullscreenButton target={()=>root.current}/>{websitePreviewAvailable(type)?<WebsitePreview type={type} state={state} customer={customer}/>:<ProductStudio type={type} state={state} customer={customer}/>}</div>;
 }
 export default memo(Preview);

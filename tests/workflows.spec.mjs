@@ -17,7 +17,8 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   test.setTimeout(120000);
   // Customer preview comes from the public site. Route it to a synthetic
   // document; all pricing assertions still use the fixture's real API.
-  await page.route('https://www.cjmmetals.com/**', route => route.fulfill({contentType:'text/html',body:`<html><body><h1>Synthetic customer preview</h1><script>addEventListener('message',e=>{if(e.data?.kind==='cjm-design-preview')document.body.dataset.state=JSON.stringify(e.data.state)});parent.postMessage({kind:'cjm-preview-ready'},'*');</script></body></html>`}));
+  await page.route('https://www.cjmmetals.com/**', route => route.fulfill({contentType:'text/html',body:`<html><body><h1>Synthetic customer preview</h1><script>addEventListener('message',async e=>{if(e.data?.kind==='cjm-design-preview')document.body.dataset.state=JSON.stringify(e.data.state);if(e.data?.kind==='cjm-export-product'){const bytes=await(await fetch('/fixture-model.glb')).arrayBuffer();parent.postMessage({kind:'cjm-product-export',requestId:e.data.requestId,bytes},e.origin,[bytes]);}});parent.postMessage({kind:'cjm-preview-ready'},'*');</script></body></html>`}));
+  await page.route('https://www.cjmmetals.com/fixture-model.glb',r=>r.fulfill({contentType:'model/gltf-binary',body:fs.readFileSync(new URL('../server/preview-seeds/kalkat-5.glb',import.meta.url))}));
   const errors = [];
   page.on("pageerror", (e) => {
     errors.push(e.message);
@@ -253,6 +254,13 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   await page.getByRole('button',{name:'Full screen',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
   await page.getByRole('button',{name:'Exit full screen',exact:true}).click();
+  const quoteBeforePreview=JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes ORDER BY id DESC LIMIT 1').get().payload);
+  await page.getByRole('button',{name:'Create customer preview',exact:true}).click();await page.getByRole('button',{name:'Create preview',exact:true}).click();
+  await expect(page.getByText('is saved in Customer previews.',{exact:false})).toBeVisible({timeout:15000});
+  expect(app.sqlite.prepare('SELECT COUNT(*) n FROM customer_preview_models m JOIN customer_previews p ON p.id=m.preview_id WHERE p.source_key LIKE ?').get('quote-model:%').n).toBe(1);
+  const afterPreview=JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes ORDER BY id DESC LIMIT 1').get().payload);for(const key of ['state','customer','overrides','priceBookSnapshot','materialMarkupPct','laborMarkupPct','taxPct'])expect(afterPreview[key]).toEqual(quoteBeforePreview[key]);
+  await page.getByRole('button',{name:'Close',exact:true}).click();
+
   await page.getByLabel("Frame height", { exact: true }).fill("0");
   await page.getByLabel("Frame height", { exact: true }).press("Tab");
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");

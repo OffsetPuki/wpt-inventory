@@ -1,0 +1,8 @@
+import {useEffect,useRef,useState} from 'react';
+import CreateCustomerPreview from './CreateCustomerPreview.jsx';
+export default function ProductStudio({type,state,customer}){
+ const host=useRef(null),studio=useRef(null),pending=useRef(Promise.resolve()),[error,setError]=useState(''),[ready,setReady]=useState(false);
+ useEffect(()=>{let stop=false;let owned;pending.current=import('../lib/product-studio.js').then(mod=>{if(stop)return;owned=mod.createProductStudio(host.current);studio.current=owned;});return()=>{stop=true;owned?.destroy();studio.current=null;};},[]);
+ useEffect(()=>{let stop=false;setReady(false);pending.current=pending.current.catch(()=>{}).then(async()=>{if(!studio.current||stop)return;const {buildQuoteProduct}=await import('../lib/quote-product.js');const model=await buildQuoteProduct(type,state);if(stop){const {disposeProduct}=await import('../lib/product-studio.js');disposeProduct(model);return;}studio.current.setProduct(model);setError('');setReady(true);}).catch(e=>{if(!stop)setError(e.message);});return()=>{stop=true;};},[type,state]);
+ return <div><div ref={host} className="product-studio-stage" style={{height:520,background:'white'}}/>{error&&<p role="alert">{error}</p>}{type==='insulation'&&<p>Representative insulation section</p>}<p className="preview-caption">Drag to rotate · Scroll to zoom</p>{ready&&<CreateCustomerPreview title={`${type[0].toUpperCase()+type.slice(1)} design`} customer={customer?.name||''} exportModel={async()=>{await pending.current;return studio.current.exportModel();}}/>}</div>;
+}

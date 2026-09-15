@@ -13,6 +13,11 @@ try{
   assert.equal((await api('/api/customer-previews','GET',undefined,worker.data.token)).status,403);
   assert.equal((await api('/api/customer-previews/notifications')).status,401);
   assert.equal((await api('/api/customer-previews/notifications','GET',undefined,worker.data.token)).status,403);
+  const requestId=crypto.randomUUID();
+  async function fromModel(bytes,id=requestId){const form=new FormData();form.append('model',new Blob([bytes]),'quote.glb');form.append('details',JSON.stringify({title:'Studio from quote'}));form.append('requestId',id);const r=await fetch(base+'/api/customer-previews/from-model',{method:'POST',headers:{'X-Auth':owner},body:form});return {status:r.status,data:await r.json()};}
+  const before=sqlite.prepare('SELECT COUNT(*) n FROM customer_previews').get().n;
+  assert.equal((await fromModel(Buffer.from('invalid'))).status,400);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM customer_previews').get().n,before);
+  const made=await fromModel(model);assert.equal(made.status,201);assert.equal(made.data.published,false);assert.equal(made.data.options.length,1);assert.equal((await fromModel(model)).data.id,made.data.id);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM customer_previews').get().n,before+1);
   const fields={title:'Synthetic customer gate',customer:'PRIVATE reference',description:'Review before quote',width:'26 ft',height:'6 ft',finish:'Black',note:'Synthetic details'};
   let r=await api('/api/customer-previews','POST',fields,owner);assert.equal(r.status,201);let p=r.data;
   const token=p.url.split('/').at(-1),publicPath=`/api/public/customer-previews/${token}`;

@@ -16,6 +16,7 @@ test('Website design imports, edits, persists and produces a quote specification
  await editor.locator('[data-action="rotate-left"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','30');
  await editor.locator('[data-action="reset-drawing"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','0');
  await editor.locator('[data-action="view"][data-value="frame"]').click();
+ await page.getByRole('button',{name:'White background preview',exact:true}).click();await expect(page.locator('.product-studio-stage canvas')).toBeVisible({timeout:20000});await expect(page.getByRole('button',{name:'Create customer preview',exact:true})).toBeVisible({timeout:20000});await page.getByRole('button',{name:'Back to design & frame',exact:true}).click();
  await page.getByRole('button',{name:'Full screen',exact:true}).click();await expect(page.locator('.barndo-product')).toHaveJSProperty('clientWidth',await page.evaluate(()=>innerWidth));await page.getByRole('button',{name:'Exit full screen',exact:true}).click();
  const frame=editor.locator('.bd-frame3d');await expect(frame).toHaveAttribute('data-ready','true');await expect(frame).toHaveAttribute('data-dimensions','40x64x12');
  await frame.locator('select[aria-label="Inspect frame"]').selectOption('cee');await expect(frame).toHaveAttribute('data-focus','cee');
