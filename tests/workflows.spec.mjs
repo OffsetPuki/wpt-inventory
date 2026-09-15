@@ -17,7 +17,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   test.setTimeout(120000);
   // Customer preview comes from the public site. Route it to a synthetic
   // document; all pricing assertions still use the fixture's real API.
-  await page.route('https://www.cjmmetals.com/**', route => route.fulfill({contentType:'text/html',body:'<html><body><h1>Synthetic customer preview</h1><p>Local test document</p></body></html>'}));
+  await page.route('https://www.cjmmetals.com/**', route => route.fulfill({contentType:'text/html',body:`<html><body><h1>Synthetic customer preview</h1><script>addEventListener('message',e=>{if(e.data?.kind==='cjm-design-preview')document.body.dataset.state=JSON.stringify(e.data.state)});parent.postMessage({kind:'cjm-preview-ready'},'*');</script></body></html>`}));
   const errors = [];
   page.on("pageerror", (e) => {
     errors.push(e.message);
@@ -248,9 +248,11 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   await expect(page.getByLabel("Top length", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Top width", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Tabletop thickness", { exact: true })).toHaveCount(0);
-  await expect(page.locator("svg").filter({ hasText: '12.2" FRAME' })).toBeVisible();
-  await expect(page.getByRole("img", { name: "Table preview" })).not.toContainText("TOP");
-  await page.getByRole("img", { name: "Table preview" }).screenshot({ path: "test-results/table-frame-preview.png" });
+  const product=page.frameLocator('iframe[title="table website preview"]');
+  await expect.poll(async()=>JSON.parse(await product.locator('body').getAttribute('data-state')||'{}')).toMatchObject({frameHeightIn:12.2,frameWidthIn:16.75,frameLengthFt:2.75,top:'hide'});
+  await page.getByRole('button',{name:'Full screen',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
+  await page.getByRole('button',{name:'Exit full screen',exact:true}).click();
   await page.getByLabel("Frame height", { exact: true }).fill("0");
   await page.getByLabel("Frame height", { exact: true }).press("Tab");
   await expect(page.getByLabel("Frame height", { exact: true })).toHaveValue("12.2 in");
@@ -277,8 +279,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   await page.getByText("Edit pricing", {exact:false}).first().click();
   const topLine = page.locator(".line").filter({ has: page.locator('input[value="Tabletop — Finished white oak"]') });
   await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
-  await expect(page.locator("svg").filter({ hasText: "TABLETOP INCLUDED" })).toBeVisible();
-  await page.getByRole("img", { name: "Table preview" }).screenshot({ path: "test-results/table-included-preview.png" });
+  await expect.poll(async()=>JSON.parse(await product.locator('body').getAttribute('data-state')||'{}')).toMatchObject({top:'show',topThicknessIn:0.03125});
   await page.getByText("Frame only", { exact: true }).click();
   await expect(topLine).toHaveCount(0);
   await expect(page.getByLabel("Tabletop cost ($ each)", { exact: true })).toHaveCount(0);
