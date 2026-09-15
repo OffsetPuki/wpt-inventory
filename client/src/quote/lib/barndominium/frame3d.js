@@ -72,6 +72,8 @@ export function createFrameViewer(wrap,initial,{lang='en',cad=false}={}){
   const signature=JSON.stringify([next.width,next.depth,next.height,next.pitch,next.frame,next.bay,next.roofSpacing,next.wallSpacing,next.openings,next.porches]);if(signature===key)return;
   const dimensionsChanged=!key||['width','depth','height','pitch'].some(k=>s[k]!==next[k]);key=signature;s=structuredClone(next);
   const built=buildBoltedFrame(s,{sections,hardware});disposeModel();focus=built.focus;built.group.updateMatrixWorld(true);inspector.setParts(built.group.children.filter(o=>o.isMesh),s.width,s.depth);
+  const blocked=built.counts.bracing?.blockedWalls??[];
+  note.textContent=tr('Illustrative framing and bracing; sizes and connections require project-specific engineering.','Estructura y arriostramientos ilustrativos; tamaños y conexiones requieren cálculo específico.')+(blocked.length?tr(' Openings prevent wall X-bracing: a supplier-designed alternative is required.',' Las aberturas impiden las cruces del muro: se requiere una alternativa calculada por el proveedor.'):'');
   // Merge repeated hardware by material for large buildings and mobile devices.
   group=new THREE.Group();const buckets=new Map();built.group.updateMatrixWorld(true);
   built.group.traverse(o=>{if(!o.isMesh)return;const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);if(!buckets.has(o.material))buckets.set(o.material,[]);buckets.get(o.material).push(geo);o.geometry.dispose();});

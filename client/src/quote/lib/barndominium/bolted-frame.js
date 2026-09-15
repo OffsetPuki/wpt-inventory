@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {buildFraming,buildWallFraming} from './framing3d.js';
 import {wallPoint} from './drawing.js';
 import {framePositions,WALLS} from './model.js';
+import {addFrameBracing} from './bracing3d.js';
 
 // Connection shapes are illustrative. These section envelopes reproduce the
 // trial viewer; they are NOT a member schedule or an engineering calculation.
@@ -207,10 +208,12 @@ function fastener(group,a,b,r=.025){
   }
   counts.cee++;
  }
+ const purlins=[];
  const start=inset+.8,run=W/2-.35-start,rows=Math.max(1,Math.ceil(run*Math.hypot(1,m)/(s.roofSpacing/scale)));
  for(let i=0;i<=rows;i++)for(const side of [-1,1]){
   const distance=start+run*i/rows,x=side<0?distance:W-distance,slope=-side*m;
   const y=roof(x)-(8/24+.05)/roofCos;
+  purlins.push({x,y,side});
   if(side<0&&i===Math.min(1,rows))focus.cee=[x,y,jointZ];
   for(let j=1;j<zs.length;j++){
    const a=[x,y,zs[j-1]+.012],b=[x,y,zs[j]-.012];
@@ -321,6 +324,8 @@ function fastener(group,a,b,r=.025){
   if(member.kind==='post')seatPost(member.geometry);
   group.add(new THREE.Mesh(member.geometry,member.kind==='cee'?mats[2]:mats[0]));
  }
+ const bracing=addFrameBracing(s,{group,material:hardwareMat,scale,W,D,H,zs,inset,axisY,rafterBottom,purlins,taperGradient,baseT});
+ counts.bracing=bracing;
  lineMat.dispose();
  group.scale.setScalar(scale);
  return {group,focus:Object.fromEntries(Object.entries(focus).map(([key,p])=>[key,p.map(v=>v*scale)])),counts};

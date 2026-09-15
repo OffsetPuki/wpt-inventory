@@ -21,6 +21,7 @@ export function describePart(mesh){
  const weld=connection.includes('weld')||kind==='weld'||info.name==='Weld';
  const name=weld?'Weld':info.name==='Bolt assembly'?'Bolt assembly':names[connection]||info.name||({cee:'CEE member',zee:'ZEE wall girt',jamb:'Opening jamb',header:'Opening header',sill:'Window sill'}[kind])||'Steel connection part';
  const rows=[['Material',info.material||(weld?'Weld metal · filler not specified':'Steel · grade not specified')]];
+ if(mesh.userData.engineeringRequired)rows.push(['Design status','Illustrative only · size, spacing and connections require engineering']);
  if(info.designation)rows.push(['Catalog section (preview)',info.designation],['Nominal weight',`${info.weightPerFoot} lb/ft`]);
  if(info.section){const [d,b,tw,tf]=info.section;rows.push(['Modeled section',`${fractionalInches(d)} deep × ${fractionalInches(b)} flange`]);if(info.gauge)rows.push(['Web / flange thickness',`${info.gauge} ga (${fractionalInches(tw)})`]);else rows.push(['Web thickness',fractionalInches(tw)],['Flange thickness',fractionalInches(tf)]);}
  if(info.taper)rows.push([info.taperLabel||'Modeled taper · base to knee',info.taper.map(fractionalInches).join(' → ')],['Section / weight','Custom built-up · engineering required']);
