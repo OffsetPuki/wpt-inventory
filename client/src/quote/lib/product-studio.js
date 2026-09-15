@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
+import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 export function copyProduct(sources){
  const group=new THREE.Group();
  for(const root of sources){root.updateWorldMatrix(true,true);root.traverseVisible(o=>{
@@ -15,7 +16,18 @@ export function copyProduct(sources){
  if(!group.children.length)throw new Error('No 3D product is available.');
  const bounds=new THREE.Box3().setFromObject(group),center=bounds.getCenter(new THREE.Vector3());group.position.set(-center.x,-bounds.min.y,-center.z);group.updateMatrixWorld(true);return group;
 }
-export async function exportProduct(group,frame=null){let exported=group;if(frame){exported=new THREE.Group();const shell=group.clone(true);shell.name='CJM_Finished';frame.name='CJM_Frame';exported.add(shell,frame);}const result=await new GLTFExporter().parseAsync(exported,{binary:true,onlyVisible:true});if(!(result instanceof ArrayBuffer))throw new Error('Could not export the model.');return result;}
+export async function exportProduct(group,frame=null){
+ let exported=group.clone(true);
+ if(frame){const shell=exported;exported=new THREE.Group();shell.name='CJM_Finished';const structure=frame.clone(true);structure.name='CJM_Frame';exported.add(shell,structure);}
+ // Index duplicate vertices from material-batched meshes. Normals and UVs
+ // participate in the merge, preserving hard edges and texture seams.
+ const owned=[];
+ try{
+  exported.traverse(o=>{if(o.isMesh){o.geometry=mergeVertices(o.geometry,1e-6);owned.push(o.geometry);}});
+  const result=await new GLTFExporter().parseAsync(exported,{binary:true,onlyVisible:true});
+  if(!(result instanceof ArrayBuffer))throw new Error('Could not export the model.');return result;
+ }finally{owned.forEach(g=>g.dispose());}
+}
 export function disposeProduct(group){group?.traverse(o=>{o.geometry?.dispose();for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[])m.dispose();});}
 export function createProductStudio(host){
  const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;host.append(renderer.domElement);
