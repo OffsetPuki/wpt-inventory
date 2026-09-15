@@ -5,6 +5,10 @@ const poly=(a,fill,extra='')=>`<polygon points="${points(a)}" fill="${fill}" ${/
 const line=(a,b,extra='')=>`<line x1="${round(a[0])}" y1="${round(a[1])}" x2="${round(b[0])}" y2="${round(b[1])}" ${/\bstroke=/.test(extra)?'':'stroke="#45545a"'} ${extra}/>`;
 const text=(x,y,s,extra='')=>`<text x="${round(x)}" y="${round(y)}" font-family="Arial,sans-serif" font-size="14" fill="#283236" ${extra}>${esc(s)}</text>`;
 export function wallPoint(s,wall,u,y,out=0){return wall==='front'?[u,y,-out]:wall==='right'?[s.width+out,y,u]:wall==='back'?[s.width-u,y,s.depth+out]:[-out,y,s.depth-u];}
+export function sideLabels(s,lang='en'){
+ const names=lang==='es'?{front:'Frente',right:'Derecha',back:'Atrás',left:'Izquierda'}:{front:'Front',right:'Right',back:'Back',left:'Left'};
+ return WALLS.map(wall=>{const offset=Math.max(s.overhang,...s.porches.filter(p=>p.wall===wall).map(p=>p.depth),0)+3;return {wall,label:names[wall],offset,point:wallPoint(s,wall,wallLength(s,wall)/2,0,offset)};});
+}
 export function elevationTransform(s,wall){const length=wallLength(s,wall),top=ridgeHeight(s),scale=Math.min(740/length,360/top);return {scale,left:(900-length*scale)/2,base:440};}
 function dim(a,b,label){return line(a,b,'stroke-width="0.7"')+line([a[0]-4,a[1]-4],[a[0]+4,a[1]+4])+line([b[0]-4,b[1]-4],[b[0]+4,b[1]+4])+text((a[0]+b[0])/2,(a[1]+b[1])/2+19,label,'text-anchor="middle"');}
 function drawWallFraming(s,wall,p){
@@ -64,15 +68,23 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   const angle=(34+rotation)*Math.PI/180,c=Math.cos(angle),sn=Math.sin(angle);
   const raw=([x,y,z])=>[(x-W/2)*c+(z-D/2)*sn,((x-W/2)*sn-(z-D/2)*c)*.47-y];
   const facing={front:c,right:sn,back:-c,left:-sn},visible=WALLS.filter(w=>facing[w]>1e-7);
-  const pad=Math.max(s.overhang,...s.porches.map(p=>p.depth),1),corners=[];
+  const directions=sideLabels(s,lang),pad=Math.max(...directions.map(d=>d.offset)),corners=[];
   for(const x of [-pad,W+pad])for(const z of [-pad,D+pad])for(const y of [0,R])corners.push(raw([x,y,z]));
   const minX=Math.min(...corners.map(p=>p[0])),maxX=Math.max(...corners.map(p=>p[0])),minY=Math.min(...corners.map(p=>p[1])),maxY=Math.max(...corners.map(p=>p[1]));
-  const k=Math.min(790/(maxX-minX),420/(maxY-minY)),p=v=>{const r=raw(v);return [450+(r[0]-(minX+maxX)/2)*k,267+(r[1]-(minY+maxY)/2)*k];};
+  const k=Math.min(760/(maxX-minX),400/(maxY-minY)),p=v=>{const r=raw(v);return [450+(r[0]-(minX+maxX)/2)*k,254+(r[1]-(minY+maxY)/2)*k];};
+  const groundLabel=d=>{
+   const a=p(wallPoint(s,d.wall,0,0)),b=p(wallPoint(s,d.wall,wallLength(s,d.wall),0)),q=p(d.point);
+   let angle=Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI;if(angle>90)angle-=180;if(angle< -90)angle+=180;
+   const x=Math.max(65,Math.min(835,q[0])),y=Math.min(493,q[1]+(['front','back'].includes(d.wall)?37:19));
+   return `<g class="bd-side-label" data-side-label="${d.wall}" pointer-events="none" opacity=".72" transform="translate(${round(x)} ${round(y)}) rotate(${round(angle)})"><text text-anchor="middle" font-family="Arial,sans-serif" font-size="13" letter-spacing="1.6" fill="#62716c">${esc(d.label.toUpperCase())}</text></g>`;
+  };
   const path=a=>'M'+a.map(v=>p(v).map(round).join(',')).join('L')+'Z';
   const drawPorch=porch=>{let markup='';const outer=porch.height-porch.depth*porch.pitch/12,wp=(u,y,d=0)=>wallPoint(s,porch.wall,u,y,d),n=Math.ceil(porch.width/10);for(let i=0;i<=n;i++){const u=porch.x+i*porch.width/n;markup+=line(p(wp(u,0,porch.depth)),p(wp(u,outer,porch.depth)),'stroke-width="4"')+line(p(wp(u,outer,porch.depth)),p(wp(u,porch.height)),'stroke-width="3"');}return markup+poly([wp(porch.x,porch.height),wp(porch.x+porch.width,porch.height),wp(porch.x+porch.width,outer,porch.depth),wp(porch.x,outer,porch.depth)].map(p),framed?'none':s.roofColor);};
   // Far porches are covered by the building, near porches cover its walls.
   for(const porch of s.porches.filter(p=>!visible.includes(p.wall)))out+=drawPorch(porch);
   out+=poly([p([0,0,0]),p([W,0,0]),p([W,0,D]),p([0,0,D])],'#ded9cc');
+  // Far-side floor markings sit behind the shell instead of showing through it.
+  for(const d of directions.filter(d=>!visible.includes(d.wall)))out+=groundLabel(d);
   for(const z of framePositions(s)){
    for(const x of [0,W])out+=line(p([x,0,z]),p([x,H,z]),`stroke-width="${s.frame==='ibeam'?5:4}"`);
    out+=line(p([0,H,z]),p([W/2,R,z]),'stroke-width="5"')+line(p([W/2,R,z]),p([W,H,z]),'stroke-width="5"');
@@ -95,7 +107,8 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   if(!framed&&s.roofPanel){const e=s.overhang,edge=H-e*s.pitch/12,slopes=[[-e,W/2],[W/2,W+e]];if(sn<0)slopes.reverse();for(const [a,b] of slopes){const ya=a===W/2?R:edge,yb=b===W/2?R:edge;out+=poly([p([a,ya,-e]),p([b,yb,-e]),p([b,yb,D+e]),p([a,ya,D+e])],mode==='insulation'&&s.roofInsulation!=='none'?'#d6be84':s.roofColor);for(let z=-e;z<=D+e;z+=1)out+=line(p([a,ya,z]),p([b,yb,z]),'stroke="#fff" stroke-opacity=".24"');}}
   for(const porch of s.porches.filter(p=>visible.includes(p.wall)))out+=drawPorch(porch);
   const dz=c>=0?-2:D+2;
-  out+=dim(p([0,0,dz]),p([W,0,dz]),`${W} ft`)+text(28,34,es?'Vista axonométrica a escala':'Scaled axonometric view')+text(28,59,`${W} × ${D} ft · ${H} ft ${es?'alero':'eave'} · ${s.pitch}:12`);
+  out+=dim(p([0,0,dz]),p([W,0,dz]),`${W} ft`)+text(28,34,`${W} × ${D} ft · ${H} ft ${es?'alero':'eave'} · ${s.pitch}:12`);
+  for(const d of directions.filter(d=>visible.includes(d.wall)))out+=groundLabel(d);
  }
  out+=text(24,525,es?'Concepto exterior · dimensiones en pies · no es un plano estructural':'Exterior concept · dimensions in feet · not a structural drawing');
  return out;

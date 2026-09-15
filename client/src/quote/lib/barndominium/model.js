@@ -1,7 +1,7 @@
 // Shared with the suite. Feet throughout; opening offsets are from the left
 // when looking at each wall from outside. This is shell geometry, not engineering.
 export const WALLS = ['front', 'right', 'back', 'left'];
-export const DEFAULT = {version:1,width:40,depth:60,height:12,pitch:4,overhang:1,frame:'ibeam',bay:20,roofSpacing:5,wallSpacing:4,roofPanel:true,wallPanel:true,roofColor:'#555b60',wallColor:'#e3dfd3',trimColor:'#303638',roofInsulation:'none',wallInsulation:'none',openings:[{id:'door-1',kind:'door',wall:'front',x:7,width:3,height:7,sill:0},{id:'window-1',kind:'window',wall:'front',x:23,width:4,height:4,sill:3}],porches:[]};
+export const DEFAULT = {version:1,width:40,depth:60,height:12,pitch:4,overhang:1,frame:'ibeam',bay:20,roofSpacing:5,wallSpacing:4,roofPanel:true,wallPanel:true,roofColor:'#555b60',wallColor:'#e3dfd3',trimColor:'#303638',roofInsulation:'none',wallInsulation:'none',openings:[{id:'door-1',kind:'door',doorPackage:'preassembled',wall:'front',x:7,width:3,height:7,sill:0},{id:'window-1',kind:'window',wall:'front',x:23,width:4,height:4,sill:3}],porches:[]};
 export const fresh = () => structuredClone(DEFAULT);
 export const round = n => Math.round(n*100)/100;
 export const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -19,7 +19,7 @@ export function normalize(raw={}) {
   const item={id:typeof o?.id==='string'?o.id.replace(/[^a-zA-Z0-9_-]/g,'').slice(0,45):`${key}-${i}`,wall:WALLS.includes(o?.wall)?o.wall:'front'};
   const keys=key==='openings'?['x','width','height','sill']:['x','width','depth','height','pitch'];
   for(const k of keys)item[k]=typeof o?.[k]==='number'&&Number.isFinite(o[k])?o[k]:0;
-  if(key==='openings'){item.kind=['door','overhead','window'].includes(o?.kind)?o.kind:'door';if(item.kind!=='window')item.sill=0;}
+  if(key==='openings'){item.kind=['door','overhead','window'].includes(o?.kind)?o.kind:'door';if(item.kind!=='window')item.sill=0;if(item.kind==='door'&&['preassembled','frame-only'].includes(o?.doorPackage))item.doorPackage=o.doorPackage;}
   return item;
  });
  return s;
@@ -98,7 +98,7 @@ export function spec(s,lang='en',{technical=true}={}) {
  ]:[]),
  [es?'Lámina':'Panels',`${es?'Techo':'Roof'}: ${s.roofPanel?'R-panel':'none'} ${s.roofColor} · ${es?'Muros':'Walls'}: ${s.wallPanel?'R-panel':'none'} ${s.wallColor}`],
  ...(technical?[[es?'Aislamiento':'Insulation',`${es?'Techo':'Roof'}: ${s.roofInsulation} · ${es?'Muros':'Walls'}: ${s.wallInsulation}`]]:[]),
- ...s.openings.map((o,i)=>[`${kind(o.kind)} ${i+1}`,`${wall(o.wall)} · ${o.width} × ${o.height} ft · ${es?'desde izquierda':'from left'} ${o.x} ft · ${es?'antepecho':'sill'} ${o.sill} ft`]),
+ ...s.openings.map((o,i)=>[`${kind(o.kind)} ${i+1}`,`${wall(o.wall)} · ${o.width} × ${o.height} ft · ${es?'desde izquierda':'from left'} ${o.x} ft · ${es?'antepecho':'sill'} ${o.sill} ft${o.kind==='door'?' · '+(o.doorPackage==='preassembled'?(es?'Paquete de puerta prearmada; producto y precio pendientes':'Preassembled door package; product and price pending'):(es?'Marco solamente':'Frame only')):''}`]),
  ...s.porches.map((p,i)=>[`${es?'Porche':'Porch'} ${i+1}`,`${wall(p.wall)} · ${p.width} × ${p.depth} ft · ${es?'desde izquierda':'from left'} ${p.x} ft · ${p.height} ft ${es?'adosado':'attachment'} · ${p.pitch}:12`]),
  [es?'Alcance':'Scope',es?'Diseño exterior preliminar; sin distribución interior, cimentación ni cálculo estructural.':'Exterior shell concept; interior fit-out, foundation and structural engineering excluded.'],
  ];

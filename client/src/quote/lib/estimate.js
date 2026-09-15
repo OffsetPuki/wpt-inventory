@@ -926,8 +926,8 @@ function estimateBarndominium(s) {
  if(s.wallPanel)add('building-walls','R-panel wall panels — net area after openings','area',t.wallNet);
  if(s.roofInsulation!=='none')add('building-roof-insulation','Roof insulation: '+s.roofInsulation+' — thickness to confirm','area',round2(s.width*s.depth*Math.hypot(1,s.pitch/12)));
  if(s.wallInsulation!=='none')add('building-wall-insulation','Wall insulation: '+s.wallInsulation+' — thickness to confirm','area',t.wallNet);
- add('building-opening-frames','Opening jambs, headers and window sills — section to confirm','length',t.openingTrim);
- for(const o of s.openings)add('building-opening-'+o.id,o.kind+' — '+o.width+' × '+o.height+' ft ('+o.wall+')','unit',1);
+ add('building-opening-frames','Opening jambs, headers and window sills — section to confirm','length',Math.max(0,t.openingTrim-s.openings.filter(o=>o.kind==='door'&&o.doorPackage==='preassembled').reduce((sum,o)=>sum+2*o.height+o.width,0)));
+ for(const o of s.openings)add('building-opening-'+o.id,(o.kind==='door'&&o.doorPackage==='preassembled'?'Preassembled insulated steel walk-door package, including frame / sub-jambs / hardware / threshold / seals — supplier quote required':o.kind==='door'?'Walk-door opening — door supplied separately':o.kind)+' — '+o.width+' × '+o.height+' ft ('+o.wall+')','unit',1);
  for(const p of s.porches){add('building-porch-'+p.id,'Porch steel package — '+p.width+' × '+p.depth+' ft ('+p.wall+'), posts / beams / CEE','unit',1);add('building-porch-roof-'+p.id,'Porch R-panel roof — '+p.wall,'area',round2(p.width*p.depth*Math.hypot(1,p.pitch/12)));}
  add('building-trim','Ridge, eave and corner trim / closures / flashing — confirm scope','flat',1);
  add('building-connections','Base plates, anchors, connections and bracing — engineering allowance','flat',1);

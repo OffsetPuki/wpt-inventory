@@ -8,6 +8,7 @@ import {wallFramingLayout} from './wall-framing.js';
 function section(kind){
  const d=.65,w=.32,t=.045;
  const points=kind==='cee'?[[0,0],[w,0],[w,t],[t,t],[t,d-t],[w,d-t],[w,d],[0,d]]:
+ kind==='zee-notched'?[[w-t,0],[w,0],[w,d-t],[2*w-t,d-t],[2*w-t,d],[w-t,d]]:
  kind==='zee'?[[0,0],[w,0],[w,d-t],[2*w-t,d-t],[2*w-t,d],[w-t,d],[w-t,t],[0,t]]:
  [[-w,-d/2],[w,-d/2],[w,-d/2+t],[t,-d/2+t],[t,d/2-t],[w,d/2-t],[w,d/2],[-w,d/2],[-w,d/2-t],[-t,d/2-t],[-t,-d/2+t],[-w,-d/2+t]];
  const shape=new THREE.Shape();points.forEach(([x,y],i)=>i?shape.lineTo(x,y):shape.moveTo(x,y));shape.closePath();return shape;
@@ -18,8 +19,9 @@ export function memberGeometry(a,b,kind='ibeam',size=.5,up=[0,1,0],scale=1){
  const geo=kind==='post'?new THREE.BoxGeometry(size*scale,size*scale,length):new THREE.ExtrudeGeometry(section(kind),{depth:length,bevelEnabled:false,steps:1});
  if(kind!=='post'){
   geo.computeBoundingBox();const box=geo.boundingBox;
-  geo.translate(-(box.min.x+box.max.x)/2,-(box.min.y+box.max.y)/2,-length/2);geo.scale(scale,scale,1);
+  geo.translate(kind==='zee-notched'?-.2975:-(box.min.x+box.max.x)/2,-(box.min.y+box.max.y)/2,-length/2);geo.scale(scale,scale,1);
  }
+ geo.userData.part={name:kind.startsWith('zee')?'ZEE wall girt':kind==='cee'?'CEE member':kind==='post'?'Square post':'I-section member',length, ...(kind.startsWith('zee')?{section:[7.8*scale,3.84*scale,.54*scale,.54*scale]}:{})};
  axis.normalize();let reference=new THREE.Vector3(...up);
  if(Math.abs(axis.dot(reference.clone().normalize()))>.99)reference=new THREE.Vector3(0,0,1);
  const x=reference.cross(axis).normalize(),y=axis.clone().cross(x).normalize();
@@ -43,7 +45,7 @@ export function openingFrameGeometry(o){
  geometry.translate(o.x,o.sill,.015);return geometry;
 }
 
-export function buildWallFraming(s,wall){
+export function buildWallFraming(s,wall,{notches=[]}={}){
  const layout=wallFramingLayout(s,wall),{scale,depth,t,frames,girts}=layout,members=[];
  const front=-.002,center=front-depth/2,webThickness=.045*scale;
  const add=(geo,kind,extra={})=>{
@@ -54,53 +56,88 @@ export function buildWallFraming(s,wall){
   else for(const attr of Object.values(geo.attributes))for(let i=0;i<attr.count;i+=3)for(let k=0;k<attr.itemSize;k++){
    const a=(i+1)*attr.itemSize+k,b=(i+2)*attr.itemSize+k;[attr.array[a],attr.array[b]]=[attr.array[b],attr.array[a]];
   }
+  geo.userData.part={...geo.userData.part,name:geo.userData.part?.name??(kind==='girt-web'?'ZEE web':kind==='zee'?'ZEE wall girt':kind==='jamb'?(extra.overhead?'Garage door jamb':'Opening jamb'):kind==='header'?(extra.overhead?'Garage door header':'Opening header'):kind==='sill'?'Window sill':kind==='clip'?'Opening connection tab':kind==='weld'?'Weld':kind==='bolt'?'Bolt assembly':kind==='base'?'Jamb base plate':kind)};
   geo.computeVertexNormals();geo.computeBoundingBox();geo.computeBoundingSphere();members.push({geometry:geo,kind,region:'main',wall,...extra});
  };
  const box=(a,b,kind,extra={})=>{if(b.some((v,i)=>v-a[i]<.0001))return;const g=new THREE.BoxGeometry(...b.map((v,i)=>v-a[i]));g.translate(...a.map((v,i)=>(v+b[i])/2));add(g,kind,extra);};
  const extrusion=(points,length,map,kind,extra={})=>{
   if(length<.0001)return;const shape=new THREE.Shape();points.forEach(([x,y],i)=>i?shape.lineTo(x,y):shape.moveTo(x,y));shape.closePath();
   const g=new THREE.ExtrudeGeometry(shape,{depth:length,steps:1,bevelEnabled:false}),p=g.attributes.position;
+  if(['jamb','header','sill'].includes(kind))g.userData.part={profile:[0,1].map(i=>(Math.max(...points.map(p=>p[i]))-Math.min(...points.map(p=>p[i])))*12),thickness:t*12,length};
+  if(kind==='clip')g.userData.part={dimensions:[0,1].map(i=>(Math.max(...points.map(p=>p[i]))-Math.min(...points.map(p=>p[i])))*12).concat(length*12),thickness:.018*scale*12};
   for(let i=0;i<p.count;i++)p.setXYZ(i,...map(p.getX(i),p.getY(i),p.getZ(i)));add(g,kind,extra);
  };
  const channel=(width,d)=>[[0,0],[width,0],[width,-t],[t,-t],[t,-d+t],[width,-d+t],[width,-d],[0,-d]];
- const bolt=(position,normal,extra)=>{
+ const bolt=(position,normal,extra,grip=.06*scale,flushBack=false)=>{
   const axis=new THREE.Vector3(...normal),q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),axis);
-  for(const [radius,length,offset,sides] of [[.022*scale,.1*scale,-.03*scale,6],[.046*scale,.018*scale,.009*scale,8],[.037*scale,.035*scale,.035*scale,6]]){
-   const g=new THREE.CylinderGeometry(radius,radius,length,sides);g.applyQuaternion(q);g.translate(...position.map((v,i)=>v+normal[i]*offset));add(g,'bolt',extra);
+  // Shank, washers, hex head and nut on opposing faces of both joined parts.
+  const back=flushBack?[[.037*scale,.012*scale,-grip+.006*scale,12]]:[[.046*scale,.018*scale,-grip-.009*scale,12],[.037*scale,.035*scale,-grip-.035*scale,6]];
+  for(const [radius,length,offset,sides] of [[.022*scale,grip+(flushBack?.04:.08)*scale,flushBack?(.04*scale-grip)/2:-grip/2,10],[.046*scale,.018*scale,.009*scale,12],[.037*scale,.035*scale,.035*scale,6],...back]){
+   const g=new THREE.CylinderGeometry(radius,radius,length,sides);g.userData.part={name:'Bolt assembly',diameter:.044*scale*12,grip:grip*12};g.applyQuaternion(q);g.translate(...position.map((v,i)=>v+normal[i]*offset));add(g,'bolt',extra);
   }
  };
- const clip=(face,dir,y,up,run,height,seat,extra={})=>{
-  const thick=.018*scale,d=.38*scale,z0=center-d/2,base=y+up*seat;
+ const clip=(face,dir,y,up,run,height,seat,extra={},section={})=>{
+  const thick=.018*scale,d=section.depth??.38*scale,clipCenter=section.center??center,z0=clipCenter-d/2,base=y+up*seat;
   if(run<.07*scale||height<.07*scale)return;
   extrusion([[0,0],[run,0],[run,thick],[thick,thick],[thick,height],[0,height]],d,
    (u,v,z)=>[face+dir*u,base+up*v,z0+z],'clip',extra);
-  for(const z of [center-.1*scale,center+.1*scale]){
-   bolt([face+dir*run*.65,base+up*thick,z],[0,up,0],extra);
-   bolt([face+dir*thick,base+up*height*.65,z],[dir,0,0],extra);
+  for(const z of [clipCenter-d*.26,clipCenter+d*.26]){
+   const girtJoint=extra.connection==='girt-jamb';
+   if(extra.connection==='jamb-base'){
+    // Exposed anchor rod, washer and nut. Embedded length and concrete are
+    // deliberately not specified by this schematic connection.
+    const x=face+dir*run*.65,seat=base+thick;
+    for(const [radius,h,y,segments,name] of [[.025*scale,seat+.12*scale,(seat+.12*scale)/2,12,'Garage jamb anchor rod'],[.046*scale,.018*scale,seat+.009*scale,16,'Garage jamb anchor washer'],[.037*scale,.035*scale,seat+.0355*scale,6,'Garage jamb anchor nut']]){
+     const geo=new THREE.CylinderGeometry(radius,radius,h,segments);geo.translate(x,y,z);
+     const label=extra.overhead?name:name.replace('Garage jamb','Opening jamb');geo.userData.part={name:label,diameter:radius*24,length:h};add(geo,'bolt',{...extra,anchorPart:label});
+    }
+   }else bolt([face+dir*run*.65,base+up*thick,z],[0,up,0],extra,thick+(girtJoint?webThickness:t),!girtJoint);
+   // The upright tab leg is welded to the jamb; only the supported member is bolted.
+  }
+  for(const side of [-1,1]){
+   const leg=.014*scale;
+   extrusion([[0,0],[leg,0],[0,side*leg]],height-.02*scale,
+    (a,b,h)=>[face+dir*a,base+up*(h+.01*scale),clipCenter+side*d/2+b],'weld',{...extra,attachment:'welded'});
   }
  };
  for(const f of frames){
-  const o=f.opening,extra={opening:o.id};
+  const o=f.opening,extra={opening:o.id,overhead:o.kind==='overhead'};
   for(const j of f.jambs){
-   extrusion(channel(j.width,depth),j.upper-j.lower,(u,z,y)=>[j.web+j.sign*u,j.lower+y,front+z],'jamb',extra);
+   extrusion(channel(j.width,depth),j.upper-j.lower,(u,z,y)=>[j.web+j.sign*u,Math.max(j.lower===0?t:j.lower,j.lower+y),front+z],'jamb',extra);
    if(j.lower===0){
     box([Math.min(j.web,j.web+j.sign*j.width),0,front-depth],[Math.max(j.web,j.web+j.sign*j.width),t,front],'base',extra);
-    clip(j.sign>0?j.hi:j.lo,j.sign,0,1,Math.min(j.width-t,.22*scale),.2*scale,t,extra);
+    clip(j.sign>0?j.hi:j.lo,j.sign,0,1,Math.min(j.width-t,.22*scale),.2*scale,t,{...extra,connection:'jamb-base'});
    }
   }
-  // Headers/sills fit between jamb webs, set inside their flanges. This is a
-  // structural channel behind the separate exterior casing in home3d.js.
-  const left=f.jambs[0].hi,right=f.jambs[1].lo,channelFront=front-t-.004*scale,channelDepth=depth-2*t-.008*scale;
-  for(const [y,up,width,kind] of [[f.top,1,f.headWidth,'header'],...(o.kind==='window'&&f.sillWidth>0?[[o.sill,-1,f.sillWidth,'sill']]:[])]){
-   extrusion(channel(width,channelDepth),right-left,(v,z,u)=>[left+u,y+up*v,channelFront+z],kind,extra);
-   for(const [face,dir] of [[left,1],[right,-1]])clip(face,dir,y,up,Math.min(.3*scale,(right-left)/3),Math.min(width,.22*scale),t,extra);
+  // Upright header/sill channels: the deep web is vertical and the flanges
+  // return into the wall. Use a single continuous channel header between the
+  // jambs, following American Buildings specification 8.4.3. Girt connections
+  // restrain the jamb extensions above the opening; no loose paired headers.
+  // These are display proportions, not a header or jamb fabrication schedule.
+  const left=f.jambs[0].hi,right=f.jambs[1].lo,channelFront=front-t-.004*scale,flange=.25*scale;
+  const upright=(h)=>[[0,0],[h,0],[h,-flange],[h-t,-flange],[h-t,-t],[t,-t],[t,-flange],[0,-flange]];
+  for(const [y,up,height,kind] of [[f.top,1,f.headWidth,'header'],...(o.kind==='window'&&f.sillWidth>0?[[o.sill,-1,f.sillWidth,'sill']]:[])]){
+   const faces=[[channelFront,1]];
+   for(const [out,sign] of faces){
+    extrusion(upright(height),right-left,(v,z,u)=>[left+u,y+up*v,out+sign*z],kind,extra);
+    const clipCenter=out-sign*flange/2;
+    for(const [face,dir] of [[left,1],[right,-1]])clip(face,dir,y,up,Math.min(.3*scale,(right-left)/3),Math.min(height-.025*scale,.24*scale),t,{...extra,connection:kind+'-jamb'}, {center:clipCenter,depth:flange-.04*scale});
+   }
+
   }
  }
  for(const girt of girts){
   const {a,b,y,copeStart,copeEnd}=girt,extra={girt:{a,b,y},opening:''};
   const start=a+copeStart,end=b-copeEnd;
   if(start<end){
-   const g=memberGeometry([start,y,center],[end,y,center],'zee',.5,[0,0,1],scale);if(g)add(g,'zee',extra);
+   const slots=notches.filter(n=>Math.abs(n.y-y)<1e-5&&n.a<end&&n.b>start);
+   const points=[...new Set([start,end,...slots.flatMap(n=>[Math.max(start,n.a),Math.min(end,n.b)])])].sort((a,b)=>a-b);
+   for(let i=1;i<points.length;i++){
+    const a=points[i-1],b=points[i],mid=(a+b)/2,notched=slots.some(n=>mid>n.a&&mid<n.b);
+    // Cope only the inward downturned flange. Keep the horizontal ZEE web
+    // continuous beneath the bolt row, including through the connection zone.
+    const g=memberGeometry([a,y,center],[b,y,center],notched?'zee-notched':'zee',.5,[0,0,1],scale);if(g)add(g,'zee',{...extra,notched});
+   }
   }
   // At an inward-facing channel, only the web continues into the connection;
   // cope the ZEE flanges to avoid passing them through the jamb flanges.

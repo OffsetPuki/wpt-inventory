@@ -15,6 +15,26 @@ test('Website design imports, edits, persists and produces a quote specification
  const editor=page.locator('.barndo');await expect(editor.locator('[data-key="depth"]')).toHaveValue('64');
  await editor.locator('[data-action="rotate-left"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','30');
  await editor.locator('[data-action="reset-drawing"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','0');
+ await editor.locator('[data-action="view"][data-value="frame"]').click();
+ const frame=editor.locator('.bd-frame3d');await expect(frame).toHaveAttribute('data-ready','true');await expect(frame).toHaveAttribute('data-dimensions','40x64x12');
+ await frame.locator('select[aria-label="Inspect frame"]').selectOption('cee');await expect(frame).toHaveAttribute('data-focus','cee');
+ await frame.locator('select[aria-label="Inspect frame"]').selectOption('zee');await expect(frame).toHaveAttribute('data-focus','zee');
+ await frame.locator('canvas').screenshot({path:'test-results/barndominium-bolted-zee.png'});
+ await expect(frame).toHaveAttribute('data-navigation','cad');
+ const canvas=frame.locator('canvas');await canvas.scrollIntoViewIfNeeded();
+ await frame.locator('[data-camera-view="fit"]').click();const initialView=await canvas.screenshot();
+ const savedBeforeNavigation=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get()?.payload;
+ const box=await canvas.boundingBox();
+ const drag=async(shift)=>{if(shift)await page.keyboard.down('Shift');await page.mouse.move(box.x+box.width*.5,box.y+box.height*.5);await page.mouse.down({button:'middle'});await page.mouse.move(box.x+box.width*.65,box.y+box.height*.58,{steps:8});await page.mouse.up({button:'middle'});if(shift)await page.keyboard.up('Shift');};
+ await drag(false);const panned=await canvas.screenshot();expect(panned.equals(initialView)).toBe(false);
+ await frame.locator('[data-camera-view="fit"]').click();await drag(true);const orbited=await canvas.screenshot();expect(orbited.equals(initialView)).toBe(false);expect(orbited.equals(panned)).toBe(false);
+ await page.mouse.move(box.x+box.width*.5,box.y+box.height*.5);await page.mouse.wheel(0,-250);expect((await canvas.screenshot()).equals(orbited)).toBe(false);
+ await frame.locator('[data-camera-view="bottom"]').click();const bottom=await canvas.screenshot({path:'test-results/barndominium-cad-bottom.png'});
+ await frame.locator('[data-camera-view="top"]').click();expect((await canvas.screenshot()).equals(bottom)).toBe(false);
+ await canvas.press('f');expect((await canvas.screenshot()).equals(initialView)).toBe(true);
+ expect(app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get()?.payload).toEqual(savedBeforeNavigation);
+
+ await editor.locator('[data-action="view"][data-value="iso"]').click();
  await editor.locator('[data-action="mode"][data-value="frame"]').click();await expect(editor.locator('[data-action="mode"][data-value="frame"]')).toHaveAttribute('aria-pressed','true');
  await editor.locator('[data-action="view"][data-value="home"]').click();
  await expect(editor.locator('.bd-home3d canvas')).toBeVisible({timeout:20000});
@@ -27,6 +47,8 @@ test('Website design imports, edits, persists and produces a quote specification
  await editor.locator('[data-action="step"][data-value="building"]').click();
  await editor.locator('[data-key="depth"]').fill('68');await editor.locator('[data-key="depth"]').press('Tab');
  await expect.poll(()=>{const row=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();return row?JSON.parse(row.payload).state.depth:null;}).toBe(68);
+ await editor.locator('[data-action="view"][data-value="frame"]').click();await expect(frame).toHaveAttribute('data-dimensions','40x68x12');await expect(frame.locator('canvas')).toHaveCount(1);
+ await editor.locator('[data-action="view"][data-value="iso"]').click();
  await page.getByText('Edit pricing',{exact:false}).first().click();
  await page.getByLabel('CEE roof purlins — net run, laps and waste to review rate',{exact:true}).fill('4.5');
  await expect.poll(()=>{const q=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();return q?Number(JSON.parse(q.payload).overrides?.items?.['building-cee']?.rate):null;}).toBe(4.5);
