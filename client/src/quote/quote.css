@@ -940,4 +940,4 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 @media(max-width:600px){.qa .website-product-preview iframe{height:460px}}
 
 .qa .preview:fullscreen .product-studio-stage,.qa .barndo-product:fullscreen .product-studio-stage{height:80vh!important}
-.qa .website-product-preview iframe{background:white}
+.qa .website-product-preview iframe{background:#f2f0e9}

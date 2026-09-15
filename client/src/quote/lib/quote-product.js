@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import {copyProduct} from './product-studio.js';
 import {PIPE_OD} from './tradeMath.js';
-export async function buildQuoteProduct(type,s){
+export async function buildQuoteProduct(type,s,mode='shell'){
  if(type==='barndominium'){
   const {createHomeViewer}=await import('./barndominium/home3d.js');const host=document.createElement('div');host.style.cssText='position:fixed;left:-10000px;width:800px;height:500px';document.body.append(host);let viewer;
-  try{viewer=createHomeViewer(host,s);if(!viewer)throw new Error('3D is unavailable.');return copyProduct([viewer.getProduct()]);}finally{viewer?.destroy();host.remove();}
+  try{viewer=createHomeViewer(host,s);if(!viewer)throw new Error('3D is unavailable.');if(mode==='frame')viewer.update(s,'frame');return copyProduct([viewer.getProduct()]);}finally{viewer?.destroy();host.remove();}
  }
  const group=new THREE.Group(),steel=new THREE.MeshStandardMaterial({color:'#999d9f',metalness:.35,roughness:.5});
  if(type==='concrete'){const mesh=new THREE.Mesh(new THREE.BoxGeometry(Number(s.widthFt),Number(s.thickness)/12,Number(s.lengthFt)),new THREE.MeshStandardMaterial({color:'#bebdb9',roughness:.95}));mesh.position.y=Number(s.thickness)/24;group.add(mesh);}

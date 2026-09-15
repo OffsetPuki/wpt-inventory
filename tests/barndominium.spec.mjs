@@ -16,7 +16,12 @@ test('Website design imports, edits, persists and produces a quote specification
  await editor.locator('[data-action="rotate-left"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','30');
  await editor.locator('[data-action="reset-drawing"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','0');
  await editor.locator('[data-action="view"][data-value="frame"]').click();
- await page.getByRole('button',{name:'White background preview',exact:true}).click();await expect(page.locator('.product-studio-stage canvas')).toBeVisible({timeout:20000});await expect(page.getByRole('button',{name:'Create customer preview',exact:true})).toBeVisible({timeout:20000});await page.getByRole('button',{name:'Back to design & frame',exact:true}).click();
+ await page.getByRole('button',{name:'Customer preview',exact:true}).click();await expect(page.locator('.product-studio-stage canvas')).toBeVisible({timeout:20000});await expect(page.getByRole('button',{name:'Create customer preview',exact:true})).toBeVisible({timeout:20000});await page.getByRole('button',{name:'Create customer preview',exact:true}).click();
+ const previewDialog=page.getByRole('dialog').last();await previewDialog.getByRole('button',{name:'Create preview',exact:true}).click();await expect(previewDialog.getByText(/is saved in Customer previews/)).toBeVisible({timeout:45000});
+ const exported=app.sqlite.prepare("SELECT m.bytes FROM customer_preview_models m JOIN customer_previews p ON p.id=m.preview_id WHERE p.source_key LIKE 'quote-model:%' ORDER BY p.id DESC LIMIT 1").get().bytes;
+ const gltf=JSON.parse(exported.subarray(20,20+exported.readUInt32LE(12)).toString());expect(gltf.nodes.some(n=>n.name==='CJM_Frame')).toBe(true);expect(gltf.nodes.some(n=>n.name==='CJM_Finished')).toBe(true);expect(exported.length).toBeLessThan(25*1024*1024);
+ await previewDialog.getByRole('button',{name:'Close',exact:true}).click();
+ await page.getByRole('button',{name:'Back to design & frame',exact:true}).click();
  await page.getByRole('button',{name:'Full screen',exact:true}).click();await expect(page.locator('.barndo-product')).toHaveJSProperty('clientWidth',await page.evaluate(()=>innerWidth));await page.getByRole('button',{name:'Exit full screen',exact:true}).click();
  const frame=editor.locator('.bd-frame3d');await expect(frame).toHaveAttribute('data-ready','true');await expect(frame).toHaveAttribute('data-dimensions','40x64x12');
  await frame.locator('select[aria-label="Inspect frame"]').selectOption('cee');await expect(frame).toHaveAttribute('data-focus','cee');

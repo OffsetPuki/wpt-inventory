@@ -15,11 +15,11 @@ export function copyProduct(sources){
  if(!group.children.length)throw new Error('No 3D product is available.');
  const bounds=new THREE.Box3().setFromObject(group),center=bounds.getCenter(new THREE.Vector3());group.position.set(-center.x,-bounds.min.y,-center.z);group.updateMatrixWorld(true);return group;
 }
-export async function exportProduct(group){const result=await new GLTFExporter().parseAsync(group,{binary:true,onlyVisible:true});if(!(result instanceof ArrayBuffer))throw new Error('Could not export the model.');return result;}
+export async function exportProduct(group,frame=null){let exported=group;if(frame){exported=new THREE.Group();const shell=group.clone(true);shell.name='CJM_Finished';frame.name='CJM_Frame';exported.add(shell,frame);}const result=await new GLTFExporter().parseAsync(exported,{binary:true,onlyVisible:true});if(!(result instanceof ArrayBuffer))throw new Error('Could not export the model.');return result;}
 export function disposeProduct(group){group?.traverse(o=>{o.geometry?.dispose();for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[])m.dispose();});}
 export function createProductStudio(host){
  const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;host.append(renderer.domElement);
- const scene=new THREE.Scene();scene.background=new THREE.Color('#ffffff');const camera=new THREE.PerspectiveCamera(38,1,.01,5000),controls=new OrbitControls(camera,renderer.domElement);controls.maxPolarAngle=Math.PI/2-.01;controls.enableDamping=false;
+ const scene=new THREE.Scene();scene.background=new THREE.Color('#f2f0e9');const camera=new THREE.PerspectiveCamera(38,1,.01,5000),controls=new OrbitControls(camera,renderer.domElement);controls.maxPolarAngle=Math.PI/2-.01;controls.enableDamping=false;
  scene.add(new THREE.HemisphereLight(0xffffff,0x888888,2.4));const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(-10,20,15);light.castShadow=true;light.shadow.mapSize.set(2048,2048);light.shadow.normalBias=.015;scene.add(light,light.target);
  const floor=new THREE.Mesh(new THREE.PlaneGeometry(10000,10000),new THREE.ShadowMaterial({opacity:.22}));floor.rotation.x=-Math.PI/2;floor.position.y=-.015;floor.receiveShadow=true;scene.add(floor);let product=null,key='';
  const draw=()=>renderer.render(scene,camera);const resize=()=>{const w=host.clientWidth||800,h=host.clientHeight||450;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();draw();};const observer=new ResizeObserver(resize);observer.observe(host);controls.addEventListener('change',draw);
@@ -27,5 +27,5 @@ export function createProductStudio(host){
   light.position.copy(center).add(new THREE.Vector3(-radius,radius*1.5,radius));light.target.position.copy(center);Object.assign(light.shadow.camera,{left:-radius,right:radius,top:radius,bottom:-radius,near:.1,far:radius*5});light.shadow.camera.updateProjectionMatrix();
   if(shape!==key){key=shape;controls.target.copy(center);const distance=Math.max(size.y,size.x/(camera.aspect||1),size.z)*1.8;camera.position.copy(center).add(new THREE.Vector3(.6,.4,1).normalize().multiplyScalar(Math.max(2,distance)));controls.minDistance=radius*.08;controls.maxDistance=radius*8;controls.update();}resize();
  }
- return {setProduct,exportModel:()=>exportProduct(product),destroy(){observer.disconnect();controls.dispose();disposeProduct(product);floor.geometry.dispose();floor.material.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
+ return {setProduct,exportModel:(frame=null)=>exportProduct(product,frame),destroy(){observer.disconnect();controls.dispose();disposeProduct(product);floor.geometry.dispose();floor.material.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
 }
