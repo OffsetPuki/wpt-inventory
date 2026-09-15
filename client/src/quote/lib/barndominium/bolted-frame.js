@@ -95,17 +95,25 @@ function beam(group,a,b,kind,up,cuts={}){
   const x=new THREE.Vector3(...up).cross(axis).normalize(),y=axis.clone().cross(x).normalize();
   const geo=new THREE.ExtrudeGeometry(profile(kind),{depth:length,bevelEnabled:false,steps:1});
   const positions=geo.attributes.position;
+  const lower=Array.from({length:positions.count},(_,i)=>positions.getY(i)<0);
   const ends=Array.from({length:positions.count},(_,i)=>positions.getZ(i)<length/2?'start':'end');
   geo.applyMatrix4(new THREE.Matrix4().makeBasis(x,y,axis));geo.translate(...a);
-  // Project both cap and adjoining side vertices onto their mating planes.
-  // Square extrusion ends otherwise leave triangular gaps at sloped joints.
+  // Taper the interior flange; the exterior flange stays vertical for wall girts.
+  // The taper is a visual envelope, not a fabricated member selection.
   for(let i=0;i<positions.count;i++){
-    const cut=cuts[ends[i]];if(!cut)continue;
-    const normal=new THREE.Vector3(...cut.normal),v=new THREE.Vector3().fromBufferAttribute(positions,i);
-    v.addScaledVector(axis,(cut.constant-normal.dot(v))/normal.dot(axis));positions.setXYZ(i,v.x,v.y,v.z);
+    const v=new THREE.Vector3().fromBufferAttribute(positions,i),direction=axis.clone();
+    if(cuts.taper&&cuts.taper.inward*(v.x-a[0])>0){
+      v.x+=cuts.taper.gradient*(v.y-baseT);direction.x+=cuts.taper.gradient;
+    }
+    if(cuts.rafterTaper&&lower[i]){v.y+=cuts.rafterTaper.gradient*(v.x-W/2);direction.y+=cuts.rafterTaper.gradient*axis.x;}
+    const cut=cuts[ends[i]];
+    if(cut){const normal=new THREE.Vector3(...cut.normal);v.addScaledVector(direction,(cut.constant-normal.dot(v))/normal.dot(direction));}
+    positions.setXYZ(i,v.x,v.y,v.z);
   }
   geo.computeVertexNormals();geo.computeBoundingBox();
   geo.userData.part={name:['I-column','I-rafter','CEE roof purlin','ZEE girt'][kind],section:[kind===0?9.73:kind===1?12.2:8,kind===0?7.96:kind===1?6.49:2.5,kind===0?.29:kind===1?.23:.075,kind===0?.435:kind===1?.38:.075].map(n=>n*scale),length:length*scale,...(kind<2&&scale===1?{designation:kind===0?'W10×33':'W12×26',weightPerFoot:kind===0?33:26,catalogUrl:'https://ami.arcelormittal.com/structural-shapes/product-size-range/'}:{}),...(kind===2&&scale===1?{gauge:14}:{})};
+  if(cuts.taper){geo.userData.part.name='Tapered built-up column';geo.userData.part.taper=[9.73,14].map(n=>n*scale);delete geo.userData.part.designation;delete geo.userData.part.weightPerFoot;delete geo.userData.part.catalogUrl;}
+  if(cuts.rafterTaper){geo.userData.part.name='Tapered built-up rafter';geo.userData.part.taper=[18,12.2].map(n=>n*scale);geo.userData.part.taperLabel='Modeled taper · knee to ridge';delete geo.userData.part.designation;delete geo.userData.part.weightPerFoot;delete geo.userData.part.catalogUrl;}
   const mesh=new THREE.Mesh(geo,mats[kind]);mesh.userData.memberKind=['column','rafter','cee','zee'][kind];group.add(mesh);
   return mesh;
 }
@@ -131,26 +139,45 @@ function fastener(group,a,b,r=.025){
     cylinder(r*1.42,.027,p.clone().addScaledVector(axis,s*.0225),6);
   }
 }
+ // A wider knee and vertical outside face follow a typical tapered-column layout.
+ // 9.73-to-14 in is illustrative only; an engineer supplies the actual plate schedule.
+ const taperRise=(14-9.73)/12,taperGradient=taperRise/(axisY(inset)-baseT);
+ const kneeFace=(inset+columnHalf+taperGradient*(H-drop-baseT))/(1-taperGradient*m);
+ const rafterStart=(inset+columnHalf+taperGradient*(H-drop-baseT)+plateT*Math.hypot(1,taperGradient))/(1-taperGradient*m);
+ // Keep the roof flange fixed; deepen the web toward each knee (display dimensions only).
+ const rafterTaperSlope=(18-12.2)/12/roofCos/(W/2-rafterStart);
+ const rafterBottom=x=>axisY(x)-rafterHalf/roofCos-rafterTaperSlope*(W/2-Math.min(x,W-x));
  for(const z of zs){
   for(const side of [-1,1]){
-   const x=side<0?inset:W-inset,slope=-side*m,face=x-side*columnHalf;
+   const x=side<0?inset:W-inset,slope=-side*m,gradient=-side*taperGradient,face=side<0?kneeFace:W-kneeFace;
    columnBase(x,z);
-   beam(group,[x,baseT,z],[x,axisY(x),z],0,[1,0,0],{end:{normal:[-slope,1,0],constant:axisY(x)-slope*x+rafterHalf/roofCos}}).userData.connection='primary-column';
-   const jointY=axisY(face);
-   plate(group,[face-side*plateT/2,jointY,z],[plateT,2*rafterHalf/roofCos+.04,.68]);
-   for(const dy of [-.33,.33])for(const dz of [-.21,.21])fastener(group,[face+side*.435/12,jointY+dy,z+dz],[face-side*plateT,jointY+dy,z+dz]);
+   beam(group,[x,baseT,z],[x,axisY(x),z],0,[1,0,0],{taper:{inward:-side,gradient},end:{normal:[-slope,1,0],constant:axisY(x)-slope*x+rafterHalf/roofCos}}).userData.connection='primary-column';
+   const normal=new THREE.Vector3(1,-gradient,0).normalize(),up=new THREE.Vector3(gradient,1,0).normalize();
+   const plane=face-gradient*axisY(face),bottomSlope=slope-side*rafterTaperSlope;
+   const intersect=(slope,intercept)=>{const xx=(plane+gradient*intercept)/(1-gradient*slope);return new THREE.Vector3(xx,slope*xx+intercept,z);};
+   const top=intersect(slope,axisY(face)-slope*face+rafterHalf/roofCos),bottom=intersect(bottomSlope,rafterBottom(face)-bottomSlope*face),center=top.clone().add(bottom).multiplyScalar(.5);
+   const basis=new THREE.Matrix4().makeBasis(normal,up,new THREE.Vector3(0,0,1));
+   const height=top.distanceTo(bottom);
+   const joint=plate(group,center.clone().addScaledVector(normal,-side*plateT/2).toArray(),[plateT,height+.04,.68],basis);
+   joint.userData.connection='tapered-knee-plate';
+   for(const dy of [-height*.28,height*.28])for(const dz of [-.21,.21]){
+    const point=center.clone().addScaledVector(up,dy);point.z+=dz;
+    fastener(group,point.clone().addScaledVector(normal,side*.435/12).toArray(),point.clone().addScaledVector(normal,-side*plateT).toArray());
+   }
   }
-  const left=inset+columnHalf+plateT,right=W-left,mid=W/2;
+  const left=rafterStart,right=W-left,mid=W/2;
   for(const [a,b,slope] of [[left,mid-plateT,m],[mid+plateT,right,-m]]){
-   beam(group,[a,axisY(a),z],[b,axisY(b),z],1,[-slope,1,0],{start:{normal:[1,0,0],constant:a},end:{normal:[1,0,0],constant:b}});
+   const atLeft=a===left,gradient=atLeft?taperGradient:-taperGradient,knee=atLeft?a:b;
+   const kneeCut={normal:[1,-gradient,0],constant:knee-gradient*axisY(knee)};
+   beam(group,[a,axisY(a),z],[b,axisY(b),z],1,[-slope,1,0],{rafterTaper:{gradient:atLeft?rafterTaperSlope:-rafterTaperSlope},start:atLeft?kneeCut:{normal:[1,0,0],constant:a},end:atLeft?{normal:[1,0,0],constant:b}:kneeCut});
   }
   for(const side of [-1,1])plate(group,[mid+side*plateT/2,axisY(mid),z],[plateT,2*rafterHalf/roofCos+.04,.68]);
   for(const dy of [-.33,.33])for(const dz of [-.21,.21])fastener(group,[mid-plateT,axisY(mid)+dy,z+dz],[mid+plateT,axisY(mid)+dy,z+dz]);
  }
  const endwallPositions=Object.fromEntries(['front','back'].map(wall=>[wall,endwallColumnPositions(s,wall).map(u=>u/scale)]));
  for(const wall of ['front','back'])for(const u of endwallPositions[wall]){
-  const x=wall==='front'?u:W-u,z=wall==='front'?zs[0]:zs.at(-1),slope=x<W/2?m:-m,capT=.035;
-  const underside=axisY(x)-rafterHalf/roofCos,top=underside-capT;
+  const x=wall==='front'?u:W-u,z=wall==='front'?zs[0]:zs.at(-1),slope=x<W/2?m+rafterTaperSlope:-m-rafterTaperSlope,capT=.035;
+  const underside=rafterBottom(x),top=underside-capT;
   columnBase(x,z);
   const column=beam(group,[x,baseT,z],[x,top,z],0,[1,0,0],{end:{normal:[-slope,1,0],constant:top-slope*x}});
   column.userData={connection:'endwall-column',wall,along:u*scale};counts.endwallColumns++;
@@ -213,7 +240,7 @@ function fastener(group,a,b,r=.025){
    const rows=[...new Set(members.filter(a=>a.kind==='zee').map(a=>a.girt.y))];
    for(const row of rows){
     const y=row/scale,k=detailScale/scale,seat=.045*k/2,t=.016;
-    const min=inset+columnHalf+plateT+.3,max=W/2-plateT-.3;
+    const min=rafterStart+.3,max=W/2-plateT-.3;
     if(max<=min)continue;
     const distance=THREE.MathUtils.clamp((y-seat-.2-H+drop)/m,min,max);
     for(const along of [distance,W-distance]){
@@ -222,7 +249,7 @@ function fastener(group,a,b,r=.025){
      if(!steel)continue;
      const webHalf=(rafterHalf-.38/12)/roofCos;
      // The clip must fit between the rafter flanges across its entire width.
-     if([-.25,.25].some(dx=>y-seat>axisY(realX+dx)+webHalf-.015||y-seat-.4<axisY(realX+dx)-webHalf+.015))continue;
+     if([-.25,.25].some(dx=>y-seat>axisY(realX+dx)+webHalf-.015||y-seat-.4<rafterBottom(realX+dx)+.38/12/roofCos+.015))continue;
      const wp=(u,h,out)=>wallPoint(s,wall,u*scale,h*scale,out*scale).map(n=>n/scale);
      const origin=new THREE.Vector3(...wp(along,y,0)),down=new THREE.Vector3(0,-1,0),outward=new THREE.Vector3(...wp(along,y,1)).sub(origin),across=down.clone().cross(outward);
      const basis=new THREE.Matrix4().makeBasis(down,outward,across),point=(a,b,c)=>origin.clone().addScaledVector(down,a).addScaledVector(outward,b).addScaledVector(across,c).toArray();

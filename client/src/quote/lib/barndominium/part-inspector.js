@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const names={
- 'primary-column':'Primary I-column','endwall-column':'Endwall I-column','column-base':'Column base plate',
+ 'primary-column':'Tapered primary column','endwall-column':'Endwall I-column','column-base':'Column base plate',
  'cee-rafter-tab':'CEE-to-rafter tab','upper-girt-rafter':'Upper ZEE-to-rafter tab','upper-girt-seat':'Upper ZEE seat',
  'endwall-primary-web':'Endwall ZEE tab','column-girt-web':'Column ZEE tab','endwall-rafter-cap':'Sloped column cap plate',
  'girt-jamb':'ZEE-to-jamb tab','header-jamb':'Header-to-jamb tab','sill-jamb':'Sill-to-jamb tab','jamb-base':'Jamb base connection','header-tie':'Garage header tie'
@@ -23,6 +23,7 @@ export function describePart(mesh){
  const rows=[['Material',info.material||(weld?'Weld metal · filler not specified':'Steel · grade not specified')]];
  if(info.designation)rows.push(['Catalog section (preview)',info.designation],['Nominal weight',`${info.weightPerFoot} lb/ft`]);
  if(info.section){const [d,b,tw,tf]=info.section;rows.push(['Modeled section',`${fractionalInches(d)} deep × ${fractionalInches(b)} flange`]);if(info.gauge)rows.push(['Web / flange thickness',`${info.gauge} ga (${fractionalInches(tw)})`]);else rows.push(['Web thickness',fractionalInches(tw)],['Flange thickness',fractionalInches(tf)]);}
+ if(info.taper)rows.push([info.taperLabel||'Modeled taper · base to knee',info.taper.map(fractionalInches).join(' → ')],['Section / weight','Custom built-up · engineering required']);
  if(info.profile)rows.push(['Modeled channel profile',info.profile.map(fractionalInches).join(' × ')]);
  const thickness=info.thickness??(info.dimensions?Math.min(...info.dimensions):null);
  if(thickness)rows.push(['Modeled thickness',fractionalInches(thickness)]);
