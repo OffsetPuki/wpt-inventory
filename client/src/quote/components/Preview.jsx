@@ -1,5 +1,7 @@
+import WebsitePreview, {websitePreviewAvailable} from './WebsitePreview.jsx';
+import FullscreenButton from './FullscreenButton.jsx';
 import {renderDrawing} from '../lib/barndominium/drawing.js';
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { renderFence } from '../lib/preview/fence.js';
 import { renderGate } from '../lib/preview/gate.js';
 import { renderCarport } from '../lib/preview/carport.js';
@@ -15,6 +17,7 @@ const ARIA = { barndominium: 'Barndominium preview', fence: 'Fence preview', gat
 
 /** Live SVG preview driven by the same config state as the price estimate. */
 function Preview({ type, state }) {
+  const root=useRef(null);
   const html = useMemo(() => {
     const fn = RENDERERS[type];
     try { return fn ? fn(state) : ''; }
@@ -28,12 +31,13 @@ function Preview({ type, state }) {
   if (!RENDERERS[type]) return null;
 
   return (
-    <div className="preview">
+    <div className="preview" ref={root}>
       <div className="preview-top">
         <span className="eyebrow">Your design</span>
         <span className="preview-summary">{summary}</span>
       </div>
-      <div className="preview-stage">
+      <FullscreenButton target={()=>root.current}/>
+      {websitePreviewAvailable(type)?<WebsitePreview type={type} state={state}/>:<div className="preview-stage">
         <svg
           viewBox="0 0 800 450"
           role="img"
@@ -42,6 +46,7 @@ function Preview({ type, state }) {
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
+      }
       <div className="preview-caption">Live preview</div>
     </div>
   );
