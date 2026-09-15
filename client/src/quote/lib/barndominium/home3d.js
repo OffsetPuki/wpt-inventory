@@ -1,3 +1,4 @@
+import {containViewerMouse} from '../viewer-mouse.js';
 import {THREE,buildBackyard,corrugatedGeometry,mergeByMaterial,setupDaylight,finishTexture} from './scenery.js';
 import {buildFraming,memberGeometry,openingFrameGeometry} from './framing3d.js';
 import {buildBoltedFrame} from './bolted-frame.js';
@@ -12,7 +13,7 @@ function disposeGroup(group,materials=false){if(!group)return;const textures=new
 export function createHomeViewer(wrap,initial,{lang='en',cad=false}={}){
  let renderer;try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'low-power'});}catch{return null;}
  renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.setSize(Math.max(1,wrap.clientWidth),Math.max(1,wrap.clientHeight),false);wrap.appendChild(renderer.domElement);
- const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(42,1,.1,3000),controls=new OrbitControls(camera,renderer.domElement);
+ const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(42,1,.1,3000),controls=new OrbitControls(camera,renderer.domElement);const releaseMouse=containViewerMouse(renderer.domElement);
  controls.enableDamping=false;controls.maxPolarAngle=Math.PI/2-.015;controls.minDistance=8;controls.maxDistance=1200;controls.enablePan=true;
  if(cad){controls.mouseButtons.MIDDLE=THREE.MOUSE.PAN;controls.zoomToCursor=true;controls.screenSpacePanning=true;}
  wrap.dataset.navigation=cad?'cad':'simple';
@@ -138,5 +139,5 @@ if(!framing)add(flatWall(openingFrameGeometry(o),w),steel);
  }
  update(initial);reset();resize();
  const visibility=()=>{if(!document.hidden)draw();};document.addEventListener('visibilitychange',visibility);
- return {getProduct:()=>group,update,reset,setActive(v){active=v;if(v)resize();},destroy(){disposed=true;inspector.destroy();cancelAnimationFrame(frame);observer.disconnect();controls.dispose();document.removeEventListener('visibilitychange',visibility);daylight.dispose();disposeGroup(scene,true);scene.background?.dispose?.();scene.environment?.dispose?.();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
+ return {getProduct:()=>group,update,reset,setActive(v){active=v;if(v)resize();},destroy(){disposed=true;inspector.destroy();cancelAnimationFrame(frame);observer.disconnect();releaseMouse();controls.dispose();document.removeEventListener('visibilitychange',visibility);daylight.dispose();disposeGroup(scene,true);scene.background?.dispose?.();scene.environment?.dispose?.();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
 }

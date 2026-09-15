@@ -1,3 +1,4 @@
+import {containViewerMouse} from '../viewer-mouse.js';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
@@ -41,7 +42,7 @@ export function createFrameViewer(wrap,initial,{lang='en',cad=false}={}){
  if(cad){const help=document.createElement('p');help.className='bd-frame-detail';help.textContent=tr('Double-click a part to orbit around it · F fits the whole frame','Haz doble clic en una pieza para girar alrededor · F muestra toda la estructura');tools.append(help);}
  const note=document.createElement('p');note.className='bd-frame-note';note.textContent=tr('Illustrative framing. Member sizes, connections and bracing require project-specific engineering.','Estructura ilustrativa. Los perfiles, conexiones y arriostramientos requieren cálculo para cada proyecto.');
  wrap.append(tools,stage,legend,detail,note);
- const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=false;controls.enablePan=false;controls.rotateSpeed=.7;controls.zoomSpeed=.8;
+ const controls=new OrbitControls(camera,renderer.domElement);const releaseMouse=containViewerMouse(renderer.domElement);controls.enableDamping=false;controls.enablePan=false;controls.rotateSpeed=.7;controls.zoomSpeed=.8;
  if(cad){controls.enablePan=true;controls.screenSpacePanning=true;controls.zoomToCursor=true;controls.mouseButtons.MIDDLE=THREE.MOUSE.PAN;controls.touches.TWO=THREE.TOUCH.DOLLY_PAN;}
  wrap.dataset.navigation=cad?'cad':'simple';
  let active=true,disposed=false,group=null,ground=null,key='',s=initial,focus={},labels=[];
@@ -100,5 +101,5 @@ export function createFrameViewer(wrap,initial,{lang='en',cad=false}={}){
   renderer.domElement.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='f'){event.preventDefault();select.value='overall';reset();}},{signal:abort.signal});
  }
  const observer=new ResizeObserver(resize);observer.observe(stage);update(initial);
- return {update,reset,setActive(value){active=value;if(active)resize();},destroy(){disposed=true;inspector.destroy();abort.abort();observer.disconnect();controls.dispose();disposeModel();for(const mat of [...sections,hardware,groundMaterial])mat.dispose();renderer.dispose();renderer.forceContextLoss();wrap.replaceChildren();}};
+ return {update,reset,setActive(value){active=value;if(active)resize();},destroy(){disposed=true;inspector.destroy();abort.abort();observer.disconnect();releaseMouse();controls.dispose();disposeModel();for(const mat of [...sections,hardware,groundMaterial])mat.dispose();renderer.dispose();renderer.forceContextLoss();wrap.replaceChildren();}};
 }

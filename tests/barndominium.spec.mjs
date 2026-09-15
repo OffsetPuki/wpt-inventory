@@ -4,6 +4,19 @@ import {fresh,spec} from '../client/src/quote/lib/barndominium/model.js';
 let app,token;
 test.beforeAll(async()=>{app=await testApp({serve:true});const response=await app.api('/api/security/password','POST',{currentPassword:'1234',password:'Barndominium fixture 2026'},app.owner);expect(response.status).toBe(200);token=response.data.token;});
 test.afterAll(async()=>app.close());
+async function checkViewerMouse(page,canvas){
+ await canvas.scrollIntoViewIfNeeded();
+ const scrollPositions=()=>canvas.evaluate(el=>{const values=[window.scrollY];for(let p=el.parentElement;p;p=p.parentElement)values.push(p.scrollTop);return values;});
+ const before=await scrollPositions(),bounds=await canvas.boundingBox();
+ expect(await canvas.evaluate(el=>['mousedown','auxclick'].every(type=>{const event=new MouseEvent(type,{button:1,bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;}))).toBe(true);
+ await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+ await page.mouse.down({button:'middle'});
+ await page.mouse.wheel(0,180);
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ await page.mouse.up({button:'middle'});
+ expect(await scrollPositions()).toEqual(before);
+ expect(await page.evaluate(()=>{const event=new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:100});document.body.dispatchEvent(event);return event.defaultPrevented;})).toBe(false);
+}
 test('Website design imports, edits, persists and produces a quote specification',async({page})=>{
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  const state=fresh();state.depth=64;state.porches=[{id:'porch-site',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];
@@ -16,14 +29,14 @@ test('Website design imports, edits, persists and produces a quote specification
  await editor.locator('[data-action="rotate-left"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','30');
  await editor.locator('[data-action="reset-drawing"]').click();await expect(editor.locator('.bd-drawing')).toHaveAttribute('data-rotation','0');
  await editor.locator('[data-action="view"][data-value="frame"]').click();
- await page.getByRole('button',{name:'Customer preview',exact:true}).click();await expect(page.locator('.product-studio-stage canvas')).toBeVisible({timeout:20000});await expect(page.getByRole('button',{name:'Create customer preview',exact:true})).toBeVisible({timeout:20000});await page.getByRole('button',{name:'Create customer preview',exact:true}).click();
+ await page.getByRole('button',{name:'Customer preview',exact:true}).click();await expect(page.locator('.product-studio-stage canvas')).toBeVisible({timeout:20000});await checkViewerMouse(page,page.locator('.product-studio-stage canvas'));await expect(page.getByRole('button',{name:'Create customer preview',exact:true})).toBeVisible({timeout:20000});await page.getByRole('button',{name:'Create customer preview',exact:true}).click();
  const previewDialog=page.getByRole('dialog').last();await previewDialog.getByRole('button',{name:'Create preview',exact:true}).click();await expect(previewDialog.getByText(/is saved in Customer previews/)).toBeVisible({timeout:45000});
  const exported=app.sqlite.prepare("SELECT m.bytes FROM customer_preview_models m JOIN customer_previews p ON p.id=m.preview_id WHERE p.source_key LIKE 'quote-model:%' ORDER BY p.id DESC LIMIT 1").get().bytes;
  const gltf=JSON.parse(exported.subarray(20,20+exported.readUInt32LE(12)).toString());expect(gltf.nodes.some(n=>n.name==='CJM_Frame')).toBe(true);expect(gltf.nodes.some(n=>n.name==='CJM_Finished')).toBe(true);expect(exported.length).toBeLessThan(25*1024*1024);
  await previewDialog.getByRole('button',{name:'Close',exact:true}).click();
  await page.getByRole('button',{name:'Back to design & frame',exact:true}).click();
  await page.getByRole('button',{name:'Full screen',exact:true}).click();await expect(page.locator('.barndo-product')).toHaveJSProperty('clientWidth',await page.evaluate(()=>innerWidth));await page.getByRole('button',{name:'Exit full screen',exact:true}).click();
- const frame=editor.locator('.bd-frame3d');await expect(frame).toHaveAttribute('data-ready','true');await expect(frame).toHaveAttribute('data-dimensions','40x64x12');
+ const frame=editor.locator('.bd-frame3d');await expect(frame).toHaveAttribute('data-ready','true');await expect(frame).toHaveAttribute('data-dimensions','40x64x12');await checkViewerMouse(page,frame.locator('canvas'));
  await frame.locator('select[aria-label="Inspect frame"]').selectOption('cee');await expect(frame).toHaveAttribute('data-focus','cee');
  await frame.locator('select[aria-label="Inspect frame"]').selectOption('zee');await expect(frame).toHaveAttribute('data-focus','zee');
  await frame.locator('canvas').screenshot({path:'test-results/barndominium-bolted-zee.png'});
@@ -45,6 +58,7 @@ test('Website design imports, edits, persists and produces a quote specification
  await editor.locator('[data-action="mode"][data-value="frame"]').click();await expect(editor.locator('[data-action="mode"][data-value="frame"]')).toHaveAttribute('aria-pressed','true');
  await editor.locator('[data-action="view"][data-value="home"]').click();
  await expect(editor.locator('.bd-home3d canvas')).toBeVisible({timeout:20000});
+ await checkViewerMouse(page,editor.locator('.bd-home3d canvas'));
  await editor.locator('.bd-home3d canvas').screenshot({path:'test-results/barndominium-zee-frame.png'});
  await editor.locator('[data-action="mode"][data-value="shell"]').click();
  await expect(editor.locator('.bd-home3d canvas')).toHaveCount(1);

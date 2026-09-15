@@ -1,3 +1,4 @@
+import {containViewerMouse} from './viewer-mouse.js';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
@@ -31,7 +32,7 @@ export async function exportProduct(group,frame=null){
 export function disposeProduct(group){group?.traverse(o=>{o.geometry?.dispose();for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[])m.dispose();});}
 export function createProductStudio(host){
  const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;host.append(renderer.domElement);
- const scene=new THREE.Scene();scene.background=new THREE.Color('#f2f0e9');const camera=new THREE.PerspectiveCamera(38,1,.01,5000),controls=new OrbitControls(camera,renderer.domElement);controls.maxPolarAngle=Math.PI/2-.01;controls.enableDamping=false;
+ const scene=new THREE.Scene();scene.background=new THREE.Color('#f2f0e9');const camera=new THREE.PerspectiveCamera(38,1,.01,5000),controls=new OrbitControls(camera,renderer.domElement);const releaseMouse=containViewerMouse(renderer.domElement);controls.maxPolarAngle=Math.PI/2-.01;controls.enableDamping=false;controls.mouseButtons.MIDDLE=THREE.MOUSE.PAN;
  scene.add(new THREE.HemisphereLight(0xffffff,0x888888,2.4));const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(-10,20,15);light.castShadow=true;light.shadow.mapSize.set(2048,2048);light.shadow.normalBias=.03;light.shadow.bias=-.0005;scene.add(light,light.target);
  // Paint the decorative floor first without writing depth; shadows still test against the product.
  const floor=new THREE.Mesh(new THREE.PlaneGeometry(10000,10000),new THREE.ShadowMaterial({opacity:.22,depthWrite:false}));floor.rotation.x=-Math.PI/2;floor.position.y=-.015;floor.receiveShadow=true;scene.add(floor);const base=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({color:'#ded9cc',toneMapped:false,depthWrite:false}));base.renderOrder=-1;base.rotation.x=-Math.PI/2;base.position.y=-.016;scene.add(base);let product=null,key='';
@@ -42,5 +43,5 @@ export function createProductStudio(host){
   camera.near=Math.max(.01,radius*.01);camera.far=Math.max(100,radius*12);camera.updateProjectionMatrix();
   if(shape!==key){key=shape;controls.target.copy(center);const distance=Math.max(size.y,size.x/(camera.aspect||1),size.z)*1.8;camera.position.copy(center).add(new THREE.Vector3(.6,.4,1).normalize().multiplyScalar(Math.max(2,distance)));controls.minDistance=radius*.08;controls.maxDistance=radius*8;controls.update();}resize();
  }
- return {setProduct,exportModel:(frame=null)=>exportProduct(product,frame),destroy(){observer.disconnect();controls.dispose();disposeProduct(product);floor.geometry.dispose();floor.material.dispose();base.geometry.dispose();base.material.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
+ return {setProduct,exportModel:(frame=null)=>exportProduct(product,frame),destroy(){observer.disconnect();releaseMouse();controls.dispose();disposeProduct(product);floor.geometry.dispose();floor.material.dispose();base.geometry.dispose();base.material.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
 }

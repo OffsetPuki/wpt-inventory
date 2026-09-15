@@ -1,3 +1,4 @@
+import {containViewerMouse} from '../viewer-mouse.js';
 // Shared 3D "At your house" backyard for the customize tools (fence, gate,
 // railing, carport). Derived from the pergola page's inline scene — the
 // pergola page keeps its own bespoke copy because its yard resizes with the
@@ -228,6 +229,7 @@ export function createViewer(wrap) {
   camera.position.set(30, 20, 45);
 
   const controls = new OrbitControls(camera, renderer.domElement);
+  const releaseMouse = containViewerMouse(renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;
@@ -290,7 +292,7 @@ export function createViewer(wrap) {
   }
 
   return {
-    THREE, renderer, scene, camera, controls, frame,
+    THREE, renderer, scene, camera, controls, frame, releaseMouse,
     setActive(v) { active = v; if (v) { dirty = true; resize(); } },
   };
 }
