@@ -24,7 +24,7 @@ export function openingDetails(s,o){
  const x=o.x,w=o.width,bottom=o.sill,top=bottom+o.height,cap=top+Math.min(.125,o.width/4,o.height/4)+.02*k,side=.12*k;
  // Seat the drip on the visible casing, not at the top of the concealed structural header.
  // Upstand behind the panel, outward sloping cap, downturned drip and hem.
- fold([[.008,cap+.15*k],[.008,cap],[.30*k,cap-.025*k],[.30*k,cap-.10*k],[.27*k,cap-.11*k]],w+side*2,x-side,(out,y,u)=>[u,y,out],'Head flashing / drip edge');
+ fold([[-.025,cap+.15*k],[-.025,cap],[.30*k,cap-.025*k],[.30*k,cap-.10*k],[.27*k,cap-.11*k]],w+side*2,x-side,(out,y,u)=>[u,y,out],'Head flashing / drip edge');
  for(const [edge,sign] of [[x,-1],[x+w,1]])fold([[edge+sign*side,.008],[edge,.008],[edge,.26*k]],o.height,bottom,(u,out,y)=>[u,y,out],'Jamb cover trim');
  if(o.kind==='window'){
   // Pan drains outward; raised end dams close the sides below the window unit.

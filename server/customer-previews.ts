@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS customer_preview_models (
  label TEXT NOT NULL, position INTEGER NOT NULL, bytes BLOB NOT NULL, size INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS customer_preview_models_preview ON customer_preview_models(preview_id,position);`);
+const modelColumns=new Set((sqlite.pragma('table_info(customer_preview_models)') as {name:string}[]).map(c=>c.name));
+for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB']]){
+  if(!modelColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_models ADD COLUMN ${name} ${definition}`);
+}
 sqlite.exec(`CREATE TABLE IF NOT EXISTS customer_preview_feedback (
  id INTEGER PRIMARY KEY AUTOINCREMENT, preview_id INTEGER NOT NULL REFERENCES customer_previews(id),
  submission_id TEXT NOT NULL, option_label TEXT NOT NULL DEFAULT '', message TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -88,7 +92,7 @@ function getPreview(id: number): Preview | undefined {
   return sqlite.prepare('SELECT * FROM customer_previews WHERE id=?').get(id) as Preview | undefined;
 }
 function modelList(id: number) {
-  return sqlite.prepare('SELECT id,label,size FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number}[];
+  return sqlite.prepare('SELECT id,label,size,revision,previous_bytes IS NOT NULL AS canRestore FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number;revision:number;canRestore:number}[];
 }
 function view(p: Preview) {
   return { id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width, height:p.height,
@@ -261,6 +265,30 @@ export function registerCustomerPreviews(app: Express): void {
       catch(error){res.status(400).json({message:error instanceof Error?error.message:'Could not save model.'});return;}
       audit(req,'preview.model_added',{targetType:'customer_preview',targetId:p.id,targetName:label.data});res.status(201).json(view(getPreview(p.id)!));
     });
+  });
+  app.post('/api/customer-previews/:id/models/:modelId/replace',requireElevated,(req,res)=>{
+    upload(req,res,(err:any)=>{
+      if(err||!req.file||!/\.glb$/i.test(req.file.originalname)){res.status(400).json({message:'Choose a GLB model up to 25 MB.'});return;}
+      const p=record(req,res);if(!p||!current(req,res,p))return;
+      try{validatePreviewGlb(req.file.buffer);}catch(e){res.status(400).json({message:e instanceof Error?e.message:'Invalid model.'});return;}
+      const changed=sqlite.transaction(()=>{
+        const r=sqlite.prepare('UPDATE customer_preview_models SET previous_bytes=bytes,bytes=?,size=?,revision=revision+1 WHERE id=? AND preview_id=?').run(req.file!.buffer,req.file!.size,req.params.modelId,p.id);
+        if(r.changes)sqlite.prepare('UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?').run(Date.now(),p.id);
+        return r.changes;
+      })();
+      if(!changed){res.status(404).json({message:'Model not found.'});return;}
+      audit(req,'preview.model_replaced',{targetType:'customer_preview',targetId:p.id});res.json(view(getPreview(p.id)!));
+    });
+  });
+  app.post('/api/customer-previews/:id/models/:modelId/restore',requireElevated,(req,res)=>{
+    const p=record(req,res);if(!p||!current(req,res,p))return;
+    const changed=sqlite.transaction(()=>{
+      const r=sqlite.prepare('UPDATE customer_preview_models SET bytes=previous_bytes,previous_bytes=bytes,size=length(previous_bytes),revision=revision+1 WHERE id=? AND preview_id=? AND previous_bytes IS NOT NULL').run(req.params.modelId,p.id);
+      if(r.changes)sqlite.prepare('UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?').run(Date.now(),p.id);
+      return r.changes;
+    })();
+    if(!changed){res.status(404).json({message:'No previous model is available.'});return;}
+    audit(req,'preview.model_restored',{targetType:'customer_preview',targetId:p.id});res.json(view(getPreview(p.id)!));
   });
   app.delete('/api/customer-previews/:id/models/:modelId',requireElevated,(req,res) => {
     const p=record(req,res);if(!p||!current(req,res,p))return;

@@ -33,6 +33,18 @@ try{
   const rr=await fetch(base+publicPath+'/models/'+p.options[0].id,{headers:key});assert.equal(rr.status,200);assert.deepEqual(Buffer.from(await rr.arrayBuffer()),model);assert.match(rr.headers.get('cache-control'),/no-store/);
   assert.equal((await api(publicPath+'/models/'+'0'.repeat(32),'GET',undefined,undefined,key)).status,404);
   const second=(await api('/api/customer-previews','POST',{title:'Other synthetic'},owner)).data;
+  const updatedModel=fs.readFileSync(new URL('../server/preview-seeds/kalkat-7.glb',import.meta.url));
+  const replace=async(bytes,version=p.version,auth=owner,id=p.id)=>{const form=new FormData();form.append('model',new Blob([bytes]),'replacement.glb');form.append('version',String(version));const rr=await fetch(`${base}/api/customer-previews/${id}/models/${p.options[0].id}/replace`,{method:'POST',headers:{'X-Auth':auth},body:form});return {status:rr.status,data:await rr.json()};};
+  assert.equal((await replace(updatedModel,p.version,worker.data.token)).status,403);
+  assert.equal((await replace(updatedModel,p.version-1)).status,409);
+  assert.equal((await replace(updatedModel,second.version,owner,second.id)).status,404);
+  assert.equal((await replace(Buffer.from('bad'))).status,400);
+  const originalId=p.options[0].id,originalVersion=p.version;
+  r=await replace(updatedModel);assert.equal(r.status,200);p=r.data;
+  assert.equal(p.url.split('/').at(-1),token);assert.equal(p.options.length,1);assert.equal(p.options[0].id,originalId);assert.equal(p.options[0].revision,2);assert.equal(p.options[0].canRestore,1);assert.equal(p.version,originalVersion+1);
+  assert.deepEqual(Buffer.from(await(await fetch(base+publicPath+'/models/'+originalId,{headers:key})).arrayBuffer()),updatedModel);
+  r=await api(`/api/customer-previews/${p.id}/models/${originalId}/restore`,'POST',{version:p.version},owner);assert.equal(r.status,200);p=r.data;assert.equal(p.options[0].revision,3);
+  assert.deepEqual(Buffer.from(await(await fetch(base+publicPath+'/models/'+originalId,{headers:key})).arrayBuffer()),model);
   assert.equal((await api(`/api/customer-previews/${second.id}/models/${p.options[0].id}`,'DELETE',{version:second.version},owner)).status,404,'Cannot remove a model belonging to another preview');
   assert.equal((await api(`/api/customer-previews/${p.id}/models/${p.options[0].id}`,'DELETE',{version:p.version},owner)).status,400,'Published preview retains a model');
   const feedback={submissionId:crypto.randomUUID(),optionId:p.options[0].id,message:'Can we make the name larger?'};
