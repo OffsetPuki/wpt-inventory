@@ -5,6 +5,9 @@ import * as THREE from 'three';
 export function addFrameBracing(s,ctx){
  const {group,material,scale,W,D,H,zs,inset,axisY,rafterBottom,purlins,taperGradient,baseT}=ctx;
  const result={roof:0,wall:0,flange:0,restraint:0,blockedWalls:[]};
+ // NBG FBE formed-angle section; connection length still follows this model.
+ // https://www.nucorsteelstore.com/pd/Part%20PDF/NBG/FBE__.pdf
+ const flangeSection={width:2.5/12,t:.105/12};
  function member(a,b,kind,{radius=.022,width,depth=.014}={}){
   const start=new THREE.Vector3(...a),end=new THREE.Vector3(...b),delta=end.clone().sub(start),length=delta.length();
   if(length<.001)return;
@@ -42,9 +45,9 @@ export function addFrameBracing(s,ctx){
   geo.userData.part={name:name+' (illustrative)'};
   const mesh=new THREE.Mesh(geo,material);mesh.userData={memberKind:'bracing-hardware',connection:name,engineeringRequired:true,attachment:'bolted'};group.add(mesh);return mesh;
  }
- function bolt(point,normal,grip=.08){
+ function bolt(point,normal,grip=.08,length=grip+.1){
   const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),normal);
-  for(const [r,h,d,sides,name] of [[.021,grip+.1,-grip/2,10,'Brace bolt'],[.047,.012,.022,16,'Brace washer'],[.047,.012,-grip-.012,16,'Brace washer'],[.038,.035,.043,6,'Brace bolt head'],[.038,.035,-grip-.035,6,'Brace nut']]){
+  for(const [r,h,d,sides,name] of [[.5/24,length,.025-length/2,10,'Brace bolt'],[.047,.012,.022,16,'Brace washer'],[.047,.012,-grip-.012,16,'Brace washer'],[.038,.035,.043,6,'Brace bolt head'],[.038,.035,-grip-.035,6,'Brace nut']]){
    const geo=new THREE.CylinderGeometry(r,r,h,sides);geo.applyQuaternion(q);geo.translate(...point.clone().addScaledVector(normal,d).toArray());geo.userData.part={name:name+' (illustrative)'};
    const mesh=new THREE.Mesh(geo,material);mesh.userData={memberKind:'bracing-hardware',connection:name,engineeringRequired:true};group.add(mesh);
   }
@@ -52,8 +55,8 @@ export function addFrameBracing(s,ctx){
  function attachment(mesh,face){
   mesh.userData.contact=face.p.toArray();mesh.userData.normal=face.n.toArray();mesh.userData.support=face.mesh.uuid;
  }
- function angle(a,b,normal,kind){
-  const axis=b.clone().sub(a).normalize(),n=normal.clone().addScaledVector(axis,-normal.dot(axis)).normalize(),cross=axis.clone().cross(n).normalize(),length=a.distanceTo(b),mid=a.clone().add(b).multiplyScalar(.5),width=.125,t=.012;
+ function angle(a,b,normal,kind,{width=.125,t=.012}={}){
+  const axis=b.clone().sub(a).normalize(),n=normal.clone().addScaledVector(axis,-normal.dot(axis)).normalize(),cross=axis.clone().cross(n).normalize(),length=a.distanceTo(b),mid=a.clone().add(b).multiplyScalar(.5);
   const face=box(mid,axis,cross,[length,width,t],kind);
   box(mid.clone().addScaledVector(cross,(width-t)/2).addScaledVector(n,(width-t)/2),axis,cross,[length,t,width],kind+' return leg');
   face.userData={...face.userData,memberKind:'bracing',a:a.toArray().map(x=>x*scale),b:b.toArray().map(x=>x*scale),bolted:true};
@@ -61,10 +64,10 @@ export function addFrameBracing(s,ctx){
   return face;
  }
  function bentEnd(face,inner,normal,kind){
-  const t=.012,width=.125,along=inner.clone().sub(face.p).projectOnPlane(face.n).normalize(),cross=along.clone().cross(face.n).normalize();
+  const {t,width}=flangeSection,along=inner.clone().sub(face.p).projectOnPlane(face.n).normalize(),cross=along.clone().cross(face.n).normalize();
   const center=face.p.clone().addScaledVector(face.n,t/2);
   const end=box(center,along,cross,[.20,width,t],'Bolted brace end');attachment(end,face);
-  bolt(face.p.clone().addScaledVector(face.n,t),face.n,t+face.thickness);
+  bolt(face.p.clone().addScaledVector(face.n,t),face.n,t+face.thickness,2/12);
   // A formed end of the brace, not a separate projecting clip or swivel.
   const from=center.clone().addScaledVector(along,.10),axis=inner.clone().sub(from).normalize(),other=axis.clone().cross(normal).normalize();
   if(other.dot(cross)<0)other.negate();
@@ -78,7 +81,9 @@ export function addFrameBracing(s,ctx){
   const toward=b.p.clone().sub(a.p),along=toward.clone().projectOnPlane(a.n).normalize();
   const start=a.p.clone().addScaledVector(a.n,.08).addScaledVector(along,.30),end=b.p.clone().addScaledVector(b.n,.08).addScaledVector(toward.clone().negate().projectOnPlane(b.n).normalize(),.20);
   const axis=end.clone().sub(start).normalize(),normal=b.n.clone().projectOnPlane(axis).normalize();
-  angle(start,end,normal,kind);bentEnd(a,start,normal,kind);bentEnd(b,end,normal,kind);
+  const body=angle(start,end,normal,kind,flangeSection);
+  Object.assign(body.geometry.userData.part,{section:[2.5,2.5,.105,.105].map(n=>n*scale),gauge:12,thickness:.105*scale,catalogUrl:'https://www.nucorsteelstore.com/pd/Part%20PDF/NBG/FBE__.pdf'});
+  bentEnd(a,start,normal,kind);bentEnd(b,end,normal,kind);
   return true;
  }
  const clear=(wall,a,b)=>!s.openings.some(o=>o.wall===wall&&Math.max(a,o.x/scale-.65)<Math.min(b,(o.x+o.width)/scale+.65));
@@ -107,7 +112,10 @@ export function addFrameBracing(s,ctx){
  // Short angle braces connect rafter lower flanges to adjacent purlin webs.
  // Mirror along the roof and use the available side of each frame station.
  for(let j=0;j<zs.length;j++){
-  const z=zs[j],direction=j===zs.length-1?-1:1,reach=Math.min(3.4375,Math.abs(zs[j+direction]-z)/3);
+  const z=zs[j];
+  // Interior rafters brace into both adjacent bays; end rafters face inward.
+  for(const direction of [j>0?-1:null,j<zs.length-1?1:null].filter(d=>d!==null)){
+  const reach=Math.min(3.4375,Math.abs(zs[j+direction]-z)/3);
   for(const p of purlins){
    const slope=-p.side*s.pitch/12,cos=1/Math.hypot(1,slope),u=v([cos,slope*cos,0]).multiplyScalar(-p.side),web=v([p.x,p.y,z+direction*reach]).addScaledVector(u,-2.5/24);
    const x=web.x-u.x*.20;
@@ -115,6 +123,8 @@ export function addFrameBracing(s,ctx){
    const b=surface(web.toArray(),u.clone().negate().toArray(),steel.filter(o=>o.userData.memberKind==='cee'));
    if(boltedLink(a,b,'Rafter flange brace'))result.flange++;
   }
+  }
+  const direction=j===zs.length-1?-1:1,reach=Math.min(3.4375,Math.abs(zs[j+direction]-z)/3);
   for(const wall of ['left','right']){
    const side=wall==='left'?1:-1,x=wall==='left'?inset:W-inset;
    const u=wall==='right'?z:D-z,v=wall==='right'?z+direction*reach:D-z-direction*reach;
