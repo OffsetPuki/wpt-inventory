@@ -72,6 +72,7 @@ export default function useDraftSave(session, setSession, book, totals) {
     };
   }, []);
   return { status, error, localSaved,
+    current: () => latest.current.session,
     flush: async () => { await saver.current.flush(); return { id: latest.current.session?.quoteId, version: latest.current.session?.version }; }, retry: () => saver.current.retry(),
     archive: () => storage.current.archive(latest.current.session),
     reset: () => { saver.current.reset(); setError(null); setStatus('Saved'); },

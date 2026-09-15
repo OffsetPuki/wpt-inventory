@@ -37,7 +37,7 @@ import { fmtMoney } from "./lib/format.js";
 import {scopeIssues} from './lib/barndoQuote.js';
 import Home from "./components/Home.jsx";
 import Configurator from "./components/Configurator.jsx";
-import BarndominiumTemplates, {BarndominiumQuoteTools} from './components/BarndominiumTemplates.jsx';
+import {BarndominiumQuoteTools} from './components/BarndominiumTemplates.jsx';
 const QuoteForm = lazy(() => import("./components/QuoteForm.jsx"));
 const QuoteOptions = lazy(() => import('./components/QuoteOptions.jsx'));
 const PriceBookPanel = lazy(() => import("./components/PriceBookPanel.jsx"));
@@ -251,6 +251,8 @@ export default function QuoteBuilder({ initialSettings }) {
   const draft = useDraftSave(session, setSession, effectiveBook, totals);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [copyBusy, setCopyBusy] = useState(false);
+  const [saveBusy,setSaveBusy]=useState(false);
+  const pendingCopy=useRef(null);
   const flushQuote = () => draft.flush();
   const showSaveError = (error) => toast({ variant: "destructive", title: "Keep this draft open", description: error.status === 404 ? 'The saved quote is no longer available. Choose “Keep edits as new quote” to save your work.' : error.message });
   const recoverDraft = () => {
@@ -265,6 +267,16 @@ export default function QuoteBuilder({ initialSettings }) {
     catch (error) { showSaveError(error); }
     finally { setReviewBusy(false); }
   };
+  const saveQuote=async()=>{
+    setSaveBusy(true);
+    try{await flushQuote();toast({title:'Quote saved',description:`${draft.current()?.number} is available under Saved.`});}
+    catch(error){showSaveError(error);}finally{setSaveBusy(false);}
+  };
+  useEffect(()=>{
+    if(!session||pendingCopy.current!==session.sid)return;
+    pendingCopy.current=null;
+    flushQuote().then(()=>toast({title:'Quote duplicated',description:`${draft.current()?.number} is saved as a separate quote.`})).catch(showSaveError).finally(()=>setCopyBusy(false));
+  },[session?.sid]);
   const issued = (result) => {
     draft.clear();
     setSession(null);
@@ -495,7 +507,17 @@ export default function QuoteBuilder({ initialSettings }) {
   // Reopen a saved quote from the suite — edits keep saving to the same number.
   const openSaved = (sess) => replaceDraft(migrateSession(sess, priceBook), true);
   useRecordLink('quote','/api/quotes', row=>{const payload=JSON.parse(row.payload);openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status});});
-  const duplicateSaved = (sess) => replaceDraft(duplicateSession(migrateSession(sess, priceBook), newSid()));
+  const duplicateSaved=async(sess,fromCurrent=false)=>{
+    if(copyBusy)return;
+    setCopyBusy(true);
+    try{
+      if(session){try{await flushQuote();}catch(error){if(![404,409].includes(error.status))throw error;draft.archive();}}
+      const source=fromCurrent?draft.current():sess;
+      const copy=duplicateSession(migrateSession(source,priceBook),newSid());
+      copy.copiedFromNumber=source.number;
+      draft.reset();pendingCopy.current=copy.sid;setSession(copy);setView('configure');window.scrollTo({top:0});
+    }catch(error){showSaveError(error);setCopyBusy(false);}
+  };
   const alternativeRequest=useRef(null);
   const createAlternative=async()=>{
     setCopyBusy(true);
@@ -510,17 +532,7 @@ export default function QuoteBuilder({ initialSettings }) {
     }catch(error){showSaveError(error);}finally{setCopyBusy(false);}
   };
   const compareOptions=async()=>{try{await flushQuote();setView('options');}catch(error){showSaveError(error);}};
-  const duplicateCurrent = async () => {
-    setCopyBusy(true);
-    try {
-      const saved=await flushQuote();
-      const row=await (await apiRequest('GET',`/api/quotes/${saved.id}`)).json();
-      const copy=duplicateSession(migrateSession(JSON.parse(row.payload),priceBook),newSid());
-      copy.copiedFromNumber=row.number;
-      if (!await replaceDraft(copy)) return;
-      toast({title:'Separate quote copy created',description:`${row.number} is unchanged. Add the customer for this copy.`});
-    } catch(error){showSaveError(error);} finally {setCopyBusy(false);}
-  };
+  const duplicateCurrent = () => duplicateSaved(session,true);
   // ── Price book ──────────────────────────────────────────────────────────────
   // Editing a material's COST also stamps materials.<id>.updatedAt — that
   // feeds the staleness badges here and the hourly "review material prices"
@@ -575,7 +587,6 @@ export default function QuoteBuilder({ initialSettings }) {
             >
               Saved
             </button>
-            <button className={view==='templates'?'active':''} onClick={()=>setView('templates')}>Barndominium templates</button>
             <button
               className={view === "costing" ? "active" : ""}
               onClick={() => setView("costing")}
@@ -611,7 +622,6 @@ export default function QuoteBuilder({ initialSettings }) {
           />
         )}
         {activeView === "find" && <FindDesign onStartQuote={startFromLead} />}
-        {activeView === 'templates' && <BarndominiumTemplates onBack={goHome} onUse={state=>startConfig('barndominium',state)} />}
         {activeView === "saved" && (
           <SavedQuotes onOpen={openSaved} onDuplicate={duplicateSaved} />
         )}
@@ -619,7 +629,7 @@ export default function QuoteBuilder({ initialSettings }) {
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
         {activeView==='options'&&session?.quoteId&&<QuoteOptions quoteId={session.quoteId} onBack={()=>setView('configure')} onShared={()=>setSession(s=>({...s,quoteStatus:'sent'}))} onDone={issued} />}
-        {session?.type==='barndominium' && ['configure','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} onTemplates={()=>setView('templates')} busy={copyBusy} />}
+        {session?.type==='barndominium' && ['configure','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
         {activeView === "configure" && session && (
           <Configurator
             key={`configure-${session.sid}`}
@@ -718,7 +728,8 @@ export default function QuoteBuilder({ initialSettings }) {
               {draft.error && draft.status !== 'Offline' && <small>{draft.error.message}</small>}
               {['Not saved', 'Offline'].includes(draft.status) && draft.error?.status !== 404 && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
             </div>
-            {activeView === "configure" ? <button className="btn" disabled={reviewBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
+            {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}>{saveBusy?'Saving quote…':'Save Quote'}</button>}
+            {activeView === "configure" ? <button className="btn" disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
               : <div id="quote-send-actions" />}
           </div>
         )}

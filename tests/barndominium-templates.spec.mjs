@@ -20,27 +20,28 @@ test('Templates validate designs and store no quote or customer fields',async()=
  expect(original.state.openings[0].x).toBe(7);expect(original.overrides.items.cee.rate).toBe(8);expect(copied.quoteId).toBeNull();expect(copied.customer.name).toBe('');
 });
 
-test('Save a design template, duplicate independently and reuse on another device',async({page,browser})=>{
+test('Save Quote persists edits and Duplicate recovers a conflicting draft without changing its source',async({page})=>{
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);
- await page.goto(app.base+'/#/crm/quotes');await page.getByRole('button',{name:'Barndominium templates',exact:true}).click();
- await page.getByRole('button',{name:'Use 20 × 25 shell',exact:true}).click();
- const editor=page.locator('.barndo');await expect(editor.locator('[data-key="width"]')).toHaveValue('20');await expect(editor.locator('[data-key="depth"]')).toHaveValue('25');
- await editor.locator('[data-key="depth"]').fill('26');await editor.locator('[data-key="depth"]').press('Tab');
- await page.getByRole('button',{name:'Save as template',exact:true}).click();await page.getByLabel('Template name').fill('Shop 20 × 26');await page.getByRole('button',{name:'Save template',exact:true}).click();
- await expect(page.getByLabel('Template name')).toHaveCount(0);
- await page.getByRole('button',{name:'Duplicate quote',exact:true}).click();await expect(page.getByText(/Copy of Q/)).toBeVisible();
- await expect.poll(()=>app.sqlite.prepare("SELECT count(*) AS n FROM quotes WHERE type='barndominium'").get().n).toBe(2);
- const rows=app.sqlite.prepare("SELECT * FROM quotes WHERE type='barndominium' ORDER BY id").all(),original=rows[0],copy=rows[1];expect(copy.number).not.toBe(original.number);
- await editor.locator('[data-key="width"]').fill('22');await editor.locator('[data-key="width"]').press('Tab');
- await expect.poll(()=>JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(copy.id).payload).state.width).toBe(22);
- const unchanged=app.sqlite.prepare('SELECT * FROM quotes WHERE id=?').get(original.id);expect(unchanged.payload).toBe(original.payload);expect(unchanged.status).toBe(original.status);expect(unchanged.total_cents).toBe(original.total_cents);
- const context=await browser.newContext({viewport:{width:390,height:844}});try{
-  await context.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);const second=await context.newPage();await second.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
-  await second.goto(app.base+'/#/crm/quotes');await second.getByRole('button',{name:'Barndominium templates',exact:true}).click();await second.getByRole('button',{name:'Use Shop 20 × 26',exact:true}).click();
-  await expect(second.locator('.barndo [data-key="width"]')).toHaveValue('20');await expect(second.locator('.barndo [data-key="depth"]')).toHaveValue('26');
-  await expect.poll(()=>app.sqlite.prepare("SELECT count(*) AS n FROM quotes WHERE type='barndominium'").get().n).toBe(3);
-  const reused=JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes ORDER BY id DESC LIMIT 1').get().payload);expect(reused.customer.name).toBe('');expect(reused.overrides).toEqual({});
-  expect(await second.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
- }finally{await context.close();}
+ await page.goto(app.base+'/#/crm/quotes');
+ await expect(page.getByRole('button',{name:'Barndominium templates',exact:true})).toHaveCount(0);
+ await page.locator('.type-card').filter({has:page.getByRole('heading',{name:'Barndominium',exact:true})}).click();
+ await expect(page.getByRole('button',{name:'Save as template',exact:true})).toHaveCount(0);
+ const editor=page.locator('.barndo');
+ await editor.locator('[data-key="depth"]').fill('48');await editor.locator('[data-key="depth"]').press('Tab');
+ await page.getByRole('button',{name:'Save Quote',exact:true}).click();await expect(page.getByText('Quote saved',{exact:true})).toBeVisible();
+ const original=app.sqlite.prepare("SELECT * FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();expect(JSON.parse(original.payload).state.depth).toBe(48);
+ await page.route(`**/api/quotes/${original.id}`,r=>r.request().method()==='PATCH'?r.fulfill({status:409,json:{message:'Changed on another device'}}):r.continue());
+ await editor.locator('[data-key="depth"]').fill('52');await editor.locator('[data-key="depth"]').press('Tab');
+ await page.getByRole('button',{name:'Save Quote',exact:true}).click();await expect(page.getByText('This quote has changed elsewhere',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Duplicate quote',exact:true}).click();await expect(page.getByText('Quote duplicated',{exact:true})).toBeVisible();
+ const copy=app.sqlite.prepare("SELECT * FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();expect(copy.id).not.toBe(original.id);expect(copy.number).not.toBe(original.number);expect(JSON.parse(copy.payload).state.depth).toBe(52);
+ expect(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(original.id).payload).toBe(original.payload);
+ await page.getByRole('button',{name:'Saved',exact:true}).click();
+ const row=page.locator('.saved-quotes .line-row').filter({hasText:original.number});
+ const duplicate=page.getByRole('button',{name:'Duplicate',exact:true});
+ await duplicate.last().click();await expect(page.locator('.barndo')).toBeVisible();
+ await expect.poll(()=>app.sqlite.prepare("SELECT count(*) n FROM quotes WHERE type='barndominium'").get().n).toBe(3);
+ await expect(page.getByRole('button',{name:'Save Quote',exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
 });

@@ -163,7 +163,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
       // A copy deliberately gets NEITHER id nor number — duplicateSession drops
       // them anyway, but not handing them over makes that impossible to undo by
       // accident later.
-      if (duplicate) onDuplicate(payload);
+      if (duplicate) onDuplicate({...payload,number:row.number});
       else onOpen({ ...payload, quoteId: row.id, number: row.number, version: row.version, leadId: row.leadId, quoteStatus: row.status });
     },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not open quote', description: e?.message }),
