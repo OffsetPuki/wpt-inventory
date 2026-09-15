@@ -29,7 +29,7 @@ export function addFrameBracing(s,ctx){
  // purlin restraint use bolted attachment faces, not floating line ends.
  // Bent angle ends bear directly on steel. Dimensions/locations remain illustrative.
  group.updateMatrixWorld(true);
- const steel=group.children.filter(o=>o.isMesh&&['column','rafter','cee','zee','girt-web'].includes(o.userData.memberKind));
+ const steel=group.children.filter(o=>o.isMesh&&(['column','rafter','cee','zee','girt-web'].includes(o.userData.memberKind)||o.userData.connection==='endwall-column'));
  const v=a=>new THREE.Vector3(...a);
  function surface(point,normal,targets,range=1){
   const n=v(normal).normalize(),p=v(point),ray=new THREE.Raycaster(p.clone().addScaledVector(n,range),n.clone().negate(),0,range*2);
@@ -84,9 +84,12 @@ export function addFrameBracing(s,ctx){
   const body=angle(start,end,normal,kind,flangeSection);
   Object.assign(body.geometry.userData.part,{section:[2.5,2.5,.105,.105].map(n=>n*scale),gauge:12,thickness:.105*scale,catalogUrl:'https://www.nucorsteelstore.com/pd/Part%20PDF/NBG/FBE__.pdf'});
   bentEnd(a,start,normal,kind);bentEnd(b,end,normal,kind);
-  return true;
+  return body;
  }
  const clear=(wall,a,b)=>!s.openings.some(o=>o.wall===wall&&Math.max(a,o.x/scale-.65)<Math.min(b,(o.x+o.width)/scale+.65));
+ const clearFlange=(wall,a,b,y)=>!s.openings.some(o=>o.wall===wall&&Math.max(Math.min(a,b),o.x/scale-.4)<Math.min(Math.max(a,b),(o.x+o.width)/scale+.4)&&y+.35>(o.sill||0)/scale&&y-.35<((o.sill||0)+o.height)/scale);
+ const girts=wall=>steel.filter(o=>o.userData.wall===wall&&['zee','girt-web'].includes(o.userData.memberKind));
+ const girtRows=wall=>[...new Set(girts(wall).map(o=>o.userData.girt?.y??o.userData.row).filter(Number.isFinite))].map(y=>y/scale);
  const bays=zs.slice(1).map((b,i)=>({i,a:zs[i],b}));
  const available=wall=>bays.filter(({a,b})=>clear(wall,wall==='right'?a:D-b,wall==='right'?b:D-a));
  const right=available('right'),left=available('left'),shared=right.find(b=>left.some(l=>l.i===b.i));
@@ -124,18 +127,43 @@ export function addFrameBracing(s,ctx){
    if(boltedLink(a,b,'Rafter flange brace'))result.flange++;
   }
   }
-  const direction=j===zs.length-1?-1:1,reach=Math.min(3.4375,Math.abs(zs[j+direction]-z)/3);
+  for(const direction of [j>0?-1:null,j<zs.length-1?1:null].filter(d=>d!==null)){
+  const reach=Math.min(2.4375,Math.abs(zs[j+direction]-z)/3);
   for(const wall of ['left','right']){
    const side=wall==='left'?1:-1,x=wall==='left'?inset:W-inset;
    const u=wall==='right'?z:D-z,v=wall==='right'?z+direction*reach:D-z-direction*reach;
-   if(!clear(wall,Math.min(u,v),Math.max(u,v)))continue;
-   const rows=[...new Set(group.children.filter(o=>o.userData.wall===wall&&o.userData.memberKind==='zee').map(o=>o.userData.girt?.y??o.userData.row).filter(Number.isFinite))];
-   for(const row of rows){
-    const y=row/scale;if(y<1.2||y>axisY(inset)-.5)continue;
+   for(const y of girtRows(wall)){
+    if(y<1.2||y>axisY(inset)-.5||!clearFlange(wall,u,v,y))continue;
     const inner=x+side*(9.73/24+taperGradient*(y-baseT));
     const a=surface([inner-side*.035,y,z+direction*.20],[-side,0,0],steel.filter(o=>o.userData.connection==='primary-column'),.15);
     const b=surface([wall==='left'?0:W,y-.18,z+direction*reach],[side,0,0],steel.filter(o=>o.userData.wall===wall&&['zee','girt-web'].includes(o.userData.memberKind)));
-    if(boltedLink(a,b,'Column flange brace'))result.flange++;
+    const brace=boltedLink(a,b,'Column flange brace');if(brace){Object.assign(brace.userData,{wall,station:z*scale,direction});result.flange++;}
+   }
+  }
+  }
+ }
+ // Endwall girt-to-column flange braces, following the AG0030/C12 arrangement.
+ // Use the existing column faces; never draw a brace through an opening.
+ for(const wall of ['front','back']){
+  const front=wall==='front',z=front?zs[0]:zs.at(-1),towardWall=front?-1:1;
+  const columns=steel.filter(o=>o.userData.connection==='endwall-column'&&o.userData.wall===wall);
+  const corners=steel.filter(o=>o.userData.connection==='primary-column');
+  for(const column of [...columns,...corners]){
+   column.geometry.computeBoundingBox();const bounds=column.geometry.boundingBox;
+   if(Math.abs((bounds.min.z+bounds.max.z)/2-z)>.1)continue;
+   const x=(bounds.min.x+bounds.max.x)/2;
+   for(const direction of [-1,1])for(const y of girtRows(wall)){
+    const targetX=x+direction*2.4375;
+    if(targetX<inset||targetX>W-inset||y<1.2||y>bounds.max.y-.5||y>Math.min(rafterBottom(x),rafterBottom(targetX))-.35)continue;
+    const u=front?x:W-x,targetU=front?targetX:W-targetX;
+    if(!clearFlange(wall,u,targetU,y))continue;
+    const primary=column.userData.connection==='primary-column';
+    const columnX=primary?(x<W/2?inset:W-inset):x;
+    const faceX=columnX+direction*(9.73/24+(primary&&direction===(x<W/2?1:-1)?taperGradient*(y-baseT):0));
+    const a=surface([faceX,y,z-towardWall*.20],[direction,0,0],[column],.15);
+    const b=surface([targetX,y-.18,front?0:D],[0,0,-towardWall],girts(wall));
+    const brace=boltedLink(a,b,'Endwall column flange brace');
+    if(brace){Object.assign(brace.userData,{wall,station:columnX*scale,direction});result.flange++;}
    }
   }
  }
