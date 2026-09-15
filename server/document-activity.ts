@@ -1,3 +1,4 @@
+import {visitorContext} from './visitor-context';
 import crypto from 'node:crypto';
 import type {Express} from 'express';
 import {z} from 'zod';
@@ -26,7 +27,7 @@ export function documentActivityRevision(kind:Kind,row:any):string {
 function document(kind:Kind,by:'id'|'share_token',value:string|number){
   return sqlite.prepare(`SELECT * FROM ${kind==='quote'?'quotes':'fin_invoices'} WHERE ${by}=? AND deleted_at IS NULL`).get(value) as any;
 }
-function save(kind:Kind,row:any,body:unknown,ua:string){
+function save(kind:Kind,row:any,body:unknown,context:Awaited<ReturnType<typeof visitorContext>>){
   const parsed=input.safeParse(body);if(!parsed.success)return 400;
   const data=parsed.data,now=Date.now();
   return sqlite.transaction(()=>{
@@ -37,10 +38,9 @@ function save(kind:Kind,row:any,body:unknown,ua:string){
     if(!old&&documentActivityRevision(kind,row)!==data.revision)return 409;
     if(!old&&(sqlite.prepare('SELECT count(*) n FROM customer_document_visits WHERE kind=? AND document_id=? AND started_at>?').get(kind,row.id,now-86400000) as any).n>=2000)return 429;
     const previous=old?JSON.parse(old.snapshot):null;
-    const snapshot={scrollPct:Math.max(data.scrollPct,previous?.scrollPct||0),loadMs:Math.max(data.loadMs,previous?.loadMs||0),assetErrors:Math.max(data.assetErrors,previous?.assetErrors||0),actionErrors:Math.max(data.actionErrors,previous?.actionErrors||0),actions:Object.fromEntries(fields.map(k=>[k,Math.max(data.actions[k],previous?.actions[k]||0)]))};
+    const snapshot={deviceName:previous?.deviceName||context.deviceName,os:previous?.os||context.os,location:previous?previous.location??null:context.location,scrollPct:Math.max(data.scrollPct,previous?.scrollPct||0),loadMs:Math.max(data.loadMs,previous?.loadMs||0),assetErrors:Math.max(data.assetErrors,previous?.assetErrors||0),actionErrors:Math.max(data.actionErrors,previous?.actionErrors||0),actions:Object.fromEntries(fields.map(k=>[k,Math.max(data.actions[k],previous?.actions[k]||0)]))};
     const activeMs=Math.max(old?.active_ms||0,Math.min(data.activeMs,28800000,now-(old?.started_at||now)+60000));
-    const device=old?.device||(/ipad|tablet|android(?!.*mobile)/i.test(ua)?'Tablet':/mobile|iphone|ipod/i.test(ua)?'Phone':'Computer');
-    const browser=old?.browser||(/edg(?:a|ios)?\//i.test(ua)?'Edge':/firefox|fxios/i.test(ua)?'Firefox':/chrome|crios/i.test(ua)?'Chrome':/safari/i.test(ua)?'Safari':'Other');
+    const device=old?.device||context.device,browser=old?.browser||context.browser;
     sqlite.prepare(`INSERT INTO customer_document_visits(kind,document_id,visit_id,revision,started_at,last_at,seq,active_ms,device,browser,snapshot) VALUES(?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(kind,document_id,visit_id) DO UPDATE SET last_at=excluded.last_at,seq=excluded.seq,active_ms=excluded.active_ms,snapshot=excluded.snapshot`)
       .run(kind,row.id,data.visitId,data.revision,old?.started_at||now,now,data.seq,activeMs,device,browser,JSON.stringify(snapshot));
@@ -53,18 +53,18 @@ function report(kind:Kind,row:any){
     coalesce(sum(json_extract(snapshot,'$.actionErrors')),0) actionErrors,coalesce(max(json_extract(snapshot,'$.scrollPct')),0) scrollPct
     FROM customer_document_visits WHERE kind=? AND document_id=?`).get(kind,row.id);
   const actions=sqlite.prepare(`SELECT a.key name,sum(a.value) count FROM customer_document_visits v,json_each(v.snapshot,'$.actions') a WHERE v.kind=? AND v.document_id=? GROUP BY a.key`).all(kind,row.id);
-  const devices=sqlite.prepare('SELECT device,browser,count(*) visits FROM customer_document_visits WHERE kind=? AND document_id=? GROUP BY device,browser ORDER BY visits DESC').all(kind,row.id);
+  const devices=sqlite.prepare(`SELECT device,browser,coalesce(json_extract(snapshot,'$.deviceName'),device) deviceName,count(*) visits FROM customer_document_visits WHERE kind=? AND document_id=? GROUP BY device,browser,deviceName ORDER BY visits DESC`).all(kind,row.id);
   const visits=sqlite.prepare('SELECT visit_id id,revision,started_at startedAt,last_at lastAt,active_ms activeMs,device,browser,snapshot FROM customer_document_visits WHERE kind=? AND document_id=? ORDER BY started_at DESC LIMIT 100').all(kind,row.id).map((r:any)=>{const {snapshot,...rest}=r;return {...rest,...JSON.parse(snapshot)};});
   const confirmed=kind==='quote'?{status:row.status,sentAt:row.sent_at,acceptedAt:row.accepted_at,declinedAt:row.declined_at,acceptNote:row.accept_note,declineNote:row.decline_note,declineReason:row.decline_reason,legacyOpens:row.view_count||0}:{status:row.status,sentAt:row.sent_at,paidCents:row.paid_cents,payments:sqlite.prepare('SELECT id,amount_cents amountCents,method,paid_at paidAt,created_at createdAt FROM fin_invoice_payments WHERE invoice_id=? ORDER BY created_at DESC LIMIT 50').all(row.id)};
   return {kind,number:row.number,revision:documentActivityRevision(kind,row),summary,actions,devices,visits,confirmed};
 }
 export function registerDocumentActivity(app:Express){
-  app.post('/api/public/document-activity/:kind/:token',(req,res)=>{
+  app.post('/api/public/document-activity/:kind/:token',async(req,res)=>{
     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Robots-Tag','noindex, nofollow');
     if(!kinds.includes(String(req.params.kind))||!hasLeadKey(req)||!/^[a-f0-9]{48}$/i.test(String(req.params.token)))return res.status(404).json({ok:false});
     const kind=req.params.kind as Kind,row=document(kind,'share_token',String(req.params.token));
     if(!row||row.status==='draft')return res.status(404).json({ok:false});
-    const status=save(kind,row,req.body,String(req.headers['x-document-user-agent']||'').slice(0,500));
+    const status=save(kind,row,req.body,await visitorContext(String(req.headers['x-document-user-agent']||''),String(req.headers['x-activity-client-ip']||'')));
     res.status(status).json({ok:status<300});
   });
   app.get('/api/document-activity/:kind/:id',(req,res,next)=>{

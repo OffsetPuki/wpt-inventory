@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {deviceDetails,visitorContext} from '../server/visitor-context.ts';
+assert.equal(deviceDetails('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile Safari/604.1').deviceName,'iPhone');
+assert.equal(deviceDetails('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36').deviceName,'Android device');
+assert.equal(deviceDetails('Mozilla/5.0 (Linux; Android 13; SM-S918B Build/TP1A) Mobile SamsungBrowser/20.0').browser,'Samsung Internet');
+assert.equal(deviceDetails('Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Edg/140.0').deviceName,'Windows computer');
+assert.equal(deviceDetails('Mozilla/5.0 (iPad) Safari/604.1').device,'Tablet');
+assert.equal(deviceDetails('').device,'Unknown');
+for(const ip of ['', '127.0.0.1', '192.168.1.1', 'not an IP', '1.1.1.1, 8.8.8.8'])assert.equal((await visitorContext('iPhone',ip)).location,null);
+const result=await visitorContext('iPhone','8.8.8.8');assert.equal(result.location?.country,'US');assert.equal('ip' in result,false);assert.equal('latitude' in result.location,false);
+console.log('Device detection and local location lookup passed.');

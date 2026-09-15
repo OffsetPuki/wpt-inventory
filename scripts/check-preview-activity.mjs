@@ -7,7 +7,7 @@ try{
   let p=(await api('/api/customer-previews','GET',undefined,owner)).data.find(p=>p.published);
   assert.ok(p);
   const path=`/api/public/customer-previews/${p.url.split('/').at(-1)}/activity`,report=`/api/customer-previews/${p.id}/activity`;
-  const key={'X-Lead-Key':'test-intake-key','X-Preview-User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Mobile Safari/604.1'};
+  const key={'X-Activity-Client-IP':'8.8.8.8','X-Lead-Key':'test-intake-key','X-Preview-User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Mobile Safari/604.1'};
   const variant=(id)=>({id,views:1,activeMs:3000,loads:1,loadMs:240,errors:0,gateOpens:1,gateCloses:1,drags:2,zooms:3});
   const body={visitId:crypto.randomUUID(),version:p.version,seq:1,activeMs:4000,variants:[variant(p.options[0].id)],links:{main:1,concrete:0,insulation:1,phone:1,email:0},webglFailed:0,contextLost:1};
   assert.equal((await api(report)).status,401);
@@ -25,7 +25,7 @@ try{
   let data=(await api(report,'GET',undefined,owner)).data;
   assert.equal(data.summary.visits,1);assert.equal(data.summary.activeMs,4000);
   assert.equal(data.variants.find(v=>v.id===p.options[0].id).gateOpens,1);
-  assert.equal(data.visits[0].device,'Phone');assert.equal(data.visits[0].browser,'Safari');
+  assert.equal(data.visits[0].device,'Phone');assert.equal(data.visits[0].browser,'Safari');assert.equal(data.visits[0].deviceName,'iPhone');assert.equal(data.visits[0].location.country,'US');assert.ok(!JSON.stringify(data).includes('8.8.8.8'));
   assert.equal(data.summary.contextLost,1);assert.equal(data.links.find(l=>l.name==='main').clicks,1);
   const next={...body,seq:3,activeMs:9000,variants:[{...body.variants[0],activeMs:5000,gateOpens:2},{...variant(p.options[1].id),activeMs:3000}]};
   assert.equal((await api(path,'POST',next,undefined,key)).status,200);

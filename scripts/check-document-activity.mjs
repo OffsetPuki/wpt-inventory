@@ -22,7 +22,7 @@ try{
   assert.equal((await api(path,'POST',{...b,seq:2},undefined,key)).status,200);
   assert.equal((await api(path,'POST',{...b,seq:4},undefined,key)).status,200);
   let r=(await api(report,'GET',undefined,owner)).data;
-  assert.equal(r.summary.visits,1);assert.equal(r.summary.activeMs,20000);assert.equal(r.summary.scrollPct,90);assert.equal(r.actions.find(x=>x.name==='print').count,3);assert.equal(r.visits[0].device,'Phone');assert.equal(r.visits[0].browser,'Safari');
+  assert.equal(r.summary.visits,1);assert.equal(r.summary.activeMs,20000);assert.equal(r.summary.scrollPct,90);assert.equal(r.actions.find(x=>x.name==='print').count,3);assert.equal(r.visits[0].device,'Phone');assert.equal(r.visits[0].browser,'Safari');assert.equal(r.visits[0].deviceName,'iPhone');assert.equal(r.visits[0].os,'iOS');assert.equal(r.visits[0].location.country,'US');assert.ok(!JSON.stringify(r).includes('8.8.8.8'));
   assert.equal(r.confirmed.status,'sent','Clicks cannot accept a quote or pay an invoice');
   if(d.kind==='quote'){assert.equal(r.confirmed.acceptedAt,null);assert.equal(r.confirmed.legacyOpens,7);sqlite.prepare('UPDATE quotes SET version=version+1 WHERE id=?').run(d.id);}
   else {assert.equal(r.confirmed.paidCents,0);assert.deepEqual(r.confirmed.payments,[]);sqlite.prepare("UPDATE fin_invoices SET customer_note='Revised content' WHERE id=?").run(d.id);}

@@ -1,3 +1,4 @@
+import {visitorContext} from './visitor-context';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -194,9 +195,9 @@ export function registerCustomerPreviews(app: Express): void {
   };
   app.post('/api/public/customer-previews/:token/feedback',(req,res)=>receiveResponse(req,res,'feedback'));
   app.post('/api/public/customer-previews/:token/accept',(req,res)=>receiveResponse(req,res,'approval'));
-  app.post('/api/public/customer-previews/:token/activity',(req,res)=>{
+  app.post('/api/public/customer-previews/:token/activity',async(req,res)=>{
     const p=readShared(req,res);if(!p)return;
-    const status=savePreviewActivity(p,req.body,String(req.headers['x-preview-user-agent']||'').slice(0,500));
+    const status=savePreviewActivity(p,req.body,String(req.headers['x-preview-user-agent']||'').slice(0,500),await visitorContext(String(req.headers['x-preview-user-agent']||''),String(req.headers['x-activity-client-ip']||'')));
     res.status(status).json({ok:status<300});
   });
   app.get('/api/customer-previews/:id/activity',requireElevated,(req,res)=>{

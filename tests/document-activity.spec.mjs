@@ -24,6 +24,8 @@ test('Quote and invoice reports show customer activity without changing their st
  await expect(dialog.getByText('No payments recorded.')).toBeVisible();
  await dialog.locator('summary').click();
  await expect(dialog.getByText('Read: 90%')).toBeVisible();
+ await expect(dialog.getByText('Device: iPhone · iOS')).toBeVisible();
+ await expect(dialog.getByText(/^Approximate location:/)).toContainText('US');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
  await page.screenshot({path:'test-results/document-activity.png',fullPage:true});
  await page.keyboard.press('Escape');

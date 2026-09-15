@@ -1,3 +1,4 @@
+import {visitorContext,deviceDetails} from './visitor-context';
 import { z } from 'zod';
 import { sqlite } from './storage';
 
@@ -17,12 +18,7 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS customer_preview_visits (
 );
 CREATE INDEX IF NOT EXISTS customer_preview_visits_recent ON customer_preview_visits(preview_id,started_at DESC);`);
 
-function deviceInfo(ua:string) {
-  return {device:/ipad|tablet|android(?!.*mobile)/i.test(ua)?'Tablet':/mobile|iphone|ipod/i.test(ua)?'Phone':'Computer',
-    browser:/edg\//i.test(ua)?'Edge':/firefox|fxios/i.test(ua)?'Firefox':/chrome|crios/i.test(ua)?'Chrome':/safari/i.test(ua)?'Safari':'Other'};
-}
-
-export function savePreviewActivity(preview:{id:number;version:number},body:unknown,ua:string) {
+export function savePreviewActivity(preview:{id:number;version:number},body:unknown,ua:string,context?:Awaited<ReturnType<typeof visitorContext>>) {
   const parsed=payload.safeParse(body);
   if(!parsed.success)return 400;
   const data=parsed.data,now=Date.now();
@@ -51,8 +47,8 @@ export function savePreviewActivity(preview:{id:number;version:number},body:unkn
     const scale=extra?Math.min(1,Math.max(0,activeMs-oldVariantTime)/extra):1;
     variants.forEach((v:any,i:number)=>{const prior=options[i].activeMs||0;v.activeMs=prior+Math.floor((v.activeMs-prior)*scale);});
     const links=Object.fromEntries(Object.entries(data.links).map(([key,value])=>[key,Math.max(value,previous?.links[key]||0)]));
-    const snapshot={variants,links,webglFailed:Math.max(data.webglFailed,previous?.webglFailed||0),contextLost:Math.max(data.contextLost,previous?.contextLost||0)};
-    const device=old||deviceInfo(ua);
+    const snapshot={deviceName:previous?.deviceName||context?.deviceName||deviceDetails(ua).deviceName,os:previous?.os||context?.os||deviceDetails(ua).os,location:previous?previous.location??null:context?.location??null,variants,links,webglFailed:Math.max(data.webglFailed,previous?.webglFailed||0),contextLost:Math.max(data.contextLost,previous?.contextLost||0)};
+    const device=old||deviceDetails(ua);
     sqlite.prepare(`INSERT INTO customer_preview_visits(preview_id,visit_id,version,started_at,last_at,seq,active_ms,device,browser,snapshot)
       VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(preview_id,visit_id) DO UPDATE SET last_at=excluded.last_at,seq=excluded.seq,active_ms=excluded.active_ms,snapshot=excluded.snapshot`)
       .run(preview.id,data.visitId,data.version,old?.started_at||now,now,data.seq,activeMs,device.device,device.browser,JSON.stringify(snapshot));
@@ -71,7 +67,7 @@ export function previewActivity(id:number) {
     sum(json_extract(v.value,'$.drags')) drags,sum(json_extract(v.value,'$.zooms')) zooms
     FROM customer_preview_visits p,json_each(p.snapshot,'$.variants') v WHERE p.preview_id=? GROUP BY p.version,id,label ORDER BY p.version DESC,activeMs DESC`).all(id);
   const links=sqlite.prepare(`SELECT l.key name,sum(l.value) clicks FROM customer_preview_visits p,json_each(p.snapshot,'$.links') l WHERE p.preview_id=? GROUP BY l.key`).all(id);
-  const devices=sqlite.prepare('SELECT device,browser,count(*) visits FROM customer_preview_visits WHERE preview_id=? GROUP BY device,browser ORDER BY visits DESC').all(id);
+  const devices=sqlite.prepare(`SELECT device,browser,coalesce(json_extract(snapshot,'$.deviceName'),device) deviceName,count(*) visits FROM customer_preview_visits WHERE preview_id=? GROUP BY device,browser,deviceName ORDER BY visits DESC`).all(id);
   const visits=sqlite.prepare('SELECT visit_id id,version,started_at startedAt,last_at lastAt,active_ms activeMs,device,browser,snapshot FROM customer_preview_visits WHERE preview_id=? ORDER BY started_at DESC LIMIT 100').all(id).map((r:any)=>{const {snapshot,...rest}=r;return {...rest,...JSON.parse(snapshot)};});
   const responses=sqlite.prepare("SELECT count(*) total,sum(CASE WHEN kind='approval' THEN 1 ELSE 0 END) acceptances FROM customer_preview_feedback WHERE preview_id=?").get(id) as any;
   return {summary:{...summary,feedback:responses.total-(responses.acceptances||0),acceptances:responses.acceptances||0},variants,links,devices,visits};
