@@ -941,3 +941,5 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 
 .qa .preview:fullscreen .product-studio-stage,.qa .barndo-product:fullscreen .product-studio-stage{height:80vh!important}
 .qa .website-product-preview iframe{background:#f2f0e9}
+
+.qa .product-preview-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}

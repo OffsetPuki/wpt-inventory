@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS customer_preview_models (
  label TEXT NOT NULL, position INTEGER NOT NULL, bytes BLOB NOT NULL, size INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS customer_preview_models_preview ON customer_preview_models(preview_id,position);`);
+if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='deleted_at')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN deleted_at INTEGER');
 const modelColumns=new Set((sqlite.pragma('table_info(customer_preview_models)') as {name:string}[]).map(c=>c.name));
 for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB']]){
   if(!modelColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_models ADD COLUMN ${name} ${definition}`);
@@ -89,7 +90,7 @@ export function validatePreviewGlb(bytes: Buffer): void {
 }
 
 function getPreview(id: number): Preview | undefined {
-  return sqlite.prepare('SELECT * FROM customer_previews WHERE id=?').get(id) as Preview | undefined;
+  return sqlite.prepare('SELECT * FROM customer_previews WHERE id=? AND deleted_at IS NULL').get(id) as Preview | undefined;
 }
 function modelList(id: number) {
   return sqlite.prepare('SELECT id,label,size,revision,previous_bytes IS NOT NULL AS canRestore FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number;revision:number;canRestore:number}[];
@@ -157,7 +158,7 @@ export function registerCustomerPreviews(app: Express): void {
   const readShared = (req: Request, res: Response) => {
     res.setHeader('Cache-Control','private, no-store'); res.setHeader('X-Robots-Tag','noindex, nofollow');
     if (!hasLeadKey(req) || !tokenPattern.test(String(req.params.token))) {res.status(404).end();return;}
-    const p=sqlite.prepare('SELECT * FROM customer_previews WHERE token=? AND published=1').get(req.params.token) as Preview|undefined;
+    const p=sqlite.prepare('SELECT * FROM customer_previews WHERE token=? AND published=1 AND deleted_at IS NULL').get(req.params.token) as Preview|undefined;
     if (!p) {res.status(404).end();return;} return p;
   };
   app.get('/api/public/customer-previews/:token',(req,res) => {
@@ -211,7 +212,7 @@ export function registerCustomerPreviews(app: Express): void {
   });
   app.get('/api/customer-previews/notifications',requireElevated,(_req,res)=>res.json(ownerMailStatus()));
   app.get('/api/customer-previews',requireElevated,(_req,res) => {
-    const ps=sqlite.prepare('SELECT * FROM customer_previews ORDER BY updated_at DESC,id DESC').all() as Preview[];
+    const ps=sqlite.prepare('SELECT * FROM customer_previews WHERE deleted_at IS NULL ORDER BY updated_at DESC,id DESC').all() as Preview[];
     res.json(ps.map(view));
   });
   app.post('/api/customer-previews',requireElevated,(req,res) => {
@@ -229,7 +230,7 @@ export function registerCustomerPreviews(app: Express): void {
       if(!parsed.success||!key.success){res.status(400).json({message:'Enter a preview title.'});return;}
       const source='quote-model:'+key.data;
       const existing=sqlite.prepare('SELECT * FROM customer_previews WHERE source_key=?').get(source) as Preview|undefined;
-      if(existing){res.json(view(existing));return;}
+      if(existing){if((existing as any).deleted_at){res.status(410).json({message:'This preview was deleted. Create a new preview.'});return;}res.json(view(existing));return;}
       try{
         validatePreviewGlb(req.file.buffer);const p=parsed.data,now=Date.now();
         const id=sqlite.transaction(()=>{
@@ -239,6 +240,11 @@ export function registerCustomerPreviews(app: Express): void {
         audit(req,'preview.created_from_quote_model',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
       }catch(e){res.status(400).json({message:e instanceof Error?e.message:'Could not create the preview.'});}
     });
+  });
+  app.delete('/api/customer-previews/:id',requireElevated,(req,res)=>{
+    const p=record(req,res);if(!p||!current(req,res,p))return;
+    sqlite.prepare('UPDATE customer_previews SET deleted_at=?,published=0,version=version+1,updated_at=? WHERE id=?').run(Date.now(),Date.now(),p.id);
+    audit(req,'preview.deleted',{targetType:'customer_preview',targetId:p.id,targetName:p.title});res.status(204).end();
   });
   app.patch('/api/customer-previews/:id',requireElevated,(req,res) => {
     const p=record(req,res);if(!p||!current(req,res,p))return;

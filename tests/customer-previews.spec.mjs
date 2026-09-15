@@ -86,3 +86,28 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   await page.screenshot({path:'test-results/customer-previews-suite.png',fullPage:true});
   expect(errors).toEqual([]);
 });
+
+
+test('Delete removes a preview and disables its customer link',async({page})=>{
+ const created=await app.api('/api/customer-previews','POST',{title:'Delete fixture'},app.owner);const preview=created.data;
+ app.sqlite.prepare('UPDATE customer_previews SET published=1 WHERE id=?').run(preview.id);
+ expect((await app.api(`/api/customer-previews/${preview.id}`,'DELETE',{version:preview.version})).status).toBe(401);
+ expect((await app.api(`/api/customer-previews/${preview.id}`,'DELETE',{version:preview.version+1},app.owner)).status).toBe(409);
+ await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);await page.goto(app.base+'/#/crm/previews');
+ const card=page.locator('article').filter({has:page.getByRole('heading',{name:'Delete fixture',exact:true})});
+ await card.getByRole('button',{name:'Delete',exact:true}).click();await page.getByRole('button',{name:'Cancel',exact:true}).click();await expect(card).toBeVisible();
+ await card.getByRole('button',{name:'Delete',exact:true}).click();await page.getByRole('button',{name:'Delete preview',exact:true}).click();await expect(card).toHaveCount(0);
+ expect((await app.api('/api/customer-previews','GET',undefined,app.owner)).data.some(p=>p.id===preview.id)).toBe(false);
+ const deleted=app.sqlite.prepare('SELECT deleted_at,published FROM customer_previews WHERE id=?').get(preview.id);expect(deleted.deleted_at).toBeGreaterThan(0);expect(deleted.published).toBe(0);
+ const token=preview.url.split('/').pop();expect((await app.api(`/api/public/customer-previews/${token}`,'GET')).status).toBe(404);
+});
+
+
+for(const type of ['Gate','Fence','Carport','Pergola','Railing','Table'])test(`${type} exposes customer preview creation above its model`,async({page})=>{
+ await page.route('https://www.cjmmetals.com/**',r=>r.fulfill({contentType:'text/html',body:`<script>parent.postMessage({kind:'cjm-preview-ready'},'*')</script>`}));
+ await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);await page.goto(app.base+'/#/crm/quotes');
+ await page.locator('.type-card').filter({has:page.getByRole('heading',{name:type,exact:true})}).click();
+ const button=page.getByRole('button',{name:'Create customer preview',exact:true});await expect(button).toBeEnabled();
+ const model=page.locator('.website-product-preview iframe');const a=await button.boundingBox(),b=await model.boundingBox();expect(a.y+a.height).toBeLessThanOrEqual(b.y);
+ await button.click();await expect(page.getByLabel('Preview title',{exact:true})).toHaveValue(type+' design');
+});
