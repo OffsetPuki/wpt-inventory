@@ -24,12 +24,12 @@ export function addFrameBracing(s,ctx){
  }
  // NBG AG0010/AG0030 and BE0001: flange-to-secondary braces and
  // purlin restraint use bolted attachment faces, not floating line ends.
- // Clip envelopes below are illustrative, not those proprietary part sizes.
+ // Bent angle ends bear directly on steel. Dimensions/locations remain illustrative.
  group.updateMatrixWorld(true);
  const steel=group.children.filter(o=>o.isMesh&&['column','rafter','cee','zee','girt-web'].includes(o.userData.memberKind));
  const v=a=>new THREE.Vector3(...a);
- function surface(point,normal,targets){
-  const n=v(normal).normalize(),p=v(point),ray=new THREE.Raycaster(p.clone().addScaledVector(n,1),n.clone().negate(),0,2);
+ function surface(point,normal,targets,range=1){
+  const n=v(normal).normalize(),p=v(point),ray=new THREE.Raycaster(p.clone().addScaledVector(n,range),n.clone().negate(),0,range*2);
   const hit=ray.intersectObjects(targets,false)[0];
   if(!hit)return null;
   const actual=hit.face.normal.clone().transformDirection(hit.object.matrixWorld);if(actual.dot(n)<0)actual.negate();
@@ -49,26 +49,36 @@ export function addFrameBracing(s,ctx){
    const mesh=new THREE.Mesh(geo,material);mesh.userData={memberKind:'bracing-hardware',connection:name,engineeringRequired:true};group.add(mesh);
   }
  }
- function clip(face,toward,extension=0){
-  const {p,n}=face,t=.02,along=toward.clone().addScaledVector(n,-toward.dot(n));
-  if(along.length()<.001)along.set(0,0,1);along.normalize();
-  const cross=along.clone().cross(n).normalize(),foot=box(p.clone().addScaledVector(n,t/2),along,cross,[.22,.20,t],'Bolted brace foot');
-  foot.userData.contact=p.toArray();foot.userData.normal=n.toArray();foot.userData.support=face.mesh.uuid;
-  bolt(p.clone().addScaledVector(n,t),n,t+face.thickness);
-  const pin=p.clone().addScaledVector(n,.12).addScaledVector(along,extension),root=p.clone().addScaledVector(n,.02);
-  const axis=pin.clone().sub(root).normalize(),length=pin.distanceTo(root);
-  box(root.clone().add(pin).multiplyScalar(.5),axis,cross,[length+.12,.02,.13],'Brace clip tab');
-  bolt(pin,cross,.04);
-  return {pin,normal:cross};
+ function attachment(mesh,face){
+  mesh.userData.contact=face.p.toArray();mesh.userData.normal=face.n.toArray();mesh.userData.support=face.mesh.uuid;
  }
- function boltedLink(a,b,kind,extension=0){
+ function angle(a,b,normal,kind){
+  const axis=b.clone().sub(a).normalize(),n=normal.clone().addScaledVector(axis,-normal.dot(axis)).normalize(),cross=axis.clone().cross(n).normalize(),length=a.distanceTo(b),mid=a.clone().add(b).multiplyScalar(.5),width=.125,t=.012;
+  const face=box(mid,axis,cross,[length,width,t],kind);
+  box(mid.clone().addScaledVector(cross,(width-t)/2).addScaledVector(n,(width-t)/2),axis,cross,[length,t,width],kind+' return leg');
+  face.userData={...face.userData,memberKind:'bracing',a:a.toArray().map(x=>x*scale),b:b.toArray().map(x=>x*scale),bolted:true};
+  face.geometry.userData.part.length=length*scale;
+  return face;
+ }
+ function bentEnd(face,inner,normal,kind){
+  const t=.012,width=.125,along=inner.clone().sub(face.p).projectOnPlane(face.n).normalize(),cross=along.clone().cross(face.n).normalize();
+  const center=face.p.clone().addScaledVector(face.n,t/2);
+  const end=box(center,along,cross,[.20,width,t],'Bolted brace end');attachment(end,face);
+  bolt(face.p.clone().addScaledVector(face.n,t),face.n,t+face.thickness);
+  // A formed end of the brace, not a separate projecting clip or swivel.
+  const from=center.clone().addScaledVector(along,.10),axis=inner.clone().sub(from).normalize(),other=axis.clone().cross(normal).normalize();
+  if(other.dot(cross)<0)other.negate();
+  const points=[from.clone().addScaledVector(cross,-width/2),from.clone().addScaledVector(cross,width/2),inner.clone().addScaledVector(other,width/2),inner.clone().addScaledVector(other,-width/2)];
+  const positions=[];for(const sign of [-1,1])for(const i of [0,1,2,0,2,3])positions.push(...points[i].clone().addScaledVector(i<2?face.n:normal,sign*t/2).toArray());
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.computeVertexNormals();
+  const mesh=new THREE.Mesh(geo,material.clone());mesh.material.side=THREE.DoubleSide;mesh.userData={memberKind:'bracing-hardware',connection:kind+' formed end',engineeringRequired:true};group.add(mesh);
+ }
+ function boltedLink(a,b,kind){
   if(!a||!b)return false;
-  const start=a.p.clone().addScaledVector(a.n,.12),end=b.p.clone().addScaledVector(b.n,.12);
-  // Offset primary-frame clips beyond the flange edge before the brace rises.
-  const toward=end.clone().sub(start);
-  const c=clip(a,toward,extension),d=clip(b,toward.clone().negate());
-  const body=member(c.pin.toArray(),d.pin.toArray(),kind,{width:.09,depth:.02});
-  body.userData.bolted=true;
+  const toward=b.p.clone().sub(a.p),along=toward.clone().projectOnPlane(a.n).normalize();
+  const start=a.p.clone().addScaledVector(a.n,.08).addScaledVector(along,.30),end=b.p.clone().addScaledVector(b.n,.08).addScaledVector(toward.clone().negate().projectOnPlane(b.n).normalize(),.20);
+  const axis=end.clone().sub(start).normalize(),normal=b.n.clone().projectOnPlane(axis).normalize();
+  angle(start,end,normal,kind);bentEnd(a,start,normal,kind);bentEnd(b,end,normal,kind);
   return true;
  }
  const clear=(wall,a,b)=>!s.openings.some(o=>o.wall===wall&&Math.max(a,o.x/scale-.65)<Math.min(b,(o.x+o.width)/scale+.65));
@@ -97,13 +107,13 @@ export function addFrameBracing(s,ctx){
  // Short angle braces connect rafter lower flanges to adjacent purlin webs.
  // Mirror along the roof and use the available side of each frame station.
  for(let j=0;j<zs.length;j++){
-  const z=zs[j],direction=j===zs.length-1?-1:1,reach=Math.min(1.1,Math.abs(zs[j+direction]-z)/4);
+  const z=zs[j],direction=j===zs.length-1?-1:1,reach=Math.min(3.4375,Math.abs(zs[j+direction]-z)/3);
   for(const p of purlins){
    const slope=-p.side*s.pitch/12,cos=1/Math.hypot(1,slope),u=v([cos,slope*cos,0]).multiplyScalar(-p.side),web=v([p.x,p.y,z+direction*reach]).addScaledVector(u,-2.5/24);
    const x=web.x-u.x*.20;
-   const a=surface([x,rafterBottom(x),z+direction*.12],[0,-1,0],steel.filter(o=>o.userData.memberKind==='rafter'));
+   const a=surface([x,rafterBottom(x)+.04,z+direction*.20],[-slope*cos,cos,0],steel.filter(o=>o.userData.memberKind==='rafter'),.15);
    const b=surface(web.toArray(),u.clone().negate().toArray(),steel.filter(o=>o.userData.memberKind==='cee'));
-   if(boltedLink(a,b,'Rafter flange brace',.43))result.flange++;
+   if(boltedLink(a,b,'Rafter flange brace'))result.flange++;
   }
   for(const wall of ['left','right']){
    const side=wall==='left'?1:-1,x=wall==='left'?inset:W-inset;
@@ -113,24 +123,23 @@ export function addFrameBracing(s,ctx){
    for(const row of rows){
     const y=row/scale;if(y<1.2||y>axisY(inset)-.5)continue;
     const inner=x+side*(9.73/24+taperGradient*(y-baseT));
-    const a=surface([inner,y,z+direction*.13],[side,0,0],steel.filter(o=>o.userData.connection==='primary-column'));
+    const a=surface([inner-side*.035,y,z+direction*.20],[-side,0,0],steel.filter(o=>o.userData.connection==='primary-column'),.15);
     const b=surface([wall==='left'?0:W,y-.18,z+direction*reach],[side,0,0],steel.filter(o=>o.userData.wall===wall&&['zee','girt-web'].includes(o.userData.memberKind)));
-    if(boltedLink(a,b,'Column flange brace',.48))result.flange++;
+    if(boltedLink(a,b,'Column flange brace'))result.flange++;
    }
   }
  }
- // Paired mid-bay straps restrain the CEE webs on each roof slope separately.
- // Final number of restraint lines and their anchorage come from engineering.
+ // BE0210 arrangement: a continuous angle bears beneath the lower purlin
+ // flanges. Displayed through-bolts are illustrative, not NBG's screw schedule.
  for(const {a,b} of bays)for(const side of [-1,1]){
   const row=purlins.filter(p=>p.side===side);
-  for(const offset of [-.25,.25])for(let i=1;i<row.length;i++){
-   const p=row[i-1],q=row[i],z=(a+b)/2+offset;
-   const slope=-side*s.pitch/12,cos=1/Math.hypot(1,slope),u=v([cos,slope*cos,0]).multiplyScalar(-side),dir=Math.sign(q.x-p.x);
-   const web=p=>v([p.x,p.y,z]).addScaledVector(u,-2.5/24);
-   const targets=steel.filter(o=>o.userData.memberKind==='cee');
-   const first=surface(web(p).toArray(),[dir*cos,dir*slope*cos,0],targets),last=surface(web(q).toArray(),[-dir*cos,-dir*slope*cos,0],targets);
-   if(boltedLink(first,last,'Purlin restraint strap'))result.restraint++;
-  }
+  const slope=-side*s.pitch/12,cos=1/Math.hypot(1,slope),up=v([-slope*cos,cos,0]),down=up.clone().negate(),targets=steel.filter(o=>o.userData.memberKind==='cee');
+  const faces=row.map(p=>surface(v([p.x,p.y,(a+b)/2]).addScaledVector(up,-8/24).toArray(),down.toArray(),targets,.12)).filter(Boolean);
+  if(faces.length<2)continue;
+  const start=faces[0].p.clone().addScaledVector(down,.006),end=faces.at(-1).p.clone().addScaledVector(down,.006),axis=end.clone().sub(start).normalize();
+  const body=angle(start.addScaledVector(axis,-.18),end.addScaledVector(axis,.18),down,'Purlin restraint angle');body.userData.bolted=false;
+  for(const face of faces){bolt(face.p.clone().addScaledVector(down,.012),down,.012+face.thickness);const contact=new THREE.Object3D();contact.userData={connection:'Purlin restraint contact'};attachment(contact,face);group.add(contact);}
+  result.restraint++;
  }
  group.userData.bracing=result;
  return result;
