@@ -22,7 +22,7 @@ function drawWallFraming(s,wall,p){
  }
  return out;
 }
-export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',interactive=false,rotation=0}={}){
+export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',interactive=false,rotation=0,compact=false}={}){
  const W=s.width,D=s.depth,H=s.height,R=ridgeHeight(s),es=lang==='es';
  let out='<rect width="900" height="540" fill="#f2f0e9"/>';
  const framed=mode==='frame';
@@ -68,14 +68,18 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   const angle=(34+rotation)*Math.PI/180,c=Math.cos(angle),sn=Math.sin(angle);
   const raw=([x,y,z])=>[(x-W/2)*c+(z-D/2)*sn,((x-W/2)*sn-(z-D/2)*c)*.47-y];
   const facing={front:c,right:sn,back:-c,left:-sn},visible=WALLS.filter(w=>facing[w]>1e-7);
-  const directions=sideLabels(s,lang),pad=Math.max(...directions.map(d=>d.offset)),corners=[];
-  for(const x of [-pad,W+pad])for(const z of [-pad,D+pad])for(const y of [0,R])corners.push(raw([x,y,z]));
+  const directions=sideLabels(s,lang),corners=[];
+  // Fit the actual building and porches, not an oversized box around every side.
+  for(const x of [0,W])for(const z of [0,D])for(const y of [0,H])corners.push(raw([x,y,z]));
+  for(const z of [-s.overhang,D+s.overhang])for(const [x,y] of [[-s.overhang,H],[W/2,R],[W+s.overhang,H]])corners.push(raw([x,y,z]));
+  for(const porch of s.porches)for(const u of [porch.x,porch.x+porch.width])for(const d of [0,porch.depth])for(const y of [0,porch.height-d*porch.pitch/12])corners.push(raw(wallPoint(s,porch.wall,u,y,d)));
+  for(const d of directions.filter(d=>visible.includes(d.wall)))corners.push(raw(d.point));
   const minX=Math.min(...corners.map(p=>p[0])),maxX=Math.max(...corners.map(p=>p[0])),minY=Math.min(...corners.map(p=>p[1])),maxY=Math.max(...corners.map(p=>p[1]));
-  const k=Math.min(760/(maxX-minX),400/(maxY-minY)),p=v=>{const r=raw(v);return [450+(r[0]-(minX+maxX)/2)*k,254+(r[1]-(minY+maxY)/2)*k];};
+  const k=Math.min((compact?600:760)/(maxX-minX),400/(maxY-minY)),p=v=>{const r=raw(v);return [450+(r[0]-(minX+maxX)/2)*k,254+(r[1]-(minY+maxY)/2)*k];};
   const groundLabel=d=>{
    const a=p(wallPoint(s,d.wall,0,0)),b=p(wallPoint(s,d.wall,wallLength(s,d.wall),0)),q=p(d.point);
    let angle=Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI;if(angle>90)angle-=180;if(angle< -90)angle+=180;
-   const x=Math.max(65,Math.min(835,q[0])),y=Math.min(493,q[1]+(['front','back'].includes(d.wall)?37:19));
+   const x=Math.max(compact?135:65,Math.min(compact?765:835,q[0])),y=Math.min(493,q[1]+(['front','back'].includes(d.wall)?37:19));
    return `<g class="bd-side-label" data-side-label="${d.wall}" pointer-events="none" opacity=".72" transform="translate(${round(x)} ${round(y)}) rotate(${round(angle)})"><text text-anchor="middle" font-family="Arial,sans-serif" font-size="13" letter-spacing="1.6" fill="#62716c">${esc(d.label.toUpperCase())}</text></g>`;
   };
   const path=a=>'M'+a.map(v=>p(v).map(round).join(',')).join('L')+'Z';
@@ -107,9 +111,9 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   if(!framed&&s.roofPanel){const e=s.overhang,edge=H-e*s.pitch/12,slopes=[[-e,W/2],[W/2,W+e]];if(sn<0)slopes.reverse();for(const [a,b] of slopes){const ya=a===W/2?R:edge,yb=b===W/2?R:edge;out+=poly([p([a,ya,-e]),p([b,yb,-e]),p([b,yb,D+e]),p([a,ya,D+e])],mode==='insulation'&&s.roofInsulation!=='none'?'#d6be84':s.roofColor);for(let z=-e;z<=D+e;z+=1)out+=line(p([a,ya,z]),p([b,yb,z]),'stroke="#fff" stroke-opacity=".24"');}}
   for(const porch of s.porches.filter(p=>visible.includes(p.wall)))out+=drawPorch(porch);
   const dz=c>=0?-2:D+2;
-  out+=dim(p([0,0,dz]),p([W,0,dz]),`${W} ft`)+text(28,34,`${W} × ${D} ft · ${H} ft ${es?'alero':'eave'} · ${s.pitch}:12`);
+  out+=dim(p([0,0,dz]),p([W,0,dz]),`${W} ft`)+text(compact?124:28,34,`${W} × ${D} ft · ${H} ft ${es?'alero':'eave'} · ${s.pitch}:12`);
   for(const d of directions.filter(d=>visible.includes(d.wall)))out+=groundLabel(d);
  }
- out+=text(24,525,es?'Concepto exterior · dimensiones en pies · no es un plano estructural':'Exterior concept · dimensions in feet · not a structural drawing');
+ out+=text(compact?124:24,525,es?'Concepto exterior · dimensiones en pies · no es un plano estructural':'Exterior concept · dimensions in feet · not a structural drawing');
  return out;
 }

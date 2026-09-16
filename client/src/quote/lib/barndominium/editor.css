@@ -76,3 +76,12 @@
 .bd-part-info dt{color:#5c6c6b}.bd-part-info dd{margin:0;overflow-wrap:anywhere}.bd-part-note{border-top:1px solid #ddd7cb;padding-top:8px;color:#6c665d}
 .bd-frame-stage>.bd-part-inspector,.bd-home3d>.bd-part-inspector{position:absolute;top:8px;right:8px;z-index:5;margin:0;width:min(330px,calc(100% - 16px));max-height:calc(100% - 16px);overflow:auto;box-shadow:0 2px 8px #0002}
 @media(max-width:850px){.bd-part-info dl{grid-template-columns:1fr 1fr}.bd-frame-stage>.bd-part-inspector,.bd-home3d>.bd-part-inspector{width:min(280px,calc(100% - 16px))}}
+
+.bd-porch-move{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:850px){.bd-customer .bd-drawing{height:auto;aspect-ratio:5/3}}
+
+.bd-drawing-zoom{position:absolute;right:10px;top:64px;display:flex;gap:4px;z-index:2}.bd-drawing-zoom button{font-size:22px;min-width:44px;min-height:44px;padding:4px 10px}
+
+@media(max-width:850px){.bd-customer .bd-drawing[data-rotatable=true]{aspect-ratio:700/540}}
+
+@media(max-width:850px){.bd-customer .bd-preview{position:relative;top:0}.bd-customer .bd-controls,.bd-customer input,.bd-customer select,.bd-customer details,.bd-customer .bd-navigation{scroll-margin-top:100px}}
