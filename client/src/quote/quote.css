@@ -937,6 +937,8 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .barndo-product:fullscreen .bd-controls{display:none}
 .qa .barndo-product:fullscreen .bd-preview{width:100%;max-width:none}
 .qa .barndo-product:fullscreen .bd-frame3d,.qa .barndo-product:fullscreen .bd-home3d{height:80vh}
+.qa .barndo-product:fullscreen .bd-frame3d{display:flex;flex-direction:column}
+.qa .barndo-product:fullscreen .bd-frame-stage{flex:1;min-height:0;height:auto}
 @media(max-width:600px){.qa .website-product-preview iframe{height:460px}}
 
 .qa .preview:fullscreen .product-studio-stage,.qa .barndo-product:fullscreen .product-studio-stage{height:80vh!important}
