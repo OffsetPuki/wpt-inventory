@@ -804,7 +804,9 @@ export function summaryLine(type, s) {
 
 /** Spec rows for the printable quote (label / value pairs). */
 export function specRows(type, s) {
-  if(type === 'barndominium') return barndoSpec(s).map(([label,value])=>({label,value}));
+  if(type === 'barndominium') return barndoSpec(s)
+    .filter(([label])=>!['Frame','Secondary framing','Panels','Insulation'].includes(label))
+    .map(([label,value])=>({label,value:value.replace('; product and price pending','')}));
   const fin = finishLabel(s.color);
   if (type === 'custom') {
     // The itemized lines carry the detail here — the spec block just says what

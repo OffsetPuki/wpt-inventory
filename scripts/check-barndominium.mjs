@@ -21,7 +21,12 @@ assert.equal(normalize({wallColor:'<script>'}).wallColor,s.wallColor);
 for(const view of ['iso','plan','front','back','left','right'])for(const mode of ['shell','frame','insulation']){const svg=renderDrawing(s,{view,mode});assert.ok(!svg.includes('NaN'));assert.ok(!svg.includes('undefined'));}
 const state=defaultState('barndominium');state.openings[0].x=9;assert.equal(defaultState('barndominium').openings[0].x,7);
 const parsed=parseLead({designState:JSON.stringify({type:'barndominium',state:s})});assert.equal(parsed.type,'barndominium');assert.deepEqual(parsed.state,s);assert.equal(refTool(normalizeRef('CJM-B123ABC')),'barndominium');
-assert.ok(specRows('barndominium',s).some(r=>r.value.includes('CEE')));assert.ok(spec(s,'es').some(([k])=>k==='Edificio'));
+const quoteSpecs=specRows('barndominium',s);
+assert.ok(!quoteSpecs.some(r=>['Frame','Secondary framing','Panels','Insulation'].includes(r.label)));
+assert.ok(!quoteSpecs.some(r=>r.value.includes('product and price pending')));
+assert.ok(quoteSpecs.some(r=>r.value.includes('Preassembled door package')));
+assert.ok(quoteSpecs.some(r=>r.label==='Building'));
+assert.ok(spec(s,'es').some(([k])=>k==='Edificio'));
 const ls=buildLineState('barndominium',s,DEFAULT_PRICE_BOOK,{});assert.ok(ls.items.some(i=>i.key==='building-cee'&&i.unpriced));assert.ok(ls.items.some(i=>i.key==='building-zee'));assert.ok(!ls.items.some(i=>i.key==='building-wall-insulation'));
 const insulated={...s,wallInsulation:'fiberglass',roofInsulation:'spray-foam'};const edited=buildLineState('barndominium',insulated,DEFAULT_PRICE_BOOK,{items:{'building-cee':{rate:4.5}}});assert.equal(edited.items.find(i=>i.key==='building-cee').rate,4.5);assert.ok(edited.items.some(i=>i.key==='building-wall-insulation'));
 // Both deployments own copies, with a release check preventing geometry drift.
