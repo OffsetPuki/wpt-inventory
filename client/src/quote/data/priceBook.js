@@ -38,6 +38,7 @@ export const DEFAULT_PRICE_BOOK = {
   // One entry per physical material. `cost` is what YOU pay per unit;
   // `wastePct` is blended into the effective rate (cutoffs, drops, spoilage).
   materials: {
+    carport_pipe: { name: 'Steel pipe — confirm size and wall', unit: 'ft', cost: 0, wastePct: 10 },
     tube_4x4_316: { name: '4×4×3/16 steel tubing', unit: 'ft',   cost: 12,   wastePct: 10 },
     tube_6x6:     { name: '6×6 steel tubing',       unit: 'ft',   cost: 21,   wastePct: 10 },
     tube_1x1:     { name: '1×1 square tubing',      unit: 'ft',   cost: 2.5,  wastePct: 10 },
@@ -117,6 +118,7 @@ export const DEFAULT_PRICE_BOOK = {
   },
 
   carport: {
+    pipeFramePerSqFt: 0,
     roofPerSqFt: 9,
     panelUpchargePerSqFt: { corrugated: 0, 'standing-seam': 3.5, polycarbonate: 5 },
     // Support frame (rafters, headers, purlins) per sq ft of plan footprint.
@@ -300,6 +302,7 @@ export const PRICE_BOOK_SCHEMA = [
       { path: 'carport.panelUpchargePerSqFt.standing-seam', label: 'Standing-seam panel', prefix: '$', suffix: '/ sq ft', step: 0.5 },
       { path: 'carport.panelUpchargePerSqFt.polycarbonate', label: 'Polycarbonate panel', prefix: '$', suffix: '/ sq ft', step: 0.5 },
       { path: 'carport.framePerSqFt', label: 'Support frame (rafters/headers)', prefix: '$', suffix: '/ sq ft of plan', step: 0.5 },
+      { path: 'carport.pipeFramePerSqFt', label: 'Pipe support frame (rafters/headers)', prefix: '$', suffix: '/ sq ft of plan', step: 0.5 },
       { path: 'carport.sidePanelPerSqFt', label: 'Enclosed side', prefix: '$', suffix: '/ sq ft', step: 0.5 },
       { path: 'carport.guttersPerFt', label: 'Gutters', prefix: '$', suffix: '/ ft', step: 0.5 },
       { path: 'carport.roofFinishUpchargePerSqFt.#1C1C1A', label: 'Roof finish — Matte Black', prefix: '$', suffix: '/ sq ft', step: 0.25 },

@@ -33,6 +33,10 @@ const item = (items, key) => items.find((i) => i.key === key);
   const embedded=deriveItems('carport',{...state,anchor:'embedded',undergroundFt:3,bagsPerPost:4},pb);
   check('Six embedded columns include underground length and six footings',approx(item(embedded.items,'posts').qty,75.35)&&approx(item(embedded.items,'concrete').qty,24));
   const frame=deriveItems('carport',{...state,frameOnly:true},pb);
+  const pipe=deriveItems('carport',{...state,frameMaterial:'pipe'},pb);
+  check('Pipe uses its own material and unset costs',item(pipe.items,'pipe-posts').materialId==='carport_pipe'&&item(pipe.items,'pipe-posts').unpriced&&item(pipe.items,'pipe-frame').unpriced);
+  check('Pipe keeps the same column quantities',item(pipe.items,'pipe-posts').qty===item(free.items,'posts').qty);
+  check('Pipe appears in customer specifications',specRows('carport',{...state,frameMaterial:'pipe'}).some(r=>r.label==='Frame material'&&r.value==='Pipe'));
   check('Frame-only view does not change the purchased roof or price',JSON.stringify(frame)===JSON.stringify(free));
 }
 

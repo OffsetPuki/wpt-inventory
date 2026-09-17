@@ -501,6 +501,8 @@ function estimateCarport(s, pb) {
   const supports = carportSupports({...s, width, depth, height});
   const posts = supports.posts.length;
   const columnLength = supports.posts.reduce((sum, post) => sum + post.h, 0);
+  const pipe = s.frameMaterial === 'pipe';
+  const columnMaterial = pipe ? 'carport_pipe' : 'tube_4x4_316';
 
   const items = [
     {
@@ -512,17 +514,17 @@ function estimateCarport(s, pb) {
   // Columns: 4×4×3/16 from the material library. Embedded anchoring adds
   // underground length + concrete; base-plate mounts don't.
   if (s.anchor === 'embedded') {
-    postAndConcreteItems(pb, s, items, { count: posts, heightFt: columnLength / posts, materialId: 'tube_4x4_316' });
+    postAndConcreteItems(pb, s, items, { count: posts, heightFt: columnLength / posts, materialId: columnMaterial, keyPrefix: pipe ? 'pipe-' : '' });
   } else {
     pushPriced(items, matItem(pb, {
-      key: 'posts', materialId: 'tube_4x4_316', qty: round2(columnLength),
-      name: `Columns — ${posts} posts, ${round2(columnLength)} total ft (base plate)`,
+      key: pipe ? 'pipe-posts' : 'posts', materialId: columnMaterial, qty: round2(columnLength),
+      name: `${pipe ? 'Pipe columns' : 'Square tubing columns'} — ${posts} posts, ${round2(columnLength)} total ft (base plate)`,
     }));
   }
 
   pushPriced(items, {
-    key: 'frame', name: 'Frame — support beams', kind: 'area',
-    qty: round2(planArea), rate: round2(num(c.framePerSqFt, 0)),
+    key: pipe ? 'pipe-frame' : 'frame', name: pipe ? 'Pipe frame — support beams' : 'Square tubing frame — support beams', kind: 'area',
+    qty: round2(planArea), rate: round2(num(pipe ? c.pipeFramePerSqFt : c.framePerSqFt, 0)),
   });
   if (s.sides !== 'open') {
     const sideArea = depth * height * (s.sides === 'two' ? 2 : 1);

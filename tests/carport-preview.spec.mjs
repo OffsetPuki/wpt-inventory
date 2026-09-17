@@ -16,8 +16,11 @@ test('Carport frame view survives dimension changes without changing selected ma
  await page.getByRole('button',{name:/Carport Free-standing/}).click();
  const frame=page.frameLocator('iframe[title="carport website preview"]');
  await expect(frame.locator('#mode')).toHaveText('finished');
+ await page.locator('#quote-option-frameMaterial label').filter({hasText:/^Pipe$/}).click();
+ await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.frameMaterial)).toBe('pipe');
  await page.getByRole('button',{name:'Frame only',exact:true}).click();
  await expect(frame.locator('#mode')).toHaveText('frame');
+ await expect(page.getByRole('radio',{name:'Pipe',exact:true})).toBeChecked();
  await page.getByRole('textbox',{name:'Depth',exact:true}).fill('40');
  await page.getByRole('textbox',{name:'Depth',exact:true}).press('Tab');
  await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.depth)).toBe(40);
@@ -27,5 +30,7 @@ test('Carport frame view survives dimension changes without changing selected ma
  await page.getByRole('button',{name:'Finished',exact:true}).click();
  await expect(frame.locator('#mode')).toHaveText('finished');
  expect(await frame.locator('body').evaluate(()=>window.design.panel)).toBe(panel);
+ await page.locator('#quote-option-frameMaterial label').filter({hasText:/^Square tubing$/}).click();
+ await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.frameMaterial)).toBe('square-tubing');
  await page.screenshot({path:'test-results/carport-view-controls.png',fullPage:true});
 });
