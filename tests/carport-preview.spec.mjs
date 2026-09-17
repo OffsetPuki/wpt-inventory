@@ -16,6 +16,9 @@ test('Carport frame view survives dimension changes without changing selected ma
  await page.getByRole('button',{name:/Carport Free-standing/}).click();
  const frame=page.frameLocator('iframe[title="carport website preview"]');
  await expect(frame.locator('#mode')).toHaveText('finished');
+ await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.gableFrame)).toBe('rigid');
+ await expect(page.locator('#quote-option-frameMaterial')).toHaveCount(0);
+ await page.locator('#quote-option-gableFrame label').filter({hasText:'Standard truss'}).click();
  await page.locator('#quote-option-frameMaterial label').filter({hasText:/^Pipe$/}).click();
  await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.frameMaterial)).toBe('pipe');
  await page.getByRole('button',{name:'Frame only',exact:true}).click();
@@ -32,5 +35,7 @@ test('Carport frame view survives dimension changes without changing selected ma
  expect(await frame.locator('body').evaluate(()=>window.design.panel)).toBe(panel);
  await page.locator('#quote-option-frameMaterial label').filter({hasText:/^Square tubing$/}).click();
  await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.frameMaterial)).toBe('square-tubing');
+ await page.locator('#quote-option-gableFrame label').filter({hasText:'Open rigid frame'}).click();
+ await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.gableFrame)).toBe('rigid');
  await page.screenshot({path:'test-results/carport-view-controls.png',fullPage:true});
 });

@@ -501,6 +501,7 @@ function estimateCarport(s, pb) {
   const supports = carportSupports({...s, width, depth, height});
   const posts = supports.posts.length;
   const columnLength = supports.posts.reduce((sum, post) => sum + post.h, 0);
+  const rigid=s.roof==='gable'&&s.gableFrame==='rigid';
   const pipe = s.frameMaterial === 'pipe';
   const columnMaterial = pipe ? 'carport_pipe' : 'tube_4x4_316';
 
@@ -513,7 +514,9 @@ function estimateCarport(s, pb) {
 
   // Columns: 4×4×3/16 from the material library. Embedded anchoring adds
   // underground length + concrete; base-plate mounts don't.
-  if (s.anchor === 'embedded') {
+  if(rigid){
+    pushPriced(items,{key:'rigid-frame-package',name:`Open rigid frame — ${posts} columns, rafters, connections and foundations; supplier quote required`,kind:'flat',qty:1,rate:0});
+  } else if (s.anchor === 'embedded') {
     postAndConcreteItems(pb, s, items, { count: posts, heightFt: columnLength / posts, materialId: columnMaterial, keyPrefix: pipe ? 'pipe-' : '' });
   } else {
     pushPriced(items, matItem(pb, {
@@ -522,12 +525,12 @@ function estimateCarport(s, pb) {
     }));
   }
 
-  pushPriced(items, {
+  if(!rigid)pushPriced(items, {
     key: pipe ? 'pipe-frame' : 'frame', name: pipe ? 'Pipe frame — support beams' : 'Square tubing frame — support beams', kind: 'area',
     qty: round2(planArea), rate: round2(num(pipe ? c.pipeFramePerSqFt : c.framePerSqFt, 0)),
   });
   if (s.sides !== 'open') {
-    const sideArea = depth * height * (s.sides === 'two' ? 2 : 1);
+    const sideArea = depth * (height+(rigid?1.8:0)) * (s.sides === 'two' ? 2 : 1);
     items.push({ key: 'sides', name: 'Enclosed sides', kind: 'area', qty: round2(sideArea), rate: round2(c.sidePanelPerSqFt) });
   }
   if (s.gutters === 'yes') {

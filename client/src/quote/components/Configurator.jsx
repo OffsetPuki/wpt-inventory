@@ -49,6 +49,7 @@ export default function Configurator({
         {type === 'barndominium' && <BarndoQuoteDetails state={state} value={barndoQuote} onChange={onChangeBarndoQuote} />}
         <div className="cfg">
           <form className="cfg-controls" onSubmit={(e) => e.preventDefault()}>
+            {type==='carport'&&state.roof==='gable'&&state.gableFrame==='rigid'&&<p className="hint">Open rigid frame concept: clear gable opening with reinforced corners. Final steel sizes, connections, foundations and price require a project-specific design.</p>}
             <details className="quote-section" open={customerOpen} onToggle={e => setCustomerOpen(e.currentTarget.open)}>
               <summary>Customer{customer?.name ? ` · ${customer.name}` : ''}</summary>
               <CustomerFields customer={customer} onChange={onChangeCustomer} />

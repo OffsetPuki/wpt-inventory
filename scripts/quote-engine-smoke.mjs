@@ -25,7 +25,9 @@ const item = (items, key) => items.find((i) => i.key === key);
 
 // Columns in the quote follow the same open-bay layout as the website preview.
 {
-  const state = {...defaultState('carport'),width:13,depth:40,height:9,pitch:3,roof:'gable',anchor:'plate',mounting:'freestanding'};
+  const state = {...defaultState('carport'),gableFrame:'truss',width:13,depth:40,height:9,pitch:3,roof:'gable',anchor:'plate',mounting:'freestanding'};
+  const rigid=deriveItems('carport',{...state,gableFrame:'rigid',width:40},pb);
+  check('Rigid frame needs its own supplier price',item(rigid.items,'rigid-frame-package').unpriced&&!item(rigid.items,'posts')&&!item(rigid.items,'frame'));
   const free=deriveItems('carport',state,pb);
   check('40 ft carport includes column heads around the rafters',approx(item(free.items,'posts').qty,57.35));
   const attached=deriveItems('carport',{...state,mounting:'attached'},pb);
@@ -139,7 +141,7 @@ console.log('\nPergola (12 × 16 ft, 8 ft clearance):');
 console.log('\nShared material propagation (4×4×3/16 +$3/ft):');
 {
   const bumped = deepMerge(pb, { materials: { tube_4x4_316: { cost: 15 } } });
-  for (const [type, st] of [['fence', defaultState('fence')], ['gate', defaultState('gate')], ['pergola', defaultState('pergola')], ['carport', defaultState('carport')]]) {
+  for (const [type, st] of [['fence', defaultState('fence')], ['gate', defaultState('gate')], ['pergola', defaultState('pergola')], ['carport', {...defaultState('carport'),gableFrame:'truss'}]]) {
     const before = deriveItems(type, st, pb).items.reduce((s, i) => s + lineCost(i), 0);
     const after = deriveItems(type, st, bumped).items.reduce((s, i) => s + lineCost(i), 0);
     check(`${type} repriced (+$${(after - before).toFixed(2)})`, after > before);

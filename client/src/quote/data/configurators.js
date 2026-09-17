@@ -318,6 +318,7 @@ export const CONFIG = {
   // ---- Carport --------------------------------------------------------------
   carport: {
     defaults: {
+      gableFrame: 'rigid',
       frameMaterial: 'square-tubing',
       roof: 'gable',
       mounting: 'freestanding',
@@ -338,7 +339,8 @@ export const CONFIG = {
       roofColor: '#A7A8A4',
     },
     controls: [
-      { kind: 'segment', name: 'frameMaterial', label: 'Frame material', cols: 2, options: [{value:'square-tubing',label:'Square tubing'},{value:'pipe',label:'Pipe'}] },
+      { kind: 'segment', name: 'gableFrame', label: 'Gable frame', cols: 2, value:s=>s.gableFrame||'truss', visibleWhen:s=>s.roof==='gable', options:[{value:'rigid',label:'Open rigid frame'},{value:'truss',label:'Standard truss'}] },
+      { kind: 'segment', name: 'frameMaterial', label: 'Frame material', cols: 2, visibleWhen:s=>s.roof!=='gable'||s.gableFrame!=='rigid', options: [{value:'square-tubing',label:'Square tubing'},{value:'pipe',label:'Pipe'}] },
       {
         kind: 'segment', name: 'roof', label: 'Roof style', cols: 3,
         options: [
@@ -801,7 +803,7 @@ export function summaryLine(type, s) {
   }
   // carport
   const roof = optionLabel('carport', 'roof', s.roof);
-  return `${roof} · ${s.frameMaterial==='pipe'?'Pipe':'Square tubing'} · ${ft(s.width)}×${ft(s.depth)} · ${ft(s.height)} clearance · ${fin}`;
+  return `${roof} · ${s.roof==='gable'&&s.gableFrame==='rigid'?'Open rigid frame':s.frameMaterial==='pipe'?'Pipe':'Square tubing'} · ${ft(s.width)}×${ft(s.depth)} · ${ft(s.height)} clearance · ${fin}`;
 }
 
 /** Spec rows for the printable quote (label / value pairs). */
@@ -971,7 +973,7 @@ export function specRows(type, s) {
   const cars = carCount(s.width);
   const rows = [
     ['Roof', optionLabel('carport', 'roof', s.roof)],
-    ['Frame material', s.frameMaterial==='pipe'?'Pipe':'Square tubing'],
+    ['Frame material', s.roof==='gable'&&s.gableFrame==='rigid'?'Open rigid steel frame — final sections and connections by engineering':s.frameMaterial==='pipe'?'Pipe':'Square tubing'],
     ['Mounting', optionLabel('carport', 'mounting', s.mounting)],
     ['Size', `${FT(s.width)} wide × ${FT(s.depth)} deep`],
     ['Capacity', `${cars} ${cars === 1 ? 'car' : 'cars'}`],
