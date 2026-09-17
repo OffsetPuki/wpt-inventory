@@ -1,4 +1,5 @@
 import {takeoff as barndoTakeoff,validate as validateBarndo} from './barndominium/model.js';
+import {carportSupports} from './carport-supports.js';
 // =============================================================================
 //  Estimate — the bridge between a design and a price.
 //
@@ -497,9 +498,9 @@ function estimateCarport(s, pb) {
   else if (s.roof === 'lean-to') slope = 1 / Math.cos((num(s.elevation, 15) * Math.PI) / 180);
   const roofArea = round2(planArea * slope);
 
-  const bays = Math.max(1, Math.round(width / 12));
-  const rows = s.mounting === 'attached' ? 1 : 2; // attached = front posts only
-  const posts = (bays + 1) * rows;
+  const supports = carportSupports({...s, width, depth, height});
+  const posts = supports.posts.length;
+  const columnLength = supports.posts.reduce((sum, post) => sum + post.h, 0);
 
   const items = [
     {
@@ -511,11 +512,11 @@ function estimateCarport(s, pb) {
   // Columns: 4×4×3/16 from the material library. Embedded anchoring adds
   // underground length + concrete; base-plate mounts don't.
   if (s.anchor === 'embedded') {
-    postAndConcreteItems(pb, s, items, { count: posts, heightFt: height, materialId: 'tube_4x4_316' });
+    postAndConcreteItems(pb, s, items, { count: posts, heightFt: columnLength / posts, materialId: 'tube_4x4_316' });
   } else {
     pushPriced(items, matItem(pb, {
-      key: 'posts', materialId: 'tube_4x4_316', qty: posts * height,
-      name: `Columns — ${posts} × ${height} ft clearance (base plate)`,
+      key: 'posts', materialId: 'tube_4x4_316', qty: round2(columnLength),
+      name: `Columns — ${posts} posts, ${round2(columnLength)} total ft (base plate)`,
     }));
   }
 
