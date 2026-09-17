@@ -18,7 +18,10 @@ import {normalize as normalizeBarndo,validate as validateBarndo} from './barndom
 //  — anything it can't read is reported as a warning and left at the default.
 // =============================================================================
 
-import { defaultState } from '../data/configurators.js';
+import { defaultState as newDesignState } from '../data/configurators.js';
+// Website/legacy design imports predate the rigid-frame selector. Do not
+// silently change their structural system when filling absent fields.
+const defaultState=type=>({...newDesignState(type),...(type==='carport'?{gableFrame:'truss'}:{})});
 import { refTool } from './refs.js';
 
 /** Lowercase, strip accents, collapse whitespace — so 'Elevación ' matches 'elevacion'. */
