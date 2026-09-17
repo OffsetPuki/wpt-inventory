@@ -25,13 +25,13 @@ const item = (items, key) => items.find((i) => i.key === key);
 
 // Columns in the quote follow the same open-bay layout as the website preview.
 {
-  const state = {...defaultState('carport'),width:13,depth:40,height:9,roof:'gable',anchor:'plate',mounting:'freestanding'};
+  const state = {...defaultState('carport'),width:13,depth:40,height:9,pitch:3,roof:'gable',anchor:'plate',mounting:'freestanding'};
   const free=deriveItems('carport',state,pb);
-  check('40 ft carport prices six 9 ft columns',approx(item(free.items,'posts').qty,54));
+  check('40 ft carport includes column heads around the rafters',approx(item(free.items,'posts').qty,57.35));
   const attached=deriveItems('carport',{...state,mounting:'attached'},pb);
-  check('Attached carport omits only the wall-supported row',approx(item(attached.items,'posts').qty,36));
+  check('Attached carport omits only the wall-supported row',approx(item(attached.items,'posts').qty,38.23));
   const embedded=deriveItems('carport',{...state,anchor:'embedded',undergroundFt:3,bagsPerPost:4},pb);
-  check('Six embedded columns include underground length and six footings',approx(item(embedded.items,'posts').qty,72)&&approx(item(embedded.items,'concrete').qty,24));
+  check('Six embedded columns include underground length and six footings',approx(item(embedded.items,'posts').qty,75.35)&&approx(item(embedded.items,'concrete').qty,24));
   const frame=deriveItems('carport',{...state,frameOnly:true},pb);
   check('Frame-only view does not change the purchased roof or price',JSON.stringify(frame)===JSON.stringify(free));
 }

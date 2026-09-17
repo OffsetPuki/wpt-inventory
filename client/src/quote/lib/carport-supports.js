@@ -12,7 +12,9 @@ export function carportSupports(s) {
  const posts=[];
  for(const z of zs)for(const x of xs){
   if(s.mounting==='attached'&&z===-D/2)continue;
-  posts.push({x,z,h:H+(D/2-z)*slope});
+  const pitch=(Number(s.pitch)||3)/12;
+  const gableHead=s.roof==='gable'?.25+.2*pitch+.25*Math.sqrt(1+pitch*pitch):0;
+  posts.push({x,z,h:H+(D/2-z)*slope+gableHead});
  }
  return {xs,zs,posts};
 }
