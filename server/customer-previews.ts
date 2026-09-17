@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS customer_preview_models (
 );
 CREATE INDEX IF NOT EXISTS customer_preview_models_preview ON customer_preview_models(preview_id,position);`);
 if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='deleted_at')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN deleted_at INTEGER');
+if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='merge_request')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN merge_request TEXT');
 const modelColumns=new Set((sqlite.pragma('table_info(customer_preview_models)') as {name:string}[]).map(c=>c.name));
 for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB']]){
   if(!modelColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_models ADD COLUMN ${name} ${definition}`);
@@ -221,6 +222,45 @@ export function registerCustomerPreviews(app: Express): void {
     const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,height,finish,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
       .run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.height,p.finish,p.note,now,now);
     const id=Number(r.lastInsertRowid);audit(req,'preview.created',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
+  });
+  app.post('/api/customer-previews/merge',requireElevated,(req,res)=>{
+    const parsed=z.object({requestId:z.string().uuid(),title:z.string().trim().min(1).max(120),customer:z.string().trim().max(120).default(''),sources:z.array(z.object({id:z.number().int().positive(),version:z.number().int().positive()})).min(2).max(MAX_OPTIONS)}).safeParse(req.body);
+    if(!parsed.success){res.status(400).json({message:'Select two or more previews and enter a title.'});return;}
+    const data=parsed.data;
+    if(new Set(data.sources.map(p=>p.id)).size!==data.sources.length){res.status(400).json({message:'Select each preview only once.'});return;}
+    const sourceKey='merge:'+data.requestId;
+    // Store the exact request signature so a network retry cannot create a
+    // second draft or silently reuse an idempotency key for another merge.
+    const signature=JSON.stringify({title:data.title,customer:data.customer,sources:data.sources});
+    try{
+      const id=sqlite.transaction(()=>{
+        const existing=sqlite.prepare('SELECT * FROM customer_previews WHERE source_key=?').get(sourceKey) as (Preview&{deleted_at:number|null;merge_request:string|null})|undefined;
+        if(existing){
+          if(existing.merge_request!==signature)throw Object.assign(new Error('This merge request was already used. Reopen the merge dialog.'),{status:409});
+          if(existing.deleted_at)throw Object.assign(new Error('The merged preview was deleted. Start a new merge.'),{status:410});
+          return existing.id;
+        }
+        const sources=data.sources.map(ref=>{
+          const p=getPreview(ref.id);
+          if(!p)throw Object.assign(new Error('A selected preview no longer exists. Refresh the list.'),{status:404});
+          if(p.version!==ref.version)throw Object.assign(new Error('A selected preview changed. Refresh the list and select it again.'),{status:409});
+          const options=modelList(p.id);
+          if(!options.length)throw Object.assign(new Error('Each selected preview must have at least one design option.'),{status:400});
+          return {p,options};
+        });
+        if(sources.reduce((sum,s)=>sum+s.options.length,0)>MAX_OPTIONS)throw Object.assign(new Error('The combined preview can have up to six design options.'),{status:400});
+        const now=Date.now();
+        const row=sqlite.prepare('INSERT INTO customer_previews(token,title,customer,merge_request,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),data.title,data.customer,signature,sourceKey,now,now);
+        const id=Number(row.lastInsertRowid);let position=0;
+        for(const source of sources)for(const option of source.options){
+          const label=`${++position}. ${source.p.title} — ${option.label}`.slice(0,60);
+          sqlite.prepare('INSERT INTO customer_preview_models(id,preview_id,label,position,bytes,size) SELECT ?,?,?,?,bytes,size FROM customer_preview_models WHERE id=? AND preview_id=?').run(crypto.randomBytes(16).toString('hex'),id,label,position-1,option.id,source.p.id);
+        }
+        return id;
+      })();
+      audit(req,'preview.merged',{targetType:'customer_preview',targetId:id,targetName:data.title});
+      res.status(201).json(view(getPreview(id)!));
+    }catch(error){res.status((error as any).status||500).json({message:(error as any).status?(error as Error).message:'Could not merge previews.'});}
   });
   app.post('/api/customer-previews/from-model',requireElevated,(req,res)=>{
     upload(req,res,(err:any)=>{
