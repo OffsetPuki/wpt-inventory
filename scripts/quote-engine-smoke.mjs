@@ -33,6 +33,8 @@ const item = (items, key) => items.find((i) => i.key === key);
   const embedded=deriveItems('carport',{...state,anchor:'embedded',undergroundFt:3,bagsPerPost:4},pb);
   check('Six embedded columns include underground length and six footings',approx(item(embedded.items,'posts').qty,75.35)&&approx(item(embedded.items,'concrete').qty,24));
   const frame=deriveItems('carport',{...state,frameOnly:true},pb);
+  const wide=deriveItems('carport',{...state,width:40},pb);
+  check('Wide gables price twelve columns including interior supports',approx(item(wide.items,'posts').qty,111.35));
   const pipe=deriveItems('carport',{...state,frameMaterial:'pipe'},pb);
   check('Pipe uses its own material and unset costs',item(pipe.items,'pipe-posts').materialId==='carport_pipe'&&item(pipe.items,'pipe-posts').unpriced&&item(pipe.items,'pipe-frame').unpriced);
   check('Pipe keeps the same column quantities',item(pipe.items,'pipe-posts').qty===item(free.items,'posts').qty);
