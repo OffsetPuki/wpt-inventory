@@ -8,17 +8,17 @@ import { apiRequest, getAuthToken } from '@/lib/queryClient';
 import { primaryBtn, secondaryBtn, inputCls } from '@/lib/ui-styles';
 import { toast } from '@/components/ui/toaster';
 
-type Preview = {id:number;title:string;description:string;customer:string;width:string;height:string;finish:string;note:string;published:boolean;version:number;url:string;updatedAt:number;options:{id:string;label:string;size:number;revision?:number;canRestore?:number}[];feedback:{id:number;kind:'feedback'|'approval';optionId:string;designVersion:number|null;optionLabel:string;message:string;createdAt:number;emailStatus:'sent'|'queued'|'attention'|'not_requested'}[]};
-const blank = {title:'',description:'',customer:'',width:'',height:'',finish:'',note:''};
+type Preview = {id:number;title:string;description:string;customer:string;width:string;depth:string;height:string;finish:string;note:string;published:boolean;version:number;url:string;updatedAt:number;options:{id:string;label:string;size:number;revision?:number;canRestore?:number}[];feedback:{id:number;kind:'feedback'|'approval';optionId:string;designVersion:number|null;optionLabel:string;message:string;createdAt:number;emailStatus:'sent'|'queued'|'attention'|'not_requested'}[]};
+const blank = {title:'',description:'',customer:'',width:'',depth:'',height:'',finish:'',note:''};
 
 function PreviewEditor({initial,previews,onClose}:{initial:Preview|null;previews:Preview[];onClose:()=>void}) {
   const query=useQueryClient();
   const [preview,setPreview]=useState(initial);
-  const [form,setForm]=useState(initial?{title:initial.title,description:initial.description,customer:initial.customer,width:initial.width,height:initial.height,finish:initial.finish,note:initial.note}:blank);
+  const [form,setForm]=useState(initial?{title:initial.title,description:initial.description,customer:initial.customer,width:initial.width,depth:initial.depth||'',height:initial.height,finish:initial.finish,note:initial.note}:blank);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[label,setLabel]=useState(''),[file,setFile]=useState<File|null>(null);
   const refresh=(p:Preview)=>{setPreview(p);query.invalidateQueries({queryKey:['customer-previews']});};
   const run=async(fn:()=>Promise<void>)=>{setError('');setBusy(true);try{await fn();}catch(e){setError(e instanceof Error?e.message:'Could not save this preview.');}finally{setBusy(false);}};
-  const save=async()=>{const p=await (await apiRequest(preview?'PATCH':'POST',preview?`/api/customer-previews/${preview.id}`:'/api/customer-previews',{...form,...(preview?{version:preview.version}:{})})).json();refresh(p);setForm({title:p.title,description:p.description,customer:p.customer,width:p.width,height:p.height,finish:p.finish,note:p.note});toast({title:'Design details saved'});return p;};
+  const save=async()=>{const p=await (await apiRequest(preview?'PATCH':'POST',preview?`/api/customer-previews/${preview.id}`:'/api/customer-previews',{...form,...(preview?{version:preview.version}:{})})).json();refresh(p);setForm({title:p.title,description:p.description,customer:p.customer,width:p.width,depth:p.depth||'',height:p.height,finish:p.finish,note:p.note});toast({title:'Design details saved'});return p;};
   // Incoming comments update independently of unsaved design details.
   const feedback=previews.find(p=>p.id===preview?.id)?.feedback||preview?.feedback||[];
   const dirty=Object.entries(form).some(([key,value])=>value!==(preview||blank)[key as keyof typeof blank]);
@@ -52,7 +52,7 @@ function PreviewEditor({initial,previews,onClose}:{initial:Preview|null;previews
           <label className="space-y-1 text-sm">Customer / job reference <span className="text-muted-foreground">(only in the suite)</span><input maxLength={120} className={inputCls} value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})}/></label>
         </div>
         <label className="block space-y-1 text-sm">Short description<textarea maxLength={600} className={inputCls+' h-20 py-2'} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
-        <div className="grid gap-3 sm:grid-cols-3">{(['width','height','finish'] as const).map(key=><label key={key} className="space-y-1 text-sm capitalize">{key}<input maxLength={key==='finish'?60:40} placeholder={key==='width'?'26 ft':key==='height'?'6 ft':'Matte black'} className={inputCls} value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/></label>)}</div>
+        <div className="grid gap-3 sm:grid-cols-2">{(['width','depth','height','finish'] as const).map(key=><label key={key} className="space-y-1 text-sm capitalize">{key}<input maxLength={key==='finish'?60:40} placeholder={key==='width'?'26 ft':key==='depth'?'40 ft':key==='height'?'6 ft':'Matte black'} className={inputCls} value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/></label>)}</div>
         <label className="block space-y-1 text-sm">Details for the customer <span className="text-muted-foreground">(optional)</span><textarea maxLength={1200} className={inputCls+' h-24 py-2'} value={form.note} onChange={e=>setForm({...form,note:e.target.value})}/></label>
         <button className={primaryBtn} disabled={busy||!form.title.trim()}>{busy?'Saving…':preview?'Save details':'Create preview'}</button>
       </fieldset></form>

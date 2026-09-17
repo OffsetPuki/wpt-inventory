@@ -15,11 +15,14 @@ test('Save and open includes pending text, and replacing a model retains its lin
   await dialog.getByRole('button',{name:'Add option',exact:true}).click();await dialog.getByRole('button',{name:'Enable customer link'}).click();
   const link=await dialog.getByLabel('Customer preview link').inputValue();
   await dialog.getByLabel('Short description',{exact:true}).fill('Changed description');
+  await dialog.getByLabel('depth',{exact:true}).fill('40 ft');
   await dialog.getByLabel('Details for the customer').fill('Changed notes');
   await context.route('https://www.cjmmetals.com/preview/**',r=>r.fulfill({body:'Preview fixture'}));
   const popupPromise=page.waitForEvent('popup');await dialog.getByRole('button',{name:'Save & open preview',exact:true}).click();const popup=await popupPromise;
   await expect(popup).toHaveURL(new RegExp(link+'\\?owner=1&v=\\d+'));
   let saved=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.url===link);
+  expect(saved.depth).toBe('40 ft');
+  expect((await app.api('/api/public/customer-previews/'+link.split('/').at(-1),'GET',undefined,undefined,{'X-Lead-Key':'test-intake-key'})).data.depth).toBe('40 ft');
   expect(saved.description).toBe('Changed description');expect(saved.note).toBe('Changed notes');await popup.close();
   await dialog.getByLabel('Replace model: kalkat-5',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-7.glb',import.meta.url)));
   await expect(dialog.getByRole('button',{name:'Restore previous model'})).toBeVisible();

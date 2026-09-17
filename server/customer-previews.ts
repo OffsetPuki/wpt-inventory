@@ -21,6 +21,7 @@ const metadata = z.object({
   description: z.string().trim().max(600).default(''),
   customer: z.string().trim().max(120).default(''),
   width: z.string().trim().max(40).default(''),
+  depth: z.string().trim().max(40).default(''),
   height: z.string().trim().max(40).default(''),
   finish: z.string().trim().max(60).default(''),
   note: z.string().trim().max(1200).default(''),
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS customer_preview_models (
 CREATE INDEX IF NOT EXISTS customer_preview_models_preview ON customer_preview_models(preview_id,position);`);
 if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='deleted_at')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN deleted_at INTEGER');
 if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='merge_request')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN merge_request TEXT');
+if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='depth')) sqlite.exec("ALTER TABLE customer_previews ADD COLUMN depth TEXT NOT NULL DEFAULT ''");
 const modelColumns=new Set((sqlite.pragma('table_info(customer_preview_models)') as {name:string}[]).map(c=>c.name));
 for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB']]){
   if(!modelColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_models ADD COLUMN ${name} ${definition}`);
@@ -97,7 +99,7 @@ function modelList(id: number) {
   return sqlite.prepare('SELECT id,label,size,revision,previous_bytes IS NOT NULL AS canRestore FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number;revision:number;canRestore:number}[];
 }
 function view(p: Preview) {
-  return { id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width, height:p.height,
+  return { id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width,depth:p.depth, height:p.height,
     finish:p.finish, note:p.note, published:!!p.published, version:p.version, createdAt:p.created_at, updatedAt:p.updated_at,
     url:`https://www.cjmmetals.com/preview/${p.token}`, options:modelList(p.id),
     feedback:sqlite.prepare(`SELECT f.id,f.kind,f.option_id AS optionId,f.design_version AS designVersion,f.option_label AS optionLabel,f.message,f.created_at AS createdAt,
@@ -147,8 +149,8 @@ export function seedCustomerPreview(): void {
   });
   sqlite.transaction(() => {
     const now=Date.now();
-    const result=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,height,finish,note,published,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?)')
-      .run(seed.token,values.title,values.description,values.customer,values.width,values.height,values.finish,values.note,'kalkat-2026-09',now,now);
+    const result=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,depth,height,finish,note,published,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?)')
+      .run(seed.token,values.title,values.description,values.customer,values.width,values.depth,values.height,values.finish,values.note,'kalkat-2026-09',now,now);
     for (const m of models) insertModel(Number(result.lastInsertRowid),m.label,m.bytes);
   })();
 }
@@ -164,7 +166,7 @@ export function registerCustomerPreviews(app: Express): void {
   };
   app.get('/api/public/customer-previews/:token',(req,res) => {
     const p=readShared(req,res);if(!p)return;
-    res.json({title:p.title,description:p.description,width:p.width,height:p.height,finish:p.finish,note:p.note,version:p.version,options:modelList(p.id)});
+    res.json({title:p.title,description:p.description,width:p.width,depth:p.depth,height:p.height,finish:p.finish,note:p.note,version:p.version,options:modelList(p.id)});
   });
   app.get('/api/public/customer-previews/:token/models/:modelId',(req,res) => {
     const p=readShared(req,res);if(!p)return;
@@ -219,8 +221,8 @@ export function registerCustomerPreviews(app: Express): void {
   app.post('/api/customer-previews',requireElevated,(req,res) => {
     const parsed=metadata.safeParse(req.body);if(!parsed.success){res.status(400).json({message:'Enter a project title and keep the description and notes within the allowed lengths.'});return;}
     const p=parsed.data,now=Date.now();
-    const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,height,finish,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-      .run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.height,p.finish,p.note,now,now);
+    const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,depth,height,finish,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+      .run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.depth,p.height,p.finish,p.note,now,now);
     const id=Number(r.lastInsertRowid);audit(req,'preview.created',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
   });
   app.post('/api/customer-previews/merge',requireElevated,(req,res)=>{
@@ -274,7 +276,7 @@ export function registerCustomerPreviews(app: Express): void {
       try{
         validatePreviewGlb(req.file.buffer);const p=parsed.data,now=Date.now();
         const id=sqlite.transaction(()=>{
-          const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,height,finish,note,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.height,p.finish,p.note,source,now,now);
+          const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,depth,height,finish,note,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.depth,p.height,p.finish,p.note,source,now,now);
           const id=Number(r.lastInsertRowid);insertModel(id,'Design from quote',req.file!.buffer);return id;
         })();
         audit(req,'preview.created_from_quote_model',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
@@ -290,8 +292,8 @@ export function registerCustomerPreviews(app: Express): void {
     const p=record(req,res);if(!p||!current(req,res,p))return;
     const parsed=metadata.safeParse(req.body);if(!parsed.success){res.status(400).json({message:'Enter a project title and keep the description and notes within the allowed lengths.'});return;}
     const v=parsed.data;
-    sqlite.prepare('UPDATE customer_previews SET title=?,description=?,customer=?,width=?,height=?,finish=?,note=?,version=version+1,updated_at=? WHERE id=?')
-      .run(v.title,v.description,v.customer,v.width,v.height,v.finish,v.note,Date.now(),p.id);
+    sqlite.prepare('UPDATE customer_previews SET title=?,description=?,customer=?,width=?,depth=?,height=?,finish=?,note=?,version=version+1,updated_at=? WHERE id=?')
+      .run(v.title,v.description,v.customer,v.width,v.depth,v.height,v.finish,v.note,Date.now(),p.id);
     audit(req,'preview.updated',{targetType:'customer_preview',targetId:p.id,targetName:v.title});res.json(view(getPreview(p.id)!));
   });
   app.post('/api/customer-previews/:id/sharing',requireElevated,(req,res) => {
