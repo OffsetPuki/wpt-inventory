@@ -1,3 +1,4 @@
+import BusinessReportSummary from "@/components/BusinessReportSummary";
 import {PencilRuler,Users,FolderKanban,Box,Timer,ArrowUpRight} from 'lucide-react';
 import { LeadQueue } from '@/components/LeadIntake';
 import { TimeReview } from "./suite-reviews";
@@ -38,6 +39,7 @@ export default function TodayPage() {
             : "Your work, materials and messages."
         }
       />
+      {isElevated && <BusinessReportSummary />}
       <section aria-label="Quick access" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {[
           {icon:PencilRuler,href:'/crm/quotes',label:'Quotes',detail:'Design, price and send'},
