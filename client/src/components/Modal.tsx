@@ -100,7 +100,7 @@ export default function Modal({
         onChangeCapture={() => {
           dirty.current = true;
         }}
-        className={`relative flex max-h-[calc(100dvh-2rem)] w-full ${maxWidth} animate-in flex-col fade-in zoom-in-95 rounded-2xl border border-border bg-card shadow-2xl`}
+        className={`suite-modal relative flex max-h-[calc(100dvh-2rem)] w-full ${maxWidth} animate-in flex-col fade-in zoom-in-95 rounded-2xl border border-border bg-card shadow-2xl`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
           <h2 id={titleId} className="text-lg font-semibold text-foreground">

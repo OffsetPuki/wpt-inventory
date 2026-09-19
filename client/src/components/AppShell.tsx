@@ -63,6 +63,7 @@ interface NavEntry {
   icon: typeof Search;
   // "elevated" = owner only. Undefined = visible to everyone signed in.
   needs?: "elevated";
+  section?: string;
 }
 
 interface NavGroup {
@@ -70,6 +71,7 @@ interface NavGroup {
   label: string;
   needs?: "elevated";
   entries: NavEntry[];
+  alwaysOpen?: boolean;
 }
 
 // The suite is organized by business function. Entry-level visibility mirrors
@@ -150,15 +152,23 @@ const ALL_NAV_GROUPS: NavGroup[] = [
 ];
 
 const NAV_GROUPS: NavGroup[] = [
-  {...ALL_NAV_GROUPS[0], entries: ALL_NAV_GROUPS[0].entries.filter(e=>!['/crm/quotes','/crm/previews'].includes(e.to))},
-  {key:'quotes',label:'Quotes & previews',entries:ALL_NAV_GROUPS[0].entries.filter(e=>['/crm/quotes','/crm/previews'].includes(e.to))},
-  ALL_NAV_GROUPS[1], ALL_NAV_GROUPS[3],
-  {key:'more',label:'More tools',entries:[
-    ...ALL_NAV_GROUPS[2].entries.map(e=>({...e,label:`Inventory · ${e.label}`})),
-    {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated'},
-    {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated'},
-    ...ALL_NAV_GROUPS.slice(4).flatMap(g=>g.entries.map(e=>({...e,needs:e.needs||g.needs})))
-  ]}
+  { key: 'sales', label: 'Customers & sales', alwaysOpen: true, entries: [
+    {...ALL_NAV_GROUPS[0].entries[1], label: 'Customers'},
+    ALL_NAV_GROUPS[0].entries[0],
+    ...ALL_NAV_GROUPS[0].entries.slice(2,4),
+  ]},
+  { key: 'projects', label: 'Work', alwaysOpen: true, entries: ALL_NAV_GROUPS[1].entries.slice(0,3) },
+  ALL_NAV_GROUPS[3],
+  { key: 'more', label: 'More', entries: [
+    ...ALL_NAV_GROUPS[1].entries.slice(3).map(e=>({...e,section:'Work tools'})),
+    ...ALL_NAV_GROUPS[2].entries.map(e=>({...e,section:'Inventory',label:e.to==='/home'?'Inventory':e.label})),
+    ...ALL_NAV_GROUPS[4].entries.map(e=>({...e,section:'Team'})),
+    {to:'/crm',label:'Sales reports',icon:BarChart3,section:'Business'},
+    {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated',section:'Business'},
+    ...ALL_NAV_GROUPS[5].entries.map(e=>({...e,needs:ALL_NAV_GROUPS[5].needs,section:'Business'})),
+    {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated',section:'Administration'},
+    ...ALL_NAV_GROUPS[6].entries.map(e=>({...e,section:'Administration'})),
+  ]},
 ];
 function groupForLocation(location: string): string | null {
   const path=location.split('?')[0];
@@ -170,11 +180,10 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const { isElevated } = useAuth();
   const [location] = useLocation();
   const [filter,setFilter]=useState('');
-  // Only the group for the screen you're on starts open — keeps the sidebar
-  // short and scannable. Opening another section closes the previous one.
+  // Daily destinations stay visible. Secondary groups open when needed.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const active = groupForLocation(location);
-    return active ? { [active]: true } : { crm: true };
+    return active ? { [active]: true } : {};
   });
 
   // Navigating into a group (e.g. via a cross-link) opens it.
@@ -190,24 +199,25 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     cn(
       "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
       active
-        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+        ? "suite-nav-active bg-sidebar-primary text-sidebar-primary-foreground"
         : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     );
 
   return (
-    <nav aria-label="Main navigation" className="flex flex-col gap-0.5 px-3">
+    <nav aria-label="Main navigation" className="suite-nav flex flex-col gap-0.5 px-3">
       <label className="mb-3 block"><span className="sr-only">Find a page</span><input type="search" value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Find a page…" className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"/></label>
-      <Link href="/today" onClick={onNavigate} className={linkCls(location === '/today')}><LayoutDashboard className="h-[18px] w-[18px]"/><span>Today</span></Link>
+      <Link href="/today" aria-current={location==='/today'?'page':undefined} onClick={onNavigate} className={linkCls(location === '/today')}><LayoutDashboard className="h-[18px] w-[18px]"/><span>Today</span></Link>
 
       {NAV_GROUPS.map((g) => {
         if (!canSee(g.needs)) return null;
-        const entries = g.entries.filter(e => canSee(e.needs) && `${g.label} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase()));
+        const entries = g.entries.filter(e => canSee(e.needs) && `${g.label} ${e.section || ""} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase()));
         if (entries.length === 0) return null;
-        const isOpen = !!filter.trim() || !!open[g.key];
+        const isOpen = !!g.alwaysOpen || !!filter.trim() || !!open[g.key];
         const containsActive = groupForLocation(location) === g.key;
         return (
           <div key={g.key} className="mt-1.5">
-            <button
+            {g.alwaysOpen ? <p className="suite-nav-heading px-3 pt-3 pb-2 text-xs font-medium text-muted-foreground">{g.label}</p> : <button
+              aria-controls={`nav-${onNavigate ? 'mobile' : 'desktop'}-${g.key}`}
               aria-expanded={isOpen}
               onClick={() => setOpen(() => isOpen ? {} : { [g.key]: true })}
               className={cn(
@@ -221,10 +231,10 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
               <ChevronDown
                 className={cn("h-3.5 w-3.5 transition-transform", !isOpen && "-rotate-90")}
               />
-            </button>
+            </button>}
             {isOpen && (
-              <div className="flex flex-col gap-0.5">
-                {entries.map((e) => {
+              <div id={`nav-${onNavigate ? 'mobile' : 'desktop'}-${g.key}`} className="flex flex-col gap-0.5">
+                {entries.map((e,index) => {
                   // Exact match only — group routes share prefixes (/crm is a
                   // prefix of /crm/leads), so prefix matching would light up
                   // two entries at once. Detail pages (/project/:id …) use
@@ -232,10 +242,13 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                   const active = location.split('?')[0] === e.to || e.to==='/projects'&&location.startsWith('/project/');
                   const Icon = e.icon;
                   return (
-                    <Link key={e.to} aria-current={active?'page':undefined} href={e.to} onClick={onNavigate} className={linkCls(active)}>
+                    <div key={e.to}>
+                    {e.section && entries[index-1]?.section !== e.section && <p className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">{e.section}</p>}
+                    <Link aria-current={active?'page':undefined} href={e.to} onClick={onNavigate} className={linkCls(active)}>
                       <Icon className="h-[18px] w-[18px] shrink-0" />
                       <span>{e.label}</span>
                     </Link>
+                    </div>
                   );
                 })}
               </div>
@@ -243,7 +256,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         );
       })}
-      {filter.trim()&&!NAV_GROUPS.some(g=>canSee(g.needs)&&g.entries.some(e=>canSee(e.needs)&&`${g.label} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase())))&&<p className="px-3 py-4 text-sm text-muted-foreground">No matching pages. Try another name.</p>}
+      {filter.trim()&&!NAV_GROUPS.some(g=>canSee(g.needs)&&g.entries.some(e=>canSee(e.needs)&&`${g.label} ${e.section || ""} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase())))&&<p className="px-3 py-4 text-sm text-muted-foreground">No matching pages. Try another name.</p>}
     </nav>
   );
 }
@@ -324,7 +337,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="suite-shell flex min-h-screen bg-background"><a href="#suite-main" onClick={e=>{e.preventDefault();document.getElementById('suite-main')?.focus();}} className="suite-skip">Skip to content</a>
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:flex lg:h-screen">
+      <aside className="suite-sidebar hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:flex lg:h-screen">
         <div className="flex items-center px-5 py-5">
           <Logo size="md" />
         </div>
@@ -369,7 +382,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             what scrolls here, not <main>: without it the bar (and the results
             panel pinned under it) would scroll away mid-search. z-40 keeps it
             under the drawer and dialogs, which are z-50. */}
-        <header className="sticky top-0 z-40 flex items-center gap-2 border-b border-border bg-sidebar px-3 py-3 lg:hidden">
+        <header className="suite-toolbar sticky top-0 z-40 flex items-center gap-2 border-b border-border bg-sidebar px-3 py-3 lg:hidden">
           <button
             onClick={() => setMobileOpen(true)}
             className="shrink-0 rounded-lg p-2 text-foreground hover:bg-accent"
@@ -389,7 +402,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
 
         {/* Desktop topbar — global search + theme + who's signed in */}
-        <header className="hidden h-16 items-center gap-4 border-b border-border bg-sidebar px-6 lg:flex">
+        <header className="suite-toolbar hidden h-16 items-center gap-4 border-b border-border bg-sidebar px-6 lg:flex">
           <SearchBar />
           <div className="ml-auto flex items-center gap-3">
             <ThemeToggle />
@@ -398,7 +411,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <SuiteBar />
-        <main id="suite-main" tabIndex={-1} ref={scrollRef} className="suite-content page-enter flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main id="suite-main" tabIndex={-1} ref={scrollRef} className="suite-content page-enter flex-1 overflow-y-auto p-5 sm:p-7 lg:p-10">
           {children}
         </main>
       </div>

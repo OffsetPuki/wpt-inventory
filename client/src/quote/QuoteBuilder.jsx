@@ -738,9 +738,9 @@ export default function QuoteBuilder({ initialSettings }) {
               {draft.error && draft.status !== 'Offline' && <small>{draft.error.message}</small>}
               {['Not saved', 'Offline'].includes(draft.status) && draft.error?.status !== 404 && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
             </div>
-            {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}>{saveBusy?'Saving quote…':'Save Quote'}</button>}
+            {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn ghost" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}>{saveBusy?'Saving quote…':'Save Quote'}</button>}
             {activeView === "configure" && <button className="btn" onClick={()=>{setView("price");window.scrollTo({top:0});}}>Next: price →</button>}
-            {["configure","price"].includes(activeView) ? <button className="btn" disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
+            {["configure","price"].includes(activeView) ? <button className={activeView === "configure" ? "btn ghost" : "btn"} disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
               : <div id="quote-send-actions" />}
           </div>
         )}

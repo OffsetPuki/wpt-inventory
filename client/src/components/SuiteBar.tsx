@@ -21,7 +21,7 @@ export default function SuiteBar() {
     successTitle: "Work time recorded",
   });
   return (
-    <div className="flex min-h-12 flex-wrap items-center gap-3 border-b border-border bg-card/50 px-4 py-2 text-sm">
+    <div className="suite-statusbar flex min-h-12 flex-wrap items-center gap-3 border-b border-border bg-card/50 px-4 py-2 text-sm">
       <Link className="rounded-lg px-2 py-1.5 font-medium hover:bg-accent" href="/today?inbox=1">
         Inbox
         {inbox.data?.some((n) => !n.read_at)
@@ -53,7 +53,7 @@ export default function SuiteBar() {
         </>
       )}
       <span className="ml-auto text-xs text-muted-foreground" role="status">
-        {connected ? "Live updates" : "Reconnecting updates…"}
+        <span className={connected?"suite-sync-dot":"suite-sync-dot disconnected"} aria-hidden="true" />{connected ? "Up to date" : "Reconnecting…"}
       </span>
     </div>
   );

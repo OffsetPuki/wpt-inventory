@@ -1,3 +1,4 @@
+import { applySuiteAccent } from "@/lib/theme-accent";
 import {
   createContext,
   useContext,
@@ -52,25 +53,7 @@ export default function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!settings) return;
-    const root = document.documentElement;
-    const { accentHue: h, accentSat: s, accentLight: l } = settings;
-    const dark = theme === "dark";
-    // Near-black brand accents (CJM ink) invert to cream on the navy dark
-    // theme — ink-on-cream by day, cream-on-ink by night, like the website.
-    // Colorful accents instead get a lightness lift so they stay vibrant.
-    const invert = dark && l < 20;
-    const accent = invert
-      ? "40 30% 92%"
-      : `${h} ${s}% ${dark ? Math.min(l + 12, 62) : l}%`;
-    const accentFg = invert ? "0 0% 8%" : l < 20 && !dark ? "40 30% 96%" : "0 0% 100%";
-    // --accent deliberately NOT overridden: it's the neutral hover/selection
-    // wash, and tinting it with the brand color made every hover state shout.
-    for (const v of ["--primary", "--ring", "--sidebar-primary", "--sidebar-ring", "--chart-1"]) {
-      root.style.setProperty(v, accent);
-    }
-    for (const v of ["--primary-foreground", "--sidebar-primary-foreground"]) {
-      root.style.setProperty(v, accentFg);
-    }
+    applySuiteAccent(settings.accentHue, settings.accentSat, settings.accentLight, theme === "dark");
   }, [settings, theme]);
 
   const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));

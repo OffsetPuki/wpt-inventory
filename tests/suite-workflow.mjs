@@ -43,7 +43,7 @@ export async function suiteWorkflow(page, browser, app, expect) {
   await expect(
     page.getByRole("heading", { name: "Connected mobile job", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Live updates", { exact: true })).toBeVisible();
+  await expect(page.getByText("Up to date", { exact: true })).toBeVisible();
   const evidenceDir = path.resolve("../_audit/2026-09-10/evidence");
   fs.mkdirSync(evidenceDir, { recursive: true });
   fs.writeFileSync(
@@ -94,7 +94,7 @@ export async function suiteWorkflow(page, browser, app, expect) {
   try {
     await second.goto(app.base + `/#/project/${job.id}?tab=work`);
     await expect(
-      second.getByText("Live updates", { exact: true }),
+      second.getByText("Up to date", { exact: true }),
     ).toBeVisible();
     await api(`/api/pm/tasks/${task.id}`, "PATCH", {
       title: "Crew task updated on another screen",

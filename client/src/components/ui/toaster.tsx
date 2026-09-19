@@ -14,15 +14,16 @@ export function Toaster() {
   const { toasts } = useToast();
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-full max-w-sm flex-col gap-2">
+    <div className="suite-toasts pointer-events-none fixed right-4 top-20 z-[100] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 sm:bottom-5 sm:top-auto">
       {toasts.map((t) => {
         const variant = VARIANT[t.variant ?? "default"];
         const Icon = variant.icon;
         return (
           <div
             key={t.id}
+            role={t.variant === "destructive" ? "alert" : "status"}
             className={cn(
-              "pointer-events-auto flex items-start gap-3 rounded-lg border bg-popover p-4 shadow-xl animate-in fade-in slide-in-from-bottom-2",
+              "pointer-events-auto flex items-start gap-3 rounded-2xl border bg-popover p-4 shadow-xl animate-in fade-in slide-in-from-bottom-2",
               variant.ring
             )}
           >
@@ -46,7 +47,7 @@ export function Toaster() {
             </div>
             <button
               onClick={() => dismissToast(t.id)}
-              className="text-muted-foreground transition-colors hover:text-foreground"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               aria-label="Dismiss"
             >
               <X className="h-4 w-4" />

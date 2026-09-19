@@ -10,7 +10,7 @@ export default function Header({ title, description, children }: HeaderProps) {
   return (
     <div className="suite-page-header mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+        <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">
           {title}
         </h1>
         {description && (

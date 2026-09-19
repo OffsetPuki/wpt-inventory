@@ -2,7 +2,7 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   darkMode: ["class"],
-  content: ["./client/src/**/*.{ts,tsx}", "./client/index.html"],
+  content: ["./client/src/**/*.{js,jsx,ts,tsx}", "./client/index.html"],
   theme: {
     extend: {
       colors: {
@@ -68,7 +68,7 @@ const config: Config = {
         "2xl": "calc(var(--radius) + 0.5rem)",
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
+        sans: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
       },
       keyframes: {
         "fade-in": {

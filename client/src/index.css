@@ -3,85 +3,41 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    /* CJM Metals brand: warm cream page (site's #F5F2EC family), white cards
-       with big radii, ink-black accent ("Custom metalwork. No shortcuts.").
-       Accent stays owner-tunable via Settings → Branding. The dark toggle
-       switches to the deep-navy vibrant palette below, where a near-black
-       accent inverts to cream (ThemeProvider). */
-    --radius: 0.75rem;
-    /* Light theme (default) */
-    --background: 40 30% 95%;
-    --foreground: 0 0% 5%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 5%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 5%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 40 30% 96%;
-    --secondary: 40 24% 92%;
-    --secondary-foreground: 0 0% 15%;
-    --muted: 40 24% 92%;
-    --muted-foreground: 40 3% 32%;
-    --accent: 40 24% 91%;
-    --accent-foreground: 0 0% 15%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 40 22% 87%;
-    --input: 40 20% 84%;
-    --ring: 0 0% 9%;
-    --chart-1: 0 0% 9%;
-    --chart-2: 173 45% 38%;
-    --chart-3: 217 60% 50%;
-    --chart-4: 38 85% 50%;
-    --chart-5: 0 55% 50%;
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 28%;
-    --sidebar-primary: 0 0% 9%;
-    --sidebar-primary-foreground: 40 30% 96%;
-    --sidebar-accent: 40 24% 92%;
-    --sidebar-accent-foreground: 0 0% 15%;
-    --sidebar-border: 40 22% 89%;
-    --sidebar-ring: 0 0% 9%;
-  }
-
-  .dark {
-    /* Dark theme — deep navy with vibrant accents (the "CRM dashboard"
-       reference look). Charts get saturated cyan/purple/pink so they glow
-       against the navy. */
-    --background: 232 26% 8%;
-    --foreground: 220 20% 92%;
-    --card: 231 22% 12%;
-    --card-foreground: 220 20% 92%;
-    --popover: 231 24% 10%;
-    --popover-foreground: 220 20% 92%;
-    --primary: 142 70% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 231 18% 17%;
-    --secondary-foreground: 220 16% 88%;
-    --muted: 231 18% 16%;
-    --muted-foreground: 226 14% 62%;
-    --accent: 231 18% 17%;
-    --accent-foreground: 220 16% 88%;
-    --destructive: 0 72% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 230 16% 20%;
-    --input: 230 16% 20%;
-    --ring: 142 70% 45%;
-    --chart-1: 142 70% 45%;
-    --chart-2: 190 95% 55%;
-    --chart-3: 265 85% 68%;
-    --chart-4: 320 85% 62%;
-    --chart-5: 45 95% 58%;
-    --sidebar-background: 232 28% 6.5%;
-    --sidebar-foreground: 222 16% 72%;
-    --sidebar-primary: 142 70% 45%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 231 20% 14%;
-    --sidebar-accent-foreground: 220 16% 88%;
-    --sidebar-border: 230 18% 15%;
-    --sidebar-ring: 142 70% 45%;
-  }
+ :root {
+  color-scheme:light;
+  --radius:.625rem;
+  --background:240 11% 97%; --foreground:240 6% 12%;
+  --card:0 0% 100%; --card-foreground:240 6% 12%;
+  --popover:0 0% 100%; --popover-foreground:240 6% 12%;
+  --primary:211 100% 43%; --primary-foreground:0 0% 100%;
+  --secondary:240 6% 94%; --secondary-foreground:240 6% 20%;
+  --muted:240 6% 94%; --muted-foreground:240 3% 43%;
+  --accent:240 6% 92%; --accent-foreground:240 6% 16%;
+  --destructive:3 75% 45%; --destructive-foreground:0 0% 100%;
+  --border:240 6% 89%; --input:240 5% 82%; --ring:211 100% 43%;
+  --chart-1:211 100% 43%; --chart-2:165 50% 35%; --chart-3:265 50% 55%; --chart-4:35 85% 45%; --chart-5:3 70% 50%;
+  --sidebar-background:240 7% 95%; --sidebar-foreground:240 5% 30%;
+  --sidebar-primary:211 100% 43%; --sidebar-primary-foreground:0 0% 100%;
+  --sidebar-accent:240 5% 89%; --sidebar-accent-foreground:240 6% 12%;
+  --sidebar-border:240 5% 87%; --sidebar-ring:211 100% 43%;
+ }
+ .dark {
+  color-scheme:dark;
+  --background:240 4% 8%; --foreground:240 7% 94%;
+  --card:240 4% 12%; --card-foreground:240 7% 94%;
+  --popover:240 4% 15%; --popover-foreground:240 7% 94%;
+  --primary:211 100% 65%; --primary-foreground:240 6% 10%;
+  --secondary:240 4% 18%; --secondary-foreground:240 7% 94%;
+  --muted:240 4% 18%; --muted-foreground:240 4% 67%;
+  --accent:240 4% 22%; --accent-foreground:240 7% 94%;
+  --destructive:3 90% 68%; --destructive-foreground:0 0% 8%;
+  --border:240 4% 23%; --input:240 4% 32%; --ring:211 100% 65%;
+  --chart-1:211 100% 65%; --chart-2:165 50% 55%; --chart-3:265 65% 70%; --chart-4:35 85% 60%; --chart-5:3 85% 68%;
+  --sidebar-background:240 4% 10%; --sidebar-foreground:240 6% 80%;
+  --sidebar-primary:211 100% 65%; --sidebar-primary-foreground:240 6% 10%;
+  --sidebar-accent:240 4% 20%; --sidebar-accent-foreground:240 7% 94%;
+  --sidebar-border:240 4% 23%; --sidebar-ring:211 100% 65%;
+ }
 }
 
 @layer base {
@@ -244,3 +200,46 @@ html {
 .suite-form :is(input,select,textarea) {scroll-margin-block:80px;}
 @media(max-width:640px){.suite-page-actions{width:100%;}.suite-page-actions>button,.suite-page-actions>a{flex:1 1 auto;min-height:44px;}.suite-form :is(input,select,textarea){font-size:16px;}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}.page-enter{animation:none;}.suite-shell *{transition-duration:0.01ms!important;}}
+
+/* Calm application surfaces; customer documents keep their own print styles. */
+@media screen {
+ body {font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.012em;}
+ .suite-content > * {max-width:1320px;}
+ .suite-toolbar {background:hsl(var(--card)/.92);backdrop-filter:blur(16px);border-color:hsl(var(--border)/.7);}
+ .suite-sidebar {width:240px;}
+ .suite-nav {padding-inline:12px;}
+ .suite-nav a {font-size:14px;min-height:42px;border-radius:10px;}
+ .suite-nav-active {box-shadow:0 2px 5px hsl(var(--primary)/.15);}
+ .suite-nav>div>button {font-size:12px;letter-spacing:0;color:hsl(var(--muted-foreground));}
+ .suite-nav input {background:hsl(var(--card)/.6);border-color:transparent;border-radius:10px;}
+ .suite-nav input:focus {background:hsl(var(--card));border-color:hsl(var(--ring));}
+ .suite-statusbar {min-height:38px;font-size:12px;background:transparent;border-color:hsl(var(--border)/.65);}
+ .suite-sync-dot {display:inline-block;width:6px;height:6px;border-radius:50%;background:#238449;margin:0 7px 1px 0;}
+ .suite-sync-dot.disconnected {background:#b77308;}
+ .suite-page-header {padding-block:4px 10px;}
+ .suite-page-header h1 {font-size:clamp(28px,3vw,36px);font-weight:650;letter-spacing:-.04em;line-height:1.15;}
+ .suite-page-header p {font-size:14px;line-height:1.5;}
+ .suite-content :where(.bg-card) {box-shadow:0 2px 8px rgb(0 0 0 / .025);}
+ .suite-content :where(table):not(.qa table) {font-variant-numeric:tabular-nums;}
+ .suite-content :where(th):not(.qa th) {background:hsl(var(--muted)/.6);font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;padding-block:13px;}
+ .suite-content :where(td):not(.qa td) {padding-block:14px;}
+ .suite-content :where(tbody tr):not(.qa tr) {transition:background-color 120ms;}
+ .suite-content :where(tbody tr:hover):not(.qa tr) {background:hsl(var(--muted)/.4);}
+ .suite-content input:not([type=checkbox]):not([type=radio]):not([type=range]):not(.qa input),.suite-content select:not(.qa select),.suite-form input:not([type=checkbox]):not([type=radio]):not([type=range]),.suite-form select {border-radius:10px;}
+ .suite-content input:focus-visible,.suite-form input:focus-visible,.suite-form select:focus-visible,.suite-form textarea:focus-visible {outline-offset:1px;}
+ .suite-modal {border-radius:20px;box-shadow:0 24px 90px rgb(0 0 0 / .2);}
+ .suite-modal>div:first-child {border-bottom-color:hsl(var(--border)/.7);padding:18px 24px;}
+ .suite-form {padding:24px;}
+ .suite-form label {font-size:14px;font-weight:500;}
+ .suite-form input,.suite-form textarea,.suite-form select {font-weight:400;}
+ .suite-date {font-size:12px;font-weight:500;color:hsl(var(--muted-foreground));margin-bottom:-16px!important;}
+ .suite-shortcut {border-color:hsl(var(--border)/.65);box-shadow:0 3px 14px rgb(0 0 0 / .035);border-radius:18px;transition:box-shadow 150ms,border-color 150ms;}
+ .suite-shortcut:hover {box-shadow:0 5px 18px rgb(0 0 0 / .07);border-color:hsl(var(--primary)/.35);}
+ .suite-shortcut-icon {display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;color:hsl(var(--primary));}
+ .suite-shortcut-arrow {color:hsl(var(--muted-foreground));}
+ .suite-shortcut>span {font-size:16px;letter-spacing:-.02em;}
+ .suite-shortcut p {font-size:13px;line-height:1.5;margin-top:6px;}
+ .suite-today>section:not([aria-label]) {border-color:hsl(var(--border)/.7);}
+ .suite-toasts {padding-bottom:env(safe-area-inset-bottom);}
+ @media(max-width:640px){.suite-page-header{margin-bottom:20px;}.suite-content{padding:24px 16px;}.suite-shortcut{padding:18px;}.suite-shortcut-icon{margin-bottom:18px;}.suite-form{padding:20px;}.suite-modal{border-radius:22px;}}
+}

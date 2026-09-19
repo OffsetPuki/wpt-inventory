@@ -1,10 +1,10 @@
 /* =============================================================================
    Quote builder styles — ported from the standalone CJM Quote app.
-   Cream/ink/steel, Fraunces + Inter, flat and sharp (no rounded corners),
-   thin rules, uppercase tracked labels.
+   Shared screen styles at the end connect the workbench to the suite theme.
+   Printable documents retain their separate paper styling.
 
    Every rule is scoped under .qa so nothing leaks into (or in from) the
-   suite's Tailwind styling. Fraunces/Inter load from client/index.html.
+   suite's Tailwind styling. Fraunces loads for printable documents.
    ========================================================================== */
 
 .qa {
@@ -960,6 +960,79 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .quote-price-summary strong { flex-shrink:0; }
 @media(max-width:600px) { .qa .quote-steps {gap:4px;} .qa .quote-steps button {font-size:12px;} .qa .quote-actionbar .hint {font-size:11px;} }
 .qa .quote-tool-row {display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding-block:12px;}
-.qa .quote-tool-row>span {font-size:12px;color:var(--muted);margin-right:2px;}
+.qa .quote-tool-row>span {font-size:12px;color:var(--steel);margin-right:2px;}
 .qa .quote-tool-row .btn {min-height:44px;padding:10px 16px;}
 .qa .quote-tool-row .btn[aria-pressed="true"] {background:#233940;color:#fff;border-color:#233940;}
+
+/* Suite workbench uses the same visual language as the rest of the app. */
+@media screen {
+ body.qa-page main {background:hsl(var(--background));}
+ .qa {--ink:hsl(var(--foreground));--cream:hsl(var(--background));--cream-dark:hsl(var(--muted));--steel:hsl(var(--muted-foreground));--line:hsl(var(--border));--line-strong:hsl(var(--input));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+ .qa .display,.qa .line-cost,.qa .totals-row.grand .v,.qa .sq-number,.qa .lead-ref {font-family:inherit;font-weight:600;letter-spacing:-.035em;line-height:1.12;}
+ .qa .print-view {--ink:#0a0a0a;--steel:#6b6b68;--line:rgba(10,10,10,.12);--line-strong:rgba(10,10,10,.22);--cream:#f5f2ec;--cream-dark:#ebe6dc;color:var(--ink);color-scheme:light;}
+ .qa .page-head h1 {font-size:clamp(28px,3.2vw,38px);margin-top:10px;}
+ .qa .page {padding-top:32px;}
+ .qa .page-head {margin-bottom:28px;}
+ .qa .topbar {background:hsl(var(--background)/.94);border-bottom-color:var(--line);padding:14px 28px;backdrop-filter:blur(12px);}
+ .qa .topnav {gap:6px;}
+ .qa .topnav button {font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;min-height:36px;padding:8px 16px;border-radius:9px;opacity:1;color:var(--steel);}
+ .qa .topnav button.active {background:hsl(var(--card));color:var(--ink);box-shadow:0 1px 5px rgb(0 0 0 / .08);}
+ .qa .topnav button.active::after {display:none;}
+ .qa .btn {border-radius:10px;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;min-height:42px;padding:11px 18px;background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-color:transparent;transition:filter 120ms,background 120ms;}
+ .qa .btn:hover {background:hsl(var(--primary));filter:brightness(.94);}
+ .qa .btn.ghost {background:hsl(var(--card));border-color:var(--line);color:var(--ink);}
+ .qa .btn.ghost:hover {background:var(--cream-dark);filter:none;}
+ .qa .btn:disabled {opacity:.45;cursor:not-allowed;}
+ .qa .back-link,.qa .type-card .go,.qa .ctrl-legend .lbl,.qa .eyebrow,.qa .section-title,.qa .estimate-reset,.qa .mt-field label,.qa .line-field label {text-transform:none;letter-spacing:0;font-size:12px;}
+ .qa .field>span {font-size:13px;letter-spacing:0;font-weight:500;}
+ .qa .field input,.qa .field select,.qa .field textarea,.qa .num,.qa .num-measure,.qa .cell {background:hsl(var(--card));border:1px solid var(--line-strong);border-radius:9px;padding:10px 12px;}
+ .qa .quote-section,.qa .type-card,.qa .sq-card,.qa .draft-recovery {border-radius:16px;border-color:var(--line);background:hsl(var(--card));}
+ .qa .quote-home .type-card {padding:22px;border-color:var(--line);transition:border-color 140ms,box-shadow 140ms;}
+ .qa .quote-home .type-card:hover {border-color:hsl(var(--primary)/.4);box-shadow:0 3px 14px rgb(0 0 0 / .05);}
+ .qa .quote-home .type-card h2 {font-size:20px;}
+ .qa .type-card .go {color:hsl(var(--primary));}
+ .qa .quote-section>summary {font-weight:600;}
+ .qa .quote-control-grid .seg-opt span,.qa .seg-opt span {background:hsl(var(--card));font-size:12px;letter-spacing:0;text-transform:none;border-radius:9px;border-color:var(--line);min-height:44px;}
+ .qa .seg-opt input:checked+span {background:hsl(var(--primary)/.1);border-color:hsl(var(--primary));color:hsl(var(--primary));font-weight:600;}
+ .qa .swatch-chip,.qa .swatch-chip img {border-radius:9px;}
+ .qa .range::-webkit-slider-thumb {border-radius:50%;background:hsl(var(--primary));}
+ .qa .quote-steps {gap:8px;padding-block:16px;}
+ .qa .quote-steps button {border:0;border-radius:12px;padding:12px;background:hsl(var(--muted));color:var(--steel);font-size:13px;font-weight:500;}
+ .qa .quote-steps span {font-size:11px;}
+ .qa .quote-steps button[aria-current="step"] {background:hsl(var(--primary)/.1);color:hsl(var(--primary));box-shadow:inset 0 0 0 1px hsl(var(--primary)/.22);}
+ .qa .quote-actionbar {background:hsl(var(--card)/.95);backdrop-filter:blur(12px);box-shadow:0 -3px 18px rgb(0 0 0 / .035);border-color:var(--line);}
+ .qa .quote-actionbar .btn {letter-spacing:0;}
+ .qa .quote-tool-row {gap:8px;padding-block:10px;}
+ .qa .quote-tool-row .btn {border-radius:8px;min-height:36px;padding:8px 14px;font-size:12px;}
+ .qa .pricing-attention {border-radius:12px;background:hsl(38 85% 95%);color:#614000;}
+ .qa .customer-results {background:hsl(var(--card));border-radius:12px;box-shadow:0 8px 24px rgb(0 0 0 / .08);}
+ .qa .sq-status {font-size:11px;letter-spacing:0;text-transform:none;}
+ .qa .share-panel,.qa .customer-preview iframe {border-radius:14px;}
+ .qa .preview {border-radius:16px;background:hsl(var(--card));border:1px solid var(--line);}
+ .qa .quote-tool-row .btn[aria-pressed="true"] {background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-color:transparent;}
+ .qa .barndo {font-family:inherit;}
+ .qa .barndo button,.qa .barndo input,.qa .barndo select {border-radius:9px;background:hsl(var(--card));border-color:var(--line-strong);color:var(--ink);}
+ .qa .barndo button[aria-pressed=true] {background:hsl(var(--primary)/.12);color:hsl(var(--primary));border-color:hsl(var(--primary)/.5);}
+ .qa .barndo button:focus-visible,.qa .barndo input:focus-visible,.qa .barndo select:focus-visible {outline-color:hsl(var(--ring));}
+ .qa .barndo .bd-controls {color:var(--ink);}
+ .qa .bd-controls .bd-simple-panel {background:hsl(var(--card));border-color:var(--line);border-radius:16px;}
+ .qa .bd-controls :is(.bd-fields label,.bd-intro,.bd-scope,.bd-hint,.bd-optional p) {color:var(--steel);}
+ .qa .bd-controls .bd-count {background:hsl(var(--muted));color:var(--ink);}
+ .qa .bd-controls :is(.bd-details,.bd-optional) {border-color:var(--line);}
+ .qa .bd-controls h2 {font-size:22px;font-weight:600;letter-spacing:-.025em;}
+ .qa .bd-controls h3 {font-weight:600;}
+ .qa .barndo .bd-preview {border-radius:14px;}
+ .qa .barndo .bd-step-number {text-transform:none;letter-spacing:0;}
+ @media(min-width:1024px){.qa .quote-actionbar{left:240px;}}
+ @media(max-width:640px){.qa .container{padding-inline:16px;}.qa .topbar{padding:12px 16px;}.qa .quote-steps{gap:4px;}.qa .quote-steps button{padding:10px 7px;font-size:12px;}.qa .quote-home .type-card{padding:16px;}.qa .quote-home .type-card h2{font-size:18px;}.qa .quote-actionbar{padding-inline:16px;}}
+ @media(max-width:640px){
+  .qa .quote-actionbar {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+  .qa .quote-actionbar>div:first-child {grid-column:1/2;}
+  .qa .quote-actionbar .draft-status {grid-column:2/-1;text-align:right;}
+  .qa .quote-actionbar strong {font-size:1.3rem;}
+  .qa .quote-actionbar>.btn {padding:10px 6px;font-size:12px;}
+  .qa #quote-send-actions {grid-column:2/-1;}
+  .qa .quote-actionbar:not(:has(>button)) #quote-send-actions {grid-column:1/-1;}
+ }
+
+}

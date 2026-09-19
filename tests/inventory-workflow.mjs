@@ -179,7 +179,7 @@ export async function inventoryWorkflow(page, app, expect) {
   await page
     .getByRole("button", { name: "Save and add another", exact: true })
     .click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.locator("#suite-main").getByRole("alert")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
     "UI Photo protected",

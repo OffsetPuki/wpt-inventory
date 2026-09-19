@@ -1,3 +1,5 @@
+import { applySuiteAccent } from "@/lib/theme-accent";
+import { useTheme } from "@/components/ThemeProvider";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
@@ -11,32 +13,16 @@ import { DatabaseBackup, Loader2, Save, Upload } from "lucide-react";
 const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 
-function applyAccent(h: number, s: number, l: number) {
-  const root = document.documentElement;
-  // Mirrors ThemeProvider exactly (neutral --accent, dark-mode lift, and the
-  // ink↔cream inversion for near-black accents) so the live slider preview
-  // matches what actually gets applied after save.
-  const dark = root.classList.contains("dark");
-  const invert = dark && l < 20;
-  const accent = invert ? "40 30% 92%" : `${h} ${s}% ${dark ? Math.min(l + 12, 62) : l}%`;
-  const accentFg = invert ? "0 0% 8%" : l < 20 && !dark ? "40 30% 96%" : "0 0% 100%";
-  for (const v of ["--primary", "--ring", "--sidebar-primary", "--sidebar-ring", "--chart-1"]) {
-    root.style.setProperty(v, accent);
-  }
-  for (const v of ["--primary-foreground", "--sidebar-primary-foreground"]) {
-    root.style.setProperty(v, accentFg);
-  }
-}
-
 function BrandingTab() {
   const qc = useQueryClient();
+  const { theme } = useTheme();
   const logoRef = useRef<HTMLInputElement>(null);
   const [companyName, setCompanyName] = useState("");
   const [tagline, setTagline] = useState("");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [hue, setHue] = useState(24);
-  const [sat, setSat] = useState(90);
-  const [light, setLight] = useState(50);
+  const [hue, setHue] = useState(211);
+  const [sat, setSat] = useState(100);
+  const [light, setLight] = useState(43);
   const [uploading, setUploading] = useState(false);
 
   const { data: settings } = useQuery<Settings>({
@@ -50,14 +36,20 @@ function BrandingTab() {
     setCompanyName(settings.companyName);
     setTagline(settings.companyTagline ?? "");
     setLogoUrl(settings.logoUrl ?? null);
-    setHue(settings.accentHue);
-    setSat(settings.accentSat);
-    setLight(settings.accentLight);
+    const legacy = settings.accentHue === 0 && settings.accentSat === 0 && settings.accentLight === 9;
+    setHue(legacy ? 211 : settings.accentHue);
+    setSat(legacy ? 100 : settings.accentSat);
+    setLight(legacy ? 43 : settings.accentLight);
   }, [settings]);
 
   useEffect(() => {
-    applyAccent(hue, sat, light);
-  }, [hue, sat, light]);
+    if (settings) applySuiteAccent(hue, sat, light, theme === "dark");
+  }, [hue, sat, light, theme, settings]);
+
+  useEffect(() => () => {
+    const saved = qc.getQueryData<Settings>(["settings"]);
+    if (saved) applySuiteAccent(saved.accentHue, saved.accentSat, saved.accentLight);
+  }, [qc]);
 
   const saveMut = useMutation({
     mutationFn: async () =>

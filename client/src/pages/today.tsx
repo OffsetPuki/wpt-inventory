@@ -1,3 +1,4 @@
+import {PencilRuler,Users,FolderKanban,Box,Timer,ArrowUpRight} from 'lucide-react';
 import { LeadQueue } from '@/components/LeadIntake';
 import { TimeReview } from "./suite-reviews";
 import { useQuery } from "@tanstack/react-query";
@@ -27,7 +28,8 @@ export default function TodayPage() {
     errorTitle: "Could not update notification",
   });
   return (
-    <div className="space-y-6">
+    <div className="suite-today space-y-6">
+      <p className="suite-date">{new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</p>
       <Header
         title="Today"
         description={
@@ -38,11 +40,11 @@ export default function TodayPage() {
       />
       <section aria-label="Quick access" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {[
-          {href:'/crm/quotes',label:'Quotes',detail:'Design, price and send a quote'},
-          {href:'/crm/clients',label:'Customers',detail:'Contacts, history and documents'},
-          {href:'/projects',label:'Jobs',detail:'Plan work and follow progress'},
-          isElevated?{href:'/crm/previews',label:'Customer previews',detail:'Review designs and customer feedback'}:{href:'/pm/time',label:'My time',detail:'Track time spent on your work'}
-        ].map(item=><Link key={item.href} href={item.href} className="group rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary"><span className="flex items-center justify-between gap-3 font-semibold">{item.label}<span aria-hidden="true">→</span></span><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.detail}</p></Link>)}
+          {icon:PencilRuler,href:'/crm/quotes',label:'Quotes',detail:'Design, price and send'},
+          {icon:Users,href:'/crm/clients',label:'Customers',detail:'Contacts and history'},
+          {icon:FolderKanban,href:'/projects',label:'Jobs',detail:'Schedules and progress'},
+          isElevated?{icon:Box,href:'/crm/previews',label:'Customer previews',detail:'Designs and feedback'}:{icon:Timer,href:'/pm/time',label:'My time',detail:'Track time spent on your work'}
+        ].map(item=><Link key={item.href} href={item.href} className="suite-shortcut group rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary"><div className="suite-shortcut-icon"><item.icon size={21} strokeWidth={1.7}/><ArrowUpRight size={16} className="suite-shortcut-arrow" aria-hidden="true"/></div><span className="flex items-center justify-between gap-3 font-semibold">{item.label}</span><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.detail}</p></Link>)}
       </section>
       <div className="flex flex-wrap gap-2">
         <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/home">Inventory</Link>
