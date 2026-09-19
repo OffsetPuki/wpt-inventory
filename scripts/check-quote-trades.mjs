@@ -27,7 +27,7 @@ const noNaN = (items) => items.every((i) => Number.isFinite(lineCost(i)));
 // ── (a) Concrete — 30×20 ft, 4", broom driveway vs the site's $8–14/sq ft ────
 console.log('\nConcrete (30 × 20 ft driveway, 4" broom):');
 {
-  const s = defaultState('concrete'); // driveway, 30×20, 4", broom
+  const s = { ...defaultState('concrete'), pricingMode: 'legacy' }; // driveway, 30×20, 4", broom
   const { items, laborHours, installHours } = deriveItems('concrete', s, pb);
   const sum = total(items);
   // The site's FINISH_RATES band for 4" broom: $8–14/sq ft installed × 600.
@@ -114,7 +114,7 @@ console.log('\nDid-you-forget checklist:');
   const cls = buildLineState('concrete', cs, pb, {});
   const cw = deriveWarnings('concrete', cs, cls, { materialMarkupPct: 35, laborMarkupPct: 35, taxPct: 8.25 }).map((w) => w.msg).join(' | ');
   check('no shop-labor nag on a field trade', !/fabrication labor|installation labor/i.test(cw), cw);
-  check('nudges a driveway without rebar', /rebar/i.test(cw), cw);
+  check('guide includes mesh without plain-slab warning', !/plain slab intended/i.test(cw), cw);
   const thick = deriveWarnings('concrete', { ...cs, project: 'patio', thickness: 6 }, cls, {}).map((w) => w.msg).join(' | ');
   check('flags a 6" patio as thicker than needed', /thicker/i.test(thick), thick);
 

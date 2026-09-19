@@ -1,3 +1,4 @@
+import { concreteServices, brickRepairs, concreteGuide, isFlatwork } from './concreteGuide.js';
 import {fresh as freshBarndo, spec as barndoSpec} from '../lib/barndominium/model.js';
 // =============================================================================
 //  Configurator option schemas — fence / gate / carport / railing.
@@ -584,7 +585,8 @@ export const CONFIG = {
   // keys, so a website estimateState imports as a near-identity.
   concrete: {
     defaults: {
-      project: 'driveway',
+      project: 'driveway', pricingMode: 'guide', pricingBasis: 'service', priceLevel: 'mid', baseRate: 0,
+      minimumCharge: 2000, repairType: 'hairline', repairQty: 1, siteAllowance: 0, thicknessAddon: 0,
       lengthFt: 30,
       widthFt: 20,
       thickness: 4,      // inches
@@ -595,21 +597,26 @@ export const CONFIG = {
     controls: [
       {
         kind: 'segment', name: 'project', label: 'Project', cols: 2,
-        options: [
-          { value: 'driveway', label: 'Driveway' },
-          { value: 'patio', label: 'Patio' },
-          { value: 'slab', label: 'Slab' },
-          { value: 'walkway', label: 'Walkway' },
-        ],
+        options: [...Object.entries(concreteServices).map(([value, v]) => ({value, label: v[0]})), {value:'brick', label:'Brick wall / fence repair'}],
       },
-      { kind: 'number', name: 'lengthFt', label: 'Length', unit: 'ft', min: 1, max: 500, step: 1 },
-      { kind: 'number', name: 'widthFt', label: 'Width', unit: 'ft', min: 1, max: 500, step: 1 },
+      {kind:'segment', name:'pricingMode', visibleWhen:isFlatwork, label:'Pricing method', cols:2, value:s=>s.pricingMode||'legacy', options:[{value:'guide',label:'CJM pricing guide'},{value:'legacy',label:'Material & labor costing'}]},
+      {kind:'segment', name:'pricingBasis', label:'Base rate by', cols:2, visibleWhen:s=>s.pricingMode==='guide'&&isFlatwork(s), options:[{value:'service',label:'Service type'},{value:'size',label:'Job size'}]},
+      {kind:'segment', name:'priceLevel', label:'Guide rate', cols:3, visibleWhen:s=>s.pricingMode==='guide', options:[{value:'low',label:'Low'},{value:'mid',label:'Midpoint'},{value:'high',label:'High'}]},
+      {kind:'segment', name:'repairType', label:'Brick repair', cols:2, visibleWhen:s=>s.project==='brick', options:Object.entries(brickRepairs).map(([value,v])=>({value,label:v[0]}))},
+      {kind:'number', name:'repairQty', label:'Repair quantity (unit shown in pricing summary)', min:0, step:1, visibleWhen:s=>s.project==='brick'},
+      {kind:'number', name:'baseRate', label:'Custom base rate ($/unit; 0 = guide)', min:0, step:.25, visibleWhen:s=>s.pricingMode==='guide'},
+      {kind:'number', name:'minimumCharge', label:'Minimum job charge ($)', min:0, step:50, visibleWhen:s=>s.pricingMode==='guide'&&isFlatwork(s)},
+      {kind:'number', name:'siteAllowance', label:'Extra site work ($)', min:0, step:50, visibleWhen:s=>s.pricingMode==='guide'},
+      {kind:'number', name:'thicknessAddon', label:'Extra thickness allowance ($/sq ft)', min:0, step:.25, visibleWhen:s=>s.pricingMode==='guide'&&isFlatwork(s)&&Number(s.thickness)>4},
+
+      { kind: 'number', name: 'lengthFt', label: 'Length', visibleWhen:s=>s.project!=='brick', unit: 'ft', min: 1, max: 500, step: 1 },
+      { kind: 'number', name: 'widthFt', label: 'Width / wall height', visibleWhen:s=>s.project!=='brick', unit: 'ft', min: 1, max: 500, step: 1 },
       {
-        kind: 'segment', name: 'thickness', label: 'Thickness', cols: 4,
+        kind: 'segment', name: 'thickness', visibleWhen:isFlatwork, label: 'Thickness', cols: 4,
         options: [4, 5, 6, 8].map((t) => ({ value: t, label: `${t} in` })),
       },
       {
-        kind: 'segment', name: 'finish', label: 'Finish', cols: 3,
+        kind: 'segment', name: 'finish', visibleWhen:isFlatwork, label: 'Finish', cols: 3,
         options: [
           { value: 'broom', label: 'Broom' },
           { value: 'smooth', label: 'Smooth Trowel' },
@@ -620,11 +627,11 @@ export const CONFIG = {
         ],
       },
       {
-        kind: 'segment', name: 'rebar', label: 'Rebar grid', cols: 2,
-        options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
+        kind: 'segment', name: 'rebar', visibleWhen:isFlatwork, label: 'Reinforcement', cols: 2,
+        options: [{ value: 'no', label: 'Wire mesh included' }, { value: 'yes', label: 'Rebar upgrade' }],
       },
       {
-        kind: 'segment', name: 'demo', label: 'Tear out old concrete', cols: 2,
+        kind: 'segment', name: 'demo', visibleWhen:isFlatwork, label: 'Tear out old concrete', cols: 2,
         options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }],
       },
     ],
@@ -788,6 +795,7 @@ export function summaryLine(type, s) {
     return `${n}${tt} · ${s.includeTop === 'yes' ? 'Frame + tabletop' : 'Frame only'} · ${ft(base.lengthFt, true)} × ${inch(base.widthIn, true)} frame · ${inch(s.frameHeightIn, true)} high${top} · ${fin}`;
   }
   if (type === 'concrete') {
+    if (s.pricingMode === 'guide' && !isFlatwork(s)) { const g=concreteGuide(s); return `${g.label} · ${g.qty} ${g.unit}`; }
     const proj = optionLabel('concrete', 'project', s.project);
     const finish = optionLabel('concrete', 'finish', s.finish);
     return `${proj} · ${ft(s.lengthFt)} × ${ft(s.widthFt)} · ${s.thickness}" slab · ${finish} finish`;
@@ -924,6 +932,7 @@ export function specRows(type, s) {
     return rows.map(([label, value]) => ({ label, value }));
   }
   if (type === 'concrete') {
+    if (s.pricingMode === 'guide' && !isFlatwork(s)) { const g=concreteGuide(s); return [{label:'Service',value:g.label},{label:'Quantity',value:`${g.qty} ${g.unit}`}]; }
     const length = Number(s.lengthFt) || 0;
     const width = Number(s.widthFt) || 0;
     const thick = Number(s.thickness) || 4;

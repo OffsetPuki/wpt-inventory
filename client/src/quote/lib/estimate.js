@@ -1,3 +1,4 @@
+import { concreteGuide, concreteGuideItems } from '../data/concreteGuide.js';
 import {takeoff as barndoTakeoff,validate as validateBarndo} from './barndominium/model.js';
 import {carportSupports} from './carport-supports.js';
 // =============================================================================
@@ -809,6 +810,7 @@ function jobMinimumItem(items, minJob) {
  * 12"-at-5"+-else-18" grid rule. Rates carry the crew labor (site work).
  */
 function estimateConcrete(s, pb) {
+  if (s.pricingMode === 'guide') return concreteGuideItems(s);
   const c = pb.concrete || {};
   const length = Math.max(0, num(s.lengthFt, 0));
   const width = Math.max(0, num(s.widthFt, 0));
@@ -1092,7 +1094,7 @@ export function buildLineState(type, state, priceBook, overrides) {
   // that sinks it below brings the floor (back) up to the mark. An explicit
   // override on the minimum line itself — including striking it — still wins.
   if (NO_CONSUMABLES.has(type) && !ovItems.minimum) {
-    const minJob = num((priceBook[type] || {}).jobMinimum, 0);
+    const minJob = type === 'concrete' && state.pricingMode === 'guide' ? concreteGuide(state).minimum : num((priceBook[type] || {}).jobMinimum, 0);
     const mi = merged.findIndex((m) => m.key === 'minimum');
     const rest = merged.reduce((sum, it) => (it.key === 'minimum' ? sum : sum + lineCost(it)), 0);
     const shortfall = rest > 0 && minJob > rest ? round2(minJob - rest) : 0;
@@ -1225,7 +1227,7 @@ export function deriveWarnings(type, state, lineState, pricing) {
     if ((s.project === 'walkway' || s.project === 'patio') && thick >= 6) {
       info(`A ${thick} in slab on a ${s.project} — thicker than foot traffic needs. Intentional?`);
     }
-    if (s.project === 'driveway' && !isYes(s.rebar)) info('Driveway without a rebar grid — plain slab intended?');
+    if (s.pricingMode !== 'guide' && s.project === 'driveway' && !isYes(s.rebar)) info('Driveway without a rebar grid — plain slab intended?');
     if (!isYes(s.demo)) info('Old concrete tear-out not included.');
   }
   if (type === 'insulation') {

@@ -1,3 +1,4 @@
+import { concreteGuide, isFlatwork } from '../../data/concreteGuide.js';
 /**
  * Pure SVG preview generator for concrete flatwork — a top-down slab plan,
  * ported from the concrete site's drawPlan() (CJM-Concrete/src/layouts/
@@ -14,6 +15,10 @@
 import { jointSpacingFt, jointOffsets, rebarGridIn } from '../tradeMath.js';
 
 export function renderConcrete(state) {
+  if (!isFlatwork(state)) {
+    const g = concreteGuide(state);
+    return `<text x="400" y="200" text-anchor="middle" font-size="26">${g.label}</text><text x="400" y="245" text-anchor="middle" font-size="20">${g.qty} ${g.unit} — site dimensions to confirm</text>`;
+  }
   const VB_W = 800;
   const VB_H = 450;
   const pad = 80;

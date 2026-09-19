@@ -1,3 +1,4 @@
+import { concreteGuide, isFlatwork } from '../data/concreteGuide.js';
 import Barndominium from './Barndominium.jsx';
 import BarndoQuoteDetails from './BarndoQuoteDetails.jsx';
 import { visibleControls, typeLabel } from '../data/configurators.js';
@@ -20,6 +21,7 @@ export default function Configurator({
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
   customer, onChangeCustomer, onChangeState, barndoQuote, onChangeBarndoQuote,
 }) {
+  const guide = type === 'concrete' && state.pricingMode === 'guide' ? concreteGuide(state) : null;
   const controls = visibleControls(type, state).filter(c => c.kind !== 'segment' || c.options.length > 1);
   const [pricingOpen, setPricingOpen] = useState(type === 'custom');
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -32,7 +34,7 @@ export default function Configurator({
     const error = c.name === 'topMaterial' && !String(state.topMaterial || '').trim() ? 'Enter the included tabletop material.'
       : c.name === 'topCost' && !(Number(state.topCost) > 0) ? 'Enter the cost per top.' : null;
     return <div key={c.name} id={`quote-option-${c.name}`} className={`control-wrap ${['segment','swatch','text'].includes(c.kind) || c.name === 'topCost' ? 'wide' : ''}`}>
-      <Control control={c} value={typeof c.value === 'function' ? c.value(state) : state[c.name]} onChange={onChangeOption} />
+      <Control control={guide && c.name === 'repairQty' ? {...c,label:`Quantity (${guide.unit})`} : c} value={typeof c.value === 'function' ? c.value(state) : state[c.name]} onChange={(name,value)=>{ onChangeOption(name,value); if(type==='concrete' && name==='project' && ['brick','retaining','repair'].includes(value)) onChangeOption('pricingMode','guide'); }} />
       {error && <p className="field-error">{error}</p>}
     </div>;
   };
@@ -64,7 +66,8 @@ export default function Configurator({
           </form>
 
           <div className="cfg-right">
-            {type !== 'barndominium' && <Preview type={type} state={state} customer={customer} />}
+            {guide && <section className="quote-section" aria-label="CJM pricing guide"><h2>{guide.label}</h2><p>{guide.qty} {guide.unit} · Guide: ${guide.low}–${guide.high}{['panel','wall','drainage','roots'].includes(state.repairType) ? '+' : ''} / {guide.unit}</p><p>Selected base: ${guide.rate.toFixed(2)} / {guide.unit}{guide.minimum > 0 ? ` · Minimum: $${guide.minimum}` : ''}</p><p className="hint">Installed guide rates include labor. Finishes and extras are separate. Any markup, tax or delivery in Edit pricing is additional. Final pricing depends on site conditions.</p>{isFlatwork(state) && Number(state.thickness)>4 && <p className="hint">Confirm the base rate for {state.thickness}″ concrete or enter an extra thickness allowance; the guides do not specify a thickness surcharge.</p>}{state.project==='retaining' && <p className="hint">Quantity is length × wall height (wall face area).</p>}{state.project==='brick' && <p className="hint">Enter affected {guide.unit}; repair scope and structural work require site review.</p>}</section>}
+            {type !== 'barndominium' && !(type === 'concrete' && !isFlatwork(state)) && <Preview type={type} state={state} customer={customer} />}
             {missing.length > 0 && <div className="pricing-attention"><strong>{missing.length} {missing.length === 1 ? 'cost needs' : 'costs need'} attention</strong><p>{missing.map(it => it.name).join(', ')}</p><button className="back-link" onClick={() => setPricingOpen(true)}>Edit missing costs</button></div>}
             <details className="quote-section pricing-section" open={pricingOpen} onToggle={e => setPricingOpen(e.currentTarget.open)}>
               <summary>Edit pricing <span>Materials, labor, delivery &amp; buy list</span></summary>

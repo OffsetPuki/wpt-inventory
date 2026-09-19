@@ -60,7 +60,7 @@ function newSession(type, priceBook) {
     type,
     state: defaultState(type),
     overrides: {},
-    materialMarkupPct: priceBook.materialMarkupPct,
+    materialMarkupPct: type === 'concrete' ? 0 : priceBook.materialMarkupPct,
     laborMarkupPct: priceBook.laborMarkupPct,
     taxPct: priceBook.taxPct,
     deliveryMiles: 0,
