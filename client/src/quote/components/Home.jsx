@@ -251,21 +251,21 @@ const ICONS = {
   ),
 };
 
-export default function Home({ onPick, onFind, onContinue, draftName, customer, onChangeCustomer }) {
+export default function Home({ onPick, onFind, onContinue, draftName, customer, onChangeCustomer, designOnly = false }) {
   return (
     <div className="page quote-home">
       <div className="container">
-        <div className="page-head"><h1 className="display">New quote</h1><p className="hint">Choose a customer and build type, then review and send.</p></div>
-        <div className="quote-start"><CustomerFields compact customer={customer} onChange={onChangeCustomer} />
+        <div className="page-head"><h1 className="display">{designOnly ? "Choose build type" : "New quote"}</h1><p className="hint">{designOnly ? "Changing build type starts a new design and pricing. Your customer and quote number stay the same." : "Choose a customer and build type, then review and send."}</p></div>
+        {!designOnly && <div className="quote-start"><CustomerFields compact customer={customer} onChange={onChangeCustomer} />
           <button className="btn ghost" onClick={onFind}>Find a website design →</button>
-        </div>
+        </div>}
         {onContinue && (
           <button
             className="btn"
             style={{ marginBottom: 24 }}
             onClick={onContinue}
           >
-            Continue draft — {draftName}
+            {designOnly ? "Back to current design" : `Continue draft — ${draftName}`}
           </button>
         )}
         {["Metals", "Concrete", "Insulation"].map((trade) => (
@@ -292,7 +292,7 @@ export default function Home({ onPick, onFind, onContinue, draftName, customer, 
                   <div>
                     <h2 className="display">{t.label}</h2>
                     <p>{t.tagline}</p>
-                    <span className="go">Start quote →</span>
+                    <span className="go">{designOnly ? "Choose type →" : "Start quote →"}</span>
                   </div>
                 </button>
               ))}

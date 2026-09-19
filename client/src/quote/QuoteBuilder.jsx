@@ -433,6 +433,16 @@ export default function QuoteBuilder({ initialSettings }) {
     }
     return replaceDraft(sess);
   };
+  const changeBuildType = async (type) => {
+    if (type === session.type) { setView('configure'); return; }
+    try {
+      await flushQuote();
+      const defaults = newSession(type, effectiveBook);
+      setSession(s => ({...s, type, state: defaults.state, overrides: {},
+        materialMarkupPct: defaults.materialMarkupPct, designRef: '', features: '', attachments: []}));
+      setView('configure'); window.scrollTo({top:0});
+    } catch (error) { showSaveError(error); }
+  };
   const goHome = () => setView("home");
   // A looked-up website design becomes a quote: the customer's options overlay
   // the defaults, their contact info fills the customer card, and the design
@@ -565,10 +575,10 @@ export default function QuoteBuilder({ initialSettings }) {
     }
   };
   const inQuoteFlow =
-    ["home", "customer", "configure", "price", "details"].includes(view);
+    ["home", "customer", "build-type", "configure", "price", "details"].includes(view);
   // Guard: flow views need a session.
   const activeView = inQuoteFlow && view !== "home" && !session ? "home"
-    : ['customer','configure','price'].includes(view) && session?.quoteStatus && session.quoteStatus !== 'draft' ? 'details' : view;
+    : ['customer','build-type','configure','price'].includes(view) && session?.quoteStatus && session.quoteStatus !== 'draft' ? 'details' : view;
   return (
     <QuotePreviewContext.Provider value={{session,prepare:async()=>{await flushQuote();return draft.current();}}}><div className="qa">
       <div className="app">
@@ -611,9 +621,10 @@ export default function QuoteBuilder({ initialSettings }) {
             <button className="btn" onClick={recoverDraft}>Keep edits as new quote</button>
           </div>
         )}
-        {inQuoteFlow && <nav className="quote-steps container" aria-label="Quote steps">{[['customer','Customer'],['configure','Design'],['price','Price'],['details','Review & send']].map(([step,label],i)=><button key={step} type="button" aria-current={(activeView===step||step==='customer'&&activeView==='home')?'step':undefined} disabled={step!=='customer'&&!session || ['customer','configure','price'].includes(step)&&!!session?.quoteStatus&&session.quoteStatus!=='draft'} onClick={()=>{if(step==='details')reviewQuote();else {setView(step==='customer'&&!session?'home':step);window.scrollTo({top:0});}}}><span>{i+1}</span>{label}</button>)}</nav>}
+        {inQuoteFlow && <nav className="quote-steps container" aria-label="Quote steps">{[['customer','Customer'],['configure','Design'],['price','Price'],['details','Review & send']].map(([step,label],i)=><button key={step} type="button" aria-current={(activeView===step||step==='configure'&&activeView==='build-type'||step==='customer'&&activeView==='home')?'step':undefined} disabled={step!=='customer'&&!session || ['customer','configure','price'].includes(step)&&!!session?.quoteStatus&&session.quoteStatus!=='draft'} onClick={()=>{if(step==='details')reviewQuote();else {setView(step==='customer'&&!session?'home':step);window.scrollTo({top:0});}}}><span>{i+1}</span>{label}</button>)}</nav>}
         <Suspense fallback={<p className="container hint" role="status">Loading…</p>}>
         {activeView === 'customer' && session && <div className="container page"><h1 className="display">Customer</h1><CustomerFields customer={session.customer} onChange={setCustomer}/><button className="btn" onClick={()=>setView('configure')}>Next: design →</button></div>}
+        {activeView === 'build-type' && session && <Home designOnly onPick={changeBuildType} onContinue={()=>setView('configure')}/>}
         {activeView === "home" && (
           <Home
             customer={startingCustomer}
@@ -680,7 +691,7 @@ export default function QuoteBuilder({ initialSettings }) {
             onChangeDiscount={(v) => patchSession({ discountPct: v })}
             onChangeDeliveryMiles={(v) => patchSession({ deliveryMiles: v })}
             onChangeDeliveryRate={(v) => patchSession({ deliveryPerMile: v })}
-            onBack={goHome}
+            onBack={() => setView("build-type")}
             onContinue={reviewQuote}
           />
         )}
