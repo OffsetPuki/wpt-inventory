@@ -1,3 +1,4 @@
+import { CARPORT_PACKAGE_RATES } from './carportPricing.js';
 // =============================================================================
 //  Price book — the single, owner-editable source of rates.
 //
@@ -118,6 +119,7 @@ export const DEFAULT_PRICE_BOOK = {
   },
 
   carport: {
+    package: { ...CARPORT_PACKAGE_RATES },
     pipeFramePerSqFt: 0,
     roofPerSqFt: 9,
     panelUpchargePerSqFt: { corrugated: 0, 'standing-seam': 3.5, polycarbonate: 5 },
@@ -295,7 +297,25 @@ export const PRICE_BOOK_SCHEMA = [
     ],
   },
   {
-    title: 'Carport',
+    title: 'Carport — installed packages',
+    note: 'Editable CJM starting estimates. Standard open steel frame, corrugated roof, standard finish, installation and base plates on suitable existing concrete. Slab, new footings and site work are separate. $25/sq ft uses a local lean-to benchmark, not an identical carport quote.',
+    fields: [
+      { path: 'carport.package.flat', label: 'Flat roof package', prefix: '$', suffix: '/ covered sq ft', step: 0.5 },
+      { path: 'carport.package.gable', label: 'Gable roof package', prefix: '$', suffix: '/ covered sq ft', step: 0.5 },
+      { path: 'carport.package.leanTo', label: 'Lean-to package', prefix: '$', suffix: '/ covered sq ft', step: 0.5 },
+      { path: 'carport.package.minimum', label: 'Minimum job charge', prefix: '$', suffix: '', step: 0.5 },
+      { path: 'carport.package.standardHeight', label: 'Included clearance', prefix: '', suffix: 'ft', step: 0.5 },
+      { path: 'carport.package.targetMargin', label: 'Target margin', prefix: '', suffix: '%', step: 0.5 },
+      { path: 'carport.package.heightPerPostFt', label: 'Extra height', prefix: '$', suffix: '/ post-ft', step: 0.5 },
+      { path: 'carport.package.sidePerSqFt', label: 'Enclosed sides', prefix: '$', suffix: '/ wall sq ft', step: 0.5 },
+      { path: 'carport.package.guttersPerFt', label: 'Gutters', prefix: '$', suffix: '/ ft', step: 0.5 },
+      { path: 'carport.package.slabPerSqFt', label: '4 in broom slab allowance', prefix: '$', suffix: '/ slab sq ft', step: 0.5 },
+      { path: 'carport.package.footingEach', label: 'Footing allowance', prefix: '$', suffix: '/ each', step: 0.5 },
+      { path: 'carport.package.standingSeamPerSqFt', label: 'Standing seam upgrade', prefix: '$', suffix: '/ roof sq ft', step: 0.5 },
+    ],
+  },
+  {
+    title: 'Carport — material cost estimates',
     note: 'Columns price from the material library (4×4×3/16).',
     fields: [
       { path: 'carport.roofPerSqFt', label: 'Roof base', prefix: '$', suffix: '/ sq ft', step: 0.5 },

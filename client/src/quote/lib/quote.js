@@ -61,6 +61,21 @@ export function toCalcQuote(lineState, pricing) {
  */
 export function computeTotals(lineState, pricing) {
   const p = pricing || {};
+  if(lineState?.carportPricing) {
+    const c=lineState.carportPricing;
+    // Package rates already include labor and profit; never stack legacy markup or delivery.
+    const res=calcQuote(toCalcQuote(lineState,{...p,materialMarkupPct:0,laborMarkupPct:0,deliveryMiles:0,deliveryPerMile:0}));
+    const discountPct=Math.min(100,Math.max(0,Number(p.discountPct)||0));
+    const discountAmt=round2(res.subtotal*discountPct/100);
+    const afterDiscount=round2(res.subtotal-discountAmt);
+    const floor=Math.max(c.minimum,c.required);
+    const minAdjustment=round2(Math.max(0,floor-afterDiscount));
+    const preTax=round2(afterDiscount+minAdjustment);
+    const tax=round2(preTax*(Number(p.taxPct)||0)/100);
+    const total=round2(preTax+tax);
+    return {...res,discountPct,discountAmt,minAdjustment,tax,total,totalWithUpgrades:total,
+      costCheck:{...c,preTax,profit:round2(preTax-c.estimatedCost),actualMargin:preTax>0?round2((preTax-c.estimatedCost)/preTax*100):0}};
+  }
   const res = calcQuote(toCalcQuote(lineState, p));
 
   // Discount: % off the pre-tax subtotal; tax shrinks proportionally so the

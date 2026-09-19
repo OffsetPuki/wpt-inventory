@@ -998,5 +998,11 @@ export function specRows(type, s) {
   if (s.coating && s.coating !== 'standard') rows.push(['Coating', optionLabel('carport', 'coating', s.coating)]);
   rows.push(['Frame finish', fin]);
   rows.push(['Roof finish', finishLabel(s.roofColor)]);
+  if(s.pricingMode==='package') {
+    rows.push(['Installation','Included'],['Concrete slab',s.includeSlab==='yes'?'Included — 4 in broom-finish allowance; site design to confirm':'Excluded']);
+    rows.push(['Foundation',s.anchor==='embedded'?'New footing allowance; design to confirm':'Suitable existing concrete required']);
+    for(const [key,label] of [['demoAllowance','Demolition'],['accessAllowance','Difficult access'],['deliveryAllowance','Delivery / travel'],['permitAllowance','Permits'],['engineeringAllowance','Engineering'],['siteAllowance','Site preparation']])rows.push([label,Number(s[key])>0?'Allowance included':'Excluded']);
+  }
+
   return rows.map(([label, value]) => ({ label, value }));
 }

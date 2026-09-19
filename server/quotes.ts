@@ -1,3 +1,4 @@
+import {carportPricingIssues} from '../client/src/quote/lib/carportPricing.js';
 import { shortLink } from './share-links';
 import {normalize as normalizeBarndo,validate as validateBarndo} from '../client/src/quote/lib/barndominium/model.js';
 import {cleanBarndoQuote,purchasing,scopeIssues} from '../client/src/quote/lib/barndoQuote.js';
@@ -707,6 +708,7 @@ export function registerQuoteRoutes(app: Express): void {
     const scopeBook=effectiveBook(scopeSession);
     const issues=quote.type==='barndominium'&&scopeSession.state&&scopeSession.overrides?.barndoQuote?.scopeEnabled
       ?scopeIssues(scopeSession,computeTotals(buildLineState(quote.type,scopeSession.state,scopeBook,scopeSession.overrides),{...scopeSession,minJobCharge:scopeBook.minJobCharge})):[];
+    if(quote.type==='carport'&&scopeSession.state?.pricingMode==='package')issues.push(...carportPricingIssues(buildLineState('carport',scopeSession.state,scopeBook,scopeSession.overrides)));
     if(issues.length)return res.status(400).json({message:issues.join(' ')});
 
     const updates: Partial<typeof quotes.$inferInsert> = { shareToken: token };

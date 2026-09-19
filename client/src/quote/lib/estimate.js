@@ -1,3 +1,4 @@
+import { isCarportPackage, carportPackage, carportCostCheck, carportPricingIssues } from './carportPricing.js';
 import { concreteGuide, concreteGuideItems } from '../data/concreteGuide.js';
 import {takeoff as barndoTakeoff,validate as validateBarndo} from './barndominium/model.js';
 import {carportSupports} from './carport-supports.js';
@@ -487,6 +488,7 @@ function estimateGate(s, pb) {
 }
 
 function estimateCarport(s, pb) {
+  if(isCarportPackage("carport",s))return carportPackage(s,pb);
   const c = pb.carport;
   const width = num(s.width, 0);
   const depth = num(s.depth, 0);
@@ -995,7 +997,7 @@ export function deriveItems(type, state, priceBook) {
   const { items, laborHours, installHours } = fn(state, priceBook);
   // Consumables ride on the material subtotal, so append after the build items.
   return {
-    items: NO_CONSUMABLES.has(type) ? items : [...items, consumablesItem(items, priceBook)],
+    items: NO_CONSUMABLES.has(type) || isCarportPackage(type,state) ? items : [...items, consumablesItem(items, priceBook)],
     laborHours,
     installHours: installHours || 0,
   };
@@ -1121,6 +1123,12 @@ export function buildLineState(type, state, priceBook, overrides) {
     edited: ov.install?.hours != null || ov.install?.rate != null,
   };
 
+  if(isCarportPackage(type,state)) {
+    const raw=estimateCarport({...state,pricingMode:'itemized'},priceBook);
+    const rawItems=[...raw.items,consumablesItem(raw.items,priceBook)];
+    const costs={costMaterials:round2(rawItems.reduce((sum,i)=>sum+lineCost(i),0)),costLabor:round2(raw.laborHours*priceBook.laborRatePerHour+raw.installHours*priceBook.installRatePerHour),missing:rawItems.filter(i=>i.unpriced).map(i=>i.name)};
+    return {items:merged,removedItems,labor:{hours:0,rate:0},install:{hours:0,rate:0},carportPricing:carportCostCheck(state,priceBook,costs,merged)};
+  }
   return { items: merged, removedItems, labor, install, reordered: !!(order && order.length) };
 }
 
@@ -1160,6 +1168,7 @@ export function deriveWarnings(type, state, lineState, pricing) {
   const p = pricing || {};
   const out = [];
   const warn = (msg) => out.push({ level: 'warn', msg });
+  if(isCarportPackage(type,s)) { carportPricingIssues(ls).forEach(warn); return out; }
   const info = (msg) => out.push({ level: 'info', msg });
   const has = (key) => ls.items.some((it) => it.key === key && lineCost(it) > 0);
 
@@ -1192,7 +1201,7 @@ export function deriveWarnings(type, state, lineState, pricing) {
   // inside the per-sq-ft line rates, so zero shop/install hours is their
   // normal state — nagging about it every time would train the owner to
   // ignore the checklist.
-  const fieldTrade = type === 'concrete' || type === 'insulation';
+  const fieldTrade = type === 'concrete' || type === 'insulation' || isCarportPackage(type,s);
   if (!fieldTrade && (!(Number(ls.labor?.hours) > 0) || !(Number(ls.labor?.rate) > 0))) {
     warn('No shop fabrication labor on this quote.');
   }

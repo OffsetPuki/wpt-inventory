@@ -60,9 +60,9 @@ function newSession(type, priceBook) {
   return {
     sid: newSid(),
     type,
-    state: defaultState(type),
+    state: type === 'carport' ? {...defaultState(type),pricingMode:'package',gableFrame:'truss'} : defaultState(type),
     overrides: {},
-    materialMarkupPct: type === 'concrete' ? 0 : priceBook.materialMarkupPct,
+    materialMarkupPct: ['concrete','carport'].includes(type) ? 0 : priceBook.materialMarkupPct,
     laborMarkupPct: priceBook.laborMarkupPct,
     taxPct: priceBook.taxPct,
     deliveryMiles: 0,
