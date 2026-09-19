@@ -16,6 +16,8 @@ test('Carport frame view survives dimension changes without changing selected ma
  await page.getByRole('button',{name:/Carport Free-standing/}).click();
  const frame=page.frameLocator('iframe[title="carport website preview"]');
  await expect(frame.locator('#mode')).toHaveText('finished');
+ await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.gableFrame)).toBe('truss');
+ await page.locator('#quote-option-gableFrame label').filter({hasText:'Open rigid frame'}).click();
  await expect.poll(()=>frame.locator('body').evaluate(()=>window.design.gableFrame)).toBe('rigid');
  await expect(page.locator('#quote-option-frameMaterial')).toHaveCount(0);
  await page.locator('#quote-option-gableFrame label').filter({hasText:'Standard truss'}).click();
