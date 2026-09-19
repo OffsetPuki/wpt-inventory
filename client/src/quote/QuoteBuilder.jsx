@@ -599,21 +599,14 @@ export default function QuoteBuilder({ initialSettings }) {
             >
               Saved
             </button>
-            <details className="quote-tools"><summary>Tools</summary><div>            <button
-              className={view === "costing" ? "active" : ""}
-              onClick={() => setView("costing")}
-            >
-              Costing
-            </button>
-            <button
-              className={view === "pricebook" ? "active" : ""}
-              onClick={() => setView("pricebook")}
-            >
-              Price book
-            </button>
-</div></details>
+
           </nav>
         </header>
+        <nav className="quote-tool-row container no-print" aria-label="Quote tools">
+          <span>Tools</span>
+          <button type="button" className="btn ghost" aria-pressed={view==='costing'} onClick={()=>setView('costing')}>Costing</button>
+          <button type="button" className="btn ghost" aria-pressed={view==='pricebook'} onClick={()=>setView('pricebook')}>Price book</button>
+        </nav>
         {session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
           <div className="container draft-recovery no-print" data-draft-recovery role="alert">
             <strong>{draft.error?.status === 404 ? 'This saved quote is no longer available' : 'This quote has changed elsewhere'}</strong>
