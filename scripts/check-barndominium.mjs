@@ -29,7 +29,8 @@ assert.ok(quoteSpecs.some(r=>r.label==='Building'));
 assert.ok(spec(s,'es').some(([k])=>k==='Edificio'));
 const ls=buildLineState('barndominium',s,DEFAULT_PRICE_BOOK,{});assert.ok(ls.items.some(i=>i.key==='building-cee'&&i.unpriced));assert.ok(ls.items.some(i=>i.key==='building-zee'));assert.ok(!ls.items.some(i=>i.key==='building-wall-insulation'));
 const insulated={...s,wallInsulation:'fiberglass',roofInsulation:'spray-foam'};const edited=buildLineState('barndominium',insulated,DEFAULT_PRICE_BOOK,{items:{'building-cee':{rate:4.5}}});assert.equal(edited.items.find(i=>i.key==='building-cee').rate,4.5);assert.ok(edited.items.some(i=>i.key==='building-wall-insulation'));
-// Both deployments own copies, with a release check preventing geometry drift.
+// Geometry must match. Viewer/editor adapters intentionally differ: the Suite has
+// frame inspection, quote exports and mouse containment unavailable on the public builder.
 const website=new URL('../../CJM/src/lib/barndominium/',import.meta.url);
-if(fs.existsSync(website))for(const name of ['model.js','drawing.js','editor.js','editor.css','home3d.js','scenery.js','panels.js','framing3d.js','wall-framing.js','frame3d.js','bolted-frame.js','part-inspector.js','opening-details.js'])assert.equal(fs.readFileSync(new URL(name,website),'utf8'),fs.readFileSync(new URL('../client/src/quote/lib/barndominium/'+name,import.meta.url),'utf8'),name+' must match between apps');
+if(fs.existsSync(website))for(const name of ['model.js','drawing.js','editor.css','panels.js','framing3d.js','wall-framing.js','bolted-frame.js','part-inspector.js','opening-details.js'])assert.equal(fs.readFileSync(new URL(name,website),'utf8'),fs.readFileSync(new URL('../client/src/quote/lib/barndominium/'+name,import.meta.url),'utf8'),name+' must match between apps');
 console.log('Barndominium geometry, constraints, takeoff, import, rates and shared-code parity passed.');

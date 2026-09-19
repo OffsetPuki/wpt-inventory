@@ -70,7 +70,7 @@ test('Website design imports, edits, persists and produces a quote specification
  await expect.poll(()=>{const row=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();return row?JSON.parse(row.payload).state.depth:null;}).toBe(68);
  await editor.locator('[data-action="view"][data-value="frame"]').click();await expect(frame).toHaveAttribute('data-dimensions','40x68x12');await expect(frame.locator('canvas')).toHaveCount(1);
  await editor.locator('[data-action="view"][data-value="iso"]').click();
- await page.getByText('Edit pricing',{exact:false}).first().click();
+ await page.getByText('Advanced pricing',{exact:false}).first().click();
  await page.getByLabel('CEE roof purlins — net run, laps and waste to review rate',{exact:true}).fill('4.5');
  await expect.poll(()=>{const q=app.sqlite.prepare("SELECT payload FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();return q?Number(JSON.parse(q.payload).overrides?.items?.['building-cee']?.rate):null;}).toBe(4.5);
  const row=app.sqlite.prepare("SELECT * FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();const saved=JSON.parse(row.payload);expect(saved.state.porches).toEqual(state.porches);expect(saved.state.openings).toEqual(state.openings);expect(saved.state.roofInsulation).toBe('fiberglass');

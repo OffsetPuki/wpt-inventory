@@ -1,3 +1,4 @@
+import { shortLink } from './share-links';
 import {normalize as normalizeBarndo,validate as validateBarndo} from '../client/src/quote/lib/barndominium/model.js';
 import {cleanBarndoQuote,purchasing,scopeIssues} from '../client/src/quote/lib/barndoQuote.js';
 import {computeTotals} from '../client/src/quote/lib/quote.js';
@@ -716,7 +717,10 @@ export function registerQuoteRoutes(app: Express): void {
     }
     db.update(quotes).set(updates).where(eq(quotes.id, id)).run();
 
-    const url = localizedLink(`${PUBLIC_SITE_URL}/quote/${token}`, communicationContext({quoteNumber:quote.number}).lang);
+    const legacyUrl = localizedLink(`${PUBLIC_SITE_URL}/quote/${token}`, communicationContext({quoteNumber:quote.number}).lang);
+
+    const customName=typeof req.body?.linkName==='string'?req.body.linkName.slice(0,60):undefined;
+    const url=localizedLink(shortLink('q',token,quote.customerName||quote.number,customName),communicationContext({quoteNumber:quote.number}).lang);
 
     // Email the customer the link when asked — explicit address wins, else the
     // one they typed into the builder's customer card (stored in the payload).
@@ -760,6 +764,6 @@ export function registerQuoteRoutes(app: Express): void {
       targetType: "quote", targetId: id, targetName: quote.number,
       details: { emailed, firstShare: quote.status === "draft" },
     });
-    res.json({ ok: true, token, url, emailed });
+    res.json({ ok: true, token, url:legacyUrl, shortUrl:url, emailed });
   });
 }

@@ -17,19 +17,21 @@ test('Save and open includes pending text, and replacing a model retains its lin
   await dialog.getByLabel('Short description',{exact:true}).fill('Changed description');
   await dialog.getByLabel('depth',{exact:true}).fill('40 ft');
   await dialog.getByLabel('Details for the customer').fill('Changed notes');
-  await context.route('https://www.cjmmetals.com/preview/**',r=>r.fulfill({body:'Preview fixture'}));
+  await expect(dialog.getByRole('region',{name:'Live customer preview'})).toContainText('Changed description');
+  await expect(dialog.getByRole('region',{name:'Live customer preview'})).toContainText('Changed notes');
+  await context.route('https://www.cjmmetals.com/p/**',r=>r.fulfill({body:'Preview fixture'}));
   const popupPromise=page.waitForEvent('popup');await dialog.getByRole('button',{name:'Save & open preview',exact:true}).click();const popup=await popupPromise;
   await expect(popup).toHaveURL(new RegExp(link+'\\?owner=1&v=\\d+'));
-  let saved=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.url===link);
+  let saved=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.shortUrl===link);
   expect(saved.depth).toBe('40 ft');
-  expect((await app.api('/api/public/customer-previews/'+link.split('/').at(-1),'GET',undefined,undefined,{'X-Lead-Key':'test-intake-key'})).data.depth).toBe('40 ft');
+  expect((await app.api('/api/public/customer-previews/'+saved.url.split('/').at(-1),'GET',undefined,undefined,{'X-Lead-Key':'test-intake-key'})).data.depth).toBe('40 ft');
   expect(saved.description).toBe('Changed description');expect(saved.note).toBe('Changed notes');await popup.close();
   await dialog.getByLabel('Replace model: kalkat-5',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-7.glb',import.meta.url)));
   await expect(dialog.getByRole('button',{name:'Restore previous model'})).toBeVisible();
   await expect(dialog.getByLabel('Customer preview link')).toHaveValue(link);
-  saved=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.url===link);expect(saved.options[0].revision).toBe(2);expect(saved.options).toHaveLength(1);
+  saved=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.shortUrl===link);expect(saved.options[0].revision).toBe(2);expect(saved.options).toHaveLength(1);
   await dialog.getByRole('button',{name:'Restore previous model'}).click();
-  await expect.poll(async()=>(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.url===link).options[0].revision).toBe(3);
+  await expect.poll(async()=>(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.shortUrl===link).options[0].revision).toBe(3);
 });
 test('Owner creates a design preview, adds a model, shares it and reads customer changes',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -48,7 +50,7 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   await dialog.getByRole('button',{name:'Add option',exact:true}).click();
   await expect(dialog.getByText('5 pipes',{exact:true})).toBeVisible();
   await dialog.getByRole('button',{name:'Enable customer link'}).click();
-  await expect(dialog.getByLabel('Customer preview link')).toHaveValue(/^https:\/\/www\.cjmmetals\.com\/preview\/[a-f0-9]{48}$/);
+  await expect(dialog.getByLabel('Customer preview link')).toHaveValue(/^https:\/\/www\.cjmmetals\.com\/p\/[a-z0-9-]+-[A-Za-z0-9_-]{16}$/);
   const list=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data;
   const p=list.find(x=>x.title==='Synthetic test gate'),token=p.url.split('/').at(-1);
   await dialog.getByLabel('Project title',{exact:true}).fill('Unsaved design change');
@@ -67,7 +69,7 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   await dialog.getByRole('button',{name:'Close',exact:true}).click();
   await expect(card).toContainText('Ready for a quote · 5 pipes');
   await expect(card).toContainText('2 customer responses');
-  await expect(card.getByRole('link',{name:'Open preview'})).toHaveAttribute('href',p.url+'?owner=1');
+  await expect(card.getByRole('link',{name:'Open preview'})).toHaveAttribute('href',p.shortUrl+'?owner=1');
   const activity={visitId:crypto.randomUUID(),version:p.version,seq:1,activeMs:12000,variants:[{id:p.options[0].id,views:1,activeMs:10000,loads:1,loadMs:300,errors:0,gateOpens:2,gateCloses:1,drags:3,zooms:1}],links:{main:1,concrete:0,insulation:0,phone:0,email:0},webglFailed:0,contextLost:0};
   expect((await app.api('/api/public/customer-previews/'+token+'/activity','POST',activity,undefined,{'X-Lead-Key':'test-intake-key','X-Preview-User-Agent':'Chrome/130'})).status).toBe(201);
   await card.getByRole('button',{name:'Customer activity',exact:true}).click();

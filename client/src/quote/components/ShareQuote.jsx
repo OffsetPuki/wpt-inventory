@@ -17,6 +17,7 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIs
   let email = customerEmail;
   if (email === undefined) { try { email = JSON.parse(row?.payload || '{}').customer?.email || ''; } catch { email = ''; } }
   email = String(email || '').trim();
+  const [linkName,setLinkName]=useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
   const copy = async url => {
@@ -28,8 +29,9 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIs
     mutationFn: async action => {
       const saved = onBeforeShare ? await onBeforeShare() : { id: quoteId, version: row?.version };
       const res = await (await apiRequest('POST', `/api/quotes/${saved?.id || quoteId}/share`, {
-        sendEmail: action === 'email', ...(action === 'email' ? { email } : {}), version: saved?.version,
+        ...(linkName.trim()?{linkName:linkName.trim()}:{}), sendEmail: action === 'email', ...(action === 'email' ? { email } : {}), version: saved?.version,
       })).json();
+      res.url=res.shortUrl||res.url;
       const copied = action === 'copy' && await copy(res.url);
       return { ...res, wantedEmail: action === 'email', copied };
     },
@@ -49,7 +51,7 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIs
     <div className="share-row"><input aria-label="Quote share link" readOnly className="share-url" value={result.url} onFocus={e => e.target.select()} /><button className="btn ghost sq-btn" onClick={() => copy(result.url)}>Copy link</button></div>
     {onIssued && actions(<button className="btn" onClick={() => onIssued(result)}>Done</button>)}
   </div>;
-  return <div className="share-panel">
+  return <div className="share-panel"><details><summary>Customize customer link</summary><label className="field"><span>Link name (optional)</span><input maxLength={60} value={linkName} placeholder="e.g. jose-shop" onChange={e=>setLinkName(e.target.value)}/></label><p className="hint">Your project name plus a private random code. Existing links keep working.</p></details>
     <p className="hint">{validEmail ? `Send to ${email}` : 'Add a valid customer email to send by email, or copy a link.'}</p>
     {actions(<div className="btn-row">
       <button className="btn" disabled={disabled || !validEmail || share.isPending || isFetching} onClick={() => share.mutate('email')}>{share.isPending && share.variables === 'email' ? 'Sending…' : 'Send email'}</button>

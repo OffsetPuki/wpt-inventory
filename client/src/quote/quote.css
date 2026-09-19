@@ -947,3 +947,18 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .product-preview-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}
 .qa .product-preview-actions [role="group"]{display:flex;gap:4px}
 .qa .product-preview-actions .btn[aria-pressed="true"],.qa .product-preview-actions .btn[aria-pressed="true"]:hover{background:#171b18;color:#fff;border-color:#171b18}
+
+/* One task at a time; keep secondary tools out of the primary quote flow. */
+.qa .quote-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding-block:16px; }
+.qa .quote-steps button { padding:12px 6px; border:1px solid #ccc; background:transparent; text-align:left; }
+.qa .quote-steps button[aria-current="step"] { background:#233940; color:white; }
+.qa .quote-steps button:disabled { opacity:.45; }
+.qa .quote-steps span { display:block; font-size:12px; margin-bottom:4px; }
+.qa .quote-tools { position:relative; margin:auto 0; }
+.qa .quote-tools summary { padding:12px; cursor:pointer; }
+.qa .quote-tools>div { position:absolute; right:0; z-index:20; min-width:180px; background:#f5f2eb; border:1px solid #ccc; }
+.qa .quote-price-layout { max-width:900px; margin:auto; }
+.qa .quote-price-summary { list-style:none; padding:0; }
+.qa .quote-price-summary li { display:flex; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:1px solid #ddd; }
+.qa .quote-price-summary strong { flex-shrink:0; }
+@media(max-width:600px) { .qa .quote-steps {gap:4px;} .qa .quote-steps button {font-size:12px;} .qa .quote-actionbar .hint {font-size:11px;} }

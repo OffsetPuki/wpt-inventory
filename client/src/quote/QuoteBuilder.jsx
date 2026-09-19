@@ -1,3 +1,5 @@
+import CustomerFields from './components/CustomerFields.jsx';
+import { QuotePreviewContext } from './lib/preview-context.jsx';
 // =============================================================================
 //  Quote builder — the standalone CJM Quote app, embedded in the suite.
 //
@@ -563,12 +565,12 @@ export default function QuoteBuilder({ initialSettings }) {
     }
   };
   const inQuoteFlow =
-    view === "home" || view === "configure" || view === "details";
+    ["home", "customer", "configure", "price", "details"].includes(view);
   // Guard: flow views need a session.
   const activeView = inQuoteFlow && view !== "home" && !session ? "home"
-    : view === 'configure' && session?.quoteStatus && session.quoteStatus !== 'draft' ? 'details' : view;
+    : ['customer','configure','price'].includes(view) && session?.quoteStatus && session.quoteStatus !== 'draft' ? 'details' : view;
   return (
-    <div className="qa">
+    <QuotePreviewContext.Provider value={{session,prepare:async()=>{await flushQuote();return draft.current();}}}><div className="qa">
       <div className="app">
         <header className="topbar no-print">
           <nav className="topnav">
@@ -587,7 +589,7 @@ export default function QuoteBuilder({ initialSettings }) {
             >
               Saved
             </button>
-            <button
+            <details className="quote-tools"><summary>Tools</summary><div>            <button
               className={view === "costing" ? "active" : ""}
               onClick={() => setView("costing")}
             >
@@ -599,6 +601,7 @@ export default function QuoteBuilder({ initialSettings }) {
             >
               Price book
             </button>
+</div></details>
           </nav>
         </header>
         {session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
@@ -608,7 +611,9 @@ export default function QuoteBuilder({ initialSettings }) {
             <button className="btn" onClick={recoverDraft}>Keep edits as new quote</button>
           </div>
         )}
+        {inQuoteFlow && <nav className="quote-steps container" aria-label="Quote steps">{[['customer','Customer'],['configure','Design'],['price','Price'],['details','Review & send']].map(([step,label],i)=><button key={step} type="button" aria-current={(activeView===step||step==='customer'&&activeView==='home')?'step':undefined} disabled={step!=='customer'&&!session || ['customer','configure','price'].includes(step)&&!!session?.quoteStatus&&session.quoteStatus!=='draft'} onClick={()=>{if(step==='details')reviewQuote();else {setView(step==='customer'&&!session?'home':step);window.scrollTo({top:0});}}}><span>{i+1}</span>{label}</button>)}</nav>}
         <Suspense fallback={<p className="container hint" role="status">Loading…</p>}>
+        {activeView === 'customer' && session && <div className="container page"><h1 className="display">Customer</h1><CustomerFields customer={session.customer} onChange={setCustomer}/><button className="btn" onClick={()=>setView('configure')}>Next: design →</button></div>}
         {activeView === "home" && (
           <Home
             customer={startingCustomer}
@@ -629,10 +634,11 @@ export default function QuoteBuilder({ initialSettings }) {
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
         {activeView==='options'&&session?.quoteId&&<QuoteOptions quoteId={session.quoteId} onBack={()=>setView('configure')} onShared={()=>setSession(s=>({...s,quoteStatus:'sent'}))} onDone={issued} />}
-        {session?.type==='barndominium' && ['configure','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
-        {activeView === "configure" && session && (
+        {session?.type==='barndominium' && ['configure','price','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
+        {["configure","price"].includes(activeView) && session && (
           <Configurator
-            key={`configure-${session.sid}`}
+            key={`configure-${session.sid}-${activeView}`}
+            mode={activeView==='price'?'price':'design'}
             customer={session.customer}
             barndoQuote={session.overrides?.barndoQuote}
             onChangeBarndoQuote={barndoQuote=>setSession(s=>({...s,overrides:{...s.overrides,barndoQuote}}))}
@@ -697,7 +703,7 @@ export default function QuoteBuilder({ initialSettings }) {
             onChangeFeatures={(v) => patchSession({ features: v })}
             onChangeAttachments={(v) => patchSession({ attachments: v })}
             onChangeDeposit={(v) => patchSession({ depositPct: v })}
-            onBack={() => setView("configure")}
+            onBack={() => setView("price")}
             version={session.version}
             saveStatus={draft.status}
             warnings={warnings}
@@ -718,7 +724,7 @@ export default function QuoteBuilder({ initialSettings }) {
           />
         )}
         </Suspense>
-        {session && (activeView === "configure" || activeView === "details") && (
+        {session && ["configure","price","details"].includes(activeView) && (
           <div className="quote-actionbar">
             <div><span className="hint">Total</span><strong>${fmtMoney(totals?.total || 0)}</strong></div>
             <div className="draft-status" role="status" aria-live="polite">
@@ -729,11 +735,12 @@ export default function QuoteBuilder({ initialSettings }) {
               {['Not saved', 'Offline'].includes(draft.status) && draft.error?.status !== 404 && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
             </div>
             {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}>{saveBusy?'Saving quote…':'Save Quote'}</button>}
-            {activeView === "configure" ? <button className="btn" disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
+            {activeView === "configure" && <button className="btn" onClick={()=>{setView("price");window.scrollTo({top:0});}}>Next: price →</button>}
+            {["configure","price"].includes(activeView) ? <button className="btn" disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
               : <div id="quote-send-actions" />}
           </div>
         )}
       </div>
-    </div>
+    </div></QuotePreviewContext.Provider>
   );
 }

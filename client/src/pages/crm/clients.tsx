@@ -1,3 +1,4 @@
+import RelatedPreviews from '@/components/RelatedPreviews';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -315,6 +316,7 @@ function ClientDetailModal({
             )}
           </div>
 
+          {isElevated && <RelatedPreviews clientId={client.id}/>}
           {isElevated && (
             <div>
               <h3 className="mb-2 text-sm font-medium text-muted-foreground">Invoices</h3>

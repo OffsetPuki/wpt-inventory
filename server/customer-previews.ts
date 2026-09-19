@@ -1,3 +1,4 @@
+import { shortLink } from './share-links';
 import {visitorContext} from './visitor-context';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -17,6 +18,10 @@ const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_OPTIONS = 6;
 const tokenPattern = /^[a-f0-9]{48}$/;
 const metadata = z.object({
+  linkName: z.string().trim().max(60).optional(),
+  clientId: z.number().int().positive().nullable().optional(),
+  projectId: z.number().int().positive().nullable().optional(),
+  quoteId: z.number().int().positive().nullable().optional(),
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().max(600).default(''),
   customer: z.string().trim().max(120).default(''),
@@ -45,6 +50,10 @@ CREATE INDEX IF NOT EXISTS customer_preview_models_preview ON customer_preview_m
 if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='deleted_at')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN deleted_at INTEGER');
 if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='merge_request')) sqlite.exec('ALTER TABLE customer_previews ADD COLUMN merge_request TEXT');
 if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name==='depth')) sqlite.exec("ALTER TABLE customer_previews ADD COLUMN depth TEXT NOT NULL DEFAULT ''");
+for (const column of ['client_id','project_id','quote_id']) {
+ if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name===column)) sqlite.exec(`ALTER TABLE customer_previews ADD COLUMN ${column} INTEGER`);
+ sqlite.exec(`CREATE INDEX IF NOT EXISTS preview_${column} ON customer_previews(${column})`);
+}
 const modelColumns=new Set((sqlite.pragma('table_info(customer_preview_models)') as {name:string}[]).map(c=>c.name));
 for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB']]){
   if(!modelColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_models ADD COLUMN ${name} ${definition}`);
@@ -98,8 +107,28 @@ function getPreview(id: number): Preview | undefined {
 function modelList(id: number) {
   return sqlite.prepare('SELECT id,label,size,revision,previous_bytes IS NOT NULL AS canRestore FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number;revision:number;canRestore:number}[];
 }
+function links(p:any) { return {clientId:p.client_id??null,projectId:p.project_id??null,quoteId:p.quote_id??null}; }
+function resolveLinks(data:z.infer<typeof metadata>, existing?:Preview) {
+ const result={...links(existing||{}),...Object.fromEntries(['clientId','projectId','quoteId'].filter(k=>(data as any)[k]!==undefined).map(k=>[k,(data as any)[k]]))};
+ if(result.projectId){
+  const job=sqlite.prepare('SELECT client_id FROM projects WHERE id=? AND deleted_at IS NULL').get(result.projectId) as any;
+  if(!job)throw new Error('Choose an active job.');
+  if(job.client_id && result.clientId && job.client_id!==result.clientId)throw new Error('This job belongs to a different customer.');
+  if(job.client_id)result.clientId=job.client_id;
+ }
+ if(result.quoteId){
+  const quote=sqlite.prepare('SELECT payload FROM quotes WHERE id=? AND deleted_at IS NULL').get(result.quoteId) as any;
+  if(!quote)throw new Error('Choose an active quote.');
+  const clientId=JSON.parse(quote.payload).customer?.clientId;
+  if(clientId && result.clientId && clientId!==result.clientId)throw new Error('This quote belongs to a different customer.');
+  if(clientId)result.clientId=clientId;
+ }
+ if(result.clientId && !sqlite.prepare('SELECT 1 FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(result.clientId))throw new Error('Choose an active customer.');
+ return result;
+}
+function saveLinks(id:number,l:ReturnType<typeof links>) { sqlite.prepare('UPDATE customer_previews SET client_id=?,project_id=?,quote_id=? WHERE id=?').run(l.clientId,l.projectId,l.quoteId,id); }
 function view(p: Preview) {
-  return { id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width,depth:p.depth, height:p.height,
+  return { shortUrl:shortLink('p',p.token,p.title), ...links(p), id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width,depth:p.depth, height:p.height,
     finish:p.finish, note:p.note, published:!!p.published, version:p.version, createdAt:p.created_at, updatedAt:p.updated_at,
     url:`https://www.cjmmetals.com/preview/${p.token}`, options:modelList(p.id),
     feedback:sqlite.prepare(`SELECT f.id,f.kind,f.option_id AS optionId,f.design_version AS designVersion,f.option_label AS optionLabel,f.message,f.created_at AS createdAt,
@@ -214,16 +243,28 @@ export function registerCustomerPreviews(app: Express): void {
     res.json(previewActivity(p.id));
   });
   app.get('/api/customer-previews/notifications',requireElevated,(_req,res)=>res.json(ownerMailStatus()));
-  app.get('/api/customer-previews',requireElevated,(_req,res) => {
+  app.get('/api/customer-previews/connections',requireElevated,(req,res)=>{
+    const search='%'+String(req.query.q||'').slice(0,120)+'%';
+    const clientId=Number(req.query.clientId)||0;
+    res.json({clients:sqlite.prepare('SELECT id,name FROM crm_clients WHERE deleted_at IS NULL AND (name LIKE ? OR email LIKE ? OR phone LIKE ?) ORDER BY name LIMIT 12').all(search,search,search),jobs:sqlite.prepare('SELECT id,name,client_id AS clientId FROM projects WHERE deleted_at IS NULL AND (?=0 OR client_id=?) AND name LIKE ? ORDER BY id DESC LIMIT 12').all(clientId,clientId,search)});
+  });
+  app.get('/api/customer-previews/:id/models/:modelId',requireElevated,(req,res)=>{
+    const p=record(req,res);if(!p)return;
+    const m=sqlite.prepare('SELECT bytes FROM customer_preview_models WHERE preview_id=? AND id=?').get(p.id,req.params.modelId) as any;
+    if(!m){res.status(404).end();return;}res.setHeader('Cache-Control','private, no-store');res.type('model/gltf-binary').send(m.bytes);
+  });
+  app.get('/api/customer-previews/:id',requireElevated,(req,res)=>{const p=record(req,res);if(p)res.json(view(p));});
+  app.get('/api/customer-previews',requireElevated,(req,res) => {
     const ps=sqlite.prepare('SELECT * FROM customer_previews WHERE deleted_at IS NULL ORDER BY updated_at DESC,id DESC').all() as Preview[];
-    res.json(ps.map(view));
+    res.json(ps.filter(p=>(!req.query.clientId||(p as any).client_id===Number(req.query.clientId))&&(!req.query.projectId||(p as any).project_id===Number(req.query.projectId))&&(!req.query.quoteId||(p as any).quote_id===Number(req.query.quoteId))).map(view));
   });
   app.post('/api/customer-previews',requireElevated,(req,res) => {
     const parsed=metadata.safeParse(req.body);if(!parsed.success){res.status(400).json({message:'Enter a project title and keep the description and notes within the allowed lengths.'});return;}
     const p=parsed.data,now=Date.now();
+    let linked;try{linked=resolveLinks(p);}catch(e){res.status(400).json({message:(e as Error).message});return;}
     const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,depth,height,finish,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
       .run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.depth,p.height,p.finish,p.note,now,now);
-    const id=Number(r.lastInsertRowid);audit(req,'preview.created',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
+    const id=Number(r.lastInsertRowid);saveLinks(id,linked);audit(req,'preview.created',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
   });
   app.post('/api/customer-previews/merge',requireElevated,(req,res)=>{
     const parsed=z.object({requestId:z.string().uuid(),title:z.string().trim().min(1).max(120),customer:z.string().trim().max(120).default(''),sources:z.array(z.object({id:z.number().int().positive(),version:z.number().int().positive()})).min(2).max(MAX_OPTIONS)}).safeParse(req.body);
@@ -274,10 +315,10 @@ export function registerCustomerPreviews(app: Express): void {
       const existing=sqlite.prepare('SELECT * FROM customer_previews WHERE source_key=?').get(source) as Preview|undefined;
       if(existing){if((existing as any).deleted_at){res.status(410).json({message:'This preview was deleted. Create a new preview.'});return;}res.json(view(existing));return;}
       try{
-        validatePreviewGlb(req.file.buffer);const p=parsed.data,now=Date.now();
+        validatePreviewGlb(req.file.buffer);const p=parsed.data,now=Date.now(),linked=resolveLinks(p);
         const id=sqlite.transaction(()=>{
           const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,depth,height,finish,note,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.depth,p.height,p.finish,p.note,source,now,now);
-          const id=Number(r.lastInsertRowid);insertModel(id,'Design from quote',req.file!.buffer);return id;
+          const id=Number(r.lastInsertRowid);saveLinks(id,linked);insertModel(id,'Design from quote',req.file!.buffer);return id;
         })();
         audit(req,'preview.created_from_quote_model',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
       }catch(e){res.status(400).json({message:e instanceof Error?e.message:'Could not create the preview.'});}
@@ -292,8 +333,11 @@ export function registerCustomerPreviews(app: Express): void {
     const p=record(req,res);if(!p||!current(req,res,p))return;
     const parsed=metadata.safeParse(req.body);if(!parsed.success){res.status(400).json({message:'Enter a project title and keep the description and notes within the allowed lengths.'});return;}
     const v=parsed.data;
+    let linked;try{linked=resolveLinks(v,p);}catch(e){res.status(400).json({message:(e as Error).message});return;}
     sqlite.prepare('UPDATE customer_previews SET title=?,description=?,customer=?,width=?,depth=?,height=?,finish=?,note=?,version=version+1,updated_at=? WHERE id=?')
       .run(v.title,v.description,v.customer,v.width,v.depth,v.height,v.finish,v.note,Date.now(),p.id);
+    saveLinks(p.id,linked);
+    if(v.linkName!==undefined)shortLink('p',p.token,v.title,v.linkName);
     audit(req,'preview.updated',{targetType:'customer_preview',targetId:p.id,targetName:v.title});res.json(view(getPreview(p.id)!));
   });
   app.post('/api/customer-previews/:id/sharing',requireElevated,(req,res) => {

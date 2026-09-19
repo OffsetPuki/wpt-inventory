@@ -112,6 +112,12 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
     page.getByRole("button", { name: /Continue draft/ }),
   ).toBeVisible();
   await page.getByRole("button", { name: /Continue draft/ }).click();
+  await expect(page.getByRole("navigation",{name:"Quote steps"})).toBeVisible();
+  await page.getByRole("navigation",{name:"Quote steps"}).getByRole("button",{name:/Customer/}).click();
+  await expect(page.getByRole("heading",{name:"Customer",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:/Next: design/}).click();
+  await page.getByRole("button",{name:/Next: price/}).click();
+  await expect(page.locator("summary").filter({hasText:"Advanced pricing"})).toBeVisible();
   await page
     .getByRole("button", { name: /Review quote/ })
     .click();
@@ -284,7 +290,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
     await expect(thickness).toHaveValue(shown);
   }
   await page.getByLabel("How many", { exact: true }).fill("3");
-  await page.getByText("Edit pricing", {exact:false}).first().click();
+  await page.getByText("Advanced pricing", {exact:false}).first().click();
   const topLine = page.locator(".line").filter({ has: page.locator('input[value="Tabletop — Finished white oak"]') });
   await expect(topLine.locator(".line-cost")).toHaveText("$1,350.75");
   await expect.poll(async()=>JSON.parse(await product.locator('body').getAttribute('data-state')||'{}')).toMatchObject({top:'show',topThicknessIn:0.03125});

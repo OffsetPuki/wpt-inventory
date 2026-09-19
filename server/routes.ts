@@ -1,3 +1,4 @@
+import { registerShareLinks } from './share-links';
 import { registerCustomerPreviews } from "./customer-previews";
 import { registerDocumentActivity } from "./document-activity";
 import { registerInventoryRoutes } from "./inventory";
@@ -119,6 +120,7 @@ const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
   registerCustomerPreviews(app);
+  registerShareLinks(app);
   registerDocumentActivity(app);
   registerRecordVersions(app);
   registerCreateOnce(app);

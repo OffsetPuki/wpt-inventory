@@ -149,7 +149,8 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const NAV_GROUPS: NavGroup[] = [...ALL_NAV_GROUPS.slice(0,4),{key:'more',label:'More',entries:[
+const NAV_GROUPS: NavGroup[] = [ALL_NAV_GROUPS[0],ALL_NAV_GROUPS[1],ALL_NAV_GROUPS[3],{key:'more',label:'More',entries:[
+  ...ALL_NAV_GROUPS[2].entries.map(e=>({...e,label:`Inventory · ${e.label}`})),
   {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated'},
   {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated'},
   ...ALL_NAV_GROUPS.slice(4).flatMap(g=>g.entries.map(e=>({...e,needs:e.needs||g.needs})))

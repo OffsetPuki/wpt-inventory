@@ -1,3 +1,4 @@
+import RelatedPreviews from '@/components/RelatedPreviews';
 import { ExtraBilling } from "./suite-reviews";
 import { useSuiteQuery } from "@/lib/suite-query";
 import { lazy, Suspense, useState } from "react";
@@ -274,6 +275,7 @@ export default function JobWorkspace({ id }: { id: string }) {
         )}
         {tab === "files" && (
           <>
+            {isElevated&&<RelatedPreviews projectId={Number(id)}/>}
             <JobFiles id={Number(id)} />
             <Documents projectId={Number(id)} />
             <Contracts project={project} />
