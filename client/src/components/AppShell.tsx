@@ -1,5 +1,5 @@
 import { useRouteScroll } from '@/lib/route-scroll';
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -149,27 +149,29 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const NAV_GROUPS: NavGroup[] = [ALL_NAV_GROUPS[0],ALL_NAV_GROUPS[1],ALL_NAV_GROUPS[3],{key:'more',label:'More',entries:[
-  ...ALL_NAV_GROUPS[2].entries.map(e=>({...e,label:`Inventory · ${e.label}`})),
-  {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated'},
-  {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated'},
-  ...ALL_NAV_GROUPS.slice(4).flatMap(g=>g.entries.map(e=>({...e,needs:e.needs||g.needs})))
-]}];
-
+const NAV_GROUPS: NavGroup[] = [
+  {...ALL_NAV_GROUPS[0], entries: ALL_NAV_GROUPS[0].entries.filter(e=>!['/crm/quotes','/crm/previews'].includes(e.to))},
+  {key:'quotes',label:'Quotes & previews',entries:ALL_NAV_GROUPS[0].entries.filter(e=>['/crm/quotes','/crm/previews'].includes(e.to))},
+  ALL_NAV_GROUPS[1], ALL_NAV_GROUPS[3],
+  {key:'more',label:'More tools',entries:[
+    ...ALL_NAV_GROUPS[2].entries.map(e=>({...e,label:`Inventory · ${e.label}`})),
+    {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated'},
+    {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated'},
+    ...ALL_NAV_GROUPS.slice(4).flatMap(g=>g.entries.map(e=>({...e,needs:e.needs||g.needs})))
+  ]}
+];
 function groupForLocation(location: string): string | null {
-  for (const g of NAV_GROUPS) {
-    if (g.entries.some((e) => location === e.to || (e.to !== "/home" && location.startsWith(e.to)))) {
-      return g.key;
-    }
-  }
-  return null;
+  const path=location.split('?')[0];
+  if(path.startsWith('/project/'))return 'projects';
+  return NAV_GROUPS.find(g=>g.entries.some(e=>e.to===path))?.key || null;
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const { isElevated } = useAuth();
   const [location] = useLocation();
+  const [filter,setFilter]=useState('');
   // Only the group for the screen you're on starts open — keeps the sidebar
-  // short and scannable. Manual toggles stick for the session.
+  // short and scannable. Opening another section closes the previous one.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const active = groupForLocation(location);
     return active ? { [active]: true } : { crm: true };
@@ -177,36 +179,39 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 
   // Navigating into a group (e.g. via a cross-link) opens it.
   useEffect(() => {
+    setFilter('');
     const active = groupForLocation(location);
-    if (active) setOpen((o) => (o[active] ? o : { ...o, [active]: true }));
+    setOpen(active ? { [active]: true } : {});
   }, [location]);
 
   const canSee = (needs?: "elevated") => (needs === "elevated" ? isElevated : true);
 
   const linkCls = (active: boolean) =>
     cn(
-      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+      "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
       active
         ? "bg-sidebar-primary text-sidebar-primary-foreground"
         : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     );
 
   return (
-    <nav className="flex flex-col gap-0.5 px-3">
+    <nav aria-label="Main navigation" className="flex flex-col gap-0.5 px-3">
+      <label className="mb-3 block"><span className="sr-only">Find a page</span><input type="search" value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Find a page…" className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"/></label>
       <Link href="/today" onClick={onNavigate} className={linkCls(location === '/today')}><LayoutDashboard className="h-[18px] w-[18px]"/><span>Today</span></Link>
 
       {NAV_GROUPS.map((g) => {
         if (!canSee(g.needs)) return null;
-        const entries = g.entries.filter((e) => canSee(e.needs));
+        const entries = g.entries.filter(e => canSee(e.needs) && `${g.label} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase()));
         if (entries.length === 0) return null;
-        const isOpen = !!open[g.key];
+        const isOpen = !!filter.trim() || !!open[g.key];
         const containsActive = groupForLocation(location) === g.key;
         return (
           <div key={g.key} className="mt-1.5">
             <button
-              onClick={() => setOpen((o) => ({ ...o, [g.key]: !isOpen }))}
+              aria-expanded={isOpen}
+              onClick={() => setOpen(() => isOpen ? {} : { [g.key]: true })}
               className={cn(
-                "flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider transition-colors",
+                "flex min-h-11 w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
                 containsActive && !isOpen
                   ? "text-sidebar-primary"
                   : "text-muted-foreground hover:text-sidebar-foreground"
@@ -224,10 +229,10 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                   // prefix of /crm/leads), so prefix matching would light up
                   // two entries at once. Detail pages (/project/:id …) use
                   // different path roots, so nothing is lost.
-                  const active = location === e.to;
+                  const active = location.split('?')[0] === e.to || e.to==='/projects'&&location.startsWith('/project/');
                   const Icon = e.icon;
                   return (
-                    <Link key={e.to} href={e.to} onClick={onNavigate} className={linkCls(active)}>
+                    <Link key={e.to} aria-current={active?'page':undefined} href={e.to} onClick={onNavigate} className={linkCls(active)}>
                       <Icon className="h-[18px] w-[18px] shrink-0" />
                       <span>{e.label}</span>
                     </Link>
@@ -238,6 +243,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         );
       })}
+      {filter.trim()&&!NAV_GROUPS.some(g=>canSee(g.needs)&&g.entries.some(e=>canSee(e.needs)&&`${g.label} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase())))&&<p className="px-3 py-4 text-sm text-muted-foreground">No matching pages. Try another name.</p>}
     </nav>
   );
 }
@@ -296,11 +302,29 @@ function UserChip() {
 export default function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const scrollRef=useRouteScroll();
+  const drawer=useRef<HTMLElement>(null);
+  useEffect(()=>{
+    if(!mobileOpen)return;
+    const previous=document.activeElement as HTMLElement|null;
+    const overflow=document.body.style.overflow;document.body.style.overflow='hidden';
+    drawer.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const key=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){event.preventDefault();setMobileOpen(false);}
+      if(event.key==='Tab'){
+        const items=Array.from(drawer.current?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input')||[]).filter(e=>e.getClientRects().length);
+        const first=items[0],last=items[items.length-1];
+        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+      }
+    };
+    document.addEventListener('keydown',key);
+    return()=>{document.removeEventListener('keydown',key);document.body.style.overflow=overflow;previous?.isConnected&&previous.focus();};
+  },[mobileOpen]);
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="suite-shell flex min-h-screen bg-background"><a href="#suite-main" onClick={e=>{e.preventDefault();document.getElementById('suite-main')?.focus();}} className="suite-skip">Skip to content</a>
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:flex">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:flex lg:h-screen">
         <div className="flex items-center px-5 py-5">
           <Logo size="md" />
         </div>
@@ -317,7 +341,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             className="absolute inset-0 touch-none bg-black/60"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="absolute left-0 top-0 flex h-full w-72 flex-col border-r border-sidebar-border bg-sidebar">
+          <aside ref={drawer} role="dialog" aria-modal="true" aria-label="Navigation menu" className="absolute left-0 top-0 flex h-full w-72 flex-col border-r border-sidebar-border bg-sidebar">
             <div className="flex items-center justify-between px-5 py-5">
               <Logo size="md" />
               <button
@@ -350,6 +374,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             onClick={() => setMobileOpen(true)}
             className="shrink-0 rounded-lg p-2 text-foreground hover:bg-accent"
             aria-label="Open menu"
+            aria-expanded={mobileOpen}
           >
             <Menu className="h-6 w-6" />
           </button>
@@ -373,7 +398,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <SuiteBar />
-        <main ref={scrollRef} className="page-enter flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main id="suite-main" tabIndex={-1} ref={scrollRef} className="suite-content page-enter flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           {children}
         </main>
       </div>

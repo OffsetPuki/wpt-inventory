@@ -5,13 +5,13 @@
 
 // Form controls / buttons (from the finance pages).
 export const inputCls =
-  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
+  "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60 outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 
 export const primaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground shadow-sm transition-colors hover:opacity-90 focus-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 export const secondaryBtn =
-  "flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground hover:border-primary disabled:opacity-60";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground bg-card transition-colors hover:bg-accent hover:border-primary focus-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 // Table cells + generic pill (from the marketing/report tables). Kept here so
 // the remaining page directories can share the same header/cell/chip strings.

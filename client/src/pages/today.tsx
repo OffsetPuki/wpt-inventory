@@ -36,29 +36,18 @@ export default function TodayPage() {
             : "Your work, materials and messages."
         }
       />
-      <div className="flex flex-wrap gap-3">
-        <Link className="rounded-lg border px-4 py-2" href="/projects">
-          Jobs
-        </Link>
-        <Link className="rounded-lg border px-4 py-2" href="/crm/leads">
-          Customers & leads
-        </Link>
-        <Link className="rounded-lg border px-4 py-2" href="/home">
-          Inventory
-        </Link>
-        {isElevated && (
-          <>
-            <Link
-              className="rounded-lg border px-4 py-2"
-              href="/finance/invoices?status=overdue"
-            >
-              Money to collect
-            </Link>
-            <Link className="rounded-lg border px-4 py-2" href="/suite-health">
-              Owner controls
-            </Link>
-          </>
-        )}
+      <section aria-label="Quick access" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          {href:'/crm/quotes',label:'Quotes',detail:'Design, price and send a quote'},
+          {href:'/crm/clients',label:'Customers',detail:'Contacts, history and documents'},
+          {href:'/projects',label:'Jobs',detail:'Plan work and follow progress'},
+          isElevated?{href:'/crm/previews',label:'Customer previews',detail:'Review designs and customer feedback'}:{href:'/pm/time',label:'My time',detail:'Track time spent on your work'}
+        ].map(item=><Link key={item.href} href={item.href} className="group rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary"><span className="flex items-center justify-between gap-3 font-semibold">{item.label}<span aria-hidden="true">→</span></span><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.detail}</p></Link>)}
+      </section>
+      <div className="flex flex-wrap gap-2">
+        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/home">Inventory</Link>
+        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/crm/leads">Customers & leads</Link>
+        {isElevated&&<><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/finance/invoices?status=overdue">Money to collect</Link><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/suite-health">Owner controls</Link></>}
       </div>
       {isElevated && <LeadQueue />}
       {data.isError ? (

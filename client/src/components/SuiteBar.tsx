@@ -21,8 +21,8 @@ export default function SuiteBar() {
     successTitle: "Work time recorded",
   });
   return (
-    <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-sm">
-      <Link className="font-medium underline" href="/today?inbox=1">
+    <div className="flex min-h-12 flex-wrap items-center gap-3 border-b border-border bg-card/50 px-4 py-2 text-sm">
+      <Link className="rounded-lg px-2 py-1.5 font-medium hover:bg-accent" href="/today?inbox=1">
         Inbox
         {inbox.data?.some((n) => !n.read_at)
           ? ` (${inbox.data.filter((n) => !n.read_at).length})`
@@ -44,7 +44,7 @@ export default function SuiteBar() {
             })}
           </Link>
           <button
-            className="rounded border px-3 py-1"
+            className="min-h-11 rounded-lg border px-3 py-1 font-medium hover:bg-accent"
             onClick={() => stop.mutate()}
             disabled={stop.isPending}
           >

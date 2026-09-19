@@ -233,3 +233,14 @@ html {
     min-height: 22px;
   }
 }
+
+/* Shared suite layout: readable pages, clear keyboard focus and touch targets. */
+.suite-skip {position:fixed;left:16px;top:-100px;z-index:100;padding:12px 18px;border-radius:10px;background:hsl(var(--primary));color:hsl(var(--primary-foreground));}
+.suite-skip:focus {top:12px;}
+.suite-content > * {max-width:1440px;margin-inline:auto;}
+.suite-content {scroll-padding-top:20px;}
+.suite-shell :is(button,a,input,select,textarea,summary):focus-visible {outline:2px solid hsl(var(--ring));outline-offset:3px;}
+.suite-form label {line-height:1.5;}
+.suite-form :is(input,select,textarea) {scroll-margin-block:80px;}
+@media(max-width:640px){.suite-page-actions{width:100%;}.suite-page-actions>button,.suite-page-actions>a{flex:1 1 auto;min-height:44px;}.suite-form :is(input,select,textarea){font-size:16px;}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}.page-enter{animation:none;}.suite-shell *{transition-duration:0.01ms!important;}}

@@ -84,7 +84,7 @@ export default function Modal({
   }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-2 sm:items-center sm:p-4">
       <div
         className="absolute inset-0 touch-none bg-black/60"
         onClick={dismiss}
@@ -109,13 +109,13 @@ export default function Modal({
           <button
             type="button"
             onClick={dismiss}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="overflow-y-auto overscroll-contain p-5">{children}</div>
+        <div className="suite-form overflow-y-auto overscroll-contain p-5">{children}</div>
       </div>
     </div>
   );

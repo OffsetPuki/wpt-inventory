@@ -8,8 +8,8 @@ import type { ReactNode } from "react";
 /** Centered spinner shown while a query is loading. */
 export function LoadingBlock() {
   return (
-    <div className="flex justify-center py-16 text-muted-foreground">
-      <Loader2 className="h-8 w-8 animate-spin" />
+    <div role="status" className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
+      <Loader2 className="h-5 w-5 animate-spin" /><span>Loading…</span>
     </div>
   );
 }
@@ -25,9 +25,9 @@ export function EmptyState({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-      <Icon className="h-12 w-12" />
-      <p className="text-lg">{message}</p>
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-card px-6 py-12 text-center text-muted-foreground">
+      <Icon className="h-10 w-10 opacity-60" />
+      <p className="max-w-lg text-base text-foreground">{message}</p>
       {children}
     </div>
   );
