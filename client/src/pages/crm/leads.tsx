@@ -1,3 +1,4 @@
+import {useBusiness,setBusiness} from '@/hooks/useBusiness';
 import { LeadIntake } from '@/components/LeadIntake';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -727,12 +728,14 @@ function LeadDetailModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function LeadsPage() {
+  const business=useBusiness();
   const { isElevated } = useAuth();
 
   const [view, setView] = useState<"board" | "list">("board");
   const [q, setQ] = useRememberedState("client/src/pages/crm/leads.tsx:q","");
   const [source, setSource] = useRememberedState("client/src/pages/crm/leads.tsx:source","");
-  const [site, setSite] = useRememberedState("client/src/pages/crm/leads.tsx:site","");
+  const site=business==='all'?'':business;
+  const setSite=(value:string)=>setBusiness(value||'all');
   const [stage, setStage] = useRememberedState("client/src/pages/crm/leads.tsx:stage","");
   const [assignee, setAssignee] = useRememberedState("client/src/pages/crm/leads.tsx:assignee","");
   const [from, setFrom] = useRememberedState("client/src/pages/crm/leads.tsx:from","");

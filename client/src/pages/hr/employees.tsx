@@ -1,3 +1,4 @@
+import { RetryBlock } from "@/components/RetryBlock";
 import { useRecordLink } from '@/lib/record-link';
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -282,7 +283,7 @@ function DetailModal({
   onClose: () => void;
   onEdit: (e: Employee) => void;
 }) {
-  const { data, isLoading } = useQuery<EmployeeDetail>({
+  const { data, isLoading, isError: detailFailed, error: detailError, refetch: retryDetail } = useQuery<EmployeeDetail>({
     queryKey: ["hr-employee-detail", id],
     queryFn: async () => (await apiRequest("GET", `/api/hr/employees/${id}/detail`)).json(),
   });
@@ -304,7 +305,7 @@ function DetailModal({
       title={emp ? `${emp.firstName} ${emp.lastName}` : "Employee"}
       maxWidth="max-w-2xl"
     >
-      {isLoading || !data || !emp ? (
+      {detailFailed ? <RetryBlock query={{error:detailError,refetch:retryDetail}}/> : isLoading || !data || !emp ? (
         <div className="flex justify-center py-12 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
@@ -387,7 +388,7 @@ export default function HrEmployeesPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   useRecordLink("employee","/api/hr/employees",row=>setDetailId(row.id));
 
-  const { data: employees = [], isLoading } = useQuery<Employee[]>({
+  const { data: employees = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<Employee[]>({
     queryKey: ["hr-employees"],
     queryFn: async () => (await apiRequest("GET", "/api/hr/employees")).json(),
   });
@@ -454,7 +455,7 @@ export default function HrEmployeesPage() {
         </select>
       </div>
 
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
       ) : filtered.length === 0 ? (
         <EmptyState

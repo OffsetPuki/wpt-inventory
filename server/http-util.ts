@@ -33,7 +33,7 @@ export const todayLocal = (): string => ymdLocal(Date.now());
  */
 export function isElevated(req: Request): boolean {
   const role = req.user?.role;
-  return role === "owner" || role === "manager" || role === "technician";
+  return role === "owner" || role === "manager";
 }
 // hr.ts historically named this `elevatedRole` — same check, kept as an alias
 // so its call sites can import it under the old name.

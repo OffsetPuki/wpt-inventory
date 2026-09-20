@@ -1,3 +1,4 @@
+import { RetryBlock } from "@/components/RetryBlock";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -67,7 +68,7 @@ export default function PmBoardPage() {
   if (q.trim()) params.set("q", q.trim());
   const qs = params.toString();
 
-  const { data: tasks = [], isLoading } = useQuery<TaskRow[]>({
+  const { data: tasks = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<TaskRow[]>({
     queryKey: ["pm-tasks", projectFilter, assigneeFilter, q],
     queryFn: async () => (await apiRequest("GET", `/api/pm/tasks${qs ? `?${qs}` : ""}`)).json(),
   });
@@ -161,7 +162,7 @@ export default function PmBoardPage() {
         )}
       </div>
 
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <div className="flex justify-center py-16 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>

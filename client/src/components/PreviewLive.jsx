@@ -13,9 +13,9 @@ export default function PreviewLive({preview,form}) {
    viewer=studio.createProductStudio(host.current);viewer.setProduct(gltf.scene);
   }).catch(e=>{if(!stopped)setError('Model preview unavailable. Your details can still be saved.');});
   return()=>{stopped=true;abort.abort();viewer?.destroy();};
- },[preview?.id,option?.id,option?.revision]);
+ },[preview?.id,option?.id,option?.revision,preview?.version]);
  return <section className="rounded-xl border border-border bg-background p-4" aria-label="Live customer preview">
-  <p className="text-xs text-muted-foreground">Live preview · Save to update the customer link</p>
+  <p className="text-xs text-muted-foreground">Live preview · Save details or publish model updates below</p>
   <h2 className="mt-2 break-words text-2xl font-semibold">{form.title||'Project title'}</h2>
   <p className="mt-2 whitespace-pre-wrap break-words">{form.description}</p>
   {preview?.options?.length>1&&<label className="block mt-3">Design option<select className="w-full border p-2" value={option?.id||''} onChange={e=>setSelected(e.target.value)}>{preview.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label>}

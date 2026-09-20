@@ -1,3 +1,4 @@
+import { RetryBlock } from "@/components/RetryBlock";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -183,7 +184,7 @@ export default function HrLeavePage() {
     queryFn: async () => (await apiRequest("GET", "/api/hr/me")).json(),
   });
 
-  const { data: rows = [], isLoading } = useQuery<LeaveRow[]>({
+  const { data: rows = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<LeaveRow[]>({
     queryKey: ["hr-leave"],
     queryFn: async () => (await apiRequest("GET", "/api/hr/leave")).json(),
   });
@@ -216,7 +217,7 @@ export default function HrLeavePage() {
         </button>
       </Header>
 
-      {isLoading || meLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading || meLoading ? (
         <LoadingBlock />
       ) : (
         <>

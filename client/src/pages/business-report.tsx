@@ -1,0 +1,20 @@
+import {useState,useEffect} from 'react';
+import {useQuery} from '@tanstack/react-query';
+import {Link} from 'wouter';
+import {useBusiness} from '@/hooks/useBusiness';
+import {apiRequest} from '@/lib/queryClient';
+import {formatMoney} from '@/lib/format';
+import {inputCls,secondaryBtn} from '@/lib/ui-styles';
+import {RetryBlock} from '@/components/RetryBlock';
+import Header from '@/components/Header';
+import {BUSINESSES} from '@shared/business.js';
+export default function BusinessReport(){
+ const site=useBusiness(),today=new Date().toLocaleDateString('en-CA'),[from,setFrom]=useState(today.slice(0,7)+'-01'),[to,setTo]=useState(today),[kind,setKind]=useState(new URLSearchParams(location.hash.split('?')[1]).get('kind')||'all'),[search,setSearch]=useState(''),[page,setPage]=useState(0);
+ useEffect(()=>setPage(0),[site]);
+ const report=useQuery<any>({refetchInterval:30000, staleTime:0, queryKey:['business-report',site,from,to],queryFn:async()=>(await apiRequest('GET',`/api/business-report?site=${site}&from=${from}&to=${to}`)).json(),enabled:!!from&&!!to&&from<=to});
+ const rows=(report.data?.rows||[]).filter((r:any)=>(kind==='all'||(kind==='cash'&&r.kind!=='outstanding')||r.kind===kind)&&r.label.toLowerCase().includes(search.toLowerCase()));
+ const select=(value:string)=>{setKind(value);setPage(0);};
+ return <div className="space-y-6"><Header title="Business report"/><p className="text-sm text-muted-foreground">Cash received and recorded expenses. Cash difference includes tax collected and is not profit. Outstanding invoices show today’s unpaid balance, excluding held retainage.</p><div className="flex flex-wrap gap-4"><label>From<input className={inputCls} type="date" value={from} onChange={e=>{setFrom(e.target.value);setPage(0);}}/></label><label>To<input className={inputCls} type="date" value={to} onChange={e=>{setTo(e.target.value);setPage(0);}}/></label></div>
+ {(!from||!to||from>to)?<p role="alert">Choose a valid start and end date.</p>:report.isError?<RetryBlock query={report}/>:report.isPending?<p role="status">Loading report…</p>:<><div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{[['paid','Cash received',report.data.paidCents],['expense','Expenses',report.data.expensesCents],['cash','Cash difference',report.data.cashDifferenceCents],['outstanding','Outstanding',report.data.outstandingCents]].map(([key,label,value])=><button key={String(key)} className="rounded-xl border bg-card p-5 text-left" onClick={()=>select(String(key))}><span className="block text-sm">{label}</span><strong className="text-2xl">{formatMoney(Number(value))}</strong></button>)}</div><div className="flex flex-wrap gap-3"><select aria-label="Report records" className={inputCls} value={kind} onChange={e=>select(e.target.value)}><option value="all">All records</option><option value="cash">Cash received minus expenses</option><option value="paid">Payments</option><option value="expense">Expenses</option><option value="outstanding">Outstanding invoices</option></select><input className={inputCls} placeholder="Find a record" aria-label="Find a report record" value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}}/></div><div className="divide-y rounded-xl border bg-card">{rows.slice(page*25,page*25+25).map((r:any)=><Link href={r.href} key={r.kind+r.id} className="flex min-h-16 items-center justify-between gap-4 p-4 hover:bg-muted"><span>{r.label}<small className="block text-muted-foreground">{r.date||'No due date'} · {(BUSINESSES as Record<string,string>)[r.site]||'Unassigned'} · {r.kind}</small></span><strong>{formatMoney(r.kind==='expense'?-r.amountCents:r.amountCents)}</strong></Link>)}{!rows.length&&<p className="p-5">No matching records.</p>}</div><div className="flex items-center gap-4"><button className={secondaryBtn} disabled={!page} onClick={()=>setPage(p=>p-1)}>Previous</button><span>{rows.length} records</span><button className={secondaryBtn} disabled={(page+1)*25>=rows.length} onClick={()=>setPage(p=>p+1)}>Next</button></div></>}
+ </div>;
+}

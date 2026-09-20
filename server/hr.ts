@@ -1,3 +1,4 @@
+import {registerLaborPolicy} from './labor-policy';
 import { initializePayRates, payrollSummary, payrollRange, payrollDate, closedPeriod } from "./payroll";
 import type { Express } from "express";
 import { z } from "zod";
@@ -135,6 +136,7 @@ const recordExpenseSchema = z.object({
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerHrRoutes(app: Express): void {
+  registerLaborPolicy(app);
   // ─── Stats ────────────────────────────────────────────────────────────────
 
   app.get("/api/hr/stats", requireElevated, (_req, res) => {

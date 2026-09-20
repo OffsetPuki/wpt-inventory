@@ -1,3 +1,4 @@
+import {quoteBusiness} from '../shared/business.js';
 import {resolveReviewSite,syncReviewTask,marketingPreference} from './marketing-core';
 import {documentActivityRevision} from './document-activity';
 import { acceptQuote } from "./quote-lifecycle";
@@ -56,11 +57,12 @@ import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 // The effective price book: stored quote_settings rates deep-merged over the
 // defaults — identical semantics to the builder (QuoteBuilder.jsx), so the
 // public estimate and an owner-built quote always start from the same rates.
-function currentPriceBook(): Record<string, any> {
+function currentPriceBook(site='metals'): Record<string, any> {
   const row = sqlite.prepare(
     "SELECT price_book FROM quote_settings WHERE id = 1",
   ).get() as { price_book?: string } | undefined;
-  return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
+  const book=deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
+  return deepMerge(book,book.businesses?.[site]||{});
 }
 
 export function currentShop(): {
@@ -181,10 +183,11 @@ export function quoteDocument(quote: Quote): QuoteDoc | null {
     if (!sess || typeof sess !== "object" || !sess.state) return null;
     const book = sess.priceBookSnapshot && typeof sess.priceBookSnapshot === "object"
       ? deepMerge(DEFAULT_PRICE_BOOK, sess.priceBookSnapshot)
-      : currentPriceBook();
+      : currentPriceBook(quoteBusiness(sess));
     const lineState = buildLineState(quote.type, sess.state, book, sess.overrides);
     // `as` rather than `:` — the engine types `lines` as {} (built dynamically).
     const totals = computeTotals(lineState, {
+      pricingRulesVersion: sess.pricingRulesVersion,
       materialMarkupPct: sess.materialMarkupPct,
       laborMarkupPct: sess.laborMarkupPct,
       taxPct: sess.taxPct,
@@ -296,7 +299,7 @@ export function registerPublicPortalRoutes(app: Express): void {
       }
       if (JSON.stringify(state).length > 8 * 1024) return res.json({ ok: false });
 
-      const priceBook = currentPriceBook();
+      const priceBook = currentPriceBook(quoteBusiness({type}));
       const { items, laborHours, installHours } = deriveItems(type, state, priceBook) as {
         items: any[]; laborHours: number; installHours?: number;
       };

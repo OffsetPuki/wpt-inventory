@@ -21,6 +21,7 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "project-fin-summary",
   ],
   jobs: [
+    "business-report",
     "suite-files",
     "suite-timeline",
     "suite-schedule",
@@ -37,6 +38,7 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "attention",
   ],
   finance: [
+    "business-report",
     "quote-costing",
     "suite-timeline",
     "suite-schedule",
@@ -62,7 +64,7 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "suite-today",
   ],
   marketing: ["marketing"],
-  crm: ["marketing", "crm-", "quote", "quotes", "suite-job", "suite-today"],
+  crm: ["business-report", "marketing", "crm-", "quote", "quotes", "suite-job", "suite-today"],
   team: [
     "suite-schedule",
     "quote-costing",

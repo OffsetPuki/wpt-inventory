@@ -27,10 +27,12 @@ test('Save and open includes pending text, and replacing a model retains its lin
   expect((await app.api('/api/public/customer-previews/'+saved.url.split('/').at(-1),'GET',undefined,undefined,{'X-Lead-Key':'test-intake-key'})).data.depth).toBe('40 ft');
   expect(saved.description).toBe('Changed description');expect(saved.note).toBe('Changed notes');await popup.close();
   await dialog.getByLabel('Replace model: kalkat-5',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-7.glb',import.meta.url)));
+  await dialog.getByRole('button',{name:'Publish design updates'}).click();
   await expect(dialog.getByRole('button',{name:'Restore previous model'})).toBeVisible();
   await expect(dialog.getByLabel('Customer preview link')).toHaveValue(link);
   saved=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.shortUrl===link);expect(saved.options[0].revision).toBe(2);expect(saved.options).toHaveLength(1);
   await dialog.getByRole('button',{name:'Restore previous model'}).click();
+  await dialog.getByRole('button',{name:'Publish design updates'}).click();
   await expect.poll(async()=>(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.shortUrl===link).options[0].revision).toBe(3);
 });
 test('Owner creates a design preview, adds a model, shares it and reads customer changes',async({page})=>{

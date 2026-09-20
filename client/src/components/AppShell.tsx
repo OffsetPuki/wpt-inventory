@@ -152,20 +152,20 @@ const ALL_NAV_GROUPS: NavGroup[] = [
 ];
 
 const NAV_GROUPS: NavGroup[] = [
-  { key: 'sales', label: 'Customers & sales', alwaysOpen: true, entries: [
+  { key: 'sales', label: 'Customers', alwaysOpen: true, entries: [
     {...ALL_NAV_GROUPS[0].entries[1], label: 'Customers'},
     ALL_NAV_GROUPS[0].entries[0],
     ...ALL_NAV_GROUPS[0].entries.slice(2,4),
   ]},
-  { key: 'projects', label: 'Work', alwaysOpen: true, entries: ALL_NAV_GROUPS[1].entries.slice(0,3) },
+  { key: 'projects', label: 'Jobs', alwaysOpen: true, entries: ALL_NAV_GROUPS[1].entries.slice(0,3) },
   ALL_NAV_GROUPS[3],
+  {...ALL_NAV_GROUPS[5],alwaysOpen:true},
   { key: 'more', label: 'More', entries: [
     ...ALL_NAV_GROUPS[1].entries.slice(3).map(e=>({...e,section:'Work tools'})),
     ...ALL_NAV_GROUPS[2].entries.map(e=>({...e,section:'Inventory',label:e.to==='/home'?'Inventory':e.label})),
     ...ALL_NAV_GROUPS[4].entries.map(e=>({...e,section:'Team'})),
     {to:'/crm',label:'Sales reports',icon:BarChart3,section:'Business'},
-    {to:'/dashboard',label:'Business reports',icon:BarChart3,needs:'elevated',section:'Business'},
-    ...ALL_NAV_GROUPS[5].entries.map(e=>({...e,needs:ALL_NAV_GROUPS[5].needs,section:'Business'})),
+    {to:'/business-report',label:'Business reports',icon:BarChart3,needs:'elevated',section:'Business'},
     {to:'/suite-health',label:'Owner controls',icon:ShieldCheck,needs:'elevated',section:'Administration'},
     ...ALL_NAV_GROUPS[6].entries.map(e=>({...e,section:'Administration'})),
   ]},

@@ -1,3 +1,5 @@
+import {useBusiness} from '@/hooks/useBusiness';
+import {RetryBlock} from '@/components/RetryBlock';
 import { useApiMutation } from '@/hooks/useApiMutation';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useState } from "react";
@@ -121,6 +123,7 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
 }
 
 export default function ProjectsPage() {
+  const business=useBusiness();
   // Manager + technician both create / manage projects.
   const { isElevated: isManager } = useAuth();
   const [, setLocation] = useLocation();
@@ -128,12 +131,12 @@ export default function ProjectsPage() {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
 
-  const { data: projects = [], isLoading } = useQuery<Project[]>({
+  const { data: projects = [], isLoading, isError,error,refetch } = useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
   });
 
-  const filtered = projects.filter(
+  const filtered = projects.filter(p=>business==='all'||p.site===business).filter(
     (p) =>
       !q ||
       p.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -174,7 +177,7 @@ export default function ProjectsPage() {
         />
       </div>
 
-      {isLoading ? (
+      {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <div className="flex justify-center py-16 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>

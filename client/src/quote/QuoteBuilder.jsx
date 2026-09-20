@@ -1,3 +1,5 @@
+import {BUSINESSES,quoteBusiness,businessShop} from "../../../shared/business.js";
+import {useBusiness} from "@/hooks/useBusiness";
 import CustomerFields from './components/CustomerFields.jsx';
 import { QuotePreviewContext } from './lib/preview-context.jsx';
 // =============================================================================
@@ -59,6 +61,7 @@ function newSid() {
 function newSession(type, priceBook) {
   return {
     sid: newSid(),
+    pricingRulesVersion: 2,
     type,
     state: type === 'carport' ? {...defaultState(type),pricingMode:'package',gableFrame:'truss'} : defaultState(type),
     overrides: {},
@@ -120,6 +123,8 @@ import { useRecordLink } from "@/lib/record-link";
 
 export default function QuoteBuilder({ initialSettings }) {
   const qc = useQueryClient();
+  const selectedBusiness=useBusiness();
+  const [bookBusiness,setBookBusiness]=useState(selectedBusiness==='all'?'metals':selectedBusiness);
   // Writing the SHARED price book is owner-only — the rates here price every
   // future quote and every instant estimate on the public website, and this
   // panel auto-saves 800ms after a keystroke with no save button to think
@@ -148,15 +153,29 @@ export default function QuoteBuilder({ initialSettings }) {
   useEffect(() => {
     latestSettings.current = { priceBook, shop };
   }, [priceBook, shop]);
-  const putSettings = (body) =>
-    apiRequest("PUT", "/api/quotes/settings", body).catch((e) => {
-      settingsDirty.current = true; // keep it dirty so a later edit/flush retries
-      toast({
-        variant: "destructive",
-        title: "Rates not saved",
-        description: e?.message,
-      });
+  const settingsVersion = useRef(initialSettings?.version ?? 0);
+  const settingsQueue = useRef(Promise.resolve());
+  const settingsBlocked = useRef(false);
+  const [settingsError,setSettingsError] = useState('');
+  const putSettings = (body) => {
+    settingsQueue.current=settingsQueue.current.then(async()=>{
+      if(settingsBlocked.current)return;
+      try {
+        const saved=await (await apiRequest("PUT","/api/quotes/settings",{...body,version:settingsVersion.current})).json();
+        if(saved.saved===false)throw new Error('You do not have permission to change rates.');
+        settingsVersion.current=saved.version;
+        qc.setQueryData(["quote-settings"],{...body,version:saved.version,canEditRates});
+        setSettingsError('');
+      }catch(e){settingsBlocked.current=true;setSettingsError(e.message||'Rates could not be saved.');}
     });
+  };
+  const reloadSettings=async()=>{
+    try{const fresh=await(await apiRequest('GET','/api/quotes/settings')).json();
+      settingsDirty.current=false;settingsBlocked.current=false;settingsVersion.current=fresh.version;
+      setPriceBook(deepMerge(DEFAULT_PRICE_BOOK,fresh.priceBook));setShop(deepMerge(DEFAULT_SHOP,fresh.shop));
+      qc.setQueryData(['quote-settings'],fresh);setSettingsError('');
+    }catch(e){setSettingsError(e.message);}
+  };
   useEffect(() => {
     if (!settingsDirty.current) return;
     if (!canEditRates) {
@@ -165,7 +184,7 @@ export default function QuoteBuilder({ initialSettings }) {
     } // server would discard it
     // Mirror local state into the query cache right away so a remount within
     // the cache's staleTime (navigate away and back) can't revert the edits.
-    qc.setQueryData(["quote-settings"], { priceBook, shop });
+    qc.setQueryData(["quote-settings"], { priceBook, shop,version:settingsVersion.current,canEditRates });
     const t = setTimeout(() => {
       settingsDirty.current = false;
       putSettings({ priceBook, shop });
@@ -179,7 +198,7 @@ export default function QuoteBuilder({ initialSettings }) {
     () => () => {
       if (settingsDirty.current) {
         settingsDirty.current = false;
-        qc.setQueryData(["quote-settings"], latestSettings.current);
+        qc.setQueryData(["quote-settings"], {...latestSettings.current,version:settingsVersion.current,canEditRates});
         putSettings(latestSettings.current);
       }
     },
@@ -202,8 +221,8 @@ export default function QuoteBuilder({ initialSettings }) {
     () =>
       session?.priceBookSnapshot
         ? deepMerge(DEFAULT_PRICE_BOOK, session.priceBookSnapshot)
-        : priceBook,
-    [session?.priceBookSnapshot, priceBook],
+        : deepMerge(priceBook,priceBook.businesses?.[quoteBusiness(session)]||{}),
+    [session?.priceBookSnapshot, session?.business,session?.type, priceBook],
   );
   const lineState = useMemo(
     () =>
@@ -221,6 +240,7 @@ export default function QuoteBuilder({ initialSettings }) {
     () =>
       lineState
         ? computeTotals(lineState, {
+            pricingRulesVersion: session.pricingRulesVersion,
             materialMarkupPct: session.materialMarkupPct,
             laborMarkupPct: session.laborMarkupPct,
             taxPct: session.taxPct,
@@ -230,13 +250,14 @@ export default function QuoteBuilder({ initialSettings }) {
             minJobCharge: effectiveBook.minJobCharge,
           })
         : null,
-    [lineState, session?.materialMarkupPct, session?.laborMarkupPct, session?.taxPct, session?.deliveryMiles, session?.deliveryPerMile, session?.discountPct, effectiveBook.minJobCharge],
+    [lineState, session?.pricingRulesVersion, session?.materialMarkupPct, session?.laborMarkupPct, session?.taxPct, session?.deliveryMiles, session?.deliveryPerMile, session?.discountPct, effectiveBook.minJobCharge],
   );
   // "Did you forget?" checklist + the per-material purchase totals (cut list).
   const warnings = useMemo(
     () =>
       session && lineState
         ? [...deriveWarnings(session.type, session.state, lineState, {
+            pricingRulesVersion: session.pricingRulesVersion,
             materialMarkupPct: session.materialMarkupPct,
             laborMarkupPct: session.laborMarkupPct,
             taxPct: session.taxPct,
@@ -422,7 +443,9 @@ export default function QuoteBuilder({ initialSettings }) {
   const [startingCustomer, setStartingCustomer] = useState({});
   const pendingLead = useRef(null);
   const startConfig = (type, templateState = null) => {
-    const sess = newSession(type, priceBook);
+    const site=selectedBusiness==='all'?quoteBusiness({type}):selectedBusiness;
+    const sess = newSession(type, deepMerge(priceBook,priceBook.businesses?.[site]||{}));
+    sess.business=site;
     if (templateState) sess.state = structuredClone(templateState);
     sess.customer = { ...sess.customer, ...startingCustomer };
     sess.leadId = pendingLead.current;
@@ -448,7 +471,9 @@ export default function QuoteBuilder({ initialSettings }) {
   // the defaults, their contact info fills the customer card, and the design
   // code rides along onto the recap + PDF.
   const startFromLead = (lead, parsed) => {
-    const sess = newSession(parsed.type, priceBook);
+    const site=lead.site||quoteBusiness({type:parsed.type});
+    const sess = newSession(parsed.type, deepMerge(priceBook,priceBook.businesses?.[site]||{}));
+    sess.business=site;
     sess.state = { ...sess.state, ...parsed.state };
     sess.customer = {
       name: lead.name || "",
@@ -602,6 +627,7 @@ export default function QuoteBuilder({ initialSettings }) {
 
           </nav>
         </header>
+        {settingsError&&<div className="container draft-recovery" role="alert"><strong>Price book not saved</strong><p>{settingsError}</p><p>Reloading replaces these unsaved rate edits with the shared price book. Saved quotes keep their prices.</p><button className="btn ghost" onClick={reloadSettings}>Reload shared rates</button></div>}
         <nav className="quote-tool-row container no-print" aria-label="Quote tools">
           <span>Tools</span>
           <button type="button" className="btn ghost" aria-pressed={view==='costing'} onClick={()=>setView('costing')}>Costing</button>
@@ -616,7 +642,7 @@ export default function QuoteBuilder({ initialSettings }) {
         )}
         {inQuoteFlow && <nav className="quote-steps container" aria-label="Quote steps">{[['customer','Customer'],['configure','Design'],['price','Price'],['details','Review & send']].map(([step,label],i)=><button key={step} type="button" aria-current={(activeView===step||step==='configure'&&activeView==='build-type'||step==='customer'&&activeView==='home')?'step':undefined} disabled={step!=='customer'&&!session || ['customer','configure','price'].includes(step)&&!!session?.quoteStatus&&session.quoteStatus!=='draft'} onClick={()=>{if(step==='details')reviewQuote();else {setView(step==='customer'&&!session?'home':step);window.scrollTo({top:0});}}}><span>{i+1}</span>{label}</button>)}</nav>}
         <Suspense fallback={<p className="container hint" role="status">Loading…</p>}>
-        {activeView === 'customer' && session && <div className="container page"><h1 className="display">Customer</h1><CustomerFields customer={session.customer} onChange={setCustomer}/><button className="btn" onClick={()=>setView('configure')}>Next: design →</button></div>}
+        {activeView === 'customer' && session && <div className="container page"><h1 className="display">Customer</h1><label className="field"><span>Quoting business</span><select value={quoteBusiness(session)} onChange={e=>setSession(s=>({...s,business:e.target.value}))}>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label><CustomerFields customer={session.customer} onChange={setCustomer}/><button className="btn" onClick={()=>setView('configure')}>Next: design →</button></div>}
         {activeView === 'build-type' && session && <Home designOnly onPick={changeBuildType} onContinue={()=>setView('configure')}/>}
         {activeView === "home" && (
           <Home
@@ -638,9 +664,10 @@ export default function QuoteBuilder({ initialSettings }) {
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
         {activeView==='options'&&session?.quoteId&&<QuoteOptions quoteId={session.quoteId} onBack={()=>setView('configure')} onShared={()=>setSession(s=>({...s,quoteStatus:'sent'}))} onDone={issued} />}
-        {session?.type==='barndominium' && ['configure','price','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
+        {session && ['configure','price','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
         {["configure","price"].includes(activeView) && session && (
           <Configurator
+            estimate={session.costEstimate} onChangeEstimate={costEstimate=>setSession(s=>({...s,costEstimate}))}
             key={`configure-${session.sid}-${activeView}`}
             mode={activeView==='price'?'price':'design'}
             customer={session.customer}
@@ -717,13 +744,14 @@ export default function QuoteBuilder({ initialSettings }) {
             onShared={() => { setSession(s => s?.sid === session.sid ? {...s,quoteStatus:'sent'} : s); document.querySelector('.review-actions')?.scrollIntoView({block:'center'}); }}
           />
         )}
+        {activeView === "pricebook" && <label className="container field"><span>Rates and company identity</span><select aria-label="Price book business" value={bookBusiness} onChange={e=>setBookBusiness(e.target.value)}>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>}
         {activeView === "pricebook" && (
           <PriceBookPanel
-            priceBook={priceBook}
-            onChange={updatePriceBook}
-            shop={shop}
-            onChangeShop={updateShop}
-            onReset={resetPriceBook}
+            priceBook={deepMerge(priceBook,priceBook.businesses?.[bookBusiness]||{})}
+            onChange={(path,value)=>updatePriceBook(`businesses.${bookBusiness}.${path}`,value)}
+            shop={businessShop(shop,bookBusiness)}
+            onChangeShop={(field,value)=>updateShop(`businesses.${bookBusiness}.${field}`,value)}
+            onReset={()=>{if(window.confirm("Reset this business’s rates to the shared defaults?"))updatePriceBook(`businesses.${bookBusiness}`,{});}}
             readOnly={!canEditRates}
           />
         )}
@@ -740,8 +768,8 @@ export default function QuoteBuilder({ initialSettings }) {
             </div>
             {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn ghost" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}>{saveBusy?'Saving quote…':'Save Quote'}</button>}
             {activeView === "configure" && <button className="btn" onClick={()=>{setView("price");window.scrollTo({top:0});}}>Next: price →</button>}
-            {["configure","price"].includes(activeView) ? <button className={activeView === "configure" ? "btn ghost" : "btn"} disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
-              : <div id="quote-send-actions" />}
+            {activeView === "price" ? <button className={activeView === "configure" ? "btn ghost" : "btn"} disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
+              : activeView==='details'&&<div id="quote-send-actions" />}
           </div>
         )}
       </div>

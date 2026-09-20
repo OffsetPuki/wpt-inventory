@@ -1,3 +1,5 @@
+import StandardPackages from './StandardPackages.jsx';
+import PriceSummary from './PriceSummary.jsx';
 import CarportPricing, { CarportOptions } from './CarportPricing.jsx';
 import { concreteGuide, isFlatwork } from '../data/concreteGuide.js';
 import Barndominium from './Barndominium.jsx';
@@ -14,7 +16,7 @@ const LineItems = lazy(() => import('./LineItems.jsx'));
  * live preview + auto-priced, hand-editable line items on the right.
  */
 export default function Configurator({
-  mode='design', type, state, lineState, totals, warnings, materialsSummary, priceLockAt, priceBook,
+  estimate,onChangeEstimate,mode='design', type, state, lineState, totals, warnings, materialsSummary, priceLockAt, priceBook,
   materialMarkupPct, laborMarkupPct, taxPct, discountPct, deliveryMiles, deliveryRate,
   onChangeOption, onEditItem, onEditLabor, onEditInstall,
   onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onMoveLine, onUnlockPrices, onResetOverrides,
@@ -30,7 +32,9 @@ export default function Configurator({
   const finish = controls.filter(c => ['coating', 'color'].includes(c.name));
   const advancedNames=['pricingMode','pricingBasis','priceLevel','baseRate','minimumCharge','siteAllowance','thicknessAddon'];
   const advancedControls=type==='concrete'?controls.filter(c=>advancedNames.includes(c.name)):[];
-  const basics = controls.filter(c => !finish.includes(c)&&!advancedControls.includes(c));
+  const optionalNames=['panelWidth','undergroundFt','bagsPerPost','meshRatio','slatCount','railCount','legs','spacing','toprail'];
+  const optionalControls=controls.filter(c=>optionalNames.includes(c.name));
+  const basics = controls.filter(c => !finish.includes(c)&&!advancedControls.includes(c)&&!optionalControls.includes(c));
   const frameControls = basics.filter(c => ['frameLengthFt','frameWidthIn','frameHeightIn'].includes(c.name));
   const topControls = basics.filter(c => ['topMaterial','topCost','lengthFt','widthIn','topThicknessIn'].includes(c.name));
   const missing = lineState.items.filter(it => it.unpriced || !(Number(it.rate) > 0));
@@ -51,6 +55,7 @@ export default function Configurator({
           <h1 className="display">{mode==='price'?'Price your quote':typeLabel(type)}</h1>
         </div>
 
+        {mode==='design' && <StandardPackages type={type} onChange={onChangeState}/>}
         {mode==='design' && type === 'barndominium' && <Barndominium state={state} onChange={onChangeState} customer={customer} />}
         {mode==='design' && type === 'barndominium' && <BarndoQuoteDetails state={state} value={barndoQuote} onChange={onChangeBarndoQuote} />}
         <div className={mode==='price'?'quote-price-layout':'cfg'}>
@@ -66,11 +71,13 @@ export default function Configurator({
               {state.includeTop === 'yes' && <section aria-label="Tabletop"><h2 className="dimension-title">Tabletop</h2><div className="quote-control-grid">{topControls.map(renderControl)}</div></section>}
               <div className="quote-control-grid">{basics.filter(c => !['qty','includeTop'].includes(c.name) && !frameControls.includes(c) && !topControls.includes(c)).map(renderControl)}</div>
             </> : <div className="quote-control-grid">{basics.map(renderControl)}</div>}
+            {!packageCarport&&optionalControls.length>0&&<details className="quote-section"><summary>Construction details</summary><div className="quote-control-grid">{optionalControls.map(renderControl)}</div></details>}
             {!packageCarport && finish.length > 0 && <details className="quote-section"><summary>Finish &amp; coating</summary><div className="quote-control-grid">{finish.map(renderControl)}</div></details>}
           </form>}
 
           <div className="cfg-right">
-            {mode==='price' && !packageCarport && <section className="quote-section"><h2>Quote total: ${Number(totals?.total||0).toLocaleString('en-US',{minimumFractionDigits:2})}</h2><p>Review the included work below. Change rates, labor, delivery or tax in Advanced pricing.</p><ul className="quote-price-summary">{lineState.items.map(item=><li key={item.key}><span>{item.name}</span><strong>{Number(item.qty).toLocaleString()} {item.unit||({area:'sq ft',length:'ft',flat:'job'}[item.kind]||'each')}</strong></li>)}</ul><p>Tax: ${Number(totals?.tax||0).toFixed(2)} · Discount: ${Number(totals?.discountAmt||0).toFixed(2)}</p></section>}
+            {mode==='price'&&<PriceSummary totals={totals} estimate={estimate} onChange={onChangeEstimate} warnings={warnings}/>}
+            {mode==='price' && !packageCarport && <section className="quote-section"><h2>Included work</h2><p>Review the included work below. Change rates, labor, delivery or tax in Advanced pricing.</p><ul className="quote-price-summary">{lineState.items.map(item=><li key={item.key}><span>{item.name}</span><strong>{Number(item.qty).toLocaleString()} {item.unit||({area:'sq ft',length:'ft',flat:'job'}[item.kind]||'each')}</strong></li>)}</ul><p>Tax: ${Number(totals?.tax||0).toFixed(2)} · Discount: ${Number(totals?.discountAmt||0).toFixed(2)}</p></section>}
             {!!advancedControls.length && <details className="quote-section"><summary>Concrete pricing options</summary><div className="quote-control-grid">{advancedControls.map(renderControl)}</div></details>}
             {guide && <section className="quote-section" aria-label="CJM pricing guide"><h2>{guide.label}</h2><p>{guide.qty} {guide.unit} · Guide: ${guide.low}–${guide.high}{['panel','wall','drainage','roots'].includes(state.repairType) ? '+' : ''} / {guide.unit}</p><p>Selected base: ${guide.rate.toFixed(2)} / {guide.unit}{guide.minimum > 0 ? ` · Minimum: $${guide.minimum}` : ''}</p><p className="hint">Installed guide rates include labor. Finishes and extras are separate. Any markup, tax or delivery in Advanced pricing is additional. Final pricing depends on site conditions.</p>{isFlatwork(state) && Number(state.thickness)>4 && <p className="hint">Confirm the base rate for {state.thickness}″ concrete or enter an extra thickness allowance; the guides do not specify a thickness surcharge.</p>}{state.project==='retaining' && <p className="hint">Quantity is length × wall height (wall face area).</p>}{state.project==='brick' && <p className="hint">Enter affected {guide.unit}; repair scope and structural work require site review.</p>}</section>}
             {mode==='design' && type !== 'barndominium' && !(type === 'concrete' && !isFlatwork(state)) && <Preview type={type} state={state} customer={customer} />}

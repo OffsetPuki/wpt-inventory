@@ -1036,3 +1036,22 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
  }
 
 }
+
+/* Focused quoting: one primary action and compact, touch-friendly choices. */
+.qa .model-navigation {display:flex;justify-content:center;gap:8px;margin:8px 0;}
+.qa .quote-price-ladder {display:grid;gap:12px;margin:16px 0;}
+.qa .quote-price-ladder>div {display:flex;justify-content:space-between;gap:16px;}
+.qa .quote-price-ladder dt {color:var(--steel);}
+.qa .quote-price-ladder dd {font-weight:600;font-variant-numeric:tabular-nums;}
+@media(max-width:640px){
+ .qa .product-studio-stage {height:280px!important;}
+ .qa .seg.cols-4 {grid-template-columns:repeat(4,minmax(0,1fr));}
+ .qa .quote-actionbar {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;}
+ .qa .quote-actionbar>div:first-child {margin-right:auto;}
+ .qa .quote-actionbar .draft-status {flex:0 1 auto;}
+ .qa .quote-actionbar>.btn {min-width:0;width:100%;}
+ .qa .quote-control-grid {gap:14px;}
+ .qa .quote-tool-row {padding-block:6px;}
+ .qa .preview-summary {display:none;}
+}
+.qa :fullscreen .product-studio-stage {height:calc(100dvh - 170px)!important;}

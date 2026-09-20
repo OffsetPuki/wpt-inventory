@@ -145,7 +145,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Revise", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Review quote", exact: false }),
+    page.getByRole("button", { name: "Next: price", exact: false }),
   ).toBeVisible();
   const revision = app.sqlite
     .prepare("SELECT * FROM quotes ORDER BY id DESC LIMIT 1")
@@ -341,7 +341,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   await page.getByLabel("Tabletop cost ($ each)", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ animations: "disabled", path: "test-results/tabletop-options-mobile.png" });
   // The primary action stays within the phone viewport while scrolling.
-  const action = await page.getByRole('button',{name:/Review quote/}).boundingBox();
+  const action = await page.getByRole('button',{name:/Next: price/}).boundingBox();
   expect(action.y + action.height).toBeLessThanOrEqual(844);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.evaluate(() => window.scrollTo({top:0}));
@@ -378,6 +378,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   await page.context().setOffline(false);
   await expect.poll(()=>JSON.parse(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(includedRow.id).payload).customer.name).toBe('Recovered offline edit');
   await expect(page.locator('.draft-status')).toHaveText('Saved');
+  await page.getByRole('button',{name:/Next: price/}).click();
   await page.getByRole('button',{name:/Review quote/}).click();
   await expect(page.getByRole('heading',{name:'Review & send'})).toBeVisible();
   await expect(page.locator('iframe[title="Customer quote"]')).toHaveAttribute('src',/preview=1.*embed=1/);

@@ -37,6 +37,7 @@ for(const kind of ['missing','deleted'])test(`Start a fresh quote directly with 
  const backup=await page.evaluate(sid=>JSON.parse(localStorage.getItem('cjm.session.v2.user.1.recovery.'+sid)),sid);
  expect(backup.notes).toBe(payload.notes);
  expect(app.sqlite.prepare('SELECT * FROM quotes WHERE id=?').get(oldId)).toEqual(before);
+ await page.getByRole('button',{name:'Next: price',exact:false}).click();
  await page.getByRole('button',{name:'Review quote',exact:false}).click();
  await expect(page.locator('.quote-review')).toBeVisible();
  await page.reload();
@@ -74,6 +75,7 @@ for(const kind of ['missing','deleted','conflict'])test(`Recover ${kind} draft f
  expect(saved.priceBookSnapshot.materialMarkupPct).toBe(37);
  expect(saved.quotePolicy).toBeUndefined();expect(saved.revisionOf).toBeUndefined();expect(saved.alternativeOf).toBeUndefined();
  expect(app.sqlite.prepare('SELECT * FROM quotes WHERE id=?').get(oldId)).toEqual(before);
+ await page.getByRole('button',{name:'Next: price',exact:false}).click();
  await page.getByRole('button',{name:'Review quote',exact:false}).click();
  await expect(page.locator('.quote-review')).toBeVisible();
  await page.getByRole('button',{name:'New quote',exact:true}).click();

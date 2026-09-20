@@ -32,18 +32,7 @@ function migratePlaintextPins(): void {
  * Only inserts if the corresponding table is empty, so manager edits are never clobbered.
  */
 export function seedDefaults(): void {
-  // ── Role collapse (Package E) ──────────────────────────────────────────
-  // manager/technician → owner. The 3-role split only hid screens from the
-  // solo owner. Idempotent; outstanding sessions keep their old role string
-  // until expiry (requireElevated tolerates the legacy names).
-  try {
-    const r = sqlite.prepare(
-      "UPDATE users SET role = 'owner' WHERE role IN ('manager', 'technician')",
-    ).run();
-    if (r.changes > 0) console.log(`[seed] Collapsed ${r.changes} manager/technician user(s) to owner`);
-  } catch (e) {
-    console.error("[seed] role collapse failed", e);
-  }
+  // Preserve assigned roles on every restart; never promote staff during seeding.
 
   // ── Users ──────────────────────────────────────────────────────────────
   if (storage.getUserCount() === 0) {

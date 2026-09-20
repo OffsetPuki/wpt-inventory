@@ -41,7 +41,16 @@ export function createProductStudio(host){
   light.position.copy(center).add(new THREE.Vector3(-radius,radius*1.5,radius));light.target.position.copy(center);Object.assign(light.shadow.camera,{left:-radius,right:radius,top:radius,bottom:-radius,near:.1,far:radius*5});light.shadow.camera.updateProjectionMatrix();
   // Preserve slab/ground depth separation throughout the allowed zoom range.
   camera.near=Math.max(.01,radius*.01);camera.far=Math.max(100,radius*12);camera.updateProjectionMatrix();
-  if(shape!==key){key=shape;controls.target.copy(center);const distance=Math.max(size.y,size.x/(camera.aspect||1),size.z)*1.8;camera.position.copy(center).add(new THREE.Vector3(.6,.4,1).normalize().multiplyScalar(Math.max(2,distance)));controls.minDistance=radius*.08;controls.maxDistance=radius*8;controls.update();}resize();
+  if(shape!==key){key=shape;controls.minDistance=radius*.08;controls.maxDistance=radius*8;fit();}else resize();
  }
- return {setProduct,exportModel:(frame=null)=>exportProduct(product,frame),destroy(){observer.disconnect();releaseMouse();controls.dispose();disposeProduct(product);floor.geometry.dispose();floor.material.dispose();base.geometry.dispose();base.material.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
+ function fit(){
+  if(!product)return;resize();
+  const box=new THREE.Box3().setFromObject(product),center=box.getCenter(new THREE.Vector3());
+  const direction=new THREE.Vector3(.6,.4,1).normalize(),right=new THREE.Vector3().crossVectors(camera.up,direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right);
+  const vertical=Math.tan(THREE.MathUtils.degToRad(camera.fov/2)),horizontal=vertical*camera.aspect;let distance=0;
+  for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){const v=new THREE.Vector3(x,y,z).sub(center);distance=Math.max(distance,v.dot(direction)+Math.max(Math.abs(v.dot(right))/horizontal,Math.abs(v.dot(up))/vertical));}
+  controls.target.copy(center);camera.position.copy(center).addScaledVector(direction,Math.max(controls.minDistance,distance*1.12));controls.update();draw();
+ }
+ function zoom(factor){const offset=camera.position.clone().sub(controls.target);offset.setLength(THREE.MathUtils.clamp(offset.length()*factor,controls.minDistance,controls.maxDistance));camera.position.copy(controls.target).add(offset);controls.update();draw();}
+ return {setProduct,fit,zoom,exportModel:(frame=null)=>exportProduct(product,frame),destroy(){observer.disconnect();releaseMouse();controls.dispose();disposeProduct(product);floor.geometry.dispose();floor.material.dispose();base.geometry.dispose();base.material.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
 }

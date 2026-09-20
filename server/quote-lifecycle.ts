@@ -1,3 +1,4 @@
+import {validateQuoteAmount} from './quote-validation';
 import { isQuoteExpired } from './quote-policy';
 import { enqueueFollowup } from "./outbox";
 import { reserveStock } from "./inventory-core";
@@ -39,6 +40,7 @@ export function acceptQuote(
   const result = sqlite.transaction(() => {
     const quote = db.select().from(quotes).where(eq(quotes.id, id)).get();
     if (!quote || quote.deletedAt != null) throw new Error("Quote not found");
+    if(quote.status!=='accepted')validateQuoteAmount(quote);
     const optionSet=sqlite.prepare('SELECT s.* FROM quote_option_sets s JOIN quote_option_members m ON m.set_id=s.id WHERE m.quote_id=?').get(id) as any;
     if(optionSet?.accepted_quote_id&&optionSet.accepted_quote_id!==id)throw new Error('Another option has already been accepted for this job.');
     if (quote.status === "declined")
@@ -166,6 +168,7 @@ export function acceptQuote(
         .run();
     if(project.quoteId&&project.quoteId!==id)throw new Error('This job is already linked to a different accepted quote. Review its source records.');
     const projectId = project.id;
+    if(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE name='customer_previews'").get())sqlite.prepare('UPDATE customer_previews SET client_id=coalesce(client_id,?),project_id=coalesce(project_id,?) WHERE quote_id=? AND (client_id IS NULL OR client_id=?) AND (project_id IS NULL OR project_id=?)').run(clientId,projectId,id,clientId,projectId);
     sqlite.prepare(`UPDATE projects SET quote_id=?,lead_id=?,site=?,site_address=coalesce(site_address,?),preferred_language=?,billing_mode=CASE WHEN billing_mode='review' THEN 'fixed' ELSE billing_mode END WHERE id=?`)
       .run(id,leadId,lead.site,session.customer?.location || null,lead.preferredLanguage || 'en',projectId);
     const depositPct = Math.min(

@@ -16,8 +16,7 @@ interface AuthContextValue {
   user: PublicUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  // Anything above worker: the owner (plus the legacy manager/technician
-  // roles a not-yet-refreshed session may still carry).
+  // Owner and manager access to management screens.
   isElevated: boolean;
   login: (name: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -104,8 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isAuthenticated = !!user;
-  // Owner or a legacy elevated role (manager/technician) — everything but worker.
-  const isElevated = !!user && user.role !== "worker";
+  // Only owners and managers can enter management screens.
+  const isElevated = !!user && ["owner","manager"].includes(user.role);
 
   return (
     <AuthContext.Provider

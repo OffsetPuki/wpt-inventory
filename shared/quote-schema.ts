@@ -80,6 +80,7 @@ export const quotes = sqliteTable("quotes", {
 // would otherwise propose DROP TABLE quote_settings (the live price book).
 export const quoteSettings = sqliteTable("quote_settings", {
   id: integer("id").primaryKey(),
+  version: integer("version").notNull().default(0),
   priceBook: text("price_book").notNull().default("{}"), // JSON object
   shop: text("shop").notNull().default("{}"), // JSON { name, location, phone, email }
   updatedAt: integer("updated_at"), // unix ms

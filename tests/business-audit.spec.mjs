@@ -1,0 +1,35 @@
+import {test,expect} from '@playwright/test';
+import {testApp} from '../scripts/test-app.mjs';
+let app;
+test.beforeAll(async()=>{app=await testApp({serve:true});app.sqlite.prepare("UPDATE users SET credential_type='password' WHERE role='owner'").run();});
+test.afterAll(async()=>app.close());
+test('Business context, standard sizes, private profit and report recovery',async({page})=>{
+ await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(app.base+'/#/crm/quotes');
+ await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('concrete');
+ await page.getByLabel('Customer name',{exact:true}).fill('Focused quote fixture');
+ await page.locator('.type-card').filter({has:page.getByRole('heading',{name:'Concrete',exact:true})}).click();
+ await page.getByText('Start with a standard size',{exact:true}).click();
+ await page.locator('details').filter({has:page.locator('summary',{hasText:'Start with a standard size'})}).getByRole('button',{name:'Patio',exact:true}).click();
+ await expect(page.locator('[name="lengthFt"]')).toHaveValue(/20/);
+ await expect(page.getByRole('button',{name:'Save Quote',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Next: price →'}).click();
+ await expect(page.getByRole('region',{name:'Price summary'})).toBeVisible();
+ await page.getByText('Private cost & profit check',{exact:true}).click();
+ await page.getByLabel('Estimated total job cost ($)').fill('1000');
+ await page.getByLabel('Target margin (%)').fill('30');
+ await expect(page.getByText(/Estimated profit:/)).toBeVisible();
+ await expect(page.locator('.draft-status')).toHaveText('Saved');
+ expect(JSON.parse(app.sqlite.prepare("SELECT payload FROM quotes WHERE customer_name='Focused quote fixture'").get().payload).business).toBe('concrete');
+ await page.screenshot({path:'test-results/quote-price-mobile.png',fullPage:true});
+ await page.goto(app.base+'/#/business-report');
+ await expect(page.getByRole('heading',{name:'Business report',exact:true})).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'Business',exact:true})).toHaveValue('concrete');
+ await expect(page.getByText('No matching records.')).toBeVisible();
+ for(const width of [390,1440]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);await page.screenshot({path:`test-results/business-report-${width}.png`,fullPage:true});}
+ await page.route('**/api/business-report?**',r=>r.fulfill({status:500,json:{message:'Synthetic report outage'}}));
+ await page.reload();await expect(page.getByRole('button',{name:/retry|try again/i})).toBeVisible({timeout:15000});
+ expect(errors).toEqual([]);
+});

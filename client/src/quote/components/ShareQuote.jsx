@@ -48,6 +48,7 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIs
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
   if (result) return <div className="share-panel" role="status">
     <p>{result.wantedEmail ? result.emailed ? `Email sent to ${email}.` : 'Quote issued, but email was not delivered. Use the link below.' : copied ? 'Quote issued. Link copied.' : 'Quote issued. Select and copy the link below.'}</p>
+    {result.projectUrl&&<p><a href={result.projectUrl} target="_blank" rel="noopener noreferrer">Open customer project page</a><button className="btn ghost" onClick={()=>copy(result.projectUrl)}>Copy project page</button></p>}
     <div className="share-row"><input aria-label="Quote share link" readOnly className="share-url" value={result.url} onFocus={e => e.target.select()} /><button className="btn ghost sq-btn" onClick={() => copy(result.url)}>Copy link</button></div>
     {onIssued && actions(<button className="btn" onClick={() => onIssued(result)}>Done</button>)}
   </div>;

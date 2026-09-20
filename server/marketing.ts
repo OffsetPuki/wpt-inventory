@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { Express } from "express";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { sqlite, db, storage } from "./storage";
-import { requireElevated } from "./auth";
+import { requireElevated, requireAuth } from "./auth";
 import { audit } from "./audit";
 import { sendOwnerMail } from "./mailer";
 import {
@@ -26,6 +26,10 @@ import { leads, clients } from "../shared/crm-schema";
 import { pid, qstr, todayLocal, registerCreate } from "./http-util";
 import { projectReadiness, portfolioServices } from '../shared/portfolio';
 
+// Technicians may prepare drafts; publishing remains manager-controlled below.
+const requireMarketingDraft: import('express').RequestHandler = (req,res,next)=>requireAuth(req,res,()=>{
+ if(!['owner','manager','technician'].includes(req.user?.role||'')){res.status(403).json({message:'Marketing access required'});return;}next();
+});
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
@@ -533,7 +537,7 @@ export function registerMarketingRoutes(app: Express): void {
     })));
   });
 
-  app.post("/api/marketing/reviews", requireElevated, (req, res) => {
+  app.post("/api/marketing/reviews", requireMarketingDraft, (req, res) => {
     let body;
     try {
       body = insertReviewSchema.parse(req.body);
@@ -563,7 +567,7 @@ export function registerMarketingRoutes(app: Express): void {
     res.status(201).json(row);
   });
 
-  app.patch("/api/marketing/reviews/:id", requireElevated, (req, res) => {
+  app.patch("/api/marketing/reviews/:id", requireMarketingDraft, (req, res) => {
     const id = pid(req.params.id);
     const before = db.select().from(reviews).where(eq(reviews.id, id)).get();
     if (!before) return res.status(404).json({ message: "Review not found" });
@@ -619,7 +623,7 @@ export function registerMarketingRoutes(app: Express): void {
     if(!/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(body.photoUrl) || !fs.existsSync(path.join(uploadsDir,path.basename(body.photoUrl)))) throw new Error('Choose an uploaded public photo.');
     if(body.projectPage && projectReadiness(body).length) throw new Error('Complete the project page: '+projectReadiness(body).join(', ')+'.');
   };
-  app.post('/api/marketing/portfolio', requireElevated, (req,res) => {
+  app.post('/api/marketing/portfolio', requireMarketingDraft, (req,res) => {
     try {
       const body=insertPortfolioItemSchema.parse({...req.body,published:req.body?.published===true});
       if(body.published&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
@@ -635,7 +639,7 @@ export function registerMarketingRoutes(app: Express): void {
     } catch(e:any) { res.status(400).json({message:e.message}); }
   });
 
-  app.patch("/api/marketing/portfolio/:id", requireElevated, (req, res) => {
+  app.patch("/api/marketing/portfolio/:id", requireMarketingDraft, (req, res) => {
     const id = pid(req.params.id);
     const before = db.select().from(portfolioItems).where(eq(portfolioItems.id, id)).get();
     if (!before) return res.status(404).json({ message: "Portfolio item not found" });

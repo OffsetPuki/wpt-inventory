@@ -1063,7 +1063,7 @@ function InvoiceDetailModal({
   // Set when the form was opened via "Deposit paid" — pre-fills that amount.
   const [payPrefill, setPayPrefill] = useState<number | null>(null);
 
-  const { data, isLoading } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
+  const { data, isLoading, isError: detailFailed, error: detailError, refetch: retryDetail } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
     queryKey: ["finance-invoice", id],
     queryFn: async () => (await apiRequest("GET", `/api/finance/invoices/${id}`)).json(),
   });
@@ -1174,7 +1174,7 @@ function InvoiceDetailModal({
       title={inv ? inv.number : "Invoice"}
       maxWidth="max-w-2xl"
     >
-      {isLoading || !inv ? (
+      {detailFailed ? <RetryBlock query={{error:detailError,refetch:retryDetail}}/> : isLoading || !inv ? (
         <div className="flex justify-center py-12 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>

@@ -1,3 +1,5 @@
+import {registerCustomerProjectPage} from './customer-project-page';
+import {registerBusinessReport} from './business-report';
 import { mailEnabled } from "./mailer";
 import { registerSuiteControls } from "./suite-controls";
 import type { Express, Request } from "express";
@@ -56,6 +58,8 @@ function localUpload(value: string) {
 export function registerSuiteRoutes(app: Express) {
   initializeSuite();
   registerSuiteControls(app);
+  registerBusinessReport(app);
+  registerCustomerProjectPage(app);
   initializeSuite(); // Include revision triggers for the control tables just created.
   const endpoint = (
     method: "get" | "post" | "patch",

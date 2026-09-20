@@ -93,14 +93,13 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-// Elevated endpoints — the owner. Legacy 'manager'/'technician' roles are
-// still accepted for older accounts. Roles are refreshed from the user record
-// on every authenticated request.
+// Management endpoints. Roles refresh from the user record on every request;
+// technicians and workers do not inherit financial or HR access.
 export function requireElevated(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     const role = req.user?.role;
-    if (role !== "owner" && role !== "manager" && role !== "technician") {
-      res.status(403).json({ message: "Owner access required" });
+    if (role !== "owner" && role !== "manager") {
+      res.status(403).json({ message: "Owner or manager access required" });
       return;
     }
     next();

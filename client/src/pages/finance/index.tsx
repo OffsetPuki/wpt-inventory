@@ -1,3 +1,4 @@
+import {RetryBlock} from '@/components/RetryBlock';
 import PaymentExceptions from "@/components/PaymentExceptions";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -218,16 +219,17 @@ const AGING_BUCKETS: {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FinanceOverviewPage() {
-  const { data: stats, isLoading: statsLoading } = useQuery<FinanceStats>({
+  const { data: stats, isLoading: statsLoading,isError:statsFailed,error:statsError,refetch:retryStats } = useQuery<FinanceStats>({
     queryKey: ["finance-stats"],
     queryFn: async () => (await apiRequest("GET", "/api/finance/stats")).json(),
   });
 
-  const { data: reports, isLoading: reportsLoading } = useQuery<FinanceReports>({
+  const { data: reports, isLoading: reportsLoading,isError:reportsFailed,error:reportsError,refetch:retryReports } = useQuery<FinanceReports>({
     queryKey: ["finance-reports"],
     queryFn: async () => (await apiRequest("GET", "/api/finance/reports")).json(),
   });
 
+  if(statsFailed||reportsFailed)return <div><Header title="Finance" description="Accounting overview"/>{statsFailed&&<RetryBlock query={{error:statsError,refetch:retryStats}}/>}{reportsFailed&&<RetryBlock query={{error:reportsError,refetch:retryReports}}/>}</div>;
   if (statsLoading || reportsLoading) {
     return (
       <div className="mx-auto max-w-6xl">

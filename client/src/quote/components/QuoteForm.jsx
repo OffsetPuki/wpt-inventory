@@ -1,3 +1,4 @@
+import {useAuth} from '@/lib/auth';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { apiRequest } from '@/lib/queryClient';
@@ -9,6 +10,7 @@ export default function QuoteForm({
   customer, notes, depositPct, quoteId, version, features, attachments, saveStatus, warnings, lineState, quoteStatus,
   onChangeCustomer, onChangeNotes, onChangeFeatures, onChangeAttachments, onChangeDeposit, onBack, onPersist, onIssued, onShared,
 }) {
+  const {isElevated}=useAuth();
   const [customerOpen, setCustomerOpen] = useState(!customer.name?.trim());
   const [sharing, setSharing] = useState(false);
   // Use the actual customer document, including its language and attachments.
@@ -19,6 +21,8 @@ export default function QuoteForm({
     enabled: !!quoteId && saveStatus === 'Saved',
     staleTime: Infinity,
   });
+  const linkedPreviews=useQuery({queryKey:['customer-previews',{quoteId}],queryFn:async()=>(await apiRequest('GET',`/api/customer-previews?quoteId=${quoteId}`)).json(),enabled:!!quoteId&&isElevated,retry:false});
+  const outdated=(linkedPreviews.data||[]).filter(p=>p.options.some(o=>o.pending||o.sourceStatus==='outdated'));
   const ready = saveStatus === 'Saved' && !!preview.data;
   const previewUrl = preview.data ? `${preview.data.url}&v=${version}` : null;
   const missing = lineState.items.filter(it => it.unpriced || !(Number(it.rate) > 0));
@@ -38,6 +42,7 @@ export default function QuoteForm({
         </details>
         </fieldset>
         {checks.length > 0 && <details className="quote-section pricing-attention" open><summary>Check pricing ({checks.length})</summary><ul>{checks.map((text,i) => <li key={i}>{text}</li>)}</ul><button className="back-link" onClick={onBack}>Return to dimensions &amp; pricing</button></details>}
+        {outdated.length>0&&<div className="quote-section pricing-attention"><strong>Review linked designs</strong><p>These previews have changed or unpublished models. Your quote does not publish those changes.</p>{outdated.map(p=><a className="back-link" key={p.id} href={`/#/crm/previews?preview=${p.id}`}>{p.title} →</a>)}</div>}
         <div className="review-actions">
           <ShareQuote quoteId={quoteId} customerEmail={customer.email || ''} onBeforeShare={onPersist} onIssued={onIssued} onShared={onShared}
             actionsId="quote-send-actions"

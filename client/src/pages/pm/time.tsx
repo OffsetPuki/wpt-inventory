@@ -1,3 +1,4 @@
+import { RetryBlock } from "@/components/RetryBlock";
 import { readContext } from '@/lib/record-link';
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -360,7 +361,7 @@ export default function PmTimePage() {
   if (isElevated && userFilter) params.set("userId", userFilter);
   const qs = params.toString();
 
-  const { data: entries = [], isLoading } = useQuery<TimeRow[]>({
+  const { data: entries = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<TimeRow[]>({
     queryKey: ["pm-time", from, to, userFilter],
     queryFn: async () => (await apiRequest("GET", `/api/pm/time${qs ? `?${qs}` : ""}`)).json(),
   });
@@ -592,7 +593,7 @@ export default function PmTimePage() {
       </div>
 
       {/* Entries grouped by day */}
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
       ) : entries.length === 0 ? (
         <EmptyState icon={Clock} message="No time entries">

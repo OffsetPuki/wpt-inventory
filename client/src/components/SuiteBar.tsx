@@ -1,9 +1,12 @@
+import {BUSINESSES} from "@shared/business.js";
+import {useBusiness,setBusiness} from "@/hooks/useBusiness";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useSuiteSync } from "@/lib/suite-sync";
 import { useApiMutation } from "@/hooks/useApiMutation";
 export default function SuiteBar() {
+  const business=useBusiness();
   const connected = useSuiteSync();
   const timer = useQuery<any>({
     queryKey: ["pm-time-running"],
@@ -22,6 +25,7 @@ export default function SuiteBar() {
   });
   return (
     <div className="suite-statusbar flex min-h-12 flex-wrap items-center gap-3 border-b border-border bg-card/50 px-4 py-2 text-sm">
+      <label className="flex items-center gap-2 text-xs"><span className="sr-only">Business</span><select aria-label="Business" value={business} onChange={e=>setBusiness(e.target.value)} className="min-h-11 max-w-40 rounded-lg border border-border bg-background px-2"><option value="all">All businesses</option>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
       <Link className="rounded-lg px-2 py-1.5 font-medium hover:bg-accent" href="/today?inbox=1">
         Inbox
         {inbox.data?.some((n) => !n.read_at)

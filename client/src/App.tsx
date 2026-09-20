@@ -8,6 +8,7 @@ import { Suspense, lazy, type ReactNode } from "react";
 // small and the user only downloads code for the screens they actually open.
 
 import AppShell from "./components/AppShell";
+const BusinessReportPage = lazy(()=>import("./pages/business-report"));
 const TodayPage = lazy(() => import("./pages/today"));
 const SuiteHealthPage = lazy(() => import("./pages/suite-health"));
 const SecurityPage = lazy(() => import("./pages/security"));
@@ -204,6 +205,7 @@ export default function App() {
           </Route>
 
           {/* Finance — management only */}
+          <Route path="/business-report"><ElevatedRoute><BusinessReportPage/></ElevatedRoute></Route>
           <Route path="/finance">
             <ElevatedRoute>
               <FinanceOverviewPage />

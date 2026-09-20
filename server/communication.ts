@@ -1,3 +1,4 @@
+import {quoteBusiness} from '../shared/business.js';
 import { sqlite } from "./storage";
 
 export function communicationContext(info: {
@@ -20,13 +21,7 @@ export function communicationContext(info: {
       leadId ??= row?.lead_id;
       designRef = row?.design_ref;
       quoteLang = JSON.parse(row?.payload || "{}").customer?.preferredLanguage;
-      quoteSite = row
-        ? row.type === "concrete"
-          ? "concrete"
-          : row.type === "insulation"
-            ? "insulation"
-            : "metals"
-        : undefined;
+      quoteSite = row ? quoteBusiness({...JSON.parse(row.payload||'{}'),type:row.type}) : undefined;
     }
     if (info.invoiceNumber) {
       const row = sqlite

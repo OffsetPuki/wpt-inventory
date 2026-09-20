@@ -8,6 +8,7 @@ export function previewDetails(session) {
   return {
     clientId:session.customer?.clientId||null,
     quoteId:session.quoteId||null,
+    sourceQuoteVersion:session.version||undefined,
     customer:session.customer?.name||'',
     description:summaryLine(session.type,s).slice(0,600),
     width:dim(s.width??s.widthFt), depth:dim(s.depth??s.lengthFt),

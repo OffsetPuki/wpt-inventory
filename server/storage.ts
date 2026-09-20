@@ -374,8 +374,8 @@ export const storage = {
     sqlite.transaction(() => {
       const user = this.getUserById(id);
       if (!user) throw new Error("User not found");
-      if (!active && user.role !== "worker" && user.disabledAt == null) {
-        const others = sqlite.prepare("SELECT count(*) AS n FROM users WHERE id != ? AND role != 'worker' AND disabled_at IS NULL").get(id) as { n: number };
+      if (!active && user.role === "owner" && user.disabledAt == null) {
+        const others = sqlite.prepare("SELECT count(*) AS n FROM users WHERE id != ? AND role = 'owner' AND disabled_at IS NULL").get(id) as { n: number };
         if (!others.n) throw new Error("Keep at least one active owner account.");
       }
       sqlite.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(active ? null : Date.now(), id);

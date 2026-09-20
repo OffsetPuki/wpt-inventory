@@ -79,8 +79,10 @@ test('Suite creates a same-customer alternative, edits specifications and sends 
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);
  await page.goto(app.base+'/#/crm/quotes');await page.getByRole('button',{name:'Saved',exact:true}).click();
  const row=page.locator('.line').filter({has:page.locator('.sq-number',{hasText:a.number})});await row.getByRole('button',{name:'Edit draft',exact:true}).click();
+ await page.getByText('More quote options',{exact:true}).click();
  await page.getByRole('button',{name:'Create alternative for this customer'}).click();await expect(page.getByText(`Copy of ${a.number}. The original quote is unchanged.`)).toBeVisible();
  await page.getByText('Material specifications',{exact:false}).first().click();await page.getByLabel('CEE roof purlins',{exact:true}).fill('8 in CEE, 16 gauge');
+ await page.getByText('More quote options',{exact:true}).click();
  await page.getByRole('button',{name:'Compare & send options',exact:true}).click();
  await page.getByLabel('Option 1 explanation for the customer').fill('Recommended 14 gauge purlins.');await page.getByLabel('Option 2 explanation for the customer').fill('Alternative uses 16 gauge purlins.');
  await page.getByRole('button',{name:'Review both quotes',exact:true}).click();await expect(page.locator('td').filter({hasText:'8 in CEE, 16 gauge'})).toBeVisible();

@@ -1,3 +1,4 @@
+import { RetryBlock } from "@/components/RetryBlock";
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useRecordLink, readContext } from "@/lib/record-link";
 import ReceiveDelivery from "@/components/inventory/ReceiveDelivery";
@@ -389,7 +390,7 @@ export default function PurchaseOrdersPage() {
     return `/api/finance/purchase-orders${s ? `?${s}` : ""}`;
   }, [tab, q]);
 
-  const { data: rows = [], isLoading } = useQuery<PurchaseOrder[]>({
+  const { data: rows = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<PurchaseOrder[]>({
     queryKey: ["finance-pos", tab, q],
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
@@ -436,7 +437,7 @@ export default function PurchaseOrdersPage() {
         />
       </div>
 
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
         <EmptyState

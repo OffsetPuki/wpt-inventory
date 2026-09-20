@@ -1,3 +1,5 @@
+import LaborPolicy from "@/components/LaborPolicy";
+import { RetryBlock } from "@/components/RetryBlock";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -24,6 +26,7 @@ interface SummaryRow {
   hours: number;
   grossCents: number;
   linkedLogin: boolean;
+  overtimeCents?:number; overtimeHours?:number;
 }
 
 function ymdLocal(d: Date): string {
@@ -45,7 +48,7 @@ export default function HrPayrollPage() {
 
   const rangeValid = !!from && !!to && from <= to;
 
-  const { data: rows = [], isLoading } = useQuery<SummaryRow[]>({
+  const { data: rows = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<SummaryRow[]>({
     queryKey: ["hr-payroll-summary", from, to],
     queryFn: async () =>
       (await apiRequest("GET", `/api/hr/payroll/summary?from=${from}&to=${to}`)).json(),
@@ -99,6 +102,13 @@ export default function HrPayrollPage() {
         </button>
       </Header>
 
+      <p className="mb-3 text-sm text-muted-foreground">Gross-pay worksheet, not take-home pay. Review overtime rules, deductions and taxes with your payroll provider before closing.</p>
+      <button className="mb-4 rounded-lg border px-4 py-3" disabled={isLoading||loadFailed||!rangeValid||!rows.length} onClick={()=>{
+        const cell=(v:unknown)=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
+        const data=[['Employee ID','Employee','From','To','Hours','Overtime hours','Gross pay','Overtime premium'],...rows.map(r=>[r.employeeId,r.name,from,to,r.hours,r.overtimeHours||0,(r.grossCents/100).toFixed(2),((r.overtimeCents||0)/100).toFixed(2)])].map(row=>row.map(cell).join(',')).join('\r\n');
+        const url=URL.createObjectURL(new Blob([data],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`payroll-${from}-${to}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }}>Export payroll worksheet</button>
+      <LaborPolicy/>
       <div className="mb-6 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">From</span>
@@ -128,7 +138,7 @@ export default function HrPayrollPage() {
       {runsFailed && <p role="alert" className="mb-4">Closed periods could not load. Refresh before closing payroll.</p>}
       {overlappingRun && <p className="mb-4 rounded-xl border border-border p-4 text-sm">This range includes closed payroll ({overlappingRun.from_date} to {overlappingRun.to_date}). Corrections belong in an open period.</p>}
       {runs.length > 0 && <details className="mb-4 rounded-xl border border-border p-4 text-sm"><summary>Closed periods</summary>{runs.map((r) => <button className="mt-2 block underline" key={r.id} onClick={() => { setFrom(r.from_date); setTo(r.to_date); }}>{r.from_date} to {r.to_date} · {formatMoney(r.total_cents)}</button>)}</details>}
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
         <EmptyState icon={Wallet} message="No payroll entries in this period">
@@ -157,7 +167,7 @@ export default function HrPayrollPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                    {r.payType === "salary" ? "salary" : r.hours}
+                    {r.payType === "salary" ? "salary" : r.hours}{!!r.overtimeHours&&<p className="text-xs">{r.overtimeHours} overtime hours</p>}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-foreground">
                     {rateLabel(r)}

@@ -1,3 +1,4 @@
+import {laborPremiums} from './labor-policy';
 import { sqlite } from "./storage";
 import { dateKey, rateOn } from "./payroll";
 
@@ -94,10 +95,20 @@ export function projectLabor(projectId: number, unbilledOnly = false) {
     ...g,
     costCents: Math.round(g.costCents),
   }));
+  let premiumCents=0,burdenCents=0;
+  if(!unbilledOnly&&entries.length){
+    const start=new Date(Math.min(...entries.map(e=>e.started_at),...corrections.map(c=>new Date(c.effective_date+'T00:00:00').getTime())));start.setHours(0,0,0,0);
+    const end=new Date(Math.max(...entries.map(e=>e.ended_at),...corrections.map(c=>new Date(c.effective_date+'T00:00:00').getTime())));end.setHours(0,0,0,0);end.setDate(end.getDate()+1);
+    for(const id of new Set(entries.map(e=>e.user_id)))for(const p of laborPremiums(id,start.getTime(),end.getTime()).filter(p=>p.projectId===projectId)){
+      premiumCents+=p.premiumCents;burdenCents+=(p.minutes/60*p.rate+p.premiumCents)*p.burdenPct/100;
+    }
+  }
+  premiumCents=Math.round(premiumCents);burdenCents=Math.round(burdenCents);
   return {
+    premiumCents,burdenCents,
     groups: rows,
     minutes: rows.reduce((s, g) => s + g.minutes, 0),
-    costCents: rows.reduce((s, g) => s + g.costCents, 0),
+    costCents: rows.reduce((s, g) => s + g.costCents, 0)+premiumCents+burdenCents,
     missingRateMinutes,
     salaryEstimated: rows.some((g) => g.payType === "salary"),
   };

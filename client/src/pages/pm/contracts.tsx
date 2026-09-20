@@ -1,3 +1,4 @@
+import { RetryBlock } from "@/components/RetryBlock";
 import { useRecordLink, readContext } from "@/lib/record-link";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1049,7 +1050,7 @@ export default function PmContractsPage() {
   if (statusFilter) params.set("status", statusFilter);
   const qs = params.toString();
 
-  const { data: contracts = [], isLoading } = useQuery<ContractRow[]>({
+  const { data: contracts = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<ContractRow[]>({
     queryKey: ["pm-contracts", kindTab, statusFilter],
     queryFn: async () =>
       (await apiRequest("GET", `/api/pm/contracts${qs ? `?${qs}` : ""}`)).json(),
@@ -1121,7 +1122,7 @@ export default function PmContractsPage() {
         </select>
       </div>
 
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
       ) : contracts.length === 0 ? (
         <EmptyState icon={FileSignature} message="No contracts yet">

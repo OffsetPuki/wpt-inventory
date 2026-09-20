@@ -22,6 +22,7 @@ const metadata = z.object({
   clientId: z.number().int().positive().nullable().optional(),
   projectId: z.number().int().positive().nullable().optional(),
   quoteId: z.number().int().positive().nullable().optional(),
+  sourceQuoteVersion:z.number().int().positive().optional(),
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().max(600).default(''),
   customer: z.string().trim().max(120).default(''),
@@ -31,7 +32,7 @@ const metadata = z.object({
   finish: z.string().trim().max(60).default(''),
   note: z.string().trim().max(1200).default(''),
 });
-type Preview = z.infer<typeof metadata> & { id: number; token: string; published: number; created_at: number; updated_at: number; version: number };
+type Preview = z.infer<typeof metadata> & { id: number; token: string; published: number; created_at: number; updated_at: number; version: number; design_version:number };
 
 // Embedded models live in SQLite so the existing complete database backup also
 // backs up every customer preview. No publicly browsable upload directory.
@@ -54,8 +55,9 @@ for (const column of ['client_id','project_id','quote_id']) {
  if (!(sqlite.pragma('table_info(customer_previews)') as {name:string}[]).some(c=>c.name===column)) sqlite.exec(`ALTER TABLE customer_previews ADD COLUMN ${column} INTEGER`);
  sqlite.exec(`CREATE INDEX IF NOT EXISTS preview_${column} ON customer_previews(${column})`);
 }
+if(!(sqlite.pragma('table_info(customer_previews)') as any[]).some(c=>c.name==='design_version')){sqlite.exec('ALTER TABLE customer_previews ADD COLUMN design_version INTEGER NOT NULL DEFAULT 1');sqlite.exec('UPDATE customer_previews SET design_version=version');}
 const modelColumns=new Set((sqlite.pragma('table_info(customer_preview_models)') as {name:string}[]).map(c=>c.name));
-for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB']]){
+for(const [name,definition] of [['revision','INTEGER NOT NULL DEFAULT 1'],['previous_bytes','BLOB'],['source_signature','TEXT'],['source_quote_version','INTEGER'],['pending_bytes','BLOB'],['pending_details','TEXT'],['pending_signature','TEXT'],['pending_quote_version','INTEGER'],['previous_signature','TEXT']]){
   if(!modelColumns.has(name))sqlite.exec(`ALTER TABLE customer_preview_models ADD COLUMN ${name} ${definition}`);
 }
 sqlite.exec(`CREATE TABLE IF NOT EXISTS customer_preview_feedback (
@@ -104,8 +106,15 @@ export function validatePreviewGlb(bytes: Buffer): void {
 function getPreview(id: number): Preview | undefined {
   return sqlite.prepare('SELECT * FROM customer_previews WHERE id=? AND deleted_at IS NULL').get(id) as Preview | undefined;
 }
+// A geometry signature ignores pricing/notes changes while detecting changed design options.
+function sourceSignature(quoteId:number) {
+ const row=sqlite.prepare('SELECT payload,version FROM quotes WHERE id=? AND deleted_at IS NULL').get(quoteId) as any;
+ if(!row)return null;const session=JSON.parse(row.payload);
+ const stable=(v:any):any=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;
+ return {version:row.version,signature:crypto.createHash('sha256').update(JSON.stringify(stable({type:session.type,state:session.state}))).digest('hex')};
+}
 function modelList(id: number) {
-  return sqlite.prepare('SELECT id,label,size,revision,previous_bytes IS NOT NULL AS canRestore FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number;revision:number;canRestore:number}[];
+  return sqlite.prepare('SELECT id,label,size,revision,source_signature,source_quote_version,pending_bytes IS NOT NULL AS pending,previous_bytes IS NOT NULL AS canRestore FROM customer_preview_models WHERE preview_id=? ORDER BY position,id').all(id) as {id:string;label:string;size:number;revision:number;canRestore:number;source_signature:string|null;source_quote_version:number|null;pending:number}[];
 }
 function links(p:any) { return {clientId:p.client_id??null,projectId:p.project_id??null,quoteId:p.quote_id??null}; }
 function resolveLinks(data:z.infer<typeof metadata>, existing?:Preview) {
@@ -130,7 +139,7 @@ function saveLinks(id:number,l:ReturnType<typeof links>) { sqlite.prepare('UPDAT
 function view(p: Preview) {
   return { shortUrl:shortLink('p',p.token,p.title), ...links(p), id:p.id, title:p.title, description:p.description, customer:p.customer, width:p.width,depth:p.depth, height:p.height,
     finish:p.finish, note:p.note, published:!!p.published, version:p.version, createdAt:p.created_at, updatedAt:p.updated_at,
-    url:`https://www.cjmmetals.com/preview/${p.token}`, options:modelList(p.id),
+    designVersion:p.design_version,url:`https://www.cjmmetals.com/preview/${p.token}`, options:modelList(p.id).map(m=>({...m,sourceQuoteVersion:m.source_quote_version,sourceStatus:!(p as any).quote_id?'unlinked':!m.source_signature?'unverified':sourceSignature((p as any).quote_id)?.signature===m.source_signature?'current':'outdated'})),
     feedback:sqlite.prepare(`SELECT f.id,f.kind,f.option_id AS optionId,f.design_version AS designVersion,f.option_label AS optionLabel,f.message,f.created_at AS createdAt,
       CASE WHEN m.accepted_at IS NOT NULL THEN 'sent'
         WHEN coalesce(d.status,o.status) IN ('failed','review','stopped') THEN 'attention'
@@ -160,7 +169,7 @@ function insertModel(previewId: number, label: string, bytes: Buffer) {
   const position = (sqlite.prepare('SELECT COALESCE(MAX(position),-1)+1 AS n FROM customer_preview_models WHERE preview_id=?').get(previewId) as any).n;
   sqlite.prepare('INSERT INTO customer_preview_models(id,preview_id,label,position,bytes,size) VALUES(?,?,?,?,?,?)')
     .run(crypto.randomBytes(16).toString('hex'),previewId,label,position,bytes,bytes.length);
-  sqlite.prepare('UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?').run(Date.now(),previewId);
+  sqlite.prepare('UPDATE customer_previews SET updated_at=?,design_version=version+1,version=version+1 WHERE id=?').run(Date.now(),previewId);
 }
 
 // One owner-requested project ships with the feature. Only inserted once;
@@ -186,7 +195,7 @@ export function seedCustomerPreview(): void {
 
 export function registerCustomerPreviews(app: Express): void {
   seedCustomerPreview();
-  const upload = multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_BYTES,files:1,fields:3,fieldSize:1000}}).single('model');
+  const upload = multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_BYTES,files:1,fields:6,fieldSize:8192}}).single('model');
   const readShared = (req: Request, res: Response) => {
     res.setHeader('Cache-Control','private, no-store'); res.setHeader('X-Robots-Tag','noindex, nofollow');
     if (!hasLeadKey(req) || !tokenPattern.test(String(req.params.token))) {res.status(404).end();return;}
@@ -195,7 +204,7 @@ export function registerCustomerPreviews(app: Express): void {
   };
   app.get('/api/public/customer-previews/:token',(req,res) => {
     const p=readShared(req,res);if(!p)return;
-    res.json({title:p.title,description:p.description,width:p.width,depth:p.depth,height:p.height,finish:p.finish,note:p.note,version:p.version,options:modelList(p.id)});
+    res.json({title:p.title,description:p.description,width:p.width,depth:p.depth,height:p.height,finish:p.finish,note:p.note,version:p.design_version,options:modelList(p.id).map(({id,label,size,revision})=>({id,label,size,revision}))});
   });
   app.get('/api/public/customer-previews/:token/models/:modelId',(req,res) => {
     const p=readShared(req,res);if(!p)return;
@@ -213,16 +222,16 @@ export function registerCustomerPreviews(app: Express): void {
       if(previous.kind!==kind||previous.message!==message||(previous.option_id&&previous.option_id!==parsed.data.optionId)||(kind==='approval'&&previous.design_version!==parsed.data.version)){res.status(409).json({message:'This response was already used for a different selection. Reload the preview and try again.'});return;}
       res.json({ok:true});return;
     }
-    if(kind==='approval'&&parsed.data.version!==p.version){res.status(409).json({message:'This design has changed. Reload the preview and review it before requesting a quote.'});return;}
+    if(kind==='approval'&&parsed.data.version!==p.design_version){res.status(409).json({message:'This design has changed. Reload the preview and review it before requesting a quote.'});return;}
     const option=modelList(p.id).find(m=>m.id===parsed.data.optionId);
     if(!option){res.status(400).json({message:'Choose one of the current design options.'});return;}
     const latest=sqlite.prepare('SELECT kind,option_id,design_version FROM customer_preview_feedback WHERE preview_id=? ORDER BY created_at DESC,id DESC LIMIT 1').get(p.id) as {kind:string;option_id:string;design_version:number}|undefined;
-    if(kind==='approval'&&latest?.kind==='approval'&&latest.option_id===option.id&&latest.design_version===p.version){res.json({ok:true});return;}
+    if(kind==='approval'&&latest?.kind==='approval'&&latest.option_id===option.id&&latest.design_version===p.design_version){res.json({ok:true});return;}
     const recent=sqlite.prepare('SELECT COUNT(*) AS n FROM customer_preview_feedback WHERE preview_id=? AND created_at>?').get(p.id,Date.now()-3600000) as {n:number};
     if(recent.n>=10){res.status(429).json({message:'Please wait a little before sending another response.'});return;}
     sqlite.transaction(()=>{
       const row=sqlite.prepare('INSERT INTO customer_preview_feedback(preview_id,submission_id,option_label,message,created_at,kind,option_id,design_version) VALUES(?,?,?,?,?,?,?,?)')
-        .run(p.id,parsed.data.submissionId,option.label,message,Date.now(),kind,option.id,p.version);
+        .run(p.id,parsed.data.submissionId,option.label,message,Date.now(),kind,option.id,p.design_version);
       enqueueFollowup(`preview-feedback-owner:${row.lastInsertRowid}`,'preview-feedback-owner',{
         subject:`[CJM Metals] ${kind==='approval'?'Design accepted — quote requested':'Design feedback'} — ${p.title.replace(/[\r\n]+/g,' ')}`,
         text:`${kind==='approval'?'The customer selected "I like this design" and is ready for a quote.':'New feedback on your customer design preview.'}\n\nProject: ${p.title}\n${p.customer?`Customer / job: ${p.customer}\n`:''}Selected option: ${option.label}\nDesign version: ${p.version}\n\nCustomer response:\n${message}\n\n${kind==='approval'?'Next step: Prepare and send a quote for this selected design.\n\n':''}Review in the Business Suite:\nhttps://flipnob.com/#/crm/previews\n\nCustomer preview:\nhttps://www.cjmmetals.com/preview/${p.token}\n\n${kind==='approval'?'This confirms the preview design for quoting only. Pricing and fabrication still require the normal quote approval.':'This is feedback before a quote, not approval to begin fabrication.'}`,
@@ -250,7 +259,7 @@ export function registerCustomerPreviews(app: Express): void {
   });
   app.get('/api/customer-previews/:id/models/:modelId',requireElevated,(req,res)=>{
     const p=record(req,res);if(!p)return;
-    const m=sqlite.prepare('SELECT bytes FROM customer_preview_models WHERE preview_id=? AND id=?').get(p.id,req.params.modelId) as any;
+    const m=sqlite.prepare('SELECT coalesce(pending_bytes,bytes) bytes FROM customer_preview_models WHERE preview_id=? AND id=?').get(p.id,req.params.modelId) as any;
     if(!m){res.status(404).end();return;}res.setHeader('Cache-Control','private, no-store');res.type('model/gltf-binary').send(m.bytes);
   });
   app.get('/api/customer-previews/:id',requireElevated,(req,res)=>{const p=record(req,res);if(p)res.json(view(p));});
@@ -288,16 +297,23 @@ export function registerCustomerPreviews(app: Express): void {
           if(!p)throw Object.assign(new Error('A selected preview no longer exists. Refresh the list.'),{status:404});
           if(p.version!==ref.version)throw Object.assign(new Error('A selected preview changed. Refresh the list and select it again.'),{status:409});
           const options=modelList(p.id);
+          if(options.some(o=>o.pending))throw Object.assign(new Error('Publish or discard staged models before merging previews.'),{status:409});
           if(!options.length)throw Object.assign(new Error('Each selected preview must have at least one design option.'),{status:400});
           return {p,options};
         });
         if(sources.reduce((sum,s)=>sum+s.options.length,0)>MAX_OPTIONS)throw Object.assign(new Error('The combined preview can have up to six design options.'),{status:400});
+        const mergedLinks:any={};
+        for(const field of ["clientId","projectId","quoteId"]){
+          const values=[...new Set(sources.map(s=>(links(s.p) as any)[field]).filter(Boolean))];
+          if(values.length>1)throw Object.assign(new Error("These previews belong to different customers, jobs or quotes. Merge options from the same job."),{status:400});
+          mergedLinks[field]=values[0]??null;
+        }
         const now=Date.now();
         const row=sqlite.prepare('INSERT INTO customer_previews(token,title,customer,merge_request,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),data.title,data.customer,signature,sourceKey,now,now);
-        const id=Number(row.lastInsertRowid);let position=0;
+        const id=Number(row.lastInsertRowid);saveLinks(id,resolveLinks(mergedLinks));let position=0;
         for(const source of sources)for(const option of source.options){
           const label=`${++position}. ${source.p.title} — ${option.label}`.slice(0,60);
-          sqlite.prepare('INSERT INTO customer_preview_models(id,preview_id,label,position,bytes,size) SELECT ?,?,?,?,bytes,size FROM customer_preview_models WHERE id=? AND preview_id=?').run(crypto.randomBytes(16).toString('hex'),id,label,position-1,option.id,source.p.id);
+          sqlite.prepare('INSERT INTO customer_preview_models(id,preview_id,label,position,bytes,size,source_signature,source_quote_version) SELECT ?,?,?,?,bytes,size,source_signature,source_quote_version FROM customer_preview_models WHERE id=? AND preview_id=?').run(crypto.randomBytes(16).toString('hex'),id,label,position-1,option.id,source.p.id);
         }
         return id;
       })();
@@ -318,7 +334,7 @@ export function registerCustomerPreviews(app: Express): void {
         validatePreviewGlb(req.file.buffer);const p=parsed.data,now=Date.now(),linked=resolveLinks(p);
         const id=sqlite.transaction(()=>{
           const r=sqlite.prepare('INSERT INTO customer_previews(token,title,description,customer,width,depth,height,finish,note,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(crypto.randomBytes(24).toString('hex'),p.title,p.description,p.customer,p.width,p.depth,p.height,p.finish,p.note,source,now,now);
-          const id=Number(r.lastInsertRowid);saveLinks(id,linked);insertModel(id,'Design from quote',req.file!.buffer);return id;
+          const id=Number(r.lastInsertRowid);saveLinks(id,linked);insertModel(id,'Design from quote',req.file!.buffer);if(p.sourceQuoteVersion&&linked.quoteId){const source=sourceSignature(linked.quoteId);if(!source||source.version!==p.sourceQuoteVersion)throw new Error('The quote changed during export. Reopen it and try again.');sqlite.prepare('UPDATE customer_preview_models SET source_signature=?,source_quote_version=? WHERE preview_id=?').run(source.signature,source.version,id);}return id;
         })();
         audit(req,'preview.created_from_quote_model',{targetType:'customer_preview',targetId:id,targetName:p.title});res.status(201).json(view(getPreview(id)!));
       }catch(e){res.status(400).json({message:e instanceof Error?e.message:'Could not create the preview.'});}
@@ -334,17 +350,51 @@ export function registerCustomerPreviews(app: Express): void {
     const parsed=metadata.safeParse(req.body);if(!parsed.success){res.status(400).json({message:'Enter a project title and keep the description and notes within the allowed lengths.'});return;}
     const v=parsed.data;
     let linked;try{linked=resolveLinks(v,p);}catch(e){res.status(400).json({message:(e as Error).message});return;}
-    sqlite.prepare('UPDATE customer_previews SET title=?,description=?,customer=?,width=?,depth=?,height=?,finish=?,note=?,version=version+1,updated_at=? WHERE id=?')
+    sqlite.prepare('UPDATE customer_previews SET title=?,description=?,customer=?,width=?,depth=?,height=?,finish=?,note=?,design_version=version+1,version=version+1,updated_at=? WHERE id=?')
       .run(v.title,v.description,v.customer,v.width,v.depth,v.height,v.finish,v.note,Date.now(),p.id);
     saveLinks(p.id,linked);
     if(v.linkName!==undefined)shortLink('p',p.token,v.title,v.linkName);
     audit(req,'preview.updated',{targetType:'customer_preview',targetId:p.id,targetName:v.title});res.json(view(getPreview(p.id)!));
   });
+  app.post('/api/customer-previews/:id/discard-models',requireElevated,(req,res)=>{
+    const p=record(req,res);if(!p||!current(req,res,p))return;
+    sqlite.transaction(()=>{sqlite.prepare('UPDATE customer_preview_models SET pending_bytes=NULL,pending_signature=NULL,pending_quote_version=NULL,pending_details=NULL WHERE preview_id=?').run(p.id);sqlite.prepare('UPDATE customer_previews SET version=version+1 WHERE id=?').run(p.id);})();
+    audit(req,'preview.models_discarded',{targetId:p.id});res.json(view(getPreview(p.id)!));
+  });
+  app.post('/api/customer-previews/:id/publish-models',requireElevated,(req,res)=>{
+    const p=record(req,res);if(!p||!current(req,res,p))return;
+    sqlite.transaction(()=>{
+      const pending=sqlite.prepare('SELECT pending_details FROM customer_preview_models WHERE preview_id=? AND pending_bytes IS NOT NULL').all(p.id) as any[];
+      if(pending.length===1&&modelList(p.id).length===1&&pending[0].pending_details){const d=JSON.parse(pending[0].pending_details);sqlite.prepare('UPDATE customer_previews SET width=?,depth=?,height=?,finish=? WHERE id=?').run(d.width,d.depth,d.height,d.finish,p.id);}
+      sqlite.prepare('UPDATE customer_preview_models SET previous_bytes=bytes,previous_signature=source_signature,bytes=pending_bytes,size=length(pending_bytes),source_signature=pending_signature,source_quote_version=pending_quote_version,pending_bytes=NULL,pending_signature=NULL,pending_quote_version=NULL,pending_details=NULL,revision=revision+1 WHERE preview_id=? AND pending_bytes IS NOT NULL').run(p.id);
+      sqlite.prepare('UPDATE customer_previews SET design_version=version+1,version=version+1,updated_at=? WHERE id=?').run(Date.now(),p.id);
+    })();audit(req,'preview.models_published',{targetId:p.id});res.json(view(getPreview(p.id)!));
+  });
+  app.post('/api/customer-previews/:id/refresh-from-quote',requireElevated,(req,res)=>{
+    upload(req,res,(err:any)=>{
+      const p=record(req,res);if(!p||!current(req,res,p))return;
+      if(err||!req.file)return res.status(400).json({message:'Choose a model up to 25 MB.'});
+      try{
+        validatePreviewGlb(req.file.buffer);
+        const source=sourceSignature((p as any).quote_id);
+        if(!source||source.version!==Number(req.body.sourceQuoteVersion))return res.status(409).json({message:'The source quote changed. Reopen it and prepare this preview again.'});
+        const model=sqlite.prepare('SELECT id FROM customer_preview_models WHERE preview_id=? AND id=?').get(p.id,req.body.optionId) as any;
+        if(!model)return res.status(400).json({message:'Choose the design option to update.'});
+        const details=metadata.safeParse(JSON.parse(req.body.details||'{}'));
+        if(!details.success)return res.status(400).json({message:'Reopen the quote and prepare its preview details again.'});
+        const {width,depth,height,finish}=details.data;
+        sqlite.prepare('UPDATE customer_preview_models SET pending_bytes=?,pending_signature=?,pending_quote_version=?,pending_details=? WHERE id=?').run(req.file.buffer,source.signature,source.version,JSON.stringify({width,depth,height,finish}),model.id);
+        sqlite.prepare('UPDATE customer_previews SET version=version+1 WHERE id=?').run(p.id);
+        // Staging leaves the public design and its approval version intact.
+        audit(req,'preview.model_staged',{targetId:p.id});res.json(view(getPreview(p.id)!));
+      }catch(e:any){res.status(400).json({message:e.message});}
+    });
+  });
   app.post('/api/customer-previews/:id/sharing',requireElevated,(req,res) => {
     const p=record(req,res);if(!p||!current(req,res,p))return;
     if(typeof req.body.published!=='boolean'){res.status(400).json({message:'Choose whether this link is available.'});return;}
     if(req.body.published&&!modelList(p.id).length){res.status(400).json({message:'Add a 3D model before creating the customer link.'});return;}
-    sqlite.prepare('UPDATE customer_previews SET published=?,updated_at=?,version=version+1 WHERE id=?').run(req.body.published?1:0,Date.now(),p.id);
+    sqlite.prepare('UPDATE customer_previews SET published=?,updated_at=?,design_version=version+1,version=version+1 WHERE id=?').run(req.body.published?1:0,Date.now(),p.id);
     audit(req,req.body.published?'preview.shared':'preview.disabled',{targetType:'customer_preview',targetId:p.id,targetName:p.title});res.json(view(getPreview(p.id)!));
   });
   app.post('/api/customer-previews/:id/models',requireElevated,(req,res,next:NextFunction) => {
@@ -364,8 +414,8 @@ export function registerCustomerPreviews(app: Express): void {
       const p=record(req,res);if(!p||!current(req,res,p))return;
       try{validatePreviewGlb(req.file.buffer);}catch(e){res.status(400).json({message:e instanceof Error?e.message:'Invalid model.'});return;}
       const changed=sqlite.transaction(()=>{
-        const r=sqlite.prepare('UPDATE customer_preview_models SET previous_bytes=bytes,bytes=?,size=?,revision=revision+1 WHERE id=? AND preview_id=?').run(req.file!.buffer,req.file!.size,req.params.modelId,p.id);
-        if(r.changes)sqlite.prepare('UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?').run(Date.now(),p.id);
+        const r=p.published?sqlite.prepare('UPDATE customer_preview_models SET pending_bytes=?,pending_signature=NULL,pending_quote_version=NULL,pending_details=NULL WHERE id=? AND preview_id=?').run(req.file!.buffer,req.params.modelId,p.id):sqlite.prepare('UPDATE customer_preview_models SET previous_bytes=bytes,previous_signature=source_signature,source_signature=NULL,bytes=?,size=?,revision=revision+1 WHERE id=? AND preview_id=?').run(req.file!.buffer,req.file!.size,req.params.modelId,p.id);
+        if(r.changes)sqlite.prepare(p.published?'UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?':'UPDATE customer_previews SET updated_at=?,design_version=version+1,version=version+1 WHERE id=?').run(Date.now(),p.id);
         return r.changes;
       })();
       if(!changed){res.status(404).json({message:'Model not found.'});return;}
@@ -375,8 +425,8 @@ export function registerCustomerPreviews(app: Express): void {
   app.post('/api/customer-previews/:id/models/:modelId/restore',requireElevated,(req,res)=>{
     const p=record(req,res);if(!p||!current(req,res,p))return;
     const changed=sqlite.transaction(()=>{
-      const r=sqlite.prepare('UPDATE customer_preview_models SET bytes=previous_bytes,previous_bytes=bytes,size=length(previous_bytes),revision=revision+1 WHERE id=? AND preview_id=? AND previous_bytes IS NOT NULL').run(req.params.modelId,p.id);
-      if(r.changes)sqlite.prepare('UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?').run(Date.now(),p.id);
+      const r=sqlite.prepare(p.published?'UPDATE customer_preview_models SET pending_bytes=previous_bytes,pending_signature=previous_signature,pending_quote_version=NULL,pending_details=NULL WHERE id=? AND preview_id=? AND previous_bytes IS NOT NULL':'UPDATE customer_preview_models SET bytes=previous_bytes,previous_bytes=bytes,source_signature=previous_signature,previous_signature=source_signature,size=length(previous_bytes),revision=revision+1 WHERE id=? AND preview_id=? AND previous_bytes IS NOT NULL').run(req.params.modelId,p.id);
+      if(r.changes)sqlite.prepare(p.published?'UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?':'UPDATE customer_previews SET updated_at=?,design_version=version+1,version=version+1 WHERE id=?').run(Date.now(),p.id);
       return r.changes;
     })();
     if(!changed){res.status(404).json({message:'No previous model is available.'});return;}
@@ -387,7 +437,7 @@ export function registerCustomerPreviews(app: Express): void {
     if(p.published&&modelList(p.id).length<=1){res.status(400).json({message:'Disable the customer link before removing its last model.'});return;}
     const r=sqlite.prepare('DELETE FROM customer_preview_models WHERE id=? AND preview_id=?').run(req.params.modelId,p.id);
     if(!r.changes){res.status(404).json({message:'Model not found.'});return;}
-    sqlite.prepare('UPDATE customer_previews SET updated_at=?,version=version+1 WHERE id=?').run(Date.now(),p.id);
+    sqlite.prepare('UPDATE customer_previews SET updated_at=?,design_version=version+1,version=version+1 WHERE id=?').run(Date.now(),p.id);
     audit(req,'preview.model_removed',{targetType:'customer_preview',targetId:p.id});res.json(view(getPreview(p.id)!));
   });
 }

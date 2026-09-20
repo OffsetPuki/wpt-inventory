@@ -92,7 +92,11 @@ export function computeTotals(lineState, pricing) {
   // Minimum job charge: small jobs still cost a truck roll + setup.
   const min = Math.max(0, Number(p.minJobCharge) || 0);
   let minAdjustment = 0;
-  if (total > 0 && min > 0 && total < min) {
+  if (Number(p.pricingRulesVersion)>=2 && res.subtotal-discountAmt>0) {
+    minAdjustment=round2(Math.max(0,min-(res.subtotal-discountAmt)));
+    tax=round2((res.subtotal-discountAmt+minAdjustment)*(Number(p.taxPct)||0)/100);
+    total=round2(res.subtotal-discountAmt+minAdjustment+tax);
+  } else if (total > 0 && min > 0 && total < min) {
     minAdjustment = round2(min - total);
     total = min;
   }

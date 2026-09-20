@@ -1463,6 +1463,8 @@ export function registerFinanceRoutes(app: Express): void {
       (s, i) => s + (i.retainageReleasedAt != null ? (i.retainageCents ?? 0) : 0), 0);
     const invoicedCents = live.reduce((s, i) => s + i.totalCents, 0) - releasedRetainageCents;
     const paidCents = live.reduce((s, i) => s + i.paidCents, 0);
+    const taxCents = live.reduce((s,i)=>s+i.taxCents,0);
+    const revenueCents = invoicedCents - taxCents;
     // Still-held retainage, capped at what's actually uncollected on each
     // invoice (a GC that ignored the withholding and paid in full holds $0).
     // Same predicate as the bill-retainage endpoint so card and button agree.
@@ -1527,7 +1529,8 @@ export function registerFinanceRoutes(app: Express): void {
         laborMinutes,
         laborCostCents,
         // What's left after materials + labor if everything billed gets paid.
-        marginCents: invoicedCents - expenseCents - laborCostCents - stock.stockCostCents,
+        taxCents, revenueCents,
+        marginCents: revenueCents - expenseCents - laborCostCents - stock.stockCostCents,
       },
     });
   });

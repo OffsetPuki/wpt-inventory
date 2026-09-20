@@ -25,6 +25,9 @@ export function initializeSuite() {
       INSERT INTO suite_notifications(user_id,event_key,title,href) VALUES(NEW.assignee_id,'task:'||NEW.id||':'||NEW.assignee_id,'Assigned: '||NEW.title,'/pm/board?task='||NEW.id)
       ON CONFLICT(user_id,event_key) DO UPDATE SET read_at=NULL,resolved_at=NULL,snoozed_until=NULL; END;
     CREATE TRIGGER IF NOT EXISTS suite_task_unassign AFTER UPDATE OF assignee_id ON pm_tasks WHEN OLD.assignee_id IS NOT NULL AND NEW.assignee_id IS NOT OLD.assignee_id BEGIN UPDATE suite_notifications SET resolved_at=unixepoch()*1000 WHERE user_id=OLD.assignee_id AND event_key='task:'||NEW.id||':'||OLD.assignee_id; END;
+    CREATE TRIGGER IF NOT EXISTS suite_task_reopened AFTER UPDATE OF status,deleted_at ON pm_tasks WHEN NEW.status!='done' AND NEW.deleted_at IS NULL AND (OLD.status='done' OR OLD.deleted_at IS NOT NULL) BEGIN
+      UPDATE suite_notifications SET resolved_at=NULL,read_at=NULL,snoozed_until=NULL,title='Assigned: '||NEW.title WHERE event_key='task:'||NEW.id||':'||NEW.assignee_id; END;
+    CREATE TRIGGER IF NOT EXISTS suite_task_renamed AFTER UPDATE OF title ON pm_tasks BEGIN UPDATE suite_notifications SET title='Assigned: '||NEW.title WHERE event_key LIKE 'task:'||NEW.id||':%'; END;
     CREATE TRIGGER IF NOT EXISTS suite_task_resolved AFTER UPDATE OF status,deleted_at ON pm_tasks WHEN NEW.status='done' OR NEW.deleted_at IS NOT NULL BEGIN
       UPDATE suite_notifications SET resolved_at=unixepoch()*1000 WHERE event_key LIKE 'task:'||NEW.id||':%'; END;
   `);
@@ -64,11 +67,11 @@ export function initializeSuite() {
       "quotes",
       "quote_settings",
     ],
-    marketing: ["mk_portfolio", "mk_reviews", "mk_settings"],
+    marketing: ["mk_portfolio", "mk_reviews", "mk_settings", "mk_spend_entries", "mk_preferences", "mk_campaign_links"],
     team: [
       "hr_employees",
       "hr_leave_requests",
-      "hr_pay_rates",
+      "hr_pay_rates", "hr_labor_policies",
       "hr_payroll_runs",
     ],
     communication: [

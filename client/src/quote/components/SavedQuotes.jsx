@@ -1,3 +1,4 @@
+import {useBusiness} from '@/hooks/useBusiness';
 import DocumentActivityButton from '@/components/DocumentActivity';
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -124,6 +125,7 @@ function BuyList({ ids, onClose }) {
  * delete the ones that went nowhere.
  */
 export default function SavedQuotes({ onOpen, onDuplicate }) {
+  const business=useBusiness();
   const qc = useQueryClient();
   // Which row has its send-to-customer panel open (one at a time).
   const [shareId, setShareId] = useState(null);
@@ -135,9 +137,10 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
   const [filters, setFilters] = useState({q:'',trade:'',status:'',page:1});
   useEffect(() => { const timer = setTimeout(() => setFilters(f => ({...f,q:search.trim(),page:1})), 300); return () => clearTimeout(timer); }, [search]);
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['quotes', filters],
-    queryFn: async () => (await apiRequest('GET', '/api/quotes?' + new URLSearchParams({...filters,pageSize:20}))).json(),
+    queryKey: ['quotes', filters,business],
+    queryFn: async () => (await apiRequest('GET', '/api/quotes?' + new URLSearchParams({...filters,site:business,pageSize:20}))).json(),
   });
+  useEffect(()=>{setFilters(f=>({...f,page:1}));setChecked(new Set());},[business]);
   const rows = data?.rows || [];
   const setFilter = (key, value) => { setShareId(null); setFilters(f => ({...f,[key]:value,page:1})); };
 

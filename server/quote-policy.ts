@@ -1,3 +1,4 @@
+import {quoteBusiness,businessShop} from '../shared/business.js';
 import { sqlite } from './storage';
 import { DEFAULT_SHOP, deepMerge } from '../client/src/quote/lib/store.js';
 
@@ -12,11 +13,12 @@ export function normalizeQuoteTerms(value: unknown): string[] {
   return [VALIDITY_TERM, ...rest.split('\n').map(s => s.trim()).filter(Boolean)];
 }
 
-function shopSettings(legacy = false) {
+function shopSettings(legacy = false, site = 'metals') {
   const row = sqlite.prepare('SELECT shop FROM quote_settings WHERE id=1').get() as any;
   const shop: any = deepMerge({...DEFAULT_SHOP, ...(legacy ? {terms: LEGACY_DEFAULT} : {})}, parse(row?.shop || '{}'));
-  return {name:shop.name, location:shop.location, phone:shop.phone, email:shop.email,
-    terms:String(shop.terms || '').split('\n').map(s=>s.trim()).filter(Boolean)};
+  const identity=businessShop(shop,site);
+  return {name:identity.name, location:identity.location, phone:identity.phone, email:identity.email,
+    terms:String(identity.terms || '').split('\n').map(s=>s.trim()).filter(Boolean)};
 }
 
 export function quotePolicy(quote: any) {
@@ -29,7 +31,7 @@ export function quoteShop(quote: any) {
   const session = parse(quote.payload);
   if (quote.status !== 'draft' && session.quotePolicy?.shop) return session.quotePolicy.shop;
   if (quote.status !== 'draft') return session.legacyShopSnapshot?.shop || shopSettings(true);
-  const shop = shopSettings();
+  const shop = shopSettings(false,quoteBusiness({...session,type:quote.type}));
   return {...shop, terms:normalizeQuoteTerms(shop.terms.join('\n'))};
 }
 

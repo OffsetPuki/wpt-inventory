@@ -51,6 +51,7 @@ test('Save Quote persists edits and Duplicate recovers a conflicting draft witho
  await page.route(`**/api/quotes/${original.id}`,r=>r.request().method()==='PATCH'?r.fulfill({status:409,json:{message:'Changed on another device'}}):r.continue());
  await editor.locator('[data-key="depth"]').fill('52');await editor.locator('[data-key="depth"]').press('Tab');
  await page.getByRole('button',{name:'Save Quote',exact:true}).click();await expect(page.getByText('This quote has changed elsewhere',{exact:true})).toBeVisible();
+ await page.getByText('More quote options',{exact:true}).click();
  await page.getByRole('button',{name:'Duplicate quote',exact:true}).click();await expect(page.getByText('Quote duplicated',{exact:true})).toBeVisible();
  const copy=app.sqlite.prepare("SELECT * FROM quotes WHERE type='barndominium' ORDER BY id DESC LIMIT 1").get();expect(copy.id).not.toBe(original.id);expect(copy.number).not.toBe(original.number);expect(JSON.parse(copy.payload).state.depth).toBe(52);
  expect(app.sqlite.prepare('SELECT payload FROM quotes WHERE id=?').get(original.id).payload).toBe(original.payload);

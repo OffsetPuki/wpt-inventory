@@ -1,3 +1,6 @@
+import {quoteBusiness} from '../shared/business.js';
+import {customerProjectUrl} from './customer-project-page';
+import {validateQuoteAmount} from './quote-validation';
 import {carportPricingIssues} from '../client/src/quote/lib/carportPricing.js';
 import { shortLink } from './share-links';
 import {normalize as normalizeBarndo,validate as validateBarndo} from '../client/src/quote/lib/barndominium/model.js';
@@ -30,6 +33,7 @@ import { buildLineState, lineCost, materialTotals } from "../client/src/quote/li
 import { deepMerge } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 import { acceptQuote } from "./quote-lifecycle";
+
 
 // ─── Quote builder module ────────────────────────────────────────────────────
 // Backs the ported CJM Quote app (client/src/quote). Three responsibilities:
@@ -173,14 +177,15 @@ function assertSafeKeys(obj: unknown, path = ""): void {
 // The price book a stored session should be priced with: its own snapshot
 // (rate versioning — quotes hold their prices) when present, else the current
 // shared book. Both deep-merged over the defaults, identically to the builder.
-function effectiveBook(sess: { priceBookSnapshot?: unknown } | null): Record<string, any> {
+function effectiveBook(sess: { priceBookSnapshot?: unknown;business?:string;type?:string } | null): Record<string, any> {
   if (sess?.priceBookSnapshot && typeof sess.priceBookSnapshot === "object") {
     return deepMerge(DEFAULT_PRICE_BOOK, sess.priceBookSnapshot as Record<string, unknown>);
   }
   const row = sqlite.prepare(
     "SELECT price_book FROM quote_settings WHERE id = 1",
   ).get() as { price_book?: string } | undefined;
-  return deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
+  const book=deepMerge(DEFAULT_PRICE_BOOK, parseJson<Record<string, unknown>>(row?.price_book, {}));
+  return deepMerge(book,book.businesses?.[quoteBusiness(sess)]||{});
 }
 
 // Where the shop's own quote book stood when the suite took over. New numbers
@@ -238,6 +243,8 @@ export function registerQuoteRoutes(app: Express): void {
   });
   const pid = (v: string | string[]): number => parseInt(v as string, 10);
 
+  try { sqlite.exec("ALTER TABLE quote_settings ADD COLUMN version INTEGER NOT NULL DEFAULT 0"); } catch {}
+
   // ─── Settings (literal path — registered before /:id) ────────────────────
   // The shared price book + shop identity. The client deep-merges these over
   // its own defaults, so an empty object simply means "all defaults".
@@ -249,12 +256,13 @@ export function registerQuoteRoutes(app: Express): void {
   // PUT below will quietly discard.
   app.get("/api/quotes/settings", requireAuth, (req, res) => {
     const row = sqlite.prepare(
-      "SELECT price_book, shop FROM quote_settings WHERE id = 1",
-    ).get() as { price_book?: string; shop?: string } | undefined;
+      "SELECT price_book, shop, version FROM quote_settings WHERE id = 1",
+    ).get() as { price_book?: string; shop?: string; version?: number } | undefined;
     res.json({
       priceBook: parseJson(row?.price_book, {}),
       shop: parseJson(row?.shop, {}),
-      canEditRates: isElevated(req),
+      canEditRates: ["owner","manager"].includes(req.user!.role),
+      version: row?.version ?? 0,
     });
   });
 
@@ -276,17 +284,20 @@ export function registerQuoteRoutes(app: Express): void {
       // control. He never sees an editable field either — the GET above hands
       // the client `canEditRates`, which renders the rate inputs read-only.
       // Reading stays open; only the write is gated.
-      if (!isElevated(req)) {
+      if (!["owner","manager"].includes(req.user!.role)) {
         audit(req, "quote.settings_update_denied");
         return res.json({ ok: true, saved: false });
       }
+      const current = sqlite.prepare("SELECT version FROM quote_settings WHERE id=1").get() as any;
+      if(req.body.version !== (current?.version ?? 0)) return res.status(409).json({message:"Rates changed on another screen. Reload the price book before saving.", version:current?.version??0});
       sqlite.prepare(`
         INSERT INTO quote_settings (id, price_book, shop, updated_at)
         VALUES (1, @priceBook, @shop, @now)
         ON CONFLICT(id) DO UPDATE SET
           price_book = excluded.price_book,
           shop = excluded.shop,
-          updated_at = excluded.updated_at
+          updated_at = excluded.updated_at,
+          version = quote_settings.version + 1
       `).run({
         priceBook: JSON.stringify(data.priceBook),
         shop: JSON.stringify(data.shop),
@@ -294,8 +305,9 @@ export function registerQuoteRoutes(app: Express): void {
       });
       // The shared price book is the most financially consequential write in
       // this module — "who changed the labor rate and when" must be answerable.
-      audit(req, "quote.settings_update");
-      res.json({ ok: true });
+      audit(req, "quote.settings_update", {details:{version:(current?.version??0)+1}});
+      if(!current) sqlite.prepare("UPDATE quote_settings SET version=1 WHERE id=1").run();
+      res.json({ ok: true, version:(current?.version??0)+1 });
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
@@ -502,6 +514,8 @@ export function registerQuoteRoutes(app: Express): void {
     const status = typeof req.query.status === 'string' ? req.query.status : '';
     const trade = typeof req.query.trade === 'string' ? req.query.trade : '';
     const conditions = [isNull(quotes.deletedAt)];
+    const site=String(req.query.site||'all');
+    if(['metals','concrete','insulation','trades'].includes(site))conditions.push(sql`CASE WHEN json_valid(${quotes.payload}) THEN coalesce(json_extract(${quotes.payload}, '$.business'),CASE ${quotes.type} WHEN 'concrete' THEN 'concrete' WHEN 'insulation' THEN 'insulation' ELSE 'metals' END) ELSE 'metals' END = ${site}`);
     if (req.query.projectId) conditions.push(sql`${quotes.id} IN (SELECT quote_id FROM projects WHERE id=${Number(req.query.projectId)} AND deleted_at IS NULL)`);
     if (search) {
       const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
@@ -603,7 +617,7 @@ export function registerQuoteRoutes(app: Express): void {
   app.post('/api/quotes/:id/alternative',requireAuth,(req,res)=>{
     try {
       const original=db.select().from(quotes).where(and(eq(quotes.id,pid(req.params.id)),isNull(quotes.deletedAt))).get();
-      if(!original||original.type!=='barndominium')return res.status(404).json({message:'Building quote not found.'});
+      if(!original)return res.status(404).json({message:'Building quote not found.'});
       if(original.status!=='draft')return res.status(409).json({message:'Create alternatives before issuing the quotes.'});
       if(req.body?.version!==original.version)return res.status(409).json({message:'The quote changed. Reopen it before making an alternative.'});
       const source=parseJson<any>(original.payload,{}),key=typeof req.body?.requestKey==='string'?req.body.requestKey:'';
@@ -611,7 +625,7 @@ export function registerQuoteRoutes(app: Express): void {
       const draftKey=`${req.user!.userId}:alternative:${original.id}:${key}`;
       const prior=db.select().from(quotes).where(eq(quotes.draftKey,draftKey)).get();if(prior)return res.json(prior);
       const copy={...duplicateSession(source,crypto.randomUUID()),customer:source.customer,leadId:original.leadId,copiedFromNumber:original.number,alternativeOf:original.id,priceBookSnapshot:source.priceBookSnapshot,priceBookSnapshotAt:source.priceBookSnapshotAt};
-      const row=insertQuoteWithNumber({type:'barndominium',customerName:original.customerName,leadId:original.leadId,totalCents:original.totalCents,payload:JSON.stringify(copy),draftKey});
+      const row=insertQuoteWithNumber({type:original.type,customerName:original.customerName,leadId:original.leadId,totalCents:original.totalCents,payload:JSON.stringify(copy),draftKey});
       audit(req,'quote.alternative_create',{targetType:'quote',targetId:row.id,targetName:row.number,details:{originalId:original.id}});res.status(201).json(row);
     }catch(error:any){res.status(400).json({message:error.message});}
   });
@@ -704,6 +718,7 @@ export function registerQuoteRoutes(app: Express): void {
       return res.json({ url: localizedLink(`${PUBLIC_SITE_URL}/quote/${token}?preview=1`, communicationContext({quoteNumber:quote.number}).lang), emailed: false });
     }
 
+    try{validateQuoteAmount(quote);}catch(e:any){return res.status(400).json({message:e.message});}
     const scopeSession=parseJson<any>(quote.payload,{});
     const scopeBook=effectiveBook(scopeSession);
     const issues=quote.type==='barndominium'&&scopeSession.state&&scopeSession.overrides?.barndoQuote?.scopeEnabled
@@ -766,6 +781,6 @@ export function registerQuoteRoutes(app: Express): void {
       targetType: "quote", targetId: id, targetName: quote.number,
       details: { emailed, firstShare: quote.status === "draft" },
     });
-    res.json({ ok: true, token, url:legacyUrl, shortUrl:url, emailed });
+    res.json({ ok: true, token, url:legacyUrl, shortUrl:url, projectUrl:customerProjectUrl(token), emailed });
   });
 }

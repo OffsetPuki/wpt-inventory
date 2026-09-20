@@ -1,3 +1,4 @@
+import {laborPremiums} from './labor-policy';
 import { sqlite } from "./storage";
 
 sqlite.exec(`
@@ -176,14 +177,17 @@ export function payrollSummary(from: string, to: string) {
       gross += (correction.minutes_delta / 60) * correction.rate_cents;
     }
     if (!lastRate) continue;
+    const premiums=employee.user_id==null?[]:laborPremiums(employee.user_id,start,end);
+    const overtimeCents=Math.round(premiums.reduce((sum,p)=>sum+p.premiumCents,0));
     rows.push({
+      overtimeCents, overtimeHours:Math.round(premiums.reduce((sum,p)=>sum+p.overtimeMinutes,0)/60*100)/100,
       employeeId: employee.id,
       name: `${employee.first_name} ${employee.last_name}`.trim(),
       payType: lastRate.pay_type,
       payRateCents: lastRate.rate_cents,
       multipleRates: rates.size > 1,
       hours: Math.round((minutes / 60) * 100) / 100,
-      grossCents: Math.round(gross),
+      grossCents: Math.round(gross)+overtimeCents,
       linkedLogin: employee.user_id != null,
     });
   }

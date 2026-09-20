@@ -71,7 +71,7 @@ export default function PmSchedulePage() {
     enabled: isElevated,
   });
 
-  const { data: tasks = [], isLoading } = useQuery<TaskRow[]>({
+  const { data: tasks = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<TaskRow[]>({
     queryKey: ["pm-tasks", "week", weekStart],
     queryFn: async () => (await apiRequest("GET", `/api/pm/tasks?from=${weekStart}&to=${addDaysYmd(weekStart,6)}`)).json(),
   });
@@ -187,7 +187,7 @@ export default function PmSchedulePage() {
       </div>
 
       <section className="mb-5 rounded-xl border p-4"><h2 className="mb-3 font-semibold">Job commitments this week</h2>{jobSchedule.isError?<RetryBlock query={jobSchedule}/>:jobSchedule.data?.map(j=><Link className="block border-t py-3" key={j.id} href={`/project/${j.id}?tab=work`}><strong>{j.name}</strong> · {j.schedule_state} · {j.start_date} to {j.due_date}<p className="text-sm">{j.ready?'Ready':j.blockers.map((b:any)=>b.label).join(' · ')}</p></Link>)}</section>
-      {isLoading ? (
+      {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
       ) : weekTasks.length === 0 && crewOnLeave === 0 ? (
         <EmptyState icon={CalendarRange} message="Nothing scheduled this week">

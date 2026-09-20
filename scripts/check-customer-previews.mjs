@@ -41,9 +41,14 @@ try{
   assert.equal((await replace(Buffer.from('bad'))).status,400);
   const originalId=p.options[0].id,originalVersion=p.version;
   r=await replace(updatedModel);assert.equal(r.status,200);p=r.data;
-  assert.equal(p.url.split('/').at(-1),token);assert.equal(p.options.length,1);assert.equal(p.options[0].id,originalId);assert.equal(p.options[0].revision,2);assert.equal(p.options[0].canRestore,1);assert.equal(p.version,originalVersion+1);
+  assert.equal(p.options[0].pending,1);
+  assert.deepEqual(Buffer.from(await(await fetch(base+publicPath+'/models/'+originalId,{headers:key})).arrayBuffer()),model,'Customers retain the published model while staging');
+  assert.deepEqual(Buffer.from(await(await fetch(`${base}/api/customer-previews/${p.id}/models/${originalId}`,{headers:{'X-Auth':owner}})).arrayBuffer()),updatedModel,'Owner sees staged model');
+  assert.equal((await api(publicPath,'GET',undefined,undefined,key)).data.version,originalVersion);
+  r=await api(`/api/customer-previews/${p.id}/publish-models`,'POST',{version:p.version},owner);assert.equal(r.status,200);p=r.data;
+  assert.equal(p.url.split('/').at(-1),token);assert.equal(p.options.length,1);assert.equal(p.options[0].id,originalId);assert.equal(p.options[0].revision,2);assert.equal(p.options[0].canRestore,1);assert.equal(p.version,originalVersion+2);
   assert.deepEqual(Buffer.from(await(await fetch(base+publicPath+'/models/'+originalId,{headers:key})).arrayBuffer()),updatedModel);
-  r=await api(`/api/customer-previews/${p.id}/models/${originalId}/restore`,'POST',{version:p.version},owner);assert.equal(r.status,200);p=r.data;assert.equal(p.options[0].revision,3);
+  r=await api(`/api/customer-previews/${p.id}/models/${originalId}/restore`,'POST',{version:p.version},owner);assert.equal(r.status,200);p=r.data;assert.equal(p.options[0].pending,1);r=await api(`/api/customer-previews/${p.id}/publish-models`,'POST',{version:p.version},owner);assert.equal(r.status,200);p=r.data;assert.equal(p.options[0].revision,3);
   assert.deepEqual(Buffer.from(await(await fetch(base+publicPath+'/models/'+originalId,{headers:key})).arrayBuffer()),model);
   assert.equal((await api(`/api/customer-previews/${second.id}/models/${p.options[0].id}`,'DELETE',{version:second.version},owner)).status,404,'Cannot remove a model belonging to another preview');
   assert.equal((await api(`/api/customer-previews/${p.id}/models/${p.options[0].id}`,'DELETE',{version:p.version},owner)).status,400,'Published preview retains a model');
