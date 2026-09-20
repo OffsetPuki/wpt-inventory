@@ -1,3 +1,4 @@
+import {resolveReviewSite,syncReviewTask,marketingPreference} from './marketing-core';
 import {documentActivityRevision} from './document-activity';
 import { acceptQuote } from "./quote-lifecycle";
 import {quoteOptionLink} from './quote-options';
@@ -707,24 +708,26 @@ export function registerPublicPortalRoutes(app: Express): void {
     client_id: number | null;
     lead_id: number | null;
     submitted_at: number | null;
+    site?:string|null;
   }
   const findReviewRequest = (token: string): ReviewRequestRow | undefined =>
     sqlite.prepare(
-      "SELECT id, token, name, email, invoice_id, client_id, lead_id, submitted_at FROM review_requests WHERE token = ?",
+      "SELECT id, token, name, email, invoice_id, client_id, lead_id, submitted_at,site FROM review_requests WHERE token = ?",
     ).get(String(token)) as ReviewRequestRow | undefined;
 
   app.get("/api/public/review-request/:token", publicLimiter(60), (req, res) => {
     const rr = findReviewRequest(String(req.params.token));
     if (!rr) return res.json({ ok: false, reason: "unknown" });
     const leadId=rr.lead_id ?? (rr.invoice_id == null ? null : (sqlite.prepare('SELECT COALESCE(i.lead_id,p.lead_id,q.lead_id) lead_id FROM fin_invoices i LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN quotes q ON q.id=i.quote_id WHERE i.id=?').get(rr.invoice_id) as any)?.lead_id);
-    const site=leadId == null ? null : (sqlite.prepare('SELECT site FROM crm_leads WHERE id=?').get(leadId) as any)?.site;
+    const site=resolveReviewSite(rr);
     const profiles:Record<string,{brand:string;googleProfileUrl:string}>={
       metals:{brand:'CJM Metals',googleProfileUrl:'https://maps.google.com/?cid=15884306771721707171'},
       concrete:{brand:'CJM Concrete',googleProfileUrl:'https://share.google/lzboKjzQ5ozdqaEjP'},
     };
     // Every rating gets the same optional Google link, including used invitations.
     // Unknown trades and unverified profiles never inherit another shop's link.
-    const profile=profiles[site] || {};
+    const profile=profiles[site || ""] || {};
+    const preference=marketingPreference(site);if(preference.googleProfileUrl)profile.googleProfileUrl=preference.googleProfileUrl;
     if (rr.submitted_at != null) return res.json({ ok: false, reason: "used",...profile });
     res.json({ ok: true, name: (rr.name ?? "").trim().split(/\s+/)[0] || "",...profile });
   });
@@ -762,7 +765,9 @@ export function registerPublicPortalRoutes(app: Express): void {
         ).get(rr.invoice_id) as { client_id: number | null } | undefined)?.client_id ?? null;
       } catch { /* finance module absent */ }
     }
+    const site=resolveReviewSite(rr)||'unassigned';
     const row = db.insert(reviews).values({
+      site:site as any,
       source: "website",
       author,
       rating: body.rating,
@@ -776,33 +781,7 @@ export function registerPublicPortalRoutes(app: Express): void {
       "UPDATE review_requests SET submitted_at = ?, review_id = ? WHERE id = ?",
     ).run(Date.now(), row.id, rr.id);
 
-    // Negative-review fast lane: 1–3 stars lands an open board task so the
-    // owner responds quickly. Deferred + try/catch'd — submitting must never
-    // 500 over a task nicety. Deduped by open task title.
-    if (body.rating <= 3) {
-      const title = `Respond to ${author || "a customer"}'s ${body.rating}-star review`;
-      setImmediate(() => {
-        try {
-          const open = db.select({ id: pmTasks.id }).from(pmTasks)
-            .where(and(
-              eq(pmTasks.title, title),
-              sql`${pmTasks.status} != 'done'`,
-              isNull(pmTasks.deletedAt),
-            ))
-            .get();
-          if (open) return;
-          db.insert(pmTasks).values({
-            title,
-            kind: "follow_up",
-            autoCreated: true,
-            dueDate: todayLocal(),
-            description: `Review #${row.id} via cjmmetals.com.`,
-          }).run();
-        } catch (e) {
-          console.error("[public-portal] review-task hook failed", e);
-        }
-      });
-    }
+    syncReviewTask(row);
 
     if (mailEnabled()) {
       const text =

@@ -15,7 +15,7 @@ export function safeGooglePage(value: string): string {
     return "/other";
   }
   if (
-    /^\/(?:es\/)?(?:quote|quotes|review|invoice|invoices|api|admin|account|auth|concepts|status)(?:\/|$)/i.test(
+    /^\/(?:es\/)?(?:q|p|preview|previews|quote|quotes|review|invoice|invoices|api|admin|account|auth|concepts|status)(?:\/|$)/i.test(
       page,
     )
   )
@@ -58,6 +58,7 @@ export function googleReport(
   // Older cached traffic includes preview hosts. Refresh it before displaying totals.
   if (kind === "traffic" && payload.productionHost !== GOOGLE_SITES[site].domain)
     return null;
+  if(Array.isArray(payload.rows))payload.rows=payload.rows.map((r:any)=>r.page?{...r,page:safeGooglePage(r.page)}:r);
   return { ...payload, fetchedAt: row.fetched_at };
 }
 const jobs = new Set<string>();
@@ -81,12 +82,12 @@ export async function refreshGoogleReports(
     const run = async (kind: string, fn: () => Promise<unknown>) => {
       try {
         save(kind, await fn());
-        recordReportingStatus('google',site,kind,null);
+        recordReportingStatus('google',site,kind,null,start,end);
         results[kind] = "updated";
       } catch (error) {
         results[kind] =
           error instanceof Error ? error.message : "Unable to refresh";
-        recordReportingStatus('google',site,kind,results[kind]);
+        recordReportingStatus('google',site,kind,results[kind],start,end);
       }
     };
     await Promise.all([

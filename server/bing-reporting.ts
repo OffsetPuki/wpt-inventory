@@ -44,7 +44,7 @@ export function normalizeBing(method:Method,rows:any[]) {
 }
 function cache(site:Site,kind:Method) {
   const r=sqlite.prepare('SELECT payload,fetched_at FROM mk_bing_reports WHERE site=? AND kind=?').get(site,kind) as any;
-  return r?{...JSON.parse(r.payload),fetchedAt:r.fetched_at}:null;
+  if(!r)return null;const payload=JSON.parse(r.payload);if(kind==='GetPageStats')payload.rows=(payload.rows||[]).map((row:any)=>({...row,label:safeGooglePage(row.label)}));return {...payload,fetchedAt:r.fetched_at};
 }
 const jobs=new Map<Site,Promise<Record<string,string>>>();
 export function refreshBingReports(site:Site,transport:typeof fetch=fetch) {

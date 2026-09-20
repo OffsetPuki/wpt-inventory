@@ -602,7 +602,7 @@ export function registerPublicRoutes(app: Express): void {
         date: reviews.reviewDate,
       })
         .from(reviews)
-        .where(and(eq(reviews.published, true),eq(reviews.site,site.data)))
+        .where(and(eq(reviews.published, true),isNull(reviews.archivedAt),eq(reviews.site,site.data)))
         .orderBy(desc(reviews.reviewDate), desc(reviews.id))
         .limit(50)
         .all(),
@@ -627,9 +627,10 @@ export function registerPublicRoutes(app: Express): void {
         title: portfolioItems.title,
         category: portfolioItems.category,
         photoUrl: portfolioItems.photoUrl,
+        photos:portfolioItems.photos,
       })
         .from(portfolioItems)
-        .where(and(eq(portfolioItems.published, true),eq(portfolioItems.site,site.data)))
+        .where(and(eq(portfolioItems.published, true),isNull(portfolioItems.archivedAt),eq(portfolioItems.site,site.data)))
         .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt), desc(portfolioItems.id))
         .offset(offset.data).limit(61).all();
     res.json({site:site.data,items:items.slice(0,60),nextOffset:items.length>60?offset.data+60:null});

@@ -1,3 +1,4 @@
+import {marketingManager} from './marketing-core';
 import type { Express } from "express";
 import { z } from "zod";
 import { sqlite } from "./storage";
@@ -53,7 +54,7 @@ export function businessMidnight(date: string) {
   }
   return guess;
 }
-function periods(endInput: unknown) {
+export function periods(endInput: unknown,startInput?:unknown) {
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Chicago",
     year: "numeric",
@@ -69,9 +70,9 @@ function periods(endInput: unknown) {
     endInput <= yesterday
       ? endInput
       : yesterday;
-  const start = new Date(Date.parse(end) - 27 * DAY).toISOString().slice(0, 10),
+  const start = typeof startInput==='string'&&daySchema.safeParse(startInput).success&&startInput<=end&&Date.parse(end)-Date.parse(startInput)<=366*DAY?startInput:new Date(Date.parse(end) - 27 * DAY).toISOString().slice(0, 10),
     previousEnd = new Date(Date.parse(start) - DAY).toISOString().slice(0, 10),
-    previousStart = new Date(Date.parse(start) - 28 * DAY)
+    previousStart = new Date(Date.parse(start) - (Date.parse(end)-Date.parse(start)+DAY))
       .toISOString()
       .slice(0, 10);
   return {
@@ -171,25 +172,34 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
     )
     .get(site, start, end) as any;
   const google = googleReport(site, start, end, "spend");
-  const spendCents = manual.n
+  let spendCents = manual.n
     ? manual.cents
     : google?.hasData
       ? google.rows.reduce((n: number, r: any) => n + r.cents, 0)
       : null;
+  const entries=sqlite.prepare('SELECT * FROM mk_spend_entries WHERE site=? AND date>=? AND date<=? AND archived_at IS NULL').all(site,start,end) as any[];
+  const channel=(source:string,medium:string)=>!/^(cpc|ppc|paid|paid_search|paid_social|display)$/i.test(medium)?null:/google/i.test(source)?'google':/facebook|instagram|meta/i.test(source)?'meta':/bing|microsoft/i.test(source)?'microsoft':'other';
+  let covered:string[]=manual.n?['all']:google?.hasData?['google']:[];
+  if(entries.length){covered=[...new Set(entries.map(e=>e.channel))];spendCents=entries.reduce((n,e)=>n+e.amount_cents,0);if(!covered.includes('google')&&google?.hasData){covered.push('google');spendCents+=google.rows.reduce((n:number,r:any)=>n+r.cents,0);}}
+  const paidGroups=[...groups.values()].filter(g=>channel(g.source,g.medium));
+  const matchedQualified=paidGroups.filter(g=>covered.includes('all')||covered.includes(channel(g.source,g.medium)!)).reduce((n,g)=>n+g.qualified,0);
+  const missingSpendChannels=[...new Set(paidGroups.map(g=>channel(g.source,g.medium)!).filter(c=>!covered.includes('all')&&!covered.includes(c)))];
+  const spendPartial=!!google?.partial&&!(manual.n&&!entries.length)&&!entries.some(e=>e.channel==='google');
   return {
     start,
     end,
     totals,
     bySource: [...groups.values()].sort((a, b) => b.leads - a.leads),
     spendCents,
-    spendSource: manual.n
+    matchedQualified,missingSpendChannels,spendPartial,
+    spendSource: entries.length?"Dated spending entries + available provider spend":manual.n
       ? "Entered spend"
       : google?.hasData
         ? "Google-linked ad spend"
         : null,
     costPerQualifiedPaidLeadCents:
-      spendCents !== null && totals.paidQualified
-        ? Math.round(spendCents / totals.paidQualified)
+      spendCents !== null && matchedQualified && !spendPartial
+        ? Math.round(spendCents / matchedQualified)
         : null,
     traffic: googleReport(site, start, end, "traffic"),
     search: googleReport(site, start, end, "search"),
@@ -198,8 +208,9 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
   };
 }
 export function registerGrowthRoutes(app: Express) {
+  app.use('/api/marketing/growth',requireElevated,marketingManager,(req,res,next)=>{const b=req.method==='GET'?req.query:req.body;for(const key of ['start','end'])if(b?.[key]){const value=String(b[key]);if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||Number.isNaN(Date.parse(value))||new Date(value).toISOString().slice(0,10)!==value||value>=new Date().toISOString().slice(0,10))return res.status(400).json({message:'Choose valid, completed reporting days.'});}if(b?.start&&b?.end&&(b.start>b.end||Date.parse(b.end)-Date.parse(b.start)>365*86400000))return res.status(400).json({message:'Choose a date range of up to one year.'});next();});
   app.get("/api/marketing/growth/overview", requireElevated, (req, res) => {
-    const { current } = periods(req.query.end);
+    const { current } = periods(req.query.end,req.query.start);
     const includeTests = req.query.includeTests === "1";
     const rows = (Object.keys(GOOGLE_SITES) as Site[]).map(site => {
       const report = cohort(site, current.start, current.end, includeTests);
@@ -212,7 +223,7 @@ export function registerGrowthRoutes(app: Express) {
         sessions: report.traffic ? report.traffic.rows.filter((row:any) => row.medium.toLowerCase() === "organic").reduce((n:number,row:any)=>n+row.sessions,0) : null,
         clicks: search?.totals?.clicks ?? null, impressions: search?.totals?.impressions ?? null,
         bingClicks:report.bing.totals?.clicks??null,bingImpressions:report.bing.totals?.impressions??null,
-        trafficUpdatedAt: report.traffic?.fetchedAt ?? null, searchUpdatedAt: search?.fetchedAt ?? null };
+        trafficPartial:!!report.traffic?.partial,trafficUpdatedAt: report.traffic?.fetchedAt ?? null, searchUpdatedAt: search?.fetchedAt ?? null };
     });
     res.json({ ...current, rows });
   });
@@ -220,7 +231,7 @@ export function registerGrowthRoutes(app: Express) {
     const site = siteSchema.safeParse(req.query.site);
     if (!site.success)
       return res.status(400).json({ message: "Choose a trade" });
-    const range = periods(req.query.end),
+    const range = periods(req.query.end,req.query.start),
       includeTests = req.query.includeTests === "1";
     const queue = sqlite
       .prepare(
@@ -266,7 +277,7 @@ export function registerGrowthRoutes(app: Express) {
           .json({
             message: "Connect Google or Bing reporting first.",
           });
-      const range = periods(req.body.end);
+      const range = periods(req.body.end,req.body.start);
       try {
         const result = reportingIdentity() ? await refreshGoogleReports(
           parsed.data,
@@ -293,7 +304,7 @@ export function registerGrowthRoutes(app: Express) {
       }
     },
   );
-  app.post("/api/marketing/growth/spend", requireElevated, (req, res) => {
+  app.post("/api/marketing/growth/spend", requireElevated,marketingManager, (req, res) => {
     const p = z
       .object({
         site: siteSchema,

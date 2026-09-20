@@ -54,7 +54,11 @@ export const campaigns = sqliteTable("mk_campaigns", {
 });
 
 export const reviews = sqliteTable("mk_reviews", {
-  site: text("site", {enum:["metals","concrete","insulation","trades"]}).notNull().default("metals"),
+  archivedAt: integer("archived_at"),
+  version: integer("version").notNull().default(1),
+  externalUrl: text("external_url"),
+  externalId: text("external_id"),
+  site: text("site", {enum:["metals","concrete","insulation","trades","unassigned"]}).notNull().default("metals"),
   id: integer("id").primaryKey({ autoIncrement: true }),
   source: text("source", { enum: REVIEW_SOURCES }).notNull().default("google"),
   author: text("author"),
@@ -84,6 +88,9 @@ export const reviews = sqliteTable("mk_reviews", {
 // "Recent work" gallery published to www.cjmmetals.com — photos uploaded via
 // the normal /api/upload flow, curated and ordered here.
 export const portfolioItems = sqliteTable("mk_portfolio", {
+  archivedAt: integer("archived_at"),
+  version: integer("version").notNull().default(1),
+  photos: text("photos").notNull().default("[]"),
   city: text("city").notNull().default(""),
   scope: text("scope").notNull().default(""),
   materials: text("materials").notNull().default(""),
@@ -130,15 +137,25 @@ export const marketingSettings = sqliteTable("mk_settings", {
 export const insertReviewSchema = createInsertSchema(reviews).omit({
   id: true,
   createdAt: true,
-  respondedAt: true,
+  respondedAt: true, version:true, archivedAt:true,
+}).extend({
+  rating:z.number().int().min(1).max(5),
+  author:z.string().trim().max(120).nullable().optional(),
+  text:z.string().trim().max(4000).nullable().optional(),
+  notes:z.string().max(4000).nullable().optional(),
+  reviewDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>!Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v&&v<=new Date().toISOString().slice(0,10),'Use a valid date, not in the future.').nullable().optional(),
+  externalUrl:z.string().max(1000).url().refine(v=>/^https:\/\//.test(v)).nullable().optional(),
+  externalId:z.string().trim().max(160).nullable().optional(),
 });
 
 export const insertPortfolioItemSchema = createInsertSchema(portfolioItems).omit({
+  version:true, archivedAt:true,
   approvedBy: true,
   approvedAt: true,
   id: true,
   createdAt: true,
 }).extend({
+  photos:z.string().max(15000).refine(v=>{try {const a=JSON.parse(v);return Array.isArray(a)&&a.length<=20&&a.every(x=>typeof x==='string'&&/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(x));}catch{return false}},"Choose up to 20 uploaded photos.").optional(),
   title: z.string().trim().min(1).max(160),
   site: z.enum(["metals", "concrete", "insulation", "trades"]).default("metals"),
   photoUrl: z.string().max(500),

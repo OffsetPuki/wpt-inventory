@@ -1,3 +1,4 @@
+import {marketingPreference} from './marketing-core';
 import { projectLabor } from './labor-cost';
 import type { Express } from "express";
 import fs from "fs";
@@ -147,6 +148,7 @@ function getSettings(): SweepSettings {
 // ─── The sweep ───────────────────────────────────────────────────────────────
 
 function runBusinessSweep(): void {
+  const preferences=Object.fromEntries(["metals","concrete","insulation","trades"].map(site=>[site,marketingPreference(site)]));
   const now = Date.now();
   const today = localDate(now);
   const cfg = getSettings();
@@ -393,11 +395,11 @@ function runBusinessSweep(): void {
   // turns stale — one open follow-up per lead, monthly re-nag via the key.
   step("stale leads", () => {
     const candidates = sqlite.prepare(`
-      SELECT id, name, stale FROM crm_leads
+      SELECT id, name, stale,site,COALESCE(last_contact_at,created_at) touch FROM crm_leads
       WHERE deleted_at IS NULL AND stage NOT IN ('won', 'lost')
         AND COALESCE(last_contact_at, created_at) < ?
-    `).all(now - cfg.stale_lead_days * DAY_MS) as any[];
-    const newlyStale = candidates.filter((l) => !l.stale);
+    `).all(now - DAY_MS) as any[];
+    const newlyStale = candidates.filter((l) => !l.stale&&l.touch<now-((preferences[l.site]||{}).staleDays??cfg.stale_lead_days)*DAY_MS);
     if (newlyStale.length === 0) return;
     const mark = sqlite.prepare("UPDATE crm_leads SET stale = 1 WHERE id = ?");
     const month = today.slice(0, 7); // "YYYY-MM"
@@ -405,7 +407,7 @@ function runBusinessSweep(): void {
       mark.run(l.id);
       if (hasOpenLeadFollowUp(l.id)) continue;
       ensureTask(`auto:stale-lead:${l.id}:${month}`,
-        `Re-engage ${l.name} — no contact in ${cfg.stale_lead_days} days`,
+        `Re-engage ${l.name} — no contact in ${(preferences[l.site]||{}).staleDays??cfg.stale_lead_days} days`,
         "follow_up", l.id);
     }
   });
@@ -414,14 +416,15 @@ function runBusinessSweep(): void {
   // then silence past the configured window. Same one-open-follow-up rule.
   step("lead quote chase", () => {
     const rows = sqlite.prepare(`
-      SELECT id, name FROM crm_leads
+      SELECT id, name,site,COALESCE(last_contact_at,created_at) touch FROM crm_leads
       WHERE deleted_at IS NULL AND stage = 'quote_sent'
         AND COALESCE(last_contact_at, created_at) < ?
-    `).all(now - cfg.quote_follow_up_days * DAY_MS) as any[];
+    `).all(now - DAY_MS) as any[];
     for (const l of rows) {
+      if(l.touch>=now-((preferences[l.site]||{}).followUpDays??cfg.quote_follow_up_days)*DAY_MS)continue;
       if (hasOpenLeadFollowUp(l.id)) continue;
       ensureTask(`auto:lead-quote-chase:${l.id}`,
-        `Follow up on quote for ${l.name} — no response in ${cfg.quote_follow_up_days} days`,
+        `Follow up on quote for ${l.name} — no response in ${(preferences[l.site]||{}).followUpDays??cfg.quote_follow_up_days} days`,
         "quote_reminder", l.id);
     }
   });
@@ -463,7 +466,7 @@ function runBusinessSweep(): void {
   // so the retry cheerfully sent the factory wording 15 minutes after he
   // switched it off — and quietly reverted any rewording he had done.
   step("review-ask retry", () => {
-    if (!mailEnabled()) return;
+    if (!mailEnabled() || !(sqlite.prepare("SELECT auto_review_request enabled FROM mk_settings WHERE id=1").get() as any)?.enabled) return;
     const rows = sqlite.prepare(`
       SELECT id, token, name, email, invoice_id, lead_id FROM review_requests
       WHERE email IS NOT NULL AND email != ''
@@ -833,6 +836,8 @@ function buildDigest(now: number, today: string): string {
   const startOfToday = new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
   const todayMs = Date.parse(today);
   const parts: string[] = [];
+  for(const site of ['metals','concrete','insulation','trades'])if(marketingPreference(site).digest){const leads=sqlite.prepare('SELECT COUNT(*) n FROM crm_leads WHERE site=? AND deleted_at IS NULL AND created_at>=?').get(site,now-7*DAY_MS) as any;const reviews=sqlite.prepare('SELECT COUNT(*) n FROM mk_reviews WHERE site=? AND archived_at IS NULL AND responded=0').get(site) as any;parts.push(`MARKETING · CJM ${site}: ${leads.n} inquiries in 7 days; ${reviews.n} reviews awaiting response. Open Marketing for channel costs and job outcomes.`);}
+
 
   // One task list (Package C): the digest covers every open board task —
   // follow-ups and plain cards alike — due today or overdue.

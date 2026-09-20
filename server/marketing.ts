@@ -1,3 +1,5 @@
+import {registerMarketingWorkflows} from './marketing-workflows';
+import {marketingMigrations,marketingManager,resolveReviewSite,syncReviewTask,versionConflict} from './marketing-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import { uploadsDir } from './storage';
@@ -187,6 +189,8 @@ for (const ddl of [
 // it unconditionally, so guarantee it exists at boot rather than lazily.
 sqlite.prepare("INSERT OR IGNORE INTO mk_settings (id) VALUES (1)").run();
 
+marketingMigrations();
+
 // ─── Small helpers ───────────────────────────────────────────────────────────
 
 function getSettingsRow(): MarketingSettings {
@@ -250,6 +254,7 @@ function computeAlerts(): string[] {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerMarketingRoutes(app: Express): void {
+  registerMarketingWorkflows(app);
   // `pid`/`qstr` (req.params/req.query narrowing) live in ./http-util.
 
   // ─── Stats (dashboard tile) ───────────────────────────────────────────────
@@ -290,7 +295,7 @@ export function registerMarketingRoutes(app: Express): void {
     // Reviews are often logged after the fact, so prefer the review's own
     // date (text "YYYY-MM-DD" → ms via unixepoch) over when it was entered.
     const avgRow = db.select({ avg: sql<number | null>`avg(${reviews.rating})` }).from(reviews)
-      .where(sql`COALESCE(
+      .where(sql`${reviews.archivedAt} IS NULL AND COALESCE(
         CASE WHEN ${reviews.reviewDate} IS NOT NULL THEN unixepoch(${reviews.reviewDate}) * 1000 END,
         ${reviews.createdAt}
       ) >= ${thirtyAgo}`)
@@ -298,7 +303,7 @@ export function registerMarketingRoutes(app: Express): void {
     const avgRating30d = avgRow?.avg != null ? Math.round(avgRow.avg * 100) / 100 : null;
 
     const unrespondedReviews = db.select({ n: sql<number>`count(*)` }).from(reviews)
-      .where(eq(reviews.responded, false)).get()?.n ?? 0;
+      .where(and(eq(reviews.responded, false),isNull(reviews.archivedAt))).get()?.n ?? 0;
 
     res.json({
       leadsThisWeek,
@@ -448,7 +453,7 @@ export function registerMarketingRoutes(app: Express): void {
     res.json(getSettingsRow());
   });
 
-  app.put("/api/marketing/settings", requireElevated, (req, res) => {
+  app.put("/api/marketing/settings", requireElevated, marketingManager, (req, res) => {
     // JSON bodies can't contain undefined, so zod-parsed output binds as-is.
     let updates;
     try {
@@ -457,8 +462,9 @@ export function registerMarketingRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
     const before = getSettingsRow(); // guarantees the row exists before UPDATE
+    if(req.body.expectedUpdatedAt!==undefined && new Date(req.body.expectedUpdatedAt).getTime()!==new Date(before.updatedAt).getTime())return res.status(409).json({message:'Settings changed in another session. Reload before saving.'});
     db.update(marketingSettings)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...updates, updatedAt: new Date(Math.max(Date.now(),new Date(before.updatedAt).getTime()+1)) })
       .where(eq(marketingSettings.id, 1))
       .run();
     // Freshness stamp for the website's lead-time banner (null counts as a
@@ -492,7 +498,9 @@ export function registerMarketingRoutes(app: Express): void {
     if (source && !(REVIEW_SOURCES as readonly string[]).includes(source)) {
       return res.status(400).json({ message: `source must be one of: ${REVIEW_SOURCES.join(", ")}` });
     }
-    const conds = [];
+    const conds = [req.query.archived==='1'?isNotNull(reviews.archivedAt):isNull(reviews.archivedAt)];
+    if(req.query.site)conds.push(eq(reviews.site,String(req.query.site) as any));
+
     if (source) conds.push(eq(reviews.source, source as (typeof REVIEW_SOURCES)[number]));
     const responded = qstr(req.query.responded);
     if (responded !== undefined) {
@@ -503,9 +511,11 @@ export function registerMarketingRoutes(app: Express): void {
     const maxRating = qstr(req.query.maxRating);
     if (maxRating !== undefined) conds.push(sql`${reviews.rating} <= ${parseInt(maxRating, 10)}`);
 
+    if(req.query.search)conds.push(sql`(${reviews.author} LIKE ${'%'+String(req.query.search).slice(0,100)+'%'} OR ${reviews.text} LIKE ${'%'+String(req.query.search).slice(0,100)+'%'})`);
     const rows = db.select().from(reviews)
       .where(conds.length ? and(...conds) : undefined)
-      .orderBy(desc(reviews.createdAt))
+      .orderBy(desc(reviews.createdAt),desc(reviews.id))
+      .limit(Math.min(1000,Math.max(1,Number(req.query.limit)||1000))).offset(Math.max(0,Number(req.query.offset)||0))
       .all();
     // Phase B #12: resolve the customer's name when the review is linked to a
     // CRM client. crm_clients belongs to the CRM module → try/catch.
@@ -530,13 +540,16 @@ export function registerMarketingRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    // A review logged as already-responded gets its responded timestamp now.
-    const row = db.insert(reviews)
-      .values({ ...body, respondedAt: body.responded ? Date.now() : null })
-      .returning().get();
+    if(body.published&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
+    if(body.published&&body.site==='unassigned')return res.status(400).json({message:'Assign the review to a business before publishing.'});
+    let created=false;
+    const create=()=>{created=true;return db.insert(reviews).values({...body,respondedAt:body.responded?Date.now():null}).returning().get();};
+    const key=req.get('Idempotency-Key');
+    let row;try{row=key?inventoryOnce(sqlite,req.user!.userId,key,{action:'review-create',...body},create):create();}catch(e:any){return res.status(409).json({message:e.message});}
+    if(created){syncReviewTask(row);audit(req,'marketing.review_create',{targetType:'review',targetId:row.id,targetName:row.author||'Customer'});}
     // Negative-review alarm (admin entry path; the public submit path lives in
     // public-portal.ts): alert the owner and queue a response task.
-    if (row.rating <= 3) {
+    if (created && row.rating <= 3) {
       const name = row.author || "Anonymous";
       const { rating, source, text } = row;
       setImmediate(() => {
@@ -545,7 +558,7 @@ export function registerMarketingRoutes(app: Express): void {
           text: `${name} left a ${rating}-star review on ${source}:\n\n${text || "(no text)"}`,
         });
       });
-      queueTaskOnce(`Respond to ${name}'s ${rating}-star review`);
+
     }
     res.status(201).json(row);
   });
@@ -560,8 +573,12 @@ export function registerMarketingRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
-    const updates: Record<string, unknown> = { ...body };
-    if (Object.keys(updates).length === 0) {
+    if(versionConflict(req,res,before.version))return;
+    if((body.published!==undefined||(before.published&&Object.keys(body).some(k=>!['responded','notes'].includes(k))))&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
+    if((body.published??before.published)&&(body.site??before.site)==='unassigned')return res.status(400).json({message:'Assign this review to a business first.'});
+    if(body.published&&before.archivedAt)return res.status(400).json({message:"Restore the review before publishing."});
+    const updates: Record<string, unknown> = { ...body,version:before.version+1,...(body.site&&body.site!==before.site?{published:false}:{}) };
+    if (Object.keys(body).length === 0) {
       return res.status(400).json({ message: "No fields to update" });
     }
     // responded=true stamps the response time; flipping it back clears it.
@@ -570,30 +587,34 @@ export function registerMarketingRoutes(app: Express): void {
     const row = db.update(reviews).set(updates)
       .where(eq(reviews.id, id))
       .returning().get();
+    syncReviewTask(row);audit(req,'marketing.review_update',{targetType:'review',targetId:id,details:{before,after:row}});
     res.json(row);
   });
 
-  app.delete("/api/marketing/reviews/:id", requireElevated, (req, res) => {
+  app.delete("/api/marketing/reviews/:id", requireElevated, marketingManager, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(reviews).where(eq(reviews.id, id)).get();
     if (!target) return res.status(404).json({ message: "Review not found" });
-    db.delete(reviews).where(eq(reviews.id, id)).run();
+    if(versionConflict(req,res,target.version))return;
+    db.update(reviews).set({archivedAt:Date.now(),published:false,version:target.version+1}).where(eq(reviews.id,id)).run();
+    syncReviewTask({...target,archivedAt:Date.now()});audit(req,'marketing.review_archive',{targetType:'review',targetId:id,details:{before:target}});
     res.json({ ok: true });
   });
 
   // ─── Portfolio ("recent work" gallery published to the website) ───────────
 
-  app.get("/api/marketing/portfolio", requireElevated, (_req, res) => {
-    res.json(
-      db.select().from(portfolioItems)
-        .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt))
-        .all(),
-    );
+  app.get("/api/marketing/portfolio",requireElevated,(req,res)=>{
+    const conditions=[req.query.archived==='1'?isNotNull(portfolioItems.archivedAt):isNull(portfolioItems.archivedAt)];
+    if(req.query.site)conditions.push(eq(portfolioItems.site,String(req.query.site) as any));
+    if(req.query.published!==undefined)conditions.push(eq(portfolioItems.published,req.query.published==='1'));
+    if(req.query.search)conditions.push(sql`(${portfolioItems.title} LIKE ${'%'+String(req.query.search).slice(0,100)+'%'} OR ${portfolioItems.city} LIKE ${'%'+String(req.query.search).slice(0,100)+'%'})`);
+    res.json(db.select().from(portfolioItems).where(and(...conditions)).orderBy(asc(portfolioItems.orderIndex),desc(portfolioItems.createdAt),desc(portfolioItems.id)).limit(Math.min(1000,Math.max(1,Number(req.query.limit)||1000))).offset(Math.max(0,Number(req.query.offset)||0)).all());
   });
 
   const validatePublication = (body: any, approved: unknown) => {
     if(body.serviceSlug && !portfolioServices[body.site]?.[body.serviceSlug]) throw new Error('Choose a service for this trade.');
     if(!body.published) return;
+    for(const photo of JSON.parse(body.photos||'[]'))if(!fs.existsSync(path.join(uploadsDir,path.basename(photo))))throw new Error('An album photo is unavailable.');
     if(approved !== true) throw new Error('Confirm approval of the public photo and details.');
     if(!/^\/uploads\/[A-Za-z0-9_.-]+\.(jpe?g|png|webp)$/i.test(body.photoUrl) || !fs.existsSync(path.join(uploadsDir,path.basename(body.photoUrl)))) throw new Error('Choose an uploaded public photo.');
     if(body.projectPage && projectReadiness(body).length) throw new Error('Complete the project page: '+projectReadiness(body).join(', ')+'.');
@@ -601,6 +622,7 @@ export function registerMarketingRoutes(app: Express): void {
   app.post('/api/marketing/portfolio', requireElevated, (req,res) => {
     try {
       const body=insertPortfolioItemSchema.parse({...req.body,published:req.body?.published===true});
+      if(body.published&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
       validatePublication(body,req.body?.approved);
       const create=()=>{
         const row=db.insert(portfolioItems).values({...body,...(body.published?{approvedBy:req.user!.userId,approvedAt:Date.now()}:{})}).returning().get();
@@ -617,15 +639,19 @@ export function registerMarketingRoutes(app: Express): void {
     const id = pid(req.params.id);
     const before = db.select().from(portfolioItems).where(eq(portfolioItems.id, id)).get();
     if (!before) return res.status(404).json({ message: "Portfolio item not found" });
+    if(versionConflict(req,res,before.version))return;
+    if((req.body.published??before.published)&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
     let body;
     try {
       body = insertPortfolioItemSchema.partial().parse(req.body);
-      validatePublication({...before,...body},req.body?.approved);
+      const merged={...before,...body};
+      if(merged.projectId){const job=storage.getProjectById(merged.projectId);if(!job||job.site!==merged.site)throw new Error('The website must match the linked job.');if(merged.published&&merged.workType==='completed'&&job.status!=='done')throw new Error('Complete the linked job before publishing finished work.');}
+      validatePublication(merged,req.body?.approved);
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
     if (Object.keys(body).length === 0) return res.json(before);
-    const row = db.update(portfolioItems).set({...body,...((body.published ?? before.published)?{approvedBy:req.user!.userId,approvedAt:Date.now()}:{})}).where(eq(portfolioItems.id, id)).returning().get();
+    const row = db.update(portfolioItems).set({...body,version:before.version+1,...((body.published ?? before.published)?{approvedBy:req.user!.userId,approvedAt:Date.now()}:{})}).where(eq(portfolioItems.id, id)).returning().get();
     if (body.published !== undefined && body.published !== before.published) {
       audit(req, "marketing.portfolio_publish", {
         targetType: "portfolio", targetId: id, targetName: before.title,
@@ -646,15 +672,23 @@ export function registerMarketingRoutes(app: Express): void {
     res.json(row);
   });
 
-  app.delete("/api/marketing/portfolio/:id", requireElevated, (req, res) => {
+  app.delete("/api/marketing/portfolio/:id", requireElevated, marketingManager, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(portfolioItems).where(eq(portfolioItems.id, id)).get();
     if (!target) return res.status(404).json({ message: "Portfolio item not found" });
-    db.delete(portfolioItems).where(eq(portfolioItems.id, id)).run();
+    if(versionConflict(req,res,target.version))return;
+    db.update(portfolioItems).set({archivedAt:Date.now(),published:false,version:target.version+1}).where(eq(portfolioItems.id,id)).run();
     audit(req, "marketing.portfolio_delete", {
       targetType: "portfolio", targetId: id, targetName: target.title,
     });
     res.json({ ok: true });
+  });
+  for(const [kind,table] of [['reviews','mk_reviews'],['portfolio','mk_portfolio']])app.post('/api/marketing/'+kind+'/:id/restore',requireElevated,marketingManager,(req,res)=>{
+    const id=pid(req.params.id);const row=sqlite.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id) as any;if(!row)return res.status(404).json({message:'Record not found'});
+    if(versionConflict(req,res,row.version))return;
+    sqlite.prepare(`UPDATE ${table} SET archived_at=NULL,published=0,version=version+1 WHERE id=?`).run(id);
+    if(kind==='reviews')syncReviewTask({...row,archivedAt:null});
+    audit(req,'marketing.restore',{targetType:kind,targetId:id});res.json({ok:true});
   });
 
   // Publish a finished shop project straight to the website gallery. Projects
@@ -678,6 +712,7 @@ export function registerMarketingRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
     try {
+      if(body.published&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
       if(body.published && project.status!=='done')throw new Error('Complete the job before publishing finished work.');
       validatePublication(body,req.body.approved);
       if(req.body.site!==project.site)throw new Error('The destination must match the job trade.');

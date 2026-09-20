@@ -1,3 +1,4 @@
+import {resolveReviewSite} from './marketing-core';
 import { listWindow } from './pagination';
 import { enqueueFollowup } from './outbox';
 import { jobStockCost,unbilledStock } from './stock-cost';
@@ -367,9 +368,9 @@ export async function run_queueReviewRequest(inv: Invoice, deliveryKey:string) {
 
       const token = crypto.randomBytes(24).toString("hex");
       const inserted = sqlite.prepare(`
-        INSERT INTO review_requests (token, name, email, invoice_id, client_id, lead_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(token, name, email, inv.id, inv.clientId ?? null, leadId);
+        INSERT INTO review_requests (token, name, email, invoice_id, client_id, lead_id,site)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(token, name, email, inv.id, inv.clientId ?? null, leadId,resolveReviewSite({invoice_id:inv.id,lead_id:leadId}));
 
       if (email && !isOptedOut(email)) {
         const first = firstNameOf(name);

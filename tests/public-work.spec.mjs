@@ -27,7 +27,7 @@ test('Owner can draft, review, publish and unpublish a complete bilingual projec
  await dialog.getByRole('button',{name:'Save draft',exact:true}).click();
  await expect(dialog).toBeHidden();
  expect((await app.api('/api/public/portfolio?site=concrete')).data.items).toHaveLength(0);
- await page.getByRole('button',{name:'Edit',exact:true}).click();
+ await page.getByRole('button',{name:'Edit Synthetic patio example',exact:true}).click();
  await dialog.getByLabel('I have approval',{exact:false}).check();
  await dialog.getByLabel('City',{exact:true}).fill('Mansfield');
  await expect(dialog.getByRole('button',{name:'Publish approved work'})).toBeDisabled();

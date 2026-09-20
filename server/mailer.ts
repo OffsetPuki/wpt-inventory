@@ -268,7 +268,7 @@ export async function sendMail(
                 .get(c.id)
             : sqlite
                 .prepare(
-                  "SELECT 1 FROM review_requests r WHERE r.id=? AND r.submitted_at IS NULL AND (r.invoice_id IS NULL OR EXISTS (SELECT 1 FROM fin_invoices i WHERE i.id=r.invoice_id AND i.status='paid' AND i.deleted_at IS NULL))",
+                  "SELECT 1 FROM review_requests r WHERE r.id=? AND r.submitted_at IS NULL AND COALESCE((SELECT auto_review_request FROM mk_settings WHERE id=1),1)=1 AND (r.invoice_id IS NULL OR EXISTS (SELECT 1 FROM fin_invoices i WHERE i.id=r.invoice_id AND i.status='paid' AND i.deleted_at IS NULL))",
                 )
                 .get(c.id);
       if (!current || isOptedOut(msg.to)) {
