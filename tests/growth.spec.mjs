@@ -3,6 +3,8 @@ import { testApp } from "../scripts/test-app.mjs";
 let app;
 test.beforeAll(async () => {
   app = await testApp({ serve: true });
+  const id=app.sqlite.prepare("INSERT INTO crm_leads(name,site,created_at) VALUES('Synthetic project','metals',?)").run(Date.now()-2*86400000).lastInsertRowid;
+  app.sqlite.prepare("INSERT INTO web_designs(ref,lead_id,name,design_state) VALUES('CJT-BROWSER',?,'Synthetic',?)").run(id,JSON.stringify({type:'trades-planner',project:'shop'}));
   // Synthetic fixture represents an already-enrolled owner; enrollment itself
   // is exercised by the full workflow and release suites.
   app.sqlite
@@ -30,6 +32,8 @@ test("Marketing report works on mobile and desktop without Google credentials", 
   await expect(
     page.getByText("Saved inquiries", { exact: true }),
   ).toBeVisible();
+  const projects=page.getByRole('region',{name:'Project results'});
+  await expect(projects.getByText('Shop / barn',{exact:true})).toBeVisible();
   const ai = page.getByRole('region', {name:'AI referral results'});
   await expect(ai.getByText(/Analytics visits unavailable/)).toBeVisible();
   await expect(ai.getByText('AI-referred inquiries', {exact:true})).toBeVisible();

@@ -84,6 +84,7 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
   const rows = sqlite
     .prepare(
       `SELECT l.*,a.first_touch,a.last_touch,a.landing_page,a.entry_site,a.handoffs,a.mode,i.qualified_at,i.survey_at,
+ (SELECT d.design_state FROM web_designs d WHERE d.lead_id=l.id ORDER BY d.id DESC LIMIT 1) design_state,
  (SELECT MIN(created_at) FROM crm_activities WHERE entity_type='lead' AND entity_id=l.id AND user_id IS NOT NULL AND kind IN ('call','email','meeting')) first_response,
  (SELECT COUNT(*) FROM quotes q WHERE q.lead_id=l.id AND q.deleted_at IS NULL AND q.status IN ('sent','accepted','declined')) quote_count,
  (SELECT COALESCE(SUM(pay.amount_cents),0) FROM fin_invoice_payments pay JOIN fin_invoices inv ON inv.id=pay.invoice_id LEFT JOIN projects p ON p.id=inv.project_id WHERE COALESCE(inv.lead_id,p.lead_id)=l.id AND inv.deleted_at IS NULL AND inv.status!='void') collected_cents
@@ -100,6 +101,8 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
       ),
     ) as any[];
   const groups = new Map<string, any>();
+  const projects = new Map<string, any>();
+  const projectNames: Record<string,string> = {driveway:'Driveway',patio:'Patio',shop:'Shop / barn',carport:'Carport',gate:'Gate / fence',insulation:'Insulation',repair:'Repairs',table:'Custom metalwork',other:'Help choosing'};
   let responseTotal = 0,
     responseCount = 0;
   const totals = {
@@ -146,6 +149,11 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
     g.bookedCents += won ? r.revenue_closed_cents || 0 : 0;
     g.collectedCents += r.collected_cents || 0;
     groups.set(key, g);
+    let project = 'unknown';
+    try { const state=JSON.parse(r.design_state||'{}');if(state?.type==='trades-planner'&&Object.hasOwn(projectNames,state.project))project=state.project; } catch {}
+    const projectRow=projects.get(project)||{project,label:projectNames[project]||'Not recorded',leads:0,qualified:0,quoted:0,won:0,bookedCents:0};
+    projectRow.leads++;projectRow.qualified+=+qualified;projectRow.quoted+=+quoted;projectRow.won+=+won;projectRow.bookedCents+=won?r.revenue_closed_cents||0:0;
+    projects.set(project,projectRow);
     totals.qualified += +qualified;
     totals.visits += +!!r.survey_at;
     totals.quoted += +quoted;
@@ -189,6 +197,7 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
     start,
     end,
     totals,
+    byProject: [...projects.values()].sort((a,b)=>b.qualified-a.qualified||b.leads-a.leads),
     bySource: [...groups.values()].sort((a, b) => b.leads - a.leads),
     spendCents,
     matchedQualified,missingSpendChannels,spendPartial,

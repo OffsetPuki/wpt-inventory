@@ -51,6 +51,8 @@ try {
     "POST",
     {
       name: "Synthetic growth check",
+      designRef: "CJT-GROWTH-TEST",
+      designState: JSON.stringify({type:"trades-planner",project:"shop"}),
       site: "metals",
       email: "growth@example.test",
       attribution,
@@ -216,6 +218,13 @@ try {
   assert.equal(cohort.data.current.totals.bookedCents, 250000);
   assert.equal(cohort.data.current.costPerQualifiedPaidLeadCents, 10000);
   assert.equal(cohort.data.current.bySource[0].page, "/plan");
+  assert.deepEqual(cohort.data.current.byProject,[{project:'shop',label:'Shop / barn',leads:1,qualified:1,quoted:1,won:1,bookedCents:250000}]);
+  app.sqlite.prepare("INSERT INTO web_designs(ref,lead_id,name,design_state) VALUES('CJT-GROWTH-LATEST',?,'Synthetic',?)").run(id,'invalid json');
+  const malformed=await app.api('/api/marketing/growth?site=metals','GET',undefined,token);
+  assert.equal(malformed.data.current.totals.leads,1,'Multiple saved designs must not multiply lead counts');
+  assert.equal(malformed.data.current.byProject[0].project,'unknown','Invalid old state remains an unclassified lead');
+  app.sqlite.prepare("DELETE FROM web_designs WHERE ref='CJT-GROWTH-LATEST'").run();
+
   assert.equal((await app.api("/api/marketing/growth/overview")).status, 401);
   app.sqlite.prepare("UPDATE mk_lead_attribution SET first_touch=? WHERE lead_id=?").run(JSON.stringify({...touch,medium:"organic"}), id);
   cache.run("metals", cohort.data.current.start, cohort.data.current.end, "searchTotals", JSON.stringify({totals:{clicks:7,impressions:100}}), Date.now());

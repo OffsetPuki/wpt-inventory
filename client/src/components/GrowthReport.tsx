@@ -48,6 +48,7 @@ type Period = {
   end: string;
   totals: Totals;
   bySource: Row[];
+  byProject?: {project:string;label:string;leads:number;qualified:number;quoted:number;won:number;bookedCents:number}[];
   spendCents: number | null;
   spendSource: string | null;
   matchedQualified:number;missingSpendChannels:string[];spendPartial:boolean;
@@ -301,6 +302,11 @@ export default function GrowthReport({view="overview"}:{view?:string}) {
             </div>
             <p className="text-sm text-muted-foreground">Inquiries and outcomes come from saved business records. These counts measure attributed visits and jobs, not how often an AI mentions or recommends CJM.</p>
           </section>
+          {!!c.byProject?.some(row=>row.project!=='unknown')&&<section aria-label="Project results" className="border rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold">Which projects become jobs?</h3>
+            <p className="text-sm text-muted-foreground">Project choices from saved estimate requests for this business and period. Older requests may not have a project recorded.</p>
+            <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr>{['Project','Inquiries','Qualified','Quoted','Won','Booked'].map(h=><th key={h} className={cell}>{h}</th>)}</tr></thead><tbody>{c.byProject.map(row=><tr className="border-t" key={row.project}>{[row.label,row.leads,row.qualified,row.quoted,row.won,formatMoney(row.bookedCents)].map((v,i)=><td key={i} className={cell}>{v}</td>)}</tr>)}</tbody></table></div>
+          </section>}
           <div className="border rounded-xl p-4 space-y-3">
             <h3 className="font-semibold">Which visits become jobs?</h3>
             <p className="text-sm text-muted-foreground">
