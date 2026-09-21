@@ -429,7 +429,8 @@ export function registerCustomerPreviews(app: Express): void {
       const p=record(req,res);if(!p||!current(req,res,p))return;
       const existing=sqlite.prepare('SELECT kind FROM customer_preview_models WHERE preview_id=? AND id=?').get(p.id,req.params.modelId) as {kind:string}|undefined;
       const kind=/\.html?$/i.test(req.file.originalname)?'html':'glb';
-      if(!existing||existing.kind!==kind){res.status(400).json({message:'Replace with the same file type, or add a new option.'});return;}
+      if(!existing){res.status(404).json({message:'Design option not found.'});return;}
+      if(existing.kind!==kind){res.status(400).json({message:'Replace with the same file type, or add a new option.'});return;}
       try{validatePreviewFile(req.file.buffer,kind);}catch(e){res.status(400).json({message:e instanceof Error?e.message:'Invalid model.'});return;}
       const changed=sqlite.transaction(()=>{
         const r=p.published?sqlite.prepare('UPDATE customer_preview_models SET pending_bytes=?,pending_signature=NULL,pending_quote_version=NULL,pending_details=NULL WHERE id=? AND preview_id=?').run(req.file!.buffer,req.params.modelId,p.id):sqlite.prepare('UPDATE customer_preview_models SET previous_bytes=bytes,previous_signature=source_signature,source_signature=NULL,bytes=?,size=?,revision=revision+1 WHERE id=? AND preview_id=?').run(req.file!.buffer,req.file!.size,req.params.modelId,p.id);
