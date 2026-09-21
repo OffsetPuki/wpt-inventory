@@ -11,7 +11,7 @@ test('Save and open includes pending text, and replacing a model retains its lin
   await page.getByRole('button',{name:'New preview',exact:true}).click();const dialog=page.getByRole('dialog');
   await dialog.getByLabel('Project title',{exact:true}).fill('Replacement fixture');
   await dialog.getByRole('button',{name:'Create preview',exact:true}).click();
-  await dialog.getByLabel('3D model',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-5.glb',import.meta.url)));
+  await dialog.getByLabel('3D model or HTML design',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-5.glb',import.meta.url)));
   await dialog.getByRole('button',{name:'Add option',exact:true}).click();await dialog.getByRole('button',{name:'Enable customer link'}).click();
   const link=await dialog.getByLabel('Customer preview link').inputValue();
   await dialog.getByLabel('Short description',{exact:true}).fill('Changed description');
@@ -48,7 +48,7 @@ test('Owner creates a design preview, adds a model, shares it and reads customer
   await expect(dialog.getByLabel('Project title',{exact:true})).toHaveValue('Synthetic test gate');
   await expect(dialog.getByRole('button',{name:'Enable customer link'})).toBeDisabled();
   await dialog.getByLabel('Option name',{exact:true}).fill('5 pipes');
-  await dialog.getByLabel('3D model',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-5.glb',import.meta.url)));
+  await dialog.getByLabel('3D model or HTML design',{exact:true}).setInputFiles(fileURLToPath(new URL('../server/preview-seeds/kalkat-5.glb',import.meta.url)));
   await dialog.getByRole('button',{name:'Add option',exact:true}).click();
   await expect(dialog.getByText('5 pipes',{exact:true})).toBeVisible();
   await dialog.getByRole('button',{name:'Enable customer link'}).click();
@@ -117,4 +117,18 @@ for(const type of ['Gate','Fence','Carport','Pergola','Railing','Table'])test(`$
  const button=page.getByRole('button',{name:'Create customer preview',exact:true});await expect(button).toBeEnabled();
  const model=page.locator('.website-product-preview iframe');const a=await button.boundingBox(),b=await model.boundingBox();expect(a.y+a.height).toBeLessThanOrEqual(b.y);
  await button.click();await expect(page.getByLabel('Preview title',{exact:true})).toHaveValue(type+' design');
+});
+
+test('HTML options run interactively in an isolated preview and publish as plain text',async({page})=>{
+ await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
+ await page.route(app.base+'/',async route=>{const response=await route.fetch();await route.fulfill({response,headers:{...response.headers(),'content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self'; img-src 'self' data: blob:"}});});
+ await page.goto(app.base+'/#/crm/previews');await page.getByRole('button',{name:'New preview',exact:true}).click();
+ const dialog=page.getByRole('dialog');await dialog.getByLabel('Project title',{exact:true}).fill('HTML fixture');
+ await dialog.getByLabel('Upload HTML file',{exact:true}).setInputFiles({name:'design.html',mimeType:'text/html',buffer:Buffer.from('<!doctype html><html><body><button onclick="this.textContent=\'Changed\'">Change color</button><script>try{parent.document.body.dataset.compromised="yes"}catch(e){}</script></body></html>')});
+ await dialog.getByRole('button',{name:'Create preview',exact:true}).click();
+ const frame=page.frameLocator('iframe[title="Interactive HTML design"]');await frame.getByRole('button',{name:'Change color'}).click();await expect(frame.getByRole('button',{name:'Changed'})).toBeVisible();
+ expect(await page.locator('body').getAttribute('data-compromised')).toBeNull();
+ await dialog.getByRole('button',{name:'Enable customer link'}).click();
+ const p=(await app.api('/api/customer-previews','GET',undefined,app.owner)).data.find(p=>p.title==='HTML fixture');expect(p.options[0].kind).toBe('html');
+ const response=await fetch(app.base+'/api/public/customer-previews/'+p.url.split('/').at(-1)+'/models/'+p.options[0].id,{headers:{'X-Lead-Key':'test-intake-key'}});expect(response.headers.get('content-type')).toContain('text/plain');expect(await response.text()).toContain('Change color');
 });
