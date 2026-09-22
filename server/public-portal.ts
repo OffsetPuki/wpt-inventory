@@ -526,6 +526,7 @@ export function registerPublicPortalRoutes(app: Express): void {
         activityRevision: documentActivityRevision('quote', quote),
         type: quote.type,
         options:quoteOptionLink(quote.id),
+        previews:(sqlite.prepare('SELECT token,title FROM customer_previews WHERE quote_id=? AND published=1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 6').all(quote.id) as {token:string;title:string}[]).map(p=>({title:p.title,url:`https://www.cjmmetals.com/preview/${p.token}`})),
         typeLabel: QUOTE_TYPE_LABELS[quote.type],
         customerName: quote.customerName,
         status: quote.status,

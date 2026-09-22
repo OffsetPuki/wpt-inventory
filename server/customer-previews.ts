@@ -270,7 +270,8 @@ export function registerCustomerPreviews(app: Express): void {
   app.get('/api/customer-previews/connections',requireElevated,(req,res)=>{
     const search='%'+String(req.query.q||'').slice(0,120)+'%';
     const clientId=Number(req.query.clientId)||0;
-    res.json({clients:sqlite.prepare('SELECT id,name FROM crm_clients WHERE deleted_at IS NULL AND (name LIKE ? OR email LIKE ? OR phone LIKE ?) ORDER BY name LIMIT 12').all(search,search,search),jobs:sqlite.prepare('SELECT id,name,client_id AS clientId FROM projects WHERE deleted_at IS NULL AND (?=0 OR client_id=?) AND name LIKE ? ORDER BY id DESC LIMIT 12').all(clientId,clientId,search)});
+    const quotes=sqlite.prepare("SELECT id,number,customer_name AS customerName FROM quotes WHERE deleted_at IS NULL AND (?=0 OR json_extract(payload,'$.customer.clientId')=?) AND (number LIKE ? OR customer_name LIKE ?) ORDER BY id DESC LIMIT 30").all(clientId,clientId,search,search);
+    res.json({quotes,clients:sqlite.prepare('SELECT id,name FROM crm_clients WHERE deleted_at IS NULL AND (name LIKE ? OR email LIKE ? OR phone LIKE ?) ORDER BY name LIMIT 12').all(search,search,search),jobs:sqlite.prepare('SELECT id,name,client_id AS clientId FROM projects WHERE deleted_at IS NULL AND (?=0 OR client_id=?) AND name LIKE ? ORDER BY id DESC LIMIT 12').all(clientId,clientId,search)});
   });
   app.get('/api/customer-previews/:id/models/:modelId',requireElevated,(req,res)=>{
     const p=record(req,res);if(!p)return;

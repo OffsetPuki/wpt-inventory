@@ -15,6 +15,8 @@ try {
  assert.equal((await call(`/api/customer-previews?clientId=${b.id}`)).length,0);
  assert.equal((await call(`/api/customer-previews?projectId=${job.id}`))[0].id,p.id);
  assert.equal((await call('/api/customer-previews/connections?clientId='+a.id)).jobs[0].id,job.id);
+ assert.equal((await call('/api/customer-previews/connections?clientId='+a.id)).quotes[0].id,q.id);
+ assert.equal((await call('/api/customer-previews/connections?clientId='+b.id)).quotes.length,0);
  assert.equal((await api('/api/customer-previews','POST',{title:'Wrong',clientId:b.id,projectId:job.id},owner)).status,400);
  assert.equal((await api(`/api/customer-previews/${p.id}`,'PATCH',{...p,clientId:b.id,version:p.version},owner)).status,400);
  assert.equal((await call('/api/customer-previews/'+p.id)).clientId,a.id);
@@ -33,5 +35,13 @@ try {
  assert.ok(share.url.includes('/quote/'));
  assert.equal((await api('/api/public/share-links/q/'+share.shortUrl.split('/').at(-1),'GET',undefined,undefined,key)).data.token,share.token);
  assert.equal((await api('/api/public/quote/'+share.token)).status,200);
+ const publicQuote=async()=>(await api('/api/public/quote/'+share.token)).data.quote;
+ assert.deepEqual((await publicQuote()).previews,[]);
+ app.sqlite.prepare('UPDATE customer_previews SET published=1 WHERE id=?').run(p.id);
+ assert.deepEqual((await publicQuote()).previews,[{title:preserved.title,url:p.url}]);
+ app.sqlite.prepare('UPDATE customer_previews SET published=0 WHERE id=?').run(p.id);
+ assert.deepEqual((await publicQuote()).previews,[]);
+ app.sqlite.prepare('UPDATE customer_previews SET published=1,deleted_at=? WHERE id=?').run(Date.now(),p.id);
+ assert.deepEqual((await publicQuote()).previews,[]);
  console.log('Preview connections, mismatches, old links, custom aliases and source quotes passed.');
 } finally {app.close();}
