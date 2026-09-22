@@ -233,7 +233,7 @@ const TOOLS = {
         parse: oneOf({ pickets: ['vertical pickets'], horizontal: ['horizontal bars'], cable: ['cable-look'], glass: ['glass panels'], ornamental: ['ornamental'] }),
       },
       { key: 'spacing', labels: ['baluster spacing'], parse: oneOf({ wide: ['wide'], standard: ['standard'] }) },
-      { key: 'toprail', labels: ['top rail'], parse: oneOf({ flat: ['flat bar'], round: ['round'], wood: ['wood cap'] }) },
+      { key: 'toprail', labels: ['top rail'], parse: oneOf({ flat: ['flat bar'], round: ['round'], wood: ['wood cap'], none: ['none', 'no top rail'] }) },
       { key: 'height', labels: ['height'], parse: firstNumber },
       // Newer website specs carry a real "Length: 24 ft"; older leads say
       // "Length: To be determined on site walkthrough" — no number → the line

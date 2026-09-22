@@ -458,11 +458,12 @@ export const CONFIG = {
         visibleWhen: (s) => s.app !== 'handrail' && s.infill === 'pickets',
       },
       {
-        kind: 'segment', name: 'toprail', label: 'Top rail', cols: 3,
+        kind: 'segment', name: 'toprail', label: 'Top rail', cols: 4,
         options: [
           { value: 'flat', label: 'Flat bar' },
           { value: 'round', label: 'Round' },
           { value: 'wood', label: 'Wood cap' },
+          { value: 'none', label: 'None' },
         ],
       },
       { kind: 'range', name: 'height', label: 'Height', unit: 'in', min: 34, max: 48, step: 1, display: (v) => `${v} in` },

@@ -51,7 +51,7 @@ export function renderRailing(state) {
   const pxPerInLen = pxPerFt / 12;
 
   const postW = Math.max(5, pxPerIn * 0.9);
-  const topThick = s.toprail === 'wood' ? Math.max(9, pxPerIn * 2.4) : s.toprail === 'round' ? Math.max(8, pxPerIn * 2.2) : Math.max(6, pxPerIn * 1.8);
+  const topThick = s.toprail === 'none' ? 0 : s.toprail === 'wood' ? Math.max(9, pxPerIn * 2.4) : s.toprail === 'round' ? Math.max(8, pxPerIn * 2.2) : Math.max(6, pxPerIn * 1.8);
   const botThick = Math.max(4, pxPerIn * 1.2);
   const dim = 'rgba(10,10,10,0.35)';
   const parts = [];
@@ -60,6 +60,7 @@ export function renderRailing(state) {
   parts.push(`<line x1="0" y1="${GROUND}" x2="${VB_W}" y2="${GROUND}" stroke="rgba(10,10,10,0.2)" stroke-width="1"/>`);
 
   function topRail(x1, x2, yTop) {
+        if (s.toprail === 'none') return;
     if (s.toprail === 'wood') {
       const steel = topThick * 0.45;
       parts.push(`<rect x="${x1}" y="${yTop + (topThick - steel)}" width="${x2 - x1}" height="${steel}" fill="${s.color}"/>`);

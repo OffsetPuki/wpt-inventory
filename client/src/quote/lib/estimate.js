@@ -593,7 +593,7 @@ function estimateRailing(s, pb) {
       qty: round2(length), rate: round2(num(r.stairsUpchargePerLnFt, 0)),
     });
   }
-  if (s.toprail !== 'flat') {
+  if (s.toprail !== 'flat' && s.toprail !== 'none') {
     pushPriced(items, {
       key: 'toprail', name: `${optionLabel('railing', 'toprail', s.toprail)} top rail`, kind: 'length',
       qty: round2(length), rate: round2(num((r.toprailUpchargePerLnFt || {})[s.toprail], 0)),
