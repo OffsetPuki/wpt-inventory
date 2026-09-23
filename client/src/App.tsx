@@ -163,6 +163,9 @@ export default function App() {
           <Route path="/crm/quotes">
             <CrmQuoteBuilderPage />
           </Route>
+          <Route path="/design-studio">
+            <ElevatedRoute><CustomerPreviewsPage studio /></ElevatedRoute>
+          </Route>
           <Route path="/crm/previews">
             <ElevatedRoute><CustomerPreviewsPage /></ElevatedRoute>
           </Route>

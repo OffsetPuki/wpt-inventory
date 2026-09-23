@@ -202,6 +202,21 @@ export function seedCustomerPreview(): void {
 
 export function registerCustomerPreviews(app: Express): void {
   seedCustomerPreview();
+  app.post('/api/design-studio/film-table',requireElevated,(req,res)=>{
+    const sourceKey='design-studio-film-table-2026-09';
+    const existing=sqlite.prepare('SELECT * FROM customer_previews WHERE source_key=?').get(sourceKey) as Preview|undefined;
+    if(existing){if((existing as any).deleted_at){res.status(409).json({message:'The film table project was deleted. Create a new preview and upload the design file.'});return;}res.json(view(existing));return;}
+    const file=path.resolve('server/design-studio/film-table.html');
+    if(!fs.existsSync(file)){res.status(503).json({message:'The film table design is not installed on this server.'});return;}
+    const bytes=fs.readFileSync(file);validatePreviewFile(bytes,'html');
+    const id=sqlite.transaction(()=>{
+      const now=Date.now();
+      const result=sqlite.prepare('INSERT INTO customer_previews(token,title,description,width,depth,height,published,source_key,created_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?,?)').run(crypto.randomBytes(24).toString('hex'),'Film stretching table','CJM Design Studio · Interactive engineering review','3 m','3 m','900 mm',sourceKey,now,now);
+      const id=Number(result.lastInsertRowid);insertModel(id,'Film table · full interactive process',bytes,'html');return id;
+    })();
+    audit(req,'preview.created',{targetType:'customer_preview',targetId:id,targetName:'Film stretching table'});
+    res.status(201).json(view(getPreview(id)!));
+  });
   // Separate document policy permits uploaded scripts without relaxing the suite CSP.
   // The response sandbox also prevents direct navigation from gaining our origin.
   app.get('/api/preview-html-renderer',(_req,res)=>{
