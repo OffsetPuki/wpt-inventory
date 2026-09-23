@@ -13,7 +13,7 @@ test('Navigation search, mobile keyboard access, and shared pages',async({page})
  await page.getByRole('button',{name:'Open menu'}).click();
  const menu=page.getByRole('dialog',{name:'Navigation menu'});
  await expect(menu.getByRole('button',{name:'Close menu'})).toBeFocused();
- for(const name of ['Customers','Quotes','Customer previews','Jobs','Tasks','Schedule'])await expect(menu.getByRole('link',{name,exact:true})).toBeVisible();
+ for(const name of ['Customers','Quotes','CJM Design Studio','Customer previews','Jobs','Tasks','Schedule'])await expect(menu.getByRole('link',{name,exact:true})).toBeVisible();
  await menu.getByRole('button',{name:'Money',exact:true}).click();
  await expect(menu.getByRole('link',{name:'Invoices',exact:true})).toBeVisible();
  await menu.getByRole('button',{name:'More',exact:true}).click();

@@ -156,7 +156,7 @@ const NAV_GROUPS: NavGroup[] = [
   { key: 'sales', label: 'Customers', alwaysOpen: true, entries: [
     {...ALL_NAV_GROUPS[0].entries[1], label: 'Customers'},
     ALL_NAV_GROUPS[0].entries[0],
-    ...ALL_NAV_GROUPS[0].entries.slice(2,4),
+    ...ALL_NAV_GROUPS[0].entries.slice(2).filter(e=>e.to!=='/crm'),
   ]},
   { key: 'projects', label: 'Jobs', alwaysOpen: true, entries: ALL_NAV_GROUPS[1].entries.slice(0,3) },
   ALL_NAV_GROUPS[3],
