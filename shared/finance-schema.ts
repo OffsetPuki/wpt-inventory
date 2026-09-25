@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { projects } from "./schema";
 import { clients } from "./crm-schema";
+import { invoicePaymentOptionsSchema } from './invoice-payment-options';
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,9 @@ export const invoices = sqliteTable("fin_invoices", {
   // Nullable, ALTER'd in finance.ts.
   customerNote: text("customer_note"),
   terms: text("terms"), // one term per line
+  // Per-invoice choices and a snapshot of wire details; future default changes
+  // never rewrite banking instructions on an existing invoice.
+  paymentOptions: text("payment_options"),
   // Which "Bill against a quote" button made this invoice — the deposit, the
   // whole job, or the balance after a deposit. NULL for a hand-typed bill.
   // The balance invoice must never be offered "settle the whole job", in the
@@ -219,6 +223,7 @@ export const insertInvoiceSchema = createInsertSchema(invoices, {
   // Tax basis points can never be negative — a negative rate would credit tax
   // back against the subtotal. (computeTotals also clamps as a backstop.)
   taxRateBp: z.number().int().min(0).optional(),
+  paymentOptions: invoicePaymentOptionsSchema.transform(v => JSON.stringify(v)).optional(),
 }).omit({
   id: true,
   number: true, // server-assigned

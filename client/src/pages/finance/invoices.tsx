@@ -1,4 +1,6 @@
 import DocumentActivityButton from '@/components/DocumentActivity';
+import InvoicePaymentEditor from '@/components/InvoicePaymentEditor';
+import { defaultPaymentOptions, invoicePaymentOptionsSchema, readPaymentOptions, type InvoicePaymentOptions } from '@shared/invoice-payment-options';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -313,6 +315,7 @@ function InvoiceFormModal({
   // The customer's wording for this bill — blank keeps the page's own.
   const [customerNote, setCustomerNote] = useState("");
   const [terms, setTerms] = useState("");
+  const [paymentOptions, setPaymentOptions] = useState<InvoicePaymentOptions | null>(defaultPaymentOptions);
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
   // Progress-billing helper inputs (Phase G #2).
   const [progressPct, setProgressPct] = useState("");
@@ -359,6 +362,7 @@ function InvoiceFormModal({
       setNotes(invoice.notes ?? "");
       setCustomerNote(invoice.customerNote ?? "");
       setTerms(invoice.terms ?? "");
+      setPaymentOptions(readPaymentOptions(invoice.paymentOptions));
       setAttachments(parseAttachments(invoice));
       setQuoteId(invoice.quoteId ?? null);
       setKind(invoice.kind ?? null);
@@ -381,6 +385,7 @@ function InvoiceFormModal({
       setNotes("");
       setCustomerNote("");
       setTerms("");
+      setPaymentOptions({...defaultPaymentOptions});
       setAttachments([]);
       setQuoteId(null);
       setKind(null);
@@ -410,7 +415,7 @@ function InvoiceFormModal({
   });
   const standardTerms = [
     ...invoiceTermLines({ ...DEFAULT_SHOP, ...(shopSettings?.shop ?? {}) }),
-    STRIPE_TERM,
+    ...((paymentOptions?.stripe ?? true) ? [STRIPE_TERM] : []),
   ].join("\n");
 
   // Phase G #2: progress billing — the job's effective contract total and
@@ -530,7 +535,7 @@ function InvoiceFormModal({
     ? Math.round((totalCents * (parseFloat(retainagePct) || 0)) / 100)
     : 0;
 
-  const recovered=useDialogDraft(`InvoiceFormModal:${invoice?.id||"new"}`,open,{clientId,clientName,freeText,projectId,issueDate,dueDate,drafts,taxPct,retainagePct,discountPct,discountAmt,notes,customerNote,terms,attachments,quoteId},v=>{if(Object.hasOwn(v,"clientId"))setClientId(v.clientId);if(Object.hasOwn(v,"clientName"))setClientName(v.clientName);if(Object.hasOwn(v,"freeText"))setFreeText(v.freeText);if(Object.hasOwn(v,"projectId"))setProjectId(v.projectId);if(Object.hasOwn(v,"issueDate"))setIssueDate(v.issueDate);if(Object.hasOwn(v,"dueDate"))setDueDate(v.dueDate);if(Object.hasOwn(v,"drafts"))setDrafts(v.drafts);if(Object.hasOwn(v,"taxPct"))setTaxPct(v.taxPct);if(Object.hasOwn(v,"retainagePct"))setRetainagePct(v.retainagePct);if(Object.hasOwn(v,"discountPct"))setDiscountPct(v.discountPct);if(Object.hasOwn(v,"discountAmt"))setDiscountAmt(v.discountAmt);if(Object.hasOwn(v,"notes"))setNotes(v.notes);if(Object.hasOwn(v,"customerNote"))setCustomerNote(v.customerNote);if(Object.hasOwn(v,"terms"))setTerms(v.terms);if(Object.hasOwn(v,"attachments"))setAttachments(v.attachments);if(Object.hasOwn(v,"quoteId"))setQuoteId(v.quoteId);},(invoice as any)?._version);
+  const recovered=useDialogDraft(`InvoiceFormModal:${invoice?.id||"new"}`,open,{clientId,clientName,freeText,projectId,issueDate,dueDate,drafts,taxPct,retainagePct,discountPct,discountAmt,notes,customerNote,terms,attachments,quoteId,paymentOptions},v=>{if(Object.hasOwn(v,"clientId"))setClientId(v.clientId);if(Object.hasOwn(v,"clientName"))setClientName(v.clientName);if(Object.hasOwn(v,"freeText"))setFreeText(v.freeText);if(Object.hasOwn(v,"projectId"))setProjectId(v.projectId);if(Object.hasOwn(v,"issueDate"))setIssueDate(v.issueDate);if(Object.hasOwn(v,"dueDate"))setDueDate(v.dueDate);if(Object.hasOwn(v,"drafts"))setDrafts(v.drafts);if(Object.hasOwn(v,"taxPct"))setTaxPct(v.taxPct);if(Object.hasOwn(v,"retainagePct"))setRetainagePct(v.retainagePct);if(Object.hasOwn(v,"discountPct"))setDiscountPct(v.discountPct);if(Object.hasOwn(v,"discountAmt"))setDiscountAmt(v.discountAmt);if(Object.hasOwn(v,"notes"))setNotes(v.notes);if(Object.hasOwn(v,"customerNote"))setCustomerNote(v.customerNote);if(Object.hasOwn(v,"terms"))setTerms(v.terms);if(Object.hasOwn(v,"attachments"))setAttachments(v.attachments);if(Object.hasOwn(v,"quoteId"))setQuoteId(v.quoteId);if(Object.hasOwn(v,"paymentOptions"))setPaymentOptions(v.paymentOptions);},(invoice as any)?._version);
   const save = useApiMutation({
     request: () => {
       const body = {
@@ -550,6 +555,7 @@ function InvoiceFormModal({
         notes: notes.trim() || null,
         customerNote: customerNote.trim() || null,
         terms: terms.trim() || null,
+        ...(paymentOptions ? {paymentOptions: {...paymentOptions, wireDetails: paymentOptions.wire ? paymentOptions.wireDetails : null}} : {}),
         attachments,
         quoteId,
         kind,
@@ -581,6 +587,13 @@ function InvoiceFormModal({
           if (draftsToLineItems(drafts).length === 0) {
             toast({ variant: "destructive", title: "Add at least one line item" });
             return;
+          }
+          if (paymentOptions) {
+            const check = invoicePaymentOptionsSchema.safeParse({...paymentOptions, wireDetails: paymentOptions.wire ? paymentOptions.wireDetails : null});
+            if (!check.success) {
+              toast({variant: 'destructive', title: check.error.issues[0].message});
+              return;
+            }
           }
           save.mutate();
         }}
@@ -829,6 +842,8 @@ function InvoiceFormModal({
             />
           </label>
         </div>
+
+        <InvoicePaymentEditor value={paymentOptions} onChange={setPaymentOptions} />
 
         {/* What the customer reads, in the owner's words. Blank keeps the
             page's own wording, so nothing changes until the owner wants it to. */}

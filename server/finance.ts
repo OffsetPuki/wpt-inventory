@@ -1,4 +1,5 @@
 import {resolveReviewSite} from './marketing-core';
+import { defaultPaymentOptions, wireDetailsSchema, stripeAllowed } from '../shared/invoice-payment-options';
 import { listWindow } from './pagination';
 import { enqueueFollowup } from './outbox';
 import { jobStockCost,unbilledStock } from './stock-cost';
@@ -158,6 +159,7 @@ for (const ddl of [
   // Per-invoice customer wording — see shared/finance-schema.ts.
   "ALTER TABLE fin_invoices ADD COLUMN customer_note TEXT",
   "ALTER TABLE fin_invoices ADD COLUMN terms TEXT",
+  "ALTER TABLE fin_invoices ADD COLUMN payment_options TEXT",
   // Which quote button made the invoice — see shared/finance-schema.ts.
   "ALTER TABLE fin_invoices ADD COLUMN kind TEXT",
   // NOTE: fin_settings is created BELOW, so its own migration lives after it —
@@ -518,7 +520,7 @@ export async function run_queueInvoiceEmail(inv: Invoice, deliveryKey:string) {
       // The prompt-payment offer, worded from this invoice's own numbers. An
       // incentive nobody is told about doesn't incentivise anything — this is
       // the one place the customer reliably reads before deciding how to pay.
-      const discountBp = payUrl ? payInFullDiscountBp() : 0;
+      const discountBp = payUrl && stripeAllowed(inv.paymentOptions) ? payInFullDiscountBp() : 0;
       // …and only while the page will actually offer it: a discount already on
       // the bill, or a sibling invoice on the same quote (a deposit billed
       // separately, or this being that deposit's balance), takes it off.
@@ -554,7 +556,7 @@ export async function run_queueInvoiceEmail(inv: Invoice, deliveryKey:string) {
           `Balance due: ${usd(inv.totalCents - retainageOf(inv) - inv.paidCents)}\n` +
           ((inv.depositCents ?? 0) > 0 ? `Deposit due: ${usd(inv.depositCents!)}\n` : "") +
           (inv.dueDate ? `Due date:    ${inv.dueDate}\n` : "") +
-          (payUrl ? `\nView it online and pay by card, Apple Pay or Google Pay:\n${payUrl}\n` : "") +
+          (payUrl ? `\n${stripeAllowed(inv.paymentOptions) ? 'View it online and pay by card, Apple Pay or Google Pay:' : 'View your invoice and wire-transfer instructions:'}\n${payUrl}\n` : "") +
           (savesCents > 0
             ? `\n${wholeJob ? "Settle the whole job" : "Pay the whole invoice"} online in one payment and take ${discountBp / 100}% off — `
               + `${usd(grossCents - savesCents)} instead of ${usd(grossCents)}, `
@@ -778,6 +780,19 @@ function validateInvoiceJob(projectId:number|null|undefined,clientId:number|null
 
 export function registerFinanceRoutes(app: Express): void {
   registerReceivingRoutes(app);
+  sqlite.exec('CREATE TABLE IF NOT EXISTS fin_payment_instructions (id INTEGER PRIMARY KEY CHECK(id=1), wire_details TEXT NOT NULL)');
+  app.get('/api/finance/payment-instructions', requireElevated, (_req, res) => {
+    const row = sqlite.prepare('SELECT wire_details FROM fin_payment_instructions WHERE id=1').get() as {wire_details: string} | undefined;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ wireDetails: row ? JSON.parse(row.wire_details) : null });
+  });
+  app.put('/api/finance/payment-instructions', requireElevated, (req, res) => {
+    const parsed = wireDetailsSchema.safeParse(req.body?.wireDetails);
+    if (!parsed.success) return res.status(400).json({message: parsed.error.issues[0].message});
+    sqlite.prepare('INSERT INTO fin_payment_instructions (id,wire_details) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET wire_details=excluded.wire_details').run(JSON.stringify(parsed.data));
+    audit(req, 'finance.wire_defaults_update', {targetType: 'finance_settings', targetId: 1});
+    res.json({wireDetails: parsed.data});
+  });
   app.get("/api/finance/payment-exceptions", requireElevated, (_req, res) => {
     res.json(sqlite.prepare(`SELECT e.*, i.number AS invoice_number FROM fin_payment_exceptions e
       LEFT JOIN fin_invoices i ON i.id = e.invoice_id WHERE e.resolved_at IS NULL ORDER BY e.created_at DESC`).all());
@@ -1017,6 +1032,7 @@ export function registerFinanceRoutes(app: Express): void {
       db.insert(invoices)
         .values({
           ...body, number: num, items: itemsJson, clientName, retainageCents, ...totals,
+          paymentOptions: body.paymentOptions ?? JSON.stringify(defaultPaymentOptions),
           ...(attachments !== undefined ? { attachments } : {}),
         })
         .returning()

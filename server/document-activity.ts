@@ -20,7 +20,7 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS customer_document_visits (
 
 export function documentActivityRevision(kind:Kind,row:any):string {
   if(kind==='quote')return String(row.version||1);
-  const keys=['items','totalCents','taxRateBp','dueDate','customerNote','terms','discountCents','attachments'];
+  const keys=['items','totalCents','taxRateBp','dueDate','customerNote','terms','discountCents','attachments','paymentOptions'];
   const values=keys.map(k=>row[k]??row[k.replace(/[A-Z]/g,c=>'_'+c.toLowerCase())]??null);
   return crypto.createHash('sha256').update(JSON.stringify(values)).digest('hex').slice(0,24);
 }

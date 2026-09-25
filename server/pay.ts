@@ -6,6 +6,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db, sqlite } from "./storage";
 import { hasLeadKey } from "./public-api";
 import { currentShop, currentShopInvoice, quoteDocument } from "./public-portal";
+import { readPaymentOptions, stripeAllowed } from '../shared/invoice-payment-options';
 import { quotes } from "../shared/quote-schema";
 import { clients } from "../shared/crm-schema";
 import { contracts } from "../shared/pm-schema";
@@ -372,7 +373,7 @@ async function closeCheckout(id: string) {
   } else if (!['complete','expired'].includes(current.status)) throw new Error('Could not confirm the previous payment page is closed.');
   sqlite.prepare('UPDATE fin_checkout_sessions SET url=NULL, expires_at=0 WHERE session_id=?').run(id);
 }
-async function expireChangedInvoices() {
+export async function expireChangedInvoices() {
   if (!stripeKey()) return;
   const jobs = sqlite.prepare('SELECT invoice_id FROM fin_checkout_expiry_queue ORDER BY created_at LIMIT 20').all() as {invoice_id:number}[];
   for (const job of jobs) {
@@ -395,6 +396,9 @@ export function registerPayRoutes(app: Express): void {
     CREATE TRIGGER IF NOT EXISTS fin_expire_changed_checkout AFTER UPDATE OF paid_cents,total_cents,status,items,deposit_cents,retainage_cents,discount_cents,deleted_at ON fin_invoices
     WHEN OLD.paid_cents IS NOT NEW.paid_cents OR OLD.total_cents IS NOT NEW.total_cents OR OLD.status IS NOT NEW.status OR OLD.items IS NOT NEW.items OR OLD.deposit_cents IS NOT NEW.deposit_cents OR OLD.retainage_cents IS NOT NEW.retainage_cents OR OLD.discount_cents IS NOT NEW.discount_cents OR OLD.deleted_at IS NOT NEW.deleted_at
     BEGIN INSERT INTO fin_checkout_expiry_queue (invoice_id,created_at) VALUES (NEW.id,unixepoch()*1000) ON CONFLICT(invoice_id) DO UPDATE SET created_at=excluded.created_at; END;`);
+  sqlite.exec(`CREATE TRIGGER IF NOT EXISTS fin_expire_payment_options AFTER UPDATE OF payment_options ON fin_invoices
+    WHEN OLD.payment_options IS NOT NEW.payment_options
+    BEGIN INSERT INTO fin_checkout_expiry_queue (invoice_id,created_at) VALUES (NEW.id,unixepoch()*1000) ON CONFLICT(invoice_id) DO UPDATE SET created_at=excluded.created_at; END;`);
   const expiryTimer = setInterval(() => { void expireChangedInvoices().catch((e) => console.error('[pay] expiration retry failed',e)); }, 30_000);
   expiryTimer.unref();
   // The customer's invoice document. Deliberately hand-picked rather than
@@ -408,6 +412,9 @@ export function registerPayRoutes(app: Express): void {
 
     const view = presentInvoice(inv, todayLocal());
     const { balanceCents, depositCents, full } = payable(inv);
+    const options = readPaymentOptions(inv.paymentOptions);
+    const shopPay = currentShopInvoice();
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json({
       ok: true,
       invoice: {
@@ -441,7 +448,7 @@ export function registerPayRoutes(app: Express): void {
         // `scope: 'contract'` means this settles the WHOLE job from a deposit
         // invoice — the page offers it beside the deposit rather than instead
         // of it, and `wasCents` is the contract price, not this bill.
-        payInFull: full
+        payInFull: full && stripeAllowed(inv.paymentOptions)
           ? {
               totalCents: full.totalCents,
               wasCents: full.grossCents,
@@ -457,6 +464,7 @@ export function registerPayRoutes(app: Express): void {
         // refuses it too, so this keeps the page from offering what it can't do.
         payable:
           !!stripeKey()
+          && stripeAllowed(inv.paymentOptions)
           && balanceCents >= STRIPE_MIN_CENTS
           && inv.status !== "draft"
           && inv.status !== "void"
@@ -464,7 +472,12 @@ export function registerPayRoutes(app: Express): void {
         shop: currentShop(),
         // Bank remit-to + the invoice's own small print. Bank details are
         // printed for anyone paying by transfer; the Pay button covers cards.
-        pay: currentShopInvoice(),
+        pay: {
+          ...shopPay,
+          stripe: stripeAllowed(inv.paymentOptions),
+          wire: options?.wire ?? false,
+          bank: options ? (options.wire ? options.wireDetails : null) : shopPay.bank,
+        },
         billTo: billTo(inv),
         // Null when the invoice wasn't raised from a quote — the document
         // simply drops the project block and the contract-price ladder.
@@ -501,6 +514,7 @@ export function registerPayRoutes(app: Express): void {
     const token = String(req.params.token);
     let inv = findInvoice(token);
     if (!inv) return res.status(404).json({ ok: false });
+    if (!stripeAllowed(inv.paymentOptions)) return res.status(409).json({ok: false, reason: 'online_payment_disabled'});
     if (!stripeKey()) return res.status(503).json({ ok: false, reason: "unconfigured" });
     if (inv.status === "void" || inv.status === "paid") {
       return res.status(409).json({ ok: false, reason: "closed" });
@@ -510,6 +524,7 @@ export function registerPayRoutes(app: Express): void {
     try {
     inv = findInvoice(token);
     if (!inv || ["paid", "void"].includes(inv.status)) return res.status(409).json({ok:false,reason:"closed"});
+    if (!stripeAllowed(inv.paymentOptions)) return res.status(409).json({ok: false, reason: 'online_payment_disabled'});
     // "full" only means anything while the offer stands; payable() decides
     // that, so a stale page asking for it just gets the ordinary balance.
     const asked = String(req.body?.which ?? "");
@@ -533,6 +548,7 @@ export function registerPayRoutes(app: Express): void {
     const fingerprint = crypto.createHash("sha256").update(JSON.stringify({
       invoiceId: inv.id, amountCents, which, home, paid: inv.paidCents,
       total: inv.totalCents, items: inv.items, discount: inv.discountCents, retainage: inv.retainageCents,
+      paymentOptions: inv.paymentOptions,
     })).digest("hex");
     const checkout = sqlite.transaction(() => {
       const now = Date.now();
