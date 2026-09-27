@@ -75,7 +75,7 @@ export default function RestockDialog({
             {created.number} created for {created.vendor}. Record each delivery
             when it arrives.
           </p>
-          <Link className={primaryBtn} href="/finance/purchase-orders">
+          <Link className={primaryBtn} href="/finance/purchase-orders?category=supplier">
             Open purchase orders
           </Link>
         </div>

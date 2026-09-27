@@ -224,7 +224,8 @@ export async function inventoryWorkflow(page, app, expect) {
     )
     .get();
   await page.getByRole("link", { name: "Open purchase orders" }).click();
-  await page.getByRole("row").filter({ hasText: po.number }).click();
+  await page.getByRole("button", { name: po.number, exact: true }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
   await page
     .getByRole("button", { name: "Receive delivery", exact: true })
     .click();
@@ -239,7 +240,8 @@ export async function inventoryWorkflow(page, app, expect) {
       .get(po.id).status,
   ).toBe("open");
   expect((await api(`/api/items/${steel.id}`)).quantity).toBe(20.75);
-  await page.getByRole("row").filter({ hasText: po.number }).click();
+  await page.getByRole("button", { name: po.number, exact: true }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
   await page
     .getByRole("button", { name: "Receive delivery", exact: true })
     .click();

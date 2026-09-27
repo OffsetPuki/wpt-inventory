@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest, getAuthToken } from '@/lib/queryClient';
 import { useApiMutation } from '@/hooks/useApiMutation';
 import { useDialogDraft } from '@/lib/dialog-draft';
-import { useRecordLink } from '@/lib/record-link';
+import { readContext, useRecordLink } from '@/lib/record-link';
 import { inputCls, primaryBtn, secondaryBtn } from '@/lib/ui-styles';
 import { formatMoney, formatDate } from '@/lib/format';
 import { toast } from '@/components/ui/toaster';
@@ -131,7 +131,7 @@ function Editor({po,type,onClose}:{po:Po|null;type:OrderType;onClose:()=>void}) 
 }
 
 export default function PurchaseOrdersPage(){
-  const [type,setType]=useState<OrderType>('customer'),[status,setStatus]=useState(''),[search,setSearch]=useState(''),[editing,setEditing]=useState<Po|null>(null),[open,setOpen]=useState(false);
+  const [type,setType]=useState<OrderType>(()=>readContext('category')==='supplier'?'supplier':'customer'),[status,setStatus]=useState(''),[search,setSearch]=useState(''),[editing,setEditing]=useState<Po|null>(null),[open,setOpen]=useState(false);
   useRecordLink('po','/api/finance/purchase-orders',row=>{setType(row.orderType||'supplier');setEditing(row);setOpen(true);});
   const list=useQuery<Po[]>({queryKey:['finance-pos',type,status,search],queryFn:async()=> (await apiRequest('GET',`/api/finance/purchase-orders?orderType=${type}&status=${status}&q=${encodeURIComponent(search)}`)).json()});
   async function edit(row:Po){try{const fresh=await (await apiRequest('GET',`/api/finance/purchase-orders/${row.id}/detail`)).json();setEditing(fresh);setOpen(true);}catch(e:any){toast({variant:'destructive',title:'Could not open order',description:e.message});}}
