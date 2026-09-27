@@ -80,8 +80,8 @@ export function registerSearchRoutes(app: Express) {
               "Purchase Orders",
               "fin_purchase_orders",
               "number",
-              "vendor",
-              "number,vendor",
+              "CASE WHEN order_type='customer' THEN customer_name ELSE vendor END",
+              "number,vendor,customer_name,customer_po_number,customer_project_number",
               "/finance/purchase-orders?po=",
             ],
             [

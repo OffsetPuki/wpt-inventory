@@ -4,6 +4,7 @@ import { z } from "zod";
 import { projects } from "./schema";
 import { clients } from "./crm-schema";
 import { invoicePaymentOptionsSchema } from './invoice-payment-options';
+import { ORDER_STATUSES, ORDER_LABELS } from './purchase-orders';
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ export const PAYMENT_METHODS = [
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-export const PO_STATUSES = ["open", "received", "cancelled"] as const;
+export const PO_STATUSES = ORDER_STATUSES;
 export type PoStatus = (typeof PO_STATUSES)[number];
 
 // ─── Tables ──────────────────────────────────────────────────────────────────
@@ -198,11 +199,28 @@ export const finSettings = sqliteTable("fin_settings", {
   updatedAt: integer("updated_at"),
 });
 
-// App-native purchase orders (vendor orders the business sends out).
+// Customer POs received and supplier POs issued. Existing rows remain suppliers.
 export const purchaseOrders = sqliteTable("fin_purchase_orders", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: text("number").notNull().unique(), // "PO-2026-0001"
   vendor: text("vendor").notNull(),
+  orderType: text('order_type', {enum:['supplier','customer']}).notNull().default('supplier'),
+  customerName: text('customer_name').notNull().default(''),
+  clientId: integer('client_id'),
+  leadId: integer('lead_id'),
+  quoteId: integer('quote_id'),
+  customerPoNumber: text('customer_po_number').notNull().default(''),
+  customerProjectNumber: text('customer_project_number').notNull().default(''),
+  details: text('details').notNull().default('{}'),
+  quoteSnapshot: text('quote_snapshot'),
+  subtotalCents: integer('subtotal_cents').notNull().default(0),
+  discountCents: integer('discount_cents').notNull().default(0),
+  shippingCents: integer('shipping_cents').notNull().default(0),
+  taxRateBp: integer('tax_rate_bp').notNull().default(0),
+  taxShipping: integer('tax_shipping',{mode:'boolean'}).notNull().default(false),
+  taxCents: integer('tax_cents').notNull().default(0),
+  depositCents: integer('deposit_cents').notNull().default(0),
+  revision: integer('revision').notNull().default(0),
   status: text("status", { enum: PO_STATUSES }).notNull().default("open"),
   items: text("items").notNull().default("[]"), // JSON LineItem[]
   totalCents: integer("total_cents").notNull().default(0),
@@ -218,6 +236,30 @@ export const purchaseOrders = sqliteTable("fin_purchase_orders", {
 });
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
+export const purchaseOrderEvents = sqliteTable('fin_po_events', {
+  id: integer('id').primaryKey(),
+  poId: integer('po_id').notNull().references(() => purchaseOrders.id),
+  revision: integer('revision').notNull(),
+  action: text('action').notNull(),
+  reason: text('reason'),
+  userId: integer('user_id'),
+  userName: text('user_name'),
+  createdAt: integer('created_at').notNull(),
+  snapshot: text('snapshot').notNull(),
+});
+export const purchaseOrderDocuments = sqliteTable('fin_po_documents', {
+  id: integer('id').primaryKey(),
+  poId: integer('po_id').notNull().references(() => purchaseOrders.id),
+  revision: integer('revision').notNull(),
+  name: text('name').notNull(),
+  file: text('file').notNull().unique(),
+  kind: text('kind').notNull(),
+  size: integer('size').notNull(),
+  sha256: text('sha256').notNull(),
+  documentDate: text('document_date'),
+  userId: integer('user_id'),
+  createdAt: integer('created_at').notNull(),
+});
 
 export const insertInvoiceSchema = createInsertSchema(invoices, {
   // Tax basis points can never be negative — a negative rate would credit tax
@@ -366,8 +408,4 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   other: "Other",
 };
 
-export const PO_STATUS_LABELS: Record<PoStatus, string> = {
-  open: "Open",
-  received: "Received",
-  cancelled: "Cancelled",
-};
+export const PO_STATUS_LABELS: Record<PoStatus, string> = ORDER_LABELS;
