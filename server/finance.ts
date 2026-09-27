@@ -1,3 +1,4 @@
+import { initializePurchaseOrders, registerPurchaseOrders } from './purchase-orders';
 import {resolveReviewSite} from './marketing-core';
 import { defaultPaymentOptions, wireDetailsSchema, stripeAllowed } from '../shared/invoice-payment-options';
 import { listWindow } from './pagination';
@@ -200,11 +201,11 @@ sqlite.exec("INSERT OR IGNORE INTO fin_settings (id) VALUES (1)");
 // reference field still carries the transaction id). Idempotent remaps.
 try {
   sqlite.exec(`
-    UPDATE fin_purchase_orders SET status = 'open' WHERE status IN ('draft', 'sent');
-    UPDATE fin_purchase_orders SET status = 'received' WHERE status = 'closed';
     UPDATE fin_invoice_payments SET method = 'other' WHERE method = 'gateway';
   `);
 } catch { /* nothing to migrate */ }
+
+initializePurchaseOrders();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // `todayLocal` (local calendar date) lives in ./http-util — invoices/expenses
@@ -1675,82 +1676,5 @@ export function registerFinanceRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
-  // ─── Purchase orders ─────────────────────────────────────────────────────
-
-  app.get("/api/finance/purchase-orders", requireElevated, (req, res) => {
-    const status = qstr(req.query.status);
-    const q = qstr(req.query.q);
-
-    const conds = [isNull(purchaseOrders.deletedAt)];
-    if (status) conds.push(eq(purchaseOrders.status, status as any));
-
-    let rows = db.select().from(purchaseOrders)
-      .where(and(...conds))
-      .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.id))
-      .all();
-    if (q) {
-      const needle = q.toLowerCase();
-      rows = rows.filter((r) => r.vendor.toLowerCase().includes(needle));
-    }
-    const receivedOrders=new Set((sqlite.prepare("SELECT DISTINCT po_id FROM inventory_receipts").all() as {po_id:number}[]).map(r=>r.po_id));
-    res.json(rows.map(row=>({...row,partiallyReceived:row.status==="open"&&receivedOrders.has(row.id)})));
-  });
-
-  app.post("/api/finance/purchase-orders", requireElevated, (req, res) => {
-    let body, itemsJson, totalCents;
-    try {
-      const raw = { ...req.body };
-      if (Array.isArray(raw.items)) raw.items = JSON.stringify(raw.items);
-      body = insertPurchaseOrderSchema.parse(raw);
-      itemsJson = body.items ?? "[]";
-      totalCents = computeTotals(itemsJson, 0).totalCents; // POs carry no tax
-    } catch (e: any) {
-      return res.status(400).json({ message: e.message });
-    }
-    const row = insertNumbered("fin_purchase_orders", "PO", (num) =>
-      db.insert(purchaseOrders)
-        // Every PO starts life open — received/cancelled only via PATCH.
-        .values({ ...body, number: num, status: "open", items: itemsJson, totalCents })
-        .returning()
-        .get()
-    );
-    audit(req, "finance.po_create", {
-      targetType: "purchase_order", targetId: row.id, targetName: row.number,
-      details: { vendor: row.vendor, totalCents: row.totalCents },
-    });
-    res.status(201).json(row);
-  });
-
-  app.patch("/api/finance/purchase-orders/:id", requireElevated, (req, res) => {
-    try {
-      const row = sqlite.transaction(() => {
-        const existing = db.select().from(purchaseOrders).where(and(eq(purchaseOrders.id,pid(req.params.id)),isNull(purchaseOrders.deletedAt))).get();
-        if (!existing) throw new Error("Purchase order not found");
-        const raw={...req.body};
-        if(Array.isArray(raw.items)) raw.items=JSON.stringify(raw.items);
-        const body=insertPurchaseOrderSchema.partial().parse(raw);
-        if(existing.status!=="open") {
-          if(Object.keys(body).length===1 && body.status===existing.status) return existing;
-          throw new Error("This purchase order is closed and cannot be edited.");
-        }
-        const hasReceipts=sqlite.prepare("SELECT 1 FROM inventory_receipts WHERE po_id=?").get(existing.id);
-        if(hasReceipts && Object.keys(body).some(k=>k!=="status")) throw new Error("A partially received order cannot be edited. Create another order for additional items.");
-        const updates:any={...body};
-        delete updates.status;
-        if(body.items!==undefined) updates.totalCents=computeTotals(body.items,0).totalCents;
-        if(Object.keys(updates).length) db.update(purchaseOrders).set(updates).where(eq(purchaseOrders.id,existing.id)).run();
-        if(body.status==="received") receivePoRemaining(existing.id,req.user!.userId);
-        else if(body.status==="cancelled") db.update(purchaseOrders).set({status:"cancelled"}).where(eq(purchaseOrders.id,existing.id)).run();
-        return db.select().from(purchaseOrders).where(eq(purchaseOrders.id,existing.id)).get()!;
-      })();
-      audit(req,"finance.po_update",{targetType:"purchase_order",targetId:row.id,targetName:row.number});
-      res.json(row);
-    } catch(e:any) {res.status(409).json({message:e.message});}
-  });
-
-  registerSoftDelete(app, "/api/finance/purchase-orders/:id", requireElevated, {
-    table: purchaseOrders, notFound: "Purchase order not found",
-    action: "finance.po_delete", targetType: "purchase_order",
-    name: (po) => po.number, audit,
-  });
+  registerPurchaseOrders(app);
 }

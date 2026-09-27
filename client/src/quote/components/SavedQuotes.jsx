@@ -47,9 +47,10 @@ function BuyList({ ids, onClose }) {
         }));
       const numbers = data.quotes.map((q) => q.number).join(', ');
       return (await apiRequest('POST', '/api/finance/purchase-orders', {
-        vendor: '',
+        orderType: 'supplier',
+        vendor: 'Supplier to confirm',
         items,
-        notes: `Buy list from quote${data.quotes.length === 1 ? '' : 's'} ${numbers}. Set the vendor and prices, then mark received to book the expense and stock in.`,
+        notes: `Buy list from quote${data.quotes.length === 1 ? '' : 's'} ${numbers}. Confirm the supplier and prices, approve and issue the order, then record deliveries as they arrive.`,
       })).json();
     },
     onSuccess: (po) => {
@@ -90,7 +91,7 @@ function BuyList({ ids, onClose }) {
       </div>
       {poNumber && (
         <p className="hint">
-          Purchase order <strong>{poNumber}</strong> created — <a href="/#/finance/purchase-orders">open it in Finance</a> to set the vendor and prices.
+          Purchase order <strong>{poNumber}</strong> created — <a href="/#/finance/purchase-orders?category=supplier">open it in Finance</a> to set the vendor and prices.
         </p>
       )}
       {isLoading && <p className="hint">Adding up materials…</p>}

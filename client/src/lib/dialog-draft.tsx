@@ -61,6 +61,13 @@ export function useDialogDraft(
   };
   return {
     clear,
+    reset: (values: any, nextVersion?: number) => {
+      clear();
+      baseline.current = JSON.stringify(values);
+      savedVersion.current = nextVersion;
+      setRecovered(false);
+      active.current = true;
+    },
     expectedVersion: ready ? savedVersion.current : version,
     notice: recovered ? (
       <p role="status" className="rounded border p-3 text-sm">

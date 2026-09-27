@@ -161,7 +161,7 @@ function resolveObsoleteTasks() {
     if (k.startsWith("auto:late-po:"))
       clear = !sqlite
         .prepare(
-          "SELECT 1 FROM fin_purchase_orders WHERE number=? AND deleted_at IS NULL AND status='open' AND expected_date<date('now','localtime')",
+          "SELECT 1 FROM fin_purchase_orders WHERE number=? AND deleted_at IS NULL AND order_type='supplier' AND status IN ('open','sent') AND expected_date<date('now','localtime')",
         )
         .get(k.slice("auto:late-po:".length));
     if (k.startsWith("auto:unbilled:")) {

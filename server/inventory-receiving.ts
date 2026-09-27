@@ -1,3 +1,4 @@
+import { receivedOrderCost, receivedLineCost } from '../shared/purchase-orders';
 import { receiveStockCost } from './stock-cost';
 import type { Express } from "express";
 import { z } from "zod";
@@ -14,6 +15,7 @@ import { parseLineItems } from "../shared/biz-common";
 import { insertNumbered } from "./numbering";
 import { db } from "./storage";
 import { purchaseOrders } from "../shared/finance-schema";
+import { eq } from 'drizzle-orm';
 
 const receiptSchema = z.object({
   requestKey: z.string().min(8).max(100),
@@ -37,6 +39,7 @@ function getPo(id: number): any {
     )
     .get(id);
   if (!po) throw new Error("Purchase order not found.");
+  if ((po as any).order_type === "customer") throw new Error("Customer orders cannot receive supplier inventory or create purchase expenses.");
   return po;
 }
 export function poReceiving(id: number) {
@@ -86,7 +89,7 @@ export function receivePo(id: number, userId: number, raw: unknown) {
     { action: "receive-po", id, ...input },
     () => {
       const po = getPo(id);
-      if (po.status !== "open")
+      if (!["open", "sent"].includes(po.status))
         throw new Error("This purchase order is no longer open.");
       const lines = parseLineItems(po.items);
       const priorReceipts = sqlite
@@ -94,11 +97,7 @@ export function receivePo(id: number, userId: number, raw: unknown) {
           "SELECT line_index,SUM(quantity) AS qty FROM inventory_receipts WHERE po_id=? GROUP BY line_index",
         )
         .all(id) as any[];
-      const expectedPriorExpense = priorReceipts.reduce(
-        (sum, row) =>
-          sum + Math.round(row.qty * lines[row.line_index].unitPriceCents),
-        0,
-      );
+      const expectedPriorExpense = receivedOrderCost(po,lines,new Map(priorReceipts.map(r=>[r.line_index,r.qty])));
       const expenseLink = sqlite
         .prepare("SELECT expense_id FROM inventory_po_expenses WHERE po_id=?")
         .get(id) as any;
@@ -181,7 +180,12 @@ export function receivePo(id: number, userId: number, raw: unknown) {
             receipt.stockQuantity,
             userId,
           );
-        if(receipt.itemId)receiveStockCost(sqlite,Number(receivedRow.lastInsertRowid),receipt.itemId,receipt.stockQuantity,Math.max(0,receipt.quantity*line.unitPriceCents),po.vendor);
+        if(receipt.itemId) {
+          const cost=po.revision>0
+            ? receivedLineCost(po,lines,receipt.lineIndex,received+receipt.quantity)-receivedLineCost(po,lines,receipt.lineIndex,received)
+            : receipt.quantity*line.unitPriceCents;
+          receiveStockCost(sqlite,Number(receivedRow.lastInsertRowid),receipt.itemId,receipt.stockQuantity,Math.max(0,cost),po.vendor);
+        }
       }
       const totals = sqlite
         .prepare(
@@ -191,12 +195,7 @@ export function receivePo(id: number, userId: number, raw: unknown) {
       const receivedByLine = new Map<number, number>(
         totals.map((r) => [r.line_index, r.qty]),
       );
-      const expenseCents = lines.reduce(
-        (sum, line, index) =>
-          sum +
-          Math.round((receivedByLine.get(index) || 0) * line.unitPriceCents),
-        0,
-      );
+      const expenseCents = receivedOrderCost(po,lines,receivedByLine);
       if (expenseCents < 0)
         throw new Error(
           "Receive discount lines together with the items they discount.",
@@ -232,9 +231,16 @@ export function receivePo(id: number, userId: number, raw: unknown) {
             "UPDATE fin_purchase_orders SET status='received' WHERE id=?",
           )
           .run(id);
+      if (po.revision > 0) {
+        if (!complete) sqlite.prepare('UPDATE fin_purchase_orders SET notes=notes WHERE id=?').run(id);
+        const user:any=sqlite.prepare('SELECT name FROM users WHERE id=?').get(userId);
+        const snap=db.select().from(purchaseOrders).where(eq(purchaseOrders.id,id)).get()!;
+        const description=input.lines.map(r=>`${r.quantity} ${lines[r.lineIndex].unit||'each'}: ${lines[r.lineIndex].description}`).join('\n');
+        sqlite.prepare('INSERT INTO fin_po_events(po_id,revision,action,reason,user_id,user_name,created_at,snapshot) VALUES(?,?,?,?,?,?,?,?)').run(id,po.revision,complete?'received':'partial_delivery',description,userId,user?.name||'',Date.now(),JSON.stringify({...snap,received:totals}));
+      }
       return {
         ok: true,
-        status: complete ? "received" : "open",
+        status: complete ? "received" : po.status,
         partial: !complete,
       };
     },

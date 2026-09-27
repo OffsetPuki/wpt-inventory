@@ -39,6 +39,8 @@ test('New carport package is editable and saves on mobile',async({page})=>{
  await page.getByLabel('Shop & installation labor',{exact:true}).fill('2000');
  await page.getByLabel('Subcontractors / concrete',{exact:true}).fill('2500');
  await page.getByLabel('I reviewed all job costs and allowances',{exact:true}).check();
+ // The previous autosave can still display Saved while this final edit is queued.
+ await expect.poll(()=>JSON.parse(app.sqlite.prepare("SELECT payload FROM quotes WHERE customer_name=? ORDER BY id DESC LIMIT 1").get('Carport mobile fixture')?.payload||'{}').state?.costReviewKey).toBeTruthy();
  await expect(page.locator('.draft-status')).toHaveText('Saved');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
  const saved=app.sqlite.prepare("SELECT payload FROM quotes WHERE customer_name=? ORDER BY id DESC LIMIT 1").get('Carport mobile fixture');

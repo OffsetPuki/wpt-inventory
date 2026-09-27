@@ -117,7 +117,7 @@ export function jobMaterials(id: number) {
     .all(id) as any[];
   const orders = sqlite
     .prepare(
-      "SELECT id,number,items,expected_date FROM fin_purchase_orders WHERE project_id=? AND status='open' AND deleted_at IS NULL",
+      "SELECT id,number,items,expected_date FROM fin_purchase_orders WHERE project_id=? AND order_type='supplier' AND status IN ('open','sent') AND deleted_at IS NULL",
     )
     .all(id) as any[];
   const incoming = new Map<number, { quantity: number; orders: any[] }>();
