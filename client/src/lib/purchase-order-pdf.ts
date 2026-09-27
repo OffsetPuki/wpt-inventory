@@ -18,13 +18,14 @@ export async function downloadOrderPdf(order: any, shop: any = {}) {
         { text: `${order.number} | Revision ${order.revision || 1} | ${ORDER_LABELS[order.status as keyof typeof ORDER_LABELS] || order.status}`, bold: true, margin: [0, 0, 0, 12] },
         { columns: [{ text: `${supplier ? 'Supplier' : 'Customer'}\n${supplier ? order.vendor : order.customerName}\n${[d.contactName, d.email, d.phone, d.billingAddress].filter(Boolean).join('\n')}` }, { text: `Customer project: ${order.customerProjectNumber || 'Not specified'}\nCustomer PO number: ${order.customerPoNumber || 'Pending'}\nQuote: ${quote?.number || 'Not linked'}\nExpected delivery: ${order.expectedDate || 'To be confirmed'}` }], columnGap: 20, margin: [0, 0, 0, 18] },
     ];
+    if(d.issueDate||d.receivedDate)content.push({text:[d.issueDate?`Issue date: ${d.issueDate}`:'',d.receivedDate?`Customer PO received: ${d.receivedDate}`:''].filter(Boolean).join(' | '),style:'muted',margin:[0,0,0,10]});
     if (order.status === 'draft' || order.status === 'review')
         content.push({ text: 'DRAFT - FOR REVIEW', bold: true, color: '#9a5400', margin: [0, 0, 0, 10] });
     for (const [key, label] of [['scope', 'Scope'], ['specifications', 'Specifications'], ['finish', 'Finish'], ['customerMaterials', 'Customer-supplied materials'], ['exclusions', 'Exclusions']])
         if (d[key])
             content.push({ text: label, style: 'heading' }, { text: d[key], margin: [0, 0, 0, 9] });
     content.push({ table: { headerRows: 1, widths: ['*', 40, 42, 70, 76], body: [['Description', 'Qty', 'Unit', 'Unit price', 'Amount'].map(text => ({ text, bold: true, fillColor: '#edf0eb' })), ...items.map((i: any) => [i.description, String(i.qty), i.unit || 'each', money(i.unitPriceCents), money(Math.round(i.qty * i.unitPriceCents))])] }, layout: 'lightHorizontalLines', margin: [0, 8, 0, 12] });
-    for (const [label, cents] of [['Subtotal', order.revision > 0 ? order.subtotalCents : items.reduce((sum: number, i: any) => sum + Math.round(i.qty * i.unitPriceCents), 0)], ['Discount', -order.discountCents], ['Freight / delivery', order.shippingCents], ['Tax', order.taxCents], ['TOTAL (USD)', order.totalCents], ['Deposit', order.depositCents], ['Balance after deposit', order.totalCents - order.depositCents]])
+    for (const [label, cents] of [['Subtotal', order.revision > 0 ? order.subtotalCents : items.reduce((sum: number, i: any) => sum + Math.round(i.qty * i.unitPriceCents), 0)], ['Discount', -order.discountCents], ['Freight / delivery', order.shippingCents], [`Tax (${(order.taxRateBp||0)/100}%)`, order.taxCents], ['TOTAL (USD)', order.totalCents], ['Deposit', order.depositCents], ['Balance after deposit', order.totalCents - order.depositCents]])
         content.push({ columns: [{ text: label, bold: label === 'TOTAL (USD)' }, { text: money(cents as number), alignment: 'right', bold: label === 'TOTAL (USD)' }], margin: [200, 3, 0, 3] });
     for (const [label, value] of [['Payment terms', d.paymentTerms], ['Delivery', `${d.deliveryIncluded ? 'Delivery included. ' : ''}${d.deliveryTerms || ''}`], ['Ship to', d.deliveryAddress], ['Notes', order.notes]])
         if (value)

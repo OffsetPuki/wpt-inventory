@@ -8,7 +8,7 @@ test('Customer PO: mobile entry, linked quote, documents, review, PDF and revisi
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
   await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
-  const q=await app.api('/api/quotes','POST',{type:'custom',customerName:'Fixture Millwork',totalCents:1550000,payload:{type:'custom',customer:{name:'Buyer test',company:'Fixture Millwork'},notes:'Fabricate metal shelving and deliver.',depositPct:55,state:{color:'#FFFFFF'}}},app.owner);
+  const q=await app.api('/api/quotes','POST',{type:'custom',customerName:'Fixture Millwork',totalCents:1550000,payload:{type:'custom',customer:{name:'Buyer test',company:'Fixture Millwork'},notes:'Fabricate metal shelving and deliver.',depositPct:55,state:{color:'#E8E6E0'}}},app.owner);
   expect(q.status).toBe(201);
   await page.goto(app.base+'/#/finance/purchase-orders');
   await page.getByRole('button',{name:'New customer PO',exact:true}).click();
