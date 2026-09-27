@@ -86,7 +86,7 @@ function quoteData(id: number) {
     catch { }
     return { id: q.id, number: q.number, version: q.version, status: q.status, business: quoteBusiness({ ...session, type: q.type }), totalCents: q.total_cents, leadId: q.lead_id, clientId: customer.clientId || null,
         customerName: customer.company || customer.name || q.customer_name || '', contactName: customer.name || q.customer_name || '', email: customer.email || '', phone: customer.phone || '', billingAddress: customer.location || '',
-        scope: String(session.notes || ''), specifications: specs.filter(s => !/^(finish|coating)$/i.test(s.label)).map(s => `${s.label}: ${s.value}`).join('\n'), finish: specs.filter(s => /finish|coating/i.test(s.label)).map(s => s.value).join('; '),
+        scope: [session.features, session.notes].filter(v => typeof v === 'string' && v.trim()).join('\n\n'), specifications: specs.filter(s => !/^(finish|coating)$/i.test(s.label)).map(s => `${s.label}: ${s.value}`).join('\n'), finish: specs.filter(s => /finish|coating/i.test(s.label)).map(s => s.value).join('; '),
         paymentTerms: Array.isArray(session.shopSnapshot?.terms) ? session.shopSnapshot.terms.join('\n') : String(session.shopSnapshot?.terms || ''),
         depositCents: Math.round(q.total_cents * Math.min(100, Math.max(0, Number(session.depositPct) || 0)) / 100), summary, payloadHash: digest(session) };
 }

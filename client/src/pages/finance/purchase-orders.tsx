@@ -88,7 +88,7 @@ function Editor({po,type,onClose}:{po:Po|null;type:OrderType;onClose:()=>void}) 
             {type==='customer'&&selector('leadId','Sales lead / job request',options.data?.leads||[],v=>v.name)}
             {selector('projectId','CJM job',options.data?.projects||[],v=>`${v.jobNumber} - ${v.name}`)}
             {selector('quoteId','Related quote',options.data?.quotes||[],v=>`${v.number} - ${v.customerName||''} (${v.status})`)}
-            {type==='customer'&&<div className="sm:col-span-2"><button type="button" className={secondaryBtn} disabled={!f.quoteId||busy} onClick={fillQuote}>Fill customer, scope and price from quote</button><p className="mt-2 text-xs text-muted-foreground">Replaces the draft's contact, scope, specifications, deposit and line items with the selected quote. Review the original customer PO for changes.</p></div>}
+            {type==='customer'&&<div className="sm:col-span-2"><button type="button" className={secondaryBtn} disabled={!f.quoteId||busy} onClick={fillQuote}>Fill customer, scope and price from quote</button><p className="mt-2 text-xs text-muted-foreground">Copies contact, scope, specifications and deposit, with the quoted total as one job line. Review separately stated tax, freight and discounts against the original PO.</p></div>}
           </Section>
           <Section title="Contact and delivery">
             {detailField('contactName','Contact name')}{detailField('email','Contact email')}{detailField('phone','Contact phone')}{detailField('billingAddress','Billing address',true)}{detailField('deliveryAddress','Delivery / ship-to address',true)}{detailField('deliveryTerms','Delivery instructions / terms',true)}

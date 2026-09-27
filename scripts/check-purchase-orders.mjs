@@ -20,7 +20,7 @@ try {
   const lookups=await get(root+'/options/search');assert.ok(Array.isArray(lookups.clients));
   const client=ok(await api('/api/crm/clients','POST',{name:'Buyer test',company:'Fixture Millwork'},owner),201);
   const job=ok(await api('/api/projects','POST',{name:'Dallas PO fixture',jobNumber:'PO-25-578'},owner),201);
-  const quote=ok(await api('/api/quotes','POST',{type:'custom',customerName:'Buyer test',totalCents:1550000,payload:{type:'custom',customer:{name:'Buyer test',company:'Fixture Millwork',clientId:client.id},depositPct:55,state:{color:'#E8E6E0'},notes:'Fabricate shelving. Delivery included.',shopSnapshot:{terms:'55% deposit. Balance on delivery.'}}},owner),201);
+  const quote=ok(await api('/api/quotes','POST',{type:'custom',customerName:'Buyer test',totalCents:1550000,payload:{type:'custom',customer:{name:'Buyer test',company:'Fixture Millwork',clientId:client.id},depositPct:55,state:{color:'#E8E6E0'},features:'Curved frame and paired mesh clamps.',notes:'Fabricate shelving. Delivery included.',shopSnapshot:{terms:'55% deposit. Balance on delivery.'}}},owner),201);
   const input={orderType:'customer',customerName:'Fixture Millwork',customerProjectNumber:'DEMO-578',clientId:client.id,quoteId:quote.id,projectId:job.id,items:[{description:'Metal shelving, paint labor and delivery',qty:1,unitPriceCents:1550000}],depositCents:852500,details:{scope:'Fabricate shelving. Delivery included.',finish:'Bronze paint supplied by buyer; CJM prepares and applies.',customerMaterials:'Bronze paint',deliveryIncluded:true,paymentTerms:'55% deposit. Balance on delivery.'}};
   let po=await create(input);assert.equal(po.totalCents,1550000);assert.equal(po.status,'draft');assert.match(po.number,/^CPO-/);assert.equal(po.customerPoNumber,'');
   assert.equal((await api(`${root}/${po.id}/receive`,'POST',receipt(1),owner)).status,409);
@@ -32,7 +32,7 @@ try {
   assert.equal((await api(root,'POST',{...input,items:[]},owner)).status,400);
   console.log('PASS Customer totals, pending buyer number, links, validation and expense isolation');
   po=await transition(po,'review');let detail=await read(po);
-  assert.ok(detail.review.differences.some(d=>d.field==='Finish'));assert.equal(detail.review.quote.finish,'White');assert.ok(!detail.review.quote.specifications.includes('Finish:'));
+  assert.ok(detail.review.differences.some(d=>d.field==='Finish'));assert.equal(detail.review.quote.finish,'White');assert.ok(!detail.review.quote.specifications.includes('Finish:'));assert.ok(detail.review.quote.scope.includes('Curved frame and paired mesh clamps.'));assert.ok(detail.review.quote.scope.includes('Delivery included.'));
   assert.equal((await call(po,'transition',{status:'confirmed',reviewed:true,reviewToken:detail.review.reviewToken,reason:'Customer authorized bronze'})).status,400);
   po=ok(await api(`${root}/${po.id}`,'PATCH',{...input,customerPoNumber:'CM-100'},owner,{'If-Match':`"${po._version}"`}));
   assert.equal((await api(root,'POST',{...input,customerPoNumber:'cm-100'},owner)).status,409);
