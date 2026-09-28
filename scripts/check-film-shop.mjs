@@ -18,6 +18,12 @@ for(const m of [tiny,large,alreadyHidden]){m.userData.shopPartId='test';lodRoot.
 let rendered;const drawDetail=createDetailRender({domElement:{clientHeight:400},render(){rendered=[tiny.visible,large.visible,alreadyHidden.visible];}},lodRoot);
 drawDetail(lodScene,lodCamera);assert.deepEqual(rendered,[false,true,false]);assert.equal(tiny.visible,true,'Drawing restores picking visibility');assert.equal(alreadyHidden.visible,false);
 lodCamera.position.z=.05;drawDetail(lodScene,lodCamera);assert.equal(rendered[0],true,'Zooming restores the full small part');
+const detailedRail=new T.Mesh(new T.BoxGeometry(6,.05,.025,100,4,4)),broadPlate=new T.Mesh(new T.BoxGeometry(1,1,.002,20,20,1));
+for(const mesh of [detailedRail,broadPlate]){mesh.userData.shopPartId='test';lodRoot.add(mesh);}
+const railGeometry=detailedRail.geometry,plateGeometry=broadPlate.geometry;
+const drawProfiles=createDetailRender({domElement:{clientHeight:400},render(){rendered=[detailedRail.geometry,broadPlate.geometry];}},lodRoot);
+lodCamera.position.z=20;drawProfiles(lodScene,lodCamera);assert.notEqual(rendered[0],railGeometry,'Narrow distant profiles have a lightweight visual');assert.equal(rendered[1],plateGeometry,'Broad plate outlines remain exact');assert.equal(detailedRail.geometry,railGeometry,'Selection retains the original rail geometry');
+lodCamera.position.z=1;drawProfiles(lodScene,lodCamera);assert.equal(rendered[0],railGeometry,'Close-up restores detailed profiles');drawProfiles.dispose();drawDetail.dispose();
 assert.equal(inchFraction(12.7),'1/2″');assert.equal(inchFraction(47.625),'1 7/8″');assert.equal(inchFraction(6.35),'1/4″');assert.equal(inchFraction(25.39),'1″');assert.equal(inchFraction(-1.5875),'-1/16″');assert.equal(inchFraction(.359),'<1/16″');
 const index=JSON.parse(fs.readFileSync('server/design-studio/current/parts.json','utf8'));
 assert(index.parts.length>300);
@@ -36,6 +42,11 @@ assert.equal(model.root.userData.studioRevision,index.revision);
 assert.equal(model.spec.table[0],6);assert.equal(model.rollGroups.length,6);assert.equal(model.guideWheels.length,6);
 const process=createProcess(model);for(const step of PROCESS_STEPS){for(const fraction of [0,.25,.5,.75,.999]){process.apply(step.start+(step.end-step.start)*fraction);model.root.updateMatrixWorld(true);model.root.traverse(o=>{assert(o.matrixWorld.elements.every(Number.isFinite),o.name+' pose');});}}assert.deepEqual(model.root.userData.hardwareAudit.issues,[]);
 process.apply(PROCESS_STEPS.find(s=>s.id==='cutFar').start);
+const overviewScene=new T.Scene(),overviewCamera=new T.PerspectiveCamera(36,390/548,.015,100);overviewScene.add(model.root);overviewCamera.position.set(17,14,19);overviewCamera.lookAt(-.28,.58,-.65);
+const sourceGeometries=new Map();let fullTriangles=0,overviewTriangles=0;model.root.traverseVisible(o=>{if(o.isMesh){sourceGeometries.set(o,o.geometry);fullTriangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3;}});
+const overviewDraw=createDetailRender({domElement:{clientHeight:548},render(){model.root.traverseVisible(o=>{if(o.isMesh)overviewTriangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3;});}},model.root);
+overviewDraw(overviewScene,overviewCamera);assert(overviewTriangles<fullTriangles*.25,'Whole-table overview reduces invisible detail by at least 75%');for(const [mesh,geometry] of sourceGeometries)assert.equal(mesh.geometry,geometry);overviewDraw.dispose();
+console.log(JSON.stringify({fullTriangles,overviewTriangles,geometryPreserved:true}));
 const picking=makePartIndex(model.root);
 assert.equal(picking.parts.size,index.parts.length);
 for(const p of index.parts){const entries=picking.parts.get(p.id);assert(entries?.length,p.name);assert.equal(new Set(entries.map(e=>e.instance)).size,p.quantity,p.name);const isolated=isolatedPart(picking,p.id),box=new T.Box3().setFromObject(isolated.group),size=box.getSize(new T.Vector3()).toArray();size.forEach((v,i)=>assert(Math.abs(v*1000-p.dimensions[i])<.015,p.name+': '+size));isolated.group.traverse(o=>o.geometry?.dispose());}

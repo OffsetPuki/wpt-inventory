@@ -36,7 +36,7 @@ export default function FilmModel({revision,hiddenParts}){
    const intersection=new IntersectionObserver(([entry])=>{inView=entry.isIntersecting;if(inView)request();});intersection.observe(host.current);
    renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();if(stopped)return;play=false;setPlaying(false);setError('The 3D view paused. Reopen it below.');});
    apply();camera.aspect=host.current.clientWidth/host.current.clientHeight;view('overall');setSteps(lib.PROCESS_STEPS);setDuration(lib.PROCESS_DURATION);setReady(true);
-   destroy=()=>{cancelAnimationFrame(raf);resize.disconnect();intersection.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();const gs=new Set(),ms=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>m.dispose());lightmap.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();control.current=null;};
+   destroy=()=>{cancelAnimationFrame(raf);resize.disconnect();intersection.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();const gs=new Set(),ms=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>m.dispose());lightmap.dispose();draw.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();control.current=null;};
   })().catch(e=>{if(!stopped)setError(e.message||'Could not open the table model.');});
   return()=>{stopped=true;abort.abort();destroy?.();};
  },[retry,revision]);
