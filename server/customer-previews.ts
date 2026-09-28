@@ -8,6 +8,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { sqlite } from './storage';
 import { requireElevated } from './auth';
+import {registerFilmTableStudio} from './film-table-studio';
 import { hasLeadKey } from './public-api';
 import { audit } from './audit';
 import { enqueueFollowup } from './outbox';
@@ -201,6 +202,7 @@ export function seedCustomerPreview(): void {
 }
 
 export function registerCustomerPreviews(app: Express): void {
+  registerFilmTableStudio(app);
   seedCustomerPreview();
   app.post('/api/design-studio/film-table',requireElevated,(req,res)=>{
     const sourceKey='design-studio-film-table-2026-09';

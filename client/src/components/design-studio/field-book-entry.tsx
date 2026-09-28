@@ -1,0 +1,10 @@
+import React,{useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import type {ShopCatalog,ShopPart} from './types';
+import type {Unit} from './fractions';
+import {MeasurementContext} from './MeasurementContext';
+import CutList from './CutList';
+import PartSheet from './PartSheet';
+import './film-studio.css';
+function FieldBook({catalog}:{catalog:ShopCatalog}){const [selected,setSelected]=useState(''),[unit,setUnit]=useState<Unit>('fraction');const part=catalog.parts.find(p=>p.id===selected);return <MeasurementContext.Provider value={unit}><main className="film-studio" style={{maxWidth:1300,margin:'24px auto'}}><header className="fs-header"><div><span className="fs-eyebrow">Offline field book</span><h2>Film stretching table</h2><p>6 × 6 m · Revision {catalog.revision} · Saved {new Date(catalog.generatedAt).toLocaleDateString()}</p></div><p>Drawings &amp; dimensions work without internet.<br/>3D animation is available in the Business Suite.</p></header><div className="fs-toolbar"><button onClick={()=>setSelected('')}>All parts &amp; cut list</button><label className="fs-unit-label">Units<select aria-label="Dimension units" value={unit} onChange={e=>setUnit(e.target.value as Unit)}><option value="fraction">Inches · 1/16</option><option value="inch">Decimal inches</option><option value="mm">Millimeters</option></select></label></div><div className="fs-body">{part?<PartSheet key={part.id} part={part} revision={catalog.revision}/>:<CutList catalog={catalog} onOpen={setSelected}/>}</div></main></MeasurementContext.Provider>;}
+(async()=>{try{const packed=document.getElementById('field-data')!.textContent!,bytes=Uint8Array.from(atob(packed),c=>c.charCodeAt(0)),data=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json();createRoot(document.getElementById('root')!).render(<FieldBook catalog={data}/>);}catch{document.getElementById('root')!.textContent='This browser could not open the field book. Open this saved HTML file in a current Chrome or Edge browser.';}})();

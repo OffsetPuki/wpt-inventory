@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import {gzipSync} from 'node:zlib';
+import {build} from 'esbuild';
+const root='server/design-studio/current',catalog=JSON.parse(fs.readFileSync(root+'/parts.json','utf8'));
+catalog.parts=catalog.parts.map(p=>JSON.parse(fs.readFileSync(root+'/parts/'+p.id+'.json','utf8')));
+const built=await build({entryPoints:['client/src/components/design-studio/field-book-entry.tsx'],bundle:true,write:false,outdir:'fieldbook',format:'iife',platform:'browser',target:'es2022',minify:true,jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'}});
+const js=built.outputFiles.find(f=>f.path.endsWith('.js')).text,css=built.outputFiles.find(f=>f.path.endsWith('.css')).text;
+const data=gzipSync(JSON.stringify(catalog)).toString('base64');
+const html='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;unsafe-inline&#39;; style-src &#39;unsafe-inline&#39;; img-src data: blob:"><title>Film table field book · '+catalog.revision+'</title><style>body{margin:0;background:#eaf0ed;font-family:Arial,sans-serif}*{box-sizing:border-box}'+css+'</style><div id="root" role="status">Opening saved field book…</div><script id="field-data" type="application/octet-stream">'+data+'</script><script>'+js.replaceAll('</script','<\/script')+'</script></html>';
+fs.writeFileSync(root+'/field-book.html',html);fs.writeFileSync(root+'/field-book-meta.json',JSON.stringify({revision:catalog.revision,bytes:Buffer.byteLength(html)}));console.log(JSON.stringify({fieldBookBytes:Buffer.byteLength(html),drawings:catalog.parts.length,revision:catalog.revision}));
