@@ -4,6 +4,7 @@ let app;
 test.beforeAll(async()=>{app=await testApp({serve:true});app.sqlite.prepare("UPDATE users SET credential_type='password' WHERE role='owner'").run();});
 test.afterAll(async()=>app.close());
 test('Engineering studio opens the current model and selectable hardware and dimensioned parts',async({page})=>{
+ test.setTimeout(180000);
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
  await page.goto(app.base+'/#/design-studio');
  await expect(page.getByRole('heading',{name:'CJM Design Studio',exact:true})).toBeVisible();

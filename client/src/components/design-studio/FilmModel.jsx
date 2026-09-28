@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {loadStudioModel} from './studio-model';
 import {secondaryBtn,inputCls} from '@/lib/ui-styles';
 import {Play,Pause,RotateCcw,SkipBack,SkipForward} from 'lucide-react';
+import {createDetailRender} from './detail-render';
 
 export default function FilmModel({revision,hiddenParts}){
  const hiddenRef=useRef(hiddenParts);hiddenRef.current=hiddenParts;
@@ -20,20 +21,22 @@ export default function FilmModel({revision,hiddenParts}){
    const env=new RoomEnvironment(),pmrem=new T.PMREMGenerator(renderer),lightmap=pmrem.fromScene(env,.03);scene.environment=lightmap.texture;scene.environmentIntensity=.72;env.dispose();pmrem.dispose();
    scene.add(new T.HemisphereLight('#eef5ff','#78877a',1.25));const sun=new T.DirectionalLight('#fff5df',2.4);sun.position.set(-3,7,4);scene.add(sun);
    const floor=new T.Mesh(new T.PlaneGeometry(50,50),new T.MeshStandardMaterial({color:'#e6ebe3',roughness:.9}));floor.rotation.x=-Math.PI/2;floor.position.y=-.004;scene.add(floor);
-   let raf=0,time=lib.PROCESS_STEPS.find(s=>s.id==='cutFar').start,play=false,last=performance.now(),ui=0,rate=1,started=false;
+   const draw=createDetailRender(renderer,model.root);
+   let raf=0,time=lib.PROCESS_STEPS.find(s=>s.id==='cutFar').start,play=false,last=performance.now(),ui=0,rate=1,started=false,inView=false;
    const request=()=>{if(!raf&&!stopped&&!document.hidden)raf=requestAnimationFrame(render);};
    const apply=()=>{applyPose(time);host.current.dataset.ready='true';host.current.dataset.time=time.toFixed(2);setClock(time);request();};
    const views={overall:[[7.3,6,8.1],[-.28,.58,-.65]],supply:[[0,6.5,-6],[0,.6,-3.68]],top:[[0,17.5,-.749],[0,.6,-.75]],mounts:[[3.55,.84,-3.28],[3.05,.744,-2.96]],pipe:[[3.48,1.08,-3.63],[3.015,.855,-3.34]],braces:[[3.72,.90,3.70],[2.99,.64,3.22]],drive:[[.30,1.18,3.92],[0,.948,3.505]]};
    const view=name=>{const [p,t]=views[name]||views.overall;camera.position.set(...p);orbit.target.set(...t);const factor=Math.max(1,(name==='overall'||name==='supply'?1.35:.9)/camera.aspect);camera.position.sub(orbit.target).multiplyScalar(factor).add(orbit.target);orbit.update();request();};
-   function render(now){raf=0;if(play&&now-last<1000/30){request();return;}if(play){time=Math.min(lib.PROCESS_DURATION,time+Math.min((now-last)/1000,.1)*rate);applyPose(time);host.current.dataset.time=time.toFixed(2);if(now-ui>150){setClock(time);ui=now;}if(time===lib.PROCESS_DURATION){play=false;setPlaying(false);setClock(time);}}last=now;const moving=orbit.update();renderer.render(scene,camera);if(play||moving)request();}
+   function render(now){raf=0;if(play&&now-last<1000/30){request();return;}if(play){time=Math.min(lib.PROCESS_DURATION,time+Math.min((now-last)/1000,.1)*rate);applyPose(time);host.current.dataset.time=time.toFixed(2);if(now-ui>150){setClock(time);ui=now;}if(time===lib.PROCESS_DURATION){play=false;setPlaying(false);setClock(time);}}last=now;const moving=orbit.update();if(inView)draw(scene,camera);if(play||moving)request();}
    const seek=t=>{play=false;setPlaying(false);time=Math.max(0,Math.min(lib.PROCESS_DURATION,t));started=true;last=performance.now();apply();};
    control.current={view,seek,refresh:apply,setRate(value){rate=value;},restart(){seek(0);},toggle(){if(!started||time===lib.PROCESS_DURATION)time=0;started=true;play=!play;setPlaying(play);last=performance.now();request();}};
    const resize=new ResizeObserver(()=>{if(!host.current)return;const w=host.current.clientWidth,h=host.current.clientHeight;if(!w||!h)return;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio,1.25,Math.sqrt(900000/(w*h))));renderer.setSize(w,h);request();});resize.observe(host.current);
    orbit.addEventListener('change',request);
    const visibility=()=>{last=performance.now();if(document.hidden){cancelAnimationFrame(raf);raf=0;}else request();};document.addEventListener('visibilitychange',visibility);
+   const intersection=new IntersectionObserver(([entry])=>{inView=entry.isIntersecting;if(inView)request();});intersection.observe(host.current);
    renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();if(stopped)return;play=false;setPlaying(false);setError('The 3D view paused. Reopen it below.');});
    apply();camera.aspect=host.current.clientWidth/host.current.clientHeight;view('overall');setSteps(lib.PROCESS_STEPS);setDuration(lib.PROCESS_DURATION);setReady(true);
-   destroy=()=>{cancelAnimationFrame(raf);resize.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();const gs=new Set(),ms=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>m.dispose());lightmap.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();control.current=null;};
+   destroy=()=>{cancelAnimationFrame(raf);resize.disconnect();intersection.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();const gs=new Set(),ms=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>m.dispose());lightmap.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();control.current=null;};
   })().catch(e=>{if(!stopped)setError(e.message||'Could not open the table model.');});
   return()=>{stopped=true;abort.abort();destroy?.();};
  },[retry,revision]);
