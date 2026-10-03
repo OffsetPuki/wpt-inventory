@@ -47,6 +47,16 @@ try{
  // blocks external fetches and never starts a mail worker.
  process.env.RESEND_API_KEY='test-never-send';process.env.MAIL_FROM='test@example.test';process.env.OWNER_EMAIL='';process.env.TO_EMAIL='owner@example.test';process.env.SMTP_USER='';
  const {readMail}=await import('../server/mail-queue.ts');
+ const {sendMail}=await import('../server/mailer.ts');
+ const isolatedFetch=globalThis.fetch,deliveries=[];
+ globalThis.fetch=async(url,init={})=>{
+  if(String(url)==='https://api.resend.com/emails'){
+   assert.equal(new Headers(init.headers).get('Authorization'),'Bearer test-never-send');
+   deliveries.push(JSON.parse(init.body));
+   return new Response(JSON.stringify({id:`synthetic-mail-${deliveries.length}`}),{status:200,headers:{'Content-Type':'application/json'}});
+  }
+  return isolatedFetch(url,init);
+ };
  const bytes=Buffer.from(photo.split(',')[1],'base64');
  for(const site of ['metals','concrete','insulation','trades']){
   const receiptToken=crypto.randomBytes(32).toString('hex');
@@ -66,6 +76,14 @@ try{
   assert.equal((await api('/api/public/leads','POST',resubmit,null,key)).data.id,leadId);
   assert.equal(readMail(`lead-intake-photos:${resubmit.submissionId}`).msg.attachments.length,1,'New photos on a recent request get their own alert');
   assert.equal(JSON.parse((await api(`/api/crm/leads/${leadId}/detail`,'GET',undefined,owner)).data.photos).length,4);
+  // Deliver from persisted queue through the real transport serializer, with
+  // the provider intercepted above. No message leaves this isolated fixture.
+  for(const [mailKey,count] of [[`lead-intake-owner:${leadId}`,2],[`lead-details:${followup.submissionId}`,1],[`lead-intake-photos:${resubmit.submissionId}`,1]]){
+   assert.equal(await sendMail(readMail(mailKey).msg,{deliveryKey:mailKey}),true);
+   const sent=deliveries.at(-1);assert.equal(sent.to,'owner@example.test');assert.equal(sent.attachments.length,count);
+   for(const attachment of sent.attachments){assert.match(attachment.filename,/\.png$/);assert.deepEqual(Buffer.from(attachment.content,'base64'),bytes);}
+   const deliveryCount=deliveries.length;assert.equal(await sendMail({to:'owner@example.test',subject:'Retry',text:'Retry',deliveryKey:mailKey}),true);assert.equal(deliveries.length,deliveryCount,'An accepted delivery is not sent twice');
+  }
  }
  const uploadCount=readdirSync(t.uploadsDir).length;
  assert.equal((await api('/api/public/leads','POST',{name:'Invalid batch',photos:[photo,'data:image/jpeg;base64,aW52YWxpZA==']},null,key)).status,400);

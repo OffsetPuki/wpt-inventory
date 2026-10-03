@@ -25,4 +25,4 @@ jobs:
       # output but don't break the build (avoids noisy PR blocks for dev-only
       # esbuild-style advisories).
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: node scripts/check-dependency-security.mjs

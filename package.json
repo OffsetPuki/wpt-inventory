@@ -71,7 +71,8 @@
     "@esbuild-kit/core-utils": {
       "esbuild": "^0.25.0"
     },
-    "qs": "^6.16.0"
+    "qs": "^6.16.0",
+    "braces": "https://codeload.github.com/FSDevelop/braces/tar.gz/28d440b5dd449dbf1fe6f3506cf94ecca4d02660"
   },
   "engines": {
     "node": ">=22.12.0"
