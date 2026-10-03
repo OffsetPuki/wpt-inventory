@@ -339,7 +339,8 @@ export function parseLead(lead) {
       const parsed = JSON.parse(rawState);
       if(parsed?.type === 'barndominium' && parsed.state && typeof parsed.state === 'object') {
         const state=normalizeBarndo(parsed.state);
-        if(validateBarndo(state).length) return {type:'barndominium',state:defaultState('barndominium'),warnings:['The saved building layout is invalid. Review the original design before quoting.'],hasSpec:true};
+        const issues=validateBarndo(state);
+        if(issues.length) return {type:'barndominium',state:issues.every(e=>['porch-eave','porch-clearance','porch-access'].includes(e.code))?state:defaultState('barndominium'),warnings:['The saved building layout needs review. Resolve the highlighted conflicts before quoting.'],hasSpec:true};
         return {type:'barndominium',state,warnings:[],hasSpec:true};
       }
       if (parsed && TOOLS[parsed.type] && parsed.state && typeof parsed.state === 'object') {

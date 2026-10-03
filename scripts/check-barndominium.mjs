@@ -21,6 +21,8 @@ assert.equal(normalize({wallColor:'<script>'}).wallColor,s.wallColor);
 for(const view of ['iso','plan','front','back','left','right'])for(const mode of ['shell','frame','insulation']){const svg=renderDrawing(s,{view,mode});assert.ok(!svg.includes('NaN'));assert.ok(!svg.includes('undefined'));}
 const state=defaultState('barndominium');state.openings[0].x=9;assert.equal(defaultState('barndominium').openings[0].x,7);
 const parsed=parseLead({designState:JSON.stringify({type:'barndominium',state:s})});assert.equal(parsed.type,'barndominium');assert.deepEqual(parsed.state,s);assert.equal(refTool(normalizeRef('CJM-B123ABC')),'barndominium');
+const legacy=fresh();legacy.depth=64;legacy.porches=[{id:'legacy',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];
+const imported=parseLead({designState:JSON.stringify({type:'barndominium',state:legacy})});assert.equal(imported.state.depth,64);assert.deepEqual(imported.state.porches,legacy.porches);assert.ok(imported.warnings.length,'Legacy conflicts retain dimensions and require review');
 const quoteSpecs=specRows('barndominium',s);
 assert.ok(!quoteSpecs.some(r=>['Frame','Secondary framing','Panels','Insulation'].includes(r.label)));
 assert.ok(!quoteSpecs.some(r=>r.value.includes('product and price pending')));
