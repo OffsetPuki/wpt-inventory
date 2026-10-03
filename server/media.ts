@@ -40,3 +40,18 @@ export function setMediaCookie(
     maxAge: token ? 12 * 60 * 60 * 1000 : 0,
   });
 }
+
+// Only freshly saved local images may become owner-email attachments.
+export function leadPhotoAttachments(leadId: number, urls: string[]) {
+  return urls.map((url, index) => {
+    if (!/^\/uploads\/[a-z0-9_-]+\.(?:jpe?g|png|webp)$/i.test(url)) throw new Error('Invalid request photo path.');
+    return {
+      filename: `lead-${leadId}-photo-${index + 1}${path.extname(url)}`,
+      content: fs.readFileSync(path.join(uploadsDir, path.basename(url))),
+    };
+  });
+}
+
+export function leadPhotoLink(leadId: number) {
+  return `${(process.env.PUBLIC_APP_URL || 'https://flipnob.com').replace(/\/+$/, '')}/#/crm/leads?lead=${leadId}`;
+}

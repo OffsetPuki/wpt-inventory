@@ -1,6 +1,6 @@
 import { qualificationSchema, saveLeadIntake, hasLeadReceipt, registerLeadExperience } from './lead-experience';
 import { saveLeadAttribution } from './lead-measurement';
-import { saveLeadPhoto } from "./media";
+import { saveLeadPhoto, leadPhotoAttachments, leadPhotoLink } from "./media";
 import type { Express } from "express";
 import path from "path";
 import fs from "fs";
@@ -361,8 +361,8 @@ export function registerPublicRoutes(app: Express): void {
       }
     }
     let photoUrls:string[]=[];
-    try {photoUrls=(body.photos || []).map(saveLeadPhoto);}
-    catch(error:any){return res.status(400).json({message:error.message});}
+    try {for(const photo of body.photos || [])photoUrls.push(saveLeadPhoto(photo));}
+    catch(error:any){for(const url of photoUrls){try{fs.unlinkSync(path.join(uploadsDir,path.basename(url)));}catch{}}return res.status(400).json({message:error.message});}
     const {row,dupe}=sqlite.transaction(()=>{
     const source = mapSource(body.utm?.source);
     // Pre-`site` senders (the metals site before the rollout) omit the field.
@@ -537,11 +537,24 @@ export function registerPublicRoutes(app: Express): void {
         (pngUrl ? `Snapshot:  ${pngUrl}\n` : "") +
         (body.designSpec ? `\nDesign spec:\n${body.designSpec}\n` : "") +
         `\nNotes:\n${body.message || "(none)"}\n` +
-        `\nLang: ${body.lang ?? "en"} · Page: ${body.page || "?"} · Lead #${row.id}`;
+        `\nLang: ${body.lang ?? "en"} · Page: ${body.page || "?"} · Lead #${row.id}` +
+        `\n\n${photoUrls.length + (pngUrl ? 1 : 0)} photo(s) attached. View this request and its photos:\n${leadPhotoLink(row.id)}`;
       queueOwnerMail({
         deliveryKey:`lead-intake-owner:${row.id}`,
         subject: `[CJM Suite] New lead from ${domain} — ${body.name}`,
         text,
+        attachments: leadPhotoAttachments(row.id, [...photoUrls, ...(pngUrl ? [pngUrl] : [])]),
+      });
+    }
+
+    // A fresh submission can add photos to a recent lead. Its initial alert
+    // already went out, so deliver only these new images, once per receipt.
+    if (dupe && photoUrls.length && mailEnabled()) {
+      queueOwnerMail({
+        deliveryKey: `lead-intake-photos:${body.submissionId || photoUrls[0]}`,
+        subject: `[CJM Suite] New request photos — ${body.name}`,
+        text: `${photoUrls.length} new photo(s) attached to lead #${row.id}.\n\n${body.message || ''}\n\nView the request and all photos:\n${leadPhotoLink(row.id)}`,
+        attachments: leadPhotoAttachments(row.id, photoUrls),
       });
     }
 

@@ -4,10 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { sqlite, uploadsDir } from './storage';
-import { saveLeadPhoto } from './media';
+import { saveLeadPhoto, leadPhotoAttachments, leadPhotoLink } from './media';
 import { requireElevated } from './auth';
 import { audit } from './audit';
-import { queueOwnerMail, mailEnabled } from './mailer';
+import { queueOwnerMail, ownerMailStatus } from './mailer';
 import { LEAD_SITES } from '../shared/crm-schema';
 
 sqlite.exec(`
@@ -63,7 +63,7 @@ export function registerLeadExperience(app: Express, hasLeadKey: (req: Request) 
        sqlite.prepare('INSERT INTO web_lead_supplements VALUES (?,?,?,?)').run(body.submissionId,tokenHash,payloadHash,Date.now());
        sqlite.prepare('UPDATE crm_lead_intake SET updated_at=? WHERE lead_id=?').run(Date.now(),access.lead_id);
        sqlite.prepare("INSERT OR IGNORE INTO suite_notifications(user_id,event_key,title,href) SELECT id,?,?,? FROM users WHERE role='owner' AND disabled_at IS NULL").run(`lead-details:${body.submissionId}`,'Customer added photos or project details',`/crm/leads?lead=${access.lead_id}`);
-       if(mailEnabled() && process.env.OWNER_EMAIL) queueOwnerMail({deliveryKey:`lead-details:${body.submissionId}`,subject:'[CJM Suite] Customer added project details',text:`Lead #${access.lead_id} has an update. Open the lead in FLIPNOB to review the notes and photos.`});
+       if(ownerMailStatus().enabled) queueOwnerMail({deliveryKey:`lead-details:${body.submissionId}`,subject:'[CJM Suite] Customer added project details',text:`Lead #${access.lead_id} has an update. ${urls.length} photo(s) attached.\n\n${body.details}\n\nView the request and all photos:\n${leadPhotoLink(access.lead_id)}`,attachments:leadPhotoAttachments(access.lead_id,urls)});
      })();
      return res.json({ok:true});
    } catch (error) {

@@ -1,5 +1,6 @@
 import {useBusiness,setBusiness} from '@/hooks/useBusiness';
 import { LeadIntake } from '@/components/LeadIntake';
+import LeadPhotos, { leadPhotos } from '@/components/LeadPhotos';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
@@ -347,6 +348,7 @@ function LeadDetailModal({
   const [selectedQuote, setSelectedQuote] = useState("");
   const [language, setLanguage] = useState(lead.preferredLanguage ?? "en");
   const { data: extras, isError: detailFailed, refetch: retryDetail } = useQuery<{
+    photos: string | null;
     quotes: { id: number; number: string; status: string; totalCents: number }[];
     projects: { id: number; name: string }[];
     invoices: { id: number; number: string; status: string; totalCents: number; paidCents: number }[];
@@ -362,6 +364,7 @@ function LeadDetailModal({
   }>({
     queryKey: ["crm-lead-detail", lead.id],
     queryFn: async () => (await apiRequest("GET", `/api/crm/leads/${lead.id}/detail`)).json(),
+    refetchInterval: 30_000,
   });
 
   const save = useApiMutation({
@@ -461,6 +464,7 @@ function LeadDetailModal({
   return (
     <Modal open onClose={onClose} title={lead.name} maxWidth="max-w-2xl">
       <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto pr-1">
+        <LeadPhotos leadId={lead.id} photos={leadPhotos(extras ? extras.photos : lead.photos)} />
         {isElevated && <LeadIntake id={lead.id} />}
         <section className="rounded-xl border border-border p-4">
           <h3 className="font-semibold">This job</h3>

@@ -862,7 +862,7 @@ export function registerCrmRoutes(app: Express): void {
   // lead's photo strip.
   app.get("/api/crm/leads/:id/detail", requireAuth, (req, res) => {
     const id = pid(req.params.id);
-    const lead = db.select({ id: leads.id }).from(leads)
+    const lead = db.select({ id: leads.id, photos: leads.photos }).from(leads)
       .where(and(eq(leads.id, id), isNull(leads.deletedAt)))
       .get();
     if (!lead) return res.status(404).json({ message: "Lead not found" });
@@ -879,7 +879,7 @@ export function registerCrmRoutes(app: Express): void {
     const quotes = sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents FROM quotes WHERE lead_id = ? OR design_ref IN (SELECT ref FROM web_designs WHERE lead_id = ?) ORDER BY id DESC`).all(id, id);
     const jobs = sqlite.prepare(`SELECT DISTINCT p.id, p.name FROM projects p JOIN fin_invoices i ON i.project_id = p.id WHERE i.lead_id = ? AND p.deleted_at IS NULL`).all(id);
     const invoices = isElevated(req) ? sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents, paid_cents AS paidCents FROM fin_invoices WHERE lead_id = ? AND deleted_at IS NULL ORDER BY id DESC`).all(id) : [];
-    res.json({ design, quotes, projects: jobs, invoices });
+    res.json({ photos: lead.photos, design, quotes, projects: jobs, invoices });
   });
 
   app.patch("/api/crm/leads/:id", requireAuth, (req, res) => {
