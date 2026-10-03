@@ -171,6 +171,14 @@ function fmtBytes(n: number | null | undefined): string {
 
 function BackupCard() {
   const [downloading, setDownloading] = useState(false);
+  const [readyBackup, setReadyBackup] = useState<{ url: string; name: string; bytes: number } | null>(null);
+
+  useEffect(() => {
+    if (!readyBackup) return;
+    // Leave time for a download already handed to the browser when this card
+    // unmounts or a fresh backup replaces it. Keep the active Save link usable.
+    return () => { window.setTimeout(() => URL.revokeObjectURL(readyBackup.url), 60_000); };
+  }, [readyBackup]);
 
   const { data: status } = useQuery<{
     dbBytes: number;
@@ -193,12 +201,8 @@ function BackupCard() {
         res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ??
         "cjm-full-backup.tar.gz";
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({ variant: "success", title: "Backup downloaded", description: name });
+      setReadyBackup({ url, name, bytes: blob.size });
+      toast({ variant: "success", title: "Backup ready", description: "Choose Save backup to save the file to your computer." });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Backup failed", description: e?.message });
     } finally {
@@ -236,8 +240,14 @@ function BackupCard() {
         className="mt-4 flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-foreground hover:border-primary disabled:opacity-60"
       >
         {downloading ? <Loader2 className="h-5 w-5 animate-spin" /> : <DatabaseBackup className="h-5 w-5" />}
-        Download backup
+        {downloading ? "Preparing backup…" : readyBackup ? "Prepare a fresh backup" : "Prepare backup"}
       </button>
+      {readyBackup && <div className="mt-4 space-y-2 rounded-xl border border-border bg-background p-4">
+        <p className="text-sm font-medium">Your backup is ready · {fmtBytes(readyBackup.bytes)}</p>
+        <p className="break-all text-xs text-muted-foreground">{readyBackup.name}</p>
+        <a href={readyBackup.url} download={readyBackup.name} className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 font-medium text-primary-foreground">Save backup</a>
+        <p className="text-sm text-muted-foreground">If the download stops, use Save backup again. Keep this page open until it finishes.</p>
+      </div>}
     </div>
   );
 }
