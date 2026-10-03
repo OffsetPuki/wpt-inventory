@@ -17,16 +17,6 @@ const MIME: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
-// Pick the best pre-compressed variant the client accepts. Returns the
-// suffix to append to the file path (e.g. ".br") and the matching
-// Content-Encoding header, or null if no precompressed copy applies.
-function pickEncoding(req: Request): { suffix: string; encoding: string } | null {
-  const accept = String(req.headers["accept-encoding"] || "");
-  if (accept.includes("br")) return { suffix: ".br", encoding: "br" };
-  if (accept.includes("gzip")) return { suffix: ".gz", encoding: "gzip" };
-  return null;
-}
-
 export function serveStatic(app: express.Express): void {
   const distPath = path.resolve(process.cwd(), "dist", "public");
 
@@ -40,7 +30,8 @@ export function serveStatic(app: express.Express): void {
   // emits content-hashed filenames here, so the bytes for a given URL never
   // change — `immutable` is safe.
   app.use("/assets", (req: Request, res: Response, next: NextFunction) => {
-    const rel = decodeURIComponent(req.path);
+    let rel:string;
+    try { rel=decodeURIComponent(req.path); } catch { return res.status(400).end(); }
     const safeRel = rel.replace(/^\/+/, "");
     if (safeRel.includes("..")) return next();
     const filePath = path.join(distPath, "assets", safeRel);
@@ -58,15 +49,17 @@ export function serveStatic(app: express.Express): void {
     // Tell caches that the chosen variant depends on Accept-Encoding.
     res.setHeader("Vary", "Accept-Encoding");
 
-    const enc = pickEncoding(req);
-    if (enc) {
-      const precompressed = filePath + enc.suffix;
-      if (fs.existsSync(precompressed)) {
-        res.setHeader("Content-Encoding", enc.encoding);
-        return res.sendFile(precompressed);
-      }
-    }
-    res.sendFile(filePath);
+    const variants = [
+      {encoding:'br',file:filePath+'.br'},
+      {encoding:'gzip',file:filePath+'.gz'},
+      {encoding:'identity',file:filePath},
+    ].filter(v=>fs.existsSync(v.file));
+    const selected = req.headers['accept-encoding']
+      ? req.acceptsEncodings(...variants.map(v=>v.encoding)) : 'identity';
+    const variant=variants.find(v=>v.encoding===selected);
+    if(!variant) { res.setHeader('Cache-Control','no-store'); return res.status(406).end(); }
+    if(variant.encoding!=='identity')res.setHeader('Content-Encoding',variant.encoding);
+    res.sendFile(variant.file);
   });
 
   // Fall back to express.static for any other built files (favicon, etc).
@@ -88,6 +81,10 @@ export function serveStatic(app: express.Express): void {
   // a deploy is picked up on the next navigation without a hard refresh.
   app.get("*", (req, res) => {
     if (req.path.startsWith("/api/")) return res.status(404).json({ message: "Not found" });
+    if(req.path.startsWith('/assets/') || path.extname(req.path)) {
+      res.setHeader('Cache-Control','no-store');
+      return res.status(404).type('text').send('File not found. Reload the page to get the current version.');
+    }
     res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.join(distPath, "index.html"));
   });

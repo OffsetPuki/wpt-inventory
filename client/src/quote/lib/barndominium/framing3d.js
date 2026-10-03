@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {porchSupportLayout} from './model.js';
 import {framePositions,WALLS} from './model.js';
 import {wallPoint} from './drawing.js';
 import {wallFramingLayout} from './wall-framing.js';
@@ -179,9 +180,9 @@ export function buildFraming(s,{includeMain=true}={}){
   const k=p.pitch/12,outer=p.height-p.depth*k,ps=Math.min(scale,p.width/2,p.depth/2,outer/2),edge=.4*ps;
   const roof=d=>p.height-d*k,wp=(u,y,d)=>wallPoint(s,p.wall,p.x+u,y,d),out=wp(0,0,1),base=wp(0,0,0),normal=[(out[0]-base[0])*k,1,(out[2]-base[2])*k];
   const addPorch=(a,b,kind='ibeam',up=[0,1,0])=>add(a,b,kind,up,p.id,ps);
-  const n=Math.max(1,Math.ceil(p.width/10)),d=p.depth-edge;
-  for(let i=0;i<=n;i++){
-   const u=edge+(p.width-2*edge)*i/n;
+  const support=porchSupportLayout(s,p),d=support.depth;
+  for(const position of support.posts){
+   const u=position-p.x;
    addPorch(wp(u,0,d),wp(u,roof(d)-1.03*ps*Math.hypot(1,k),d),'post');
    addPorch(wp(u,roof(edge)-1.03*ps*Math.hypot(1,k),edge),wp(u,roof(d)-1.03*ps*Math.hypot(1,k),d),'ibeam',normal);
   }

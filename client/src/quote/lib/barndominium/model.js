@@ -24,6 +24,13 @@ export function normalize(raw={}) {
  });
  return s;
 }
+// Same support positions and beam envelope used by the porch renderer.
+export function porchSupportLayout(s,p){
+ const k=p.pitch/12,outer=p.height-p.depth*k;
+ const scale=Math.min(1,s.width/4,s.depth/4,s.height/4,p.width/2,p.depth/2,outer/2),edge=.4*scale;
+ const count=Math.max(1,Math.ceil(p.width/10)),depth=p.depth-edge;
+ return {scale,edge,depth,posts:Array.from({length:count+1},(_,i)=>p.x+edge+(p.width-2*edge)*i/count),beamBottom:p.height-depth*k-(1.03*Math.hypot(1,k)+.325)*scale};
+}
 export function validate(s) {
  const errors=[];
  for(const [key,min,max] of [['width',2,300],['depth',2,300],['height',2,40],['pitch',1,5],['overhang',0,4],['bay',2,40],['roofSpacing',1,10],['wallSpacing',1,10]])if(!Number.isFinite(s[key])||s[key]<min||s[key]>max)errors.push({code:'range',key,min,max});
@@ -43,6 +50,11 @@ export function validate(s) {
   for(const o of s.openings)if(o.wall===p.wall&&o.x<p.x+p.width&&o.x+o.width>p.x&&o.sill+o.height>=p.height-0.25)errors.push({code:'porch-opening',id:o.id});
   const k=p.pitch/12,scale=Math.min(1,s.width/4,s.depth/4,s.height/4,p.width/2,p.depth/2,(p.height-p.depth*k)/2);
   const clearHeight=p.height-(.4*k+1.03*Math.hypot(1,k)+.325)*scale-.05;
+  const supports=porchSupportLayout(s,p);
+  for(const o of s.openings)if(o.kind!=='window'&&o.wall===p.wall&&o.x<p.x+p.width&&o.x+o.width>p.x){
+   const postObstructs=supports.posts.some(x=>x+.25*supports.scale>o.x&&x-.25*supports.scale<o.x+o.width);
+   if(postObstructs||supports.beamBottom<o.height+.05)errors.push({code:'porch-access',id:p.id,other:o.id});
+  }
   for(const o of s.openings)if(o.wall===p.wall&&o.x<p.x+p.width&&o.x+o.width>p.x&&o.sill+o.height< p.height-.25&&o.sill+o.height>=clearHeight)errors.push({code:'porch-clearance',id:o.id});
  }
  for(let i=0;i<s.porches.length;i++)for(const b of s.porches.slice(i+1)){const a=s.porches[i];if(a.wall===b.wall&&a.x<b.x+b.width&&a.x+a.width>b.x)errors.push({code:'porch-overlap',id:a.id});}
@@ -50,23 +62,58 @@ export function validate(s) {
 }
 // When the shell shrinks, keep opening sizes and move them to the nearest
 // available position. Never discard a customer's door, window or porch.
-export function fitOpeningsToSize(next) {
+export function fitOpeningsToSize(next,{edge=.25,gap=.25}={}) {
  const s=structuredClone(next);
  if(validate({...s,openings:[]}).length)return s;
- const placed=[];
- for(const original of s.openings){
-  const L=wallLength(s,original.wall),max=L-original.width-.25;
-  const sill=original.kind==='window'?Math.max(0,Math.min(original.sill,s.height-original.height-.25)):0;
-  const xs=[original.x,.25,max];
-  for(const other of placed.filter(o=>o.wall===original.wall))xs.push(other.x-original.width-.25,other.x+other.width+.25);
-  if(['left','right'].includes(original.wall))for(const z of framePositions(s)){const u=original.wall==='right'?z:s.depth-z;xs.push(u-original.width-.25,u+.25);}
-  xs.sort((a,b)=>Math.abs(a-original.x)-Math.abs(b-original.x));
-  const opening=xs.map(x=>({...original,x,sill})).find(o=>!validate({...s,openings:[...placed,o]}).length);
-  if(!opening)return structuredClone(next);
-  placed.push(opening);
+ // Prefer breathing room at corners; use smaller clearances only if necessary.
+ for(const margin of [...new Set([edge,Math.min(edge,1),.25])]){
+  let attempts=0;
+  const place=(index,placed)=>{
+   if(index===s.openings.length)return placed;
+   if(++attempts>10000)return null;
+   const original=s.openings[index],L=wallLength(s,original.wall),max=L-original.width-margin;
+   const sill=original.kind==='window'?Math.max(0,Math.min(original.sill,s.height-original.height-.25)):0;
+   const xs=[Math.max(margin,Math.min(original.x,max)),margin,max];
+   for(const other of placed.filter(o=>o.wall===original.wall))xs.push(other.x-original.width-gap,other.x+other.width+gap);
+   if(['left','right'].includes(original.wall))for(const z of framePositions(s)){const u=original.wall==='right'?z:s.depth-z;xs.push(u-original.width-.25,u+.25);}
+   // Alternate placements let earlier openings make room for later ones.
+   for(let x=margin;x<=max;x+=.25)xs.push(x);
+   xs.sort((a,b)=>Math.abs(a-original.x)-Math.abs(b-original.x));
+   for(const x of new Set(xs)){
+    if(x<margin||x>max)continue;
+    const o={...original,x,sill};
+    if(placed.some(other=>other.wall===o.wall&&o.x<other.x+other.width+gap&&o.x+o.width+gap>other.x&&o.sill<other.sill+other.height+gap&&o.sill+o.height+gap>other.sill))continue;
+    if(validate({...s,openings:[...placed,o]}).length)continue;
+    const result=place(index+1,[...placed,o]);if(result)return result;
+   }
+   return null;
+  };
+  const openings=place(0,[]);if(openings){s.openings=openings;return s;}
  }
- s.openings=placed;
- return s;
+ return structuredClone(next);
+}
+export function findPorchPlacement(state,wall,id){
+ const width=Math.min(16,wallLength(state,wall)),depth=8,pitch=2;
+ const heights=[];
+ for(let height=Math.max(2,state.height-1);height<state.height;height+=.25)heights.push(height);
+ const xs=[0,wallLength(state,wall)-width];
+ for(const o of state.openings.filter(o=>o.wall===wall))xs.push(o.x-width-.25,o.x+o.width+.25);
+ for(const p of state.porches.filter(p=>p.wall===wall))xs.push(p.x-width,p.x+p.width);
+ for(let x=.5;x+width<=wallLength(state,wall);x+=.5)xs.push(x);
+ for(const x of new Set(xs)){
+  if(x<0||x+width>wallLength(state,wall))continue;
+  for(const height of heights){
+   const porch={id,wall,x,width,depth,height,pitch};
+   if(!validate({...state,porches:[...state.porches,porch]}).length)return porch;
+  }
+ }
+ return null;
+}
+export function centerOpeningVertically(state,id){
+ const next=structuredClone(state),opening=next.openings.find(o=>o.id===id);
+ if(!opening||opening.kind!=='window')return next;
+ opening.sill=(next.height-opening.height)/2;
+ return validate(next).length?structuredClone(state):next;
 }
 export function takeoff(s) {
  const slope=Math.hypot(1,s.pitch/12),run=s.width/2+s.overhang;

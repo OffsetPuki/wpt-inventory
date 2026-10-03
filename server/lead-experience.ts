@@ -23,8 +23,10 @@ export const qualificationSchema = z.object({
 });
 const tokenSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-export function saveLeadIntake(leadId: number, site: string, body: { contact?: string; bestTime?: string; page?: string; consent?: string; qualification?: z.infer<typeof qualificationSchema>; receiptToken?: string; utm?: unknown }) {
- const context = JSON.stringify({ contact: body.contact || '', bestTime: body.bestTime || '', page: body.page || '', consent: body.consent || '', qualification: body.qualification || {}, utm: body.utm || {} });
+export function saveLeadIntake(leadId: number, site: string, body: { contact?: string; bestTime?: string; page?: string; consent?: string; qualification?: z.infer<typeof qualificationSchema>; receiptToken?: string; utm?: unknown; requestedTrades?: string[]; fulfillmentTeam?: string }) {
+ const prior=sqlite.prepare('SELECT context FROM crm_lead_intake WHERE lead_id=?').get(leadId) as {context:string}|undefined;
+ let previous:Record<string,unknown>={};try{previous=JSON.parse(prior?.context||'{}');}catch{}
+ const context = JSON.stringify({ requestedTrades: body.requestedTrades ?? previous.requestedTrades ?? [site], fulfillmentTeam: body.fulfillmentTeam ?? previous.fulfillmentTeam ?? site, contact: body.contact || '', bestTime: body.bestTime || '', page: body.page || '', consent: body.consent || '', qualification: body.qualification || {}, utm: body.utm || {} });
  sqlite.prepare(`INSERT INTO crm_lead_intake (lead_id,context,updated_at) VALUES (?,?,?) ON CONFLICT(lead_id) DO UPDATE SET context=excluded.context,updated_at=excluded.updated_at`).run(leadId, context, Date.now());
  if (body.receiptToken) {
    // Conflict never rebinds an existing capability to another customer/request.

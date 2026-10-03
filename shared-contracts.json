@@ -1,0 +1,17 @@
+{
+  "barndominium": {
+    "version": "2026-10-03",
+    "source": "OffsetPuki/cjm-website@347eff6277cc15810dfbae5b5c662883bddd0493",
+    "files": {
+      "client/src/quote/lib/barndominium/model.js": "40b99be013d051220cfcb3cda07518fa0dbbb25c5e91fc290fdbd6696feef45f",
+      "client/src/quote/lib/barndominium/drawing.js": "c845f93b06248a2ca1a602b309fab6e5f2dc7f531d13a656e8cce4526c33d15a",
+      "client/src/quote/lib/barndominium/editor.css": "7fc9dd2c6a0b0ef05205fdfae20ead192e3a09f8430a18f91a6b472ffe01da23",
+      "client/src/quote/lib/barndominium/panels.js": "ddf12984b1d3a3365a85cec98bfaecd83dce02f314c410b97f9c28e7772f1df1",
+      "client/src/quote/lib/barndominium/framing3d.js": "a64bc2768b406001d83f5f2b07970ebbde3a66b7f698bcb22cd1811c8f1b8192",
+      "client/src/quote/lib/barndominium/wall-framing.js": "fce976fd349f32e4d99bdbf56991c514010804143d0185e5b049655bf91b73d4",
+      "client/src/quote/lib/barndominium/bolted-frame.js": "bbe0fab397246fc77d4c45c135e8bd4db4510f0cbfd2b65fdc829a6c90a3edc4",
+      "client/src/quote/lib/barndominium/part-inspector.js": "2470d94a18d2173ecad2cda23cc062dfd87e6afb7679cad8bf92c2b9b98bbfc4",
+      "client/src/quote/lib/barndominium/opening-details.js": "6ca3d640f7d57633e5d2c728f7df08a8ef3ed44fda2c26a47d18358ce252ed56"
+    }
+  }
+}

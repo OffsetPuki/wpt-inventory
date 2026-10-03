@@ -20,23 +20,33 @@ export function storedMail(
     .get(deliveryKey);
   if (existing) return { ...existing, key: deliveryKey };
   const dir = path.join(dataDir, "mail-attachments");
-  const attachments = msg.attachments?.map((a) => {
-    fs.mkdirSync(dir, { recursive: true });
-    const file = crypto.randomUUID();
-    fs.writeFileSync(path.join(dir, file), a.content, { mode: 0o600 });
-    return { filename: a.filename, file };
-  });
-  const payload = JSON.stringify({ msg: { ...msg, attachments }, bcc, from });
-  sqlite
-    .prepare("INSERT INTO suite_mail(key,payload) VALUES(?,?)")
-    .run(deliveryKey, payload);
-  enqueueFollowup(`delivery:${deliveryKey}`, "mail", { key: deliveryKey });
-  return {
-    key: deliveryKey,
-    payload,
-    first_attempt_at: null,
-    accepted_at: null,
-  };
+  const created: string[] = [];
+  const cleanup = () => { for(const file of created) { try { fs.unlinkSync(path.join(dir,file)); } catch {} } };
+  try {
+    const result = sqlite.transaction(() => {
+      const attachments = msg.attachments?.map((a) => {
+        fs.mkdirSync(dir, { recursive: true });
+        const file = crypto.randomUUID();
+        fs.writeFileSync(path.join(dir,file),a.content,{mode:0o600,flag:'wx'});
+        created.push(file);
+        return {filename:a.filename,file};
+      });
+      const payload=JSON.stringify({msg:{...msg,attachments},bcc,from});
+      sqlite.prepare('INSERT INTO suite_mail(key,payload) VALUES(?,?)').run(deliveryKey,payload);
+      enqueueFollowup('delivery:'+deliveryKey,'mail',{key:deliveryKey});
+      return {key:deliveryKey,payload,first_attempt_at:null,accepted_at:null};
+    })();
+    // An outer synchronous SQLite transaction may still roll back after this
+    // returns. Verify durability on the next turn before retaining new copies.
+    setImmediate(() => {
+      try {
+        const persisted=sqlite.prepare('SELECT payload FROM suite_mail WHERE key=?').get(deliveryKey) as {payload:string}|undefined;
+        if(!persisted || persisted.payload!==result.payload) cleanup();
+      } catch { /* Database unavailable: retain for the reference audit. */ }
+    });
+    return result;
+  } catch(error) { cleanup(); throw error; }
+
 }
 export function readMail(key: string) {
   const row: any = sqlite

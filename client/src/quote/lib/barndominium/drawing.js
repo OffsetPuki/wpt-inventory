@@ -43,6 +43,16 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
    out+=poly([p(porch.x,porch.height),p(porch.x+porch.width,porch.height),p(porch.x+porch.width,outer),p(porch.x,outer)],s.roofColor,'fill-opacity=".25"');
    out+=line(p(porch.x,0),p(porch.x,outer),'stroke-width="4"')+line(p(porch.x+porch.width,0),p(porch.x+porch.width,outer),'stroke-width="4"');
   }
+  if(!framed){
+   const columns=['front','back'].includes(view)?[0,L]:framePositions(s).map(z=>view==='right'?z:D-z);
+   out+=`<g class="bd-column-guides" pointer-events="none" aria-label="${es?'Ubicación de columnas':'Column locations'}">`;
+   for(const u of columns){
+    const a=p(Math.max(0,u-.25),H),b=p(Math.min(L,u+.25),0);
+    out+=`<rect data-column-position="${round(u)}" x="${round(a[0])}" y="${round(a[1])}" width="${round(b[0]-a[0])}" height="${round(b[1]-a[1])}" fill="#e79b9b" fill-opacity=".55"/>`;
+    out+=line(p(u,0),p(u,H),'stroke="#c86f6f" stroke-width="1.5" stroke-dasharray="5 4"');
+   }
+   out+=`<rect x="30" y="88" width="12" height="12" rx="2" fill="#e79b9b"/><text x="50" y="99" font-family="Arial,sans-serif" font-size="13" fill="#8b4444">${es?'Columnas · deja las aberturas entre las marcas rojas':'Columns · keep openings between the red guides'}</text></g>`;
+  }
   for(const o of s.openings.filter(o=>o.wall===view)){
    const a=p(o.x,o.sill+o.height),b=p(o.x+o.width,o.sill),w=b[0]-a[0],h=b[1]-a[1];
    out+=`<g data-opening="${esc(o.id)}" tabindex="0" role="button" aria-label="${esc(o.kind+' '+o.id)}" style="cursor:grab"><rect x="${a[0]}" y="${a[1]}" width="${w}" height="${h}" fill="${o.kind==='window'?'#bed2d9':'#eae7df'}" stroke="${selected===o.id?'#096c8a':s.trimColor}" stroke-width="${selected===o.id?4:3}"/>`;
@@ -73,7 +83,9 @@ export function renderDrawing(s,{view='iso',mode='shell',selected='',lang='en',i
   for(const x of [0,W])for(const z of [0,D])for(const y of [0,H])corners.push(raw([x,y,z]));
   for(const z of [-s.overhang,D+s.overhang])for(const [x,y] of [[-s.overhang,H],[W/2,R],[W+s.overhang,H]])corners.push(raw([x,y,z]));
   for(const porch of s.porches)for(const u of [porch.x,porch.x+porch.width])for(const d of [0,porch.depth])for(const y of [0,porch.height-d*porch.pitch/12])corners.push(raw(wallPoint(s,porch.wall,u,y,d)));
-  for(const d of directions.filter(d=>visible.includes(d.wall)))corners.push(raw(d.point));
+  // Keep fitting continuous as faces cross the visibility boundary during rotation.
+  // Including only visible labels made the building jump in scale and position.
+  for(const d of directions)corners.push(raw(d.point));
   const minX=Math.min(...corners.map(p=>p[0])),maxX=Math.max(...corners.map(p=>p[0])),minY=Math.min(...corners.map(p=>p[1])),maxY=Math.max(...corners.map(p=>p[1]));
   const k=Math.min((compact?600:760)/(maxX-minX),400/(maxY-minY)),p=v=>{const r=raw(v);return [450+(r[0]-(minX+maxX)/2)*k,254+(r[1]-(minY+maxY)/2)*k];};
   const groundLabel=d=>{

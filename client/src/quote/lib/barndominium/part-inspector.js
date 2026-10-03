@@ -64,7 +64,7 @@ export function createPartInspector({host,canvas,scene,camera,draw,onFocus,lang=
   select.value=part.description.name;const list=groups.get(select.value),index=list.indexOf(part);count.textContent=tr('Piece ','Pieza ')+`${index+1} / ${list.length}`;
   const title=document.createElement('strong');title.textContent=part.description.name;const dl=document.createElement('dl');
   for(const [label,value] of part.description.rows){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;dl.append(dt,dd);}content.append(title,dl);
-  if(part.description.catalogUrl){const a=document.createElement('a');a.href=part.description.catalogUrl;a.target='_blank';a.rel='noopener noreferrer';a.textContent=tr('Manufacturer section catalog ↗','Catálogo de perfiles del fabricante ↗');content.append(a);}
+  if(part.description.catalogUrl){const a=document.createElement('a');a.href=part.description.catalogUrl;a.target='_blank';a.rel='noopener noreferrer';a.textContent=tr('Manufacturer section catalog','Catálogo de perfiles del fabricante');content.append(a);}
   if(panel.open){const box=new THREE.Box3().setFromObject(part.mesh);highlight=new THREE.Box3Helper(box,0xd57a16);highlight.material.depthTest=false;highlight.renderOrder=10;scene.add(highlight);}draw();
  }
  function clear(){clearHighlight();parts.forEach(p=>p.mesh.geometry.dispose());parts=[];groups=new Map();selected=null;}

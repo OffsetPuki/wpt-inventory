@@ -50,6 +50,17 @@ sqlite.exec(`
 
 sqlite.exec(`CREATE TABLE IF NOT EXISTS web_lead_receipts (submission_id TEXT PRIMARY KEY, lead_id INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
 
+if (!(sqlite.prepare('PRAGMA table_info(web_lead_receipts)').all() as {name:string}[]).some(c=>c.name==='payload_hash')) {
+  sqlite.exec('ALTER TABLE web_lead_receipts ADD COLUMN payload_hash TEXT');
+}
+
+// Parsed customer content gets a stable fingerprint; object key order is immaterial.
+function canonicalPayload(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(canonicalPayload).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.entries(value).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>JSON.stringify(k)+':'+canonicalPayload(v)).join(',') + '}';
+  return JSON.stringify(value) ?? 'null';
+}
+
 // Additive migration: the saved design-preview PNG (an /uploads URL) arrived
 // after installs existed. SQLite has no IF NOT EXISTS for columns — the throw
 // on re-run is expected.
@@ -87,9 +98,9 @@ function saveDesignPng(designPng: unknown): string | null {
   if (!m) return null;
   try {
     const buf = Buffer.from(m[1], "base64");
-    if (buf.length === 0) return null;
+    if (buf.length < 8 || !buf.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return null;
     const name = `${Date.now()}-${crypto.randomBytes(16).toString("hex")}.png`;
-    fs.writeFileSync(path.join(uploadsDir, name), buf);
+    fs.writeFileSync(path.join(uploadsDir, name), buf, {flag:"wx",mode:0o600});
     return `/uploads/${name}`;
   } catch {
     return null;
@@ -107,6 +118,8 @@ const intakeSchema = z.object({
   name: z.string().trim().min(1).max(200),
   // Which family website is submitting; absent = the original metals site.
   site: z.enum(LEAD_SITES).optional(),
+  requestedTrades: z.array(z.enum(LEAD_SITES)).max(4).optional(),
+  fulfillmentTeam: z.enum(LEAD_SITES).optional(),
   phone: z.string().trim().max(60).optional(),
   email: z.string().trim().max(200).optional(),
   service: z.string().trim().max(400).optional(),
@@ -353,16 +366,20 @@ export function registerPublicRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
 
+    const payloadHash = crypto.createHash('sha256').update(canonicalPayload({...body,site:body.site||'metals'})).digest('hex');
     if(body.submissionId) {
-      const receipt=sqlite.prepare("SELECT r.lead_id,l.site FROM web_lead_receipts r JOIN crm_leads l ON l.id=r.lead_id WHERE submission_id=? AND l.deleted_at IS NULL").get(body.submissionId) as any;
+      const receipt=sqlite.prepare("SELECT r.lead_id,r.payload_hash,l.site FROM web_lead_receipts r JOIN crm_leads l ON l.id=r.lead_id WHERE submission_id=? AND l.deleted_at IS NULL").get(body.submissionId) as any;
       if(receipt) {
-        if(receipt.site!==(body.site||'metals'))return res.status(409).json({message:'Submission belongs to another trade.'});
+        if(receipt.site!==(body.site||'metals'))return res.status(409).json({message:'Submission belongs to another website.'});
+        if(receipt.payload_hash && receipt.payload_hash!==payloadHash)return res.status(409).json({message:'This request ID was already used for different details. Submit again with a new request ID.',code:'submission_conflict'});
         return res.status(200).json({ok:true,id:receipt.lead_id,deduped:true,receiptEnabled:hasLeadReceipt(receipt.lead_id,receipt.site,body.receiptToken)});
       }
     }
     let photoUrls:string[]=[];
     try {for(const photo of body.photos || [])photoUrls.push(saveLeadPhoto(photo));}
     catch(error:any){for(const url of photoUrls){try{fs.unlinkSync(path.join(uploadsDir,path.basename(url)));}catch{}}return res.status(400).json({message:error.message});}
+    const createdFiles = [...photoUrls];
+    try {
     const {row,dupe}=sqlite.transaction(()=>{
     const source = mapSource(body.utm?.source);
     // Pre-`site` senders (the metals site before the rollout) omit the field.
@@ -371,11 +388,14 @@ export function registerPublicRoutes(app: Express): void {
     // Design-preview snapshot → /uploads file. Null when absent or unusable —
     // never a reason to reject the lead.
     const pngUrl = saveDesignPng(body.designPng);
+    if(pngUrl)createdFiles.push(pngUrl);
 
     // Everything that doesn't have a column lands in notes, so no context the
     // form captured is ever lost.
     const noteLines = [
       body.message,
+      body.requestedTrades?.length ? 'Requested trades: ' + body.requestedTrades.join(', ') : null,
+      body.fulfillmentTeam ? 'Fulfillment team: ' + body.fulfillmentTeam : null,
       ...Object.entries(body.qualification || {}).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`),
       "—",
       `From ${domain}${body.page ?? ""}${body.lang === "es" ? " (Español)" : ""}`,
@@ -549,12 +569,13 @@ export function registerPublicRoutes(app: Express): void {
 
     // A fresh submission can add photos to a recent lead. Its initial alert
     // already went out, so deliver only these new images, once per receipt.
-    if (dupe && photoUrls.length && mailEnabled()) {
+    const newImages = [...photoUrls, ...(pngUrl ? [pngUrl] : [])];
+    if (dupe && newImages.length && mailEnabled()) {
       queueOwnerMail({
-        deliveryKey: `lead-intake-photos:${body.submissionId || photoUrls[0]}`,
+        deliveryKey: `lead-intake-photos:${body.submissionId || newImages[0]}`,
         subject: `[CJM Suite] New request photos — ${body.name}`,
-        text: `${photoUrls.length} new photo(s) attached to lead #${row.id}.\n\n${body.message || ''}\n\nView the request and all photos:\n${leadPhotoLink(row.id)}`,
-        attachments: leadPhotoAttachments(row.id, photoUrls),
+        text: `${newImages.length} new photo(s) attached to lead #${row.id}.\n\n${body.message || ''}\n\nView the request and all photos:\n${leadPhotoLink(row.id)}`,
+        attachments: leadPhotoAttachments(row.id, newImages),
       });
     }
 
@@ -573,12 +594,17 @@ export function registerPublicRoutes(app: Express): void {
       }
     }
 
-    if(body.submissionId)sqlite.prepare("INSERT INTO web_lead_receipts (submission_id,lead_id,created_at) VALUES (?,?,?)").run(body.submissionId,row.id,Date.now());
+    if(body.submissionId)sqlite.prepare("INSERT INTO web_lead_receipts (submission_id,lead_id,created_at,payload_hash) VALUES (?,?,?,?)").run(body.submissionId,row.id,Date.now(),payloadHash);
     return {row,dupe};
     })();
     res.status(201).json(
       { ok: true, id: row.id, deduped: !!dupe, receiptEnabled: hasLeadReceipt(row.id, body.site || 'metals', body.receiptToken) },
     );
+    } catch(error) {
+      for(const url of createdFiles) { try { fs.unlinkSync(path.join(uploadsDir,path.basename(url))); } catch {} }
+      console.error('[lead-intake] persistence failed', error instanceof Error ? error.message : 'unknown error');
+      return res.status(503).json({message:'We could not save this request. Please try again.'});
+    }
   });
 
   // ─── Read-only public feeds ───────────────────────────────────────────────

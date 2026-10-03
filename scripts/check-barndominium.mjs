@@ -15,7 +15,7 @@ const collision=fresh();collision.openings.push({...collision.openings[0],id:'ov
 const column=fresh();column.openings=[{id:'garage',kind:'overhead',wall:'right',x:16,width:10,height:10,sill:0}];assert.ok(validate(column).some(e=>e.code==='column'));
 column.openings[0].x=5;assert.deepEqual(validate(column),[]);
 const outside=fresh();outside.openings[0].height=13;assert.ok(validate(outside).some(e=>e.code==='opening-bounds'));
-const porch=fresh();porch.porches=[{id:'porch',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];assert.deepEqual(validate(porch),[]);assert.ok(takeoff(porch).porchRoof>128);porch.porches[0].height=6;assert.ok(validate(porch).some(e=>e.code==='porch-opening'));
+const porch=fresh();porch.porches=[{id:'porch',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];assert.ok(validate(porch).some(e=>e.code==='porch-access'));porch.openings[0].x=3;assert.deepEqual(validate(porch),[]);assert.ok(takeoff(porch).porchRoof>128);porch.porches[0].height=6;assert.ok(validate(porch).some(e=>e.code==='porch-opening'));
 for(const [key,value] of [['width',Infinity],['depth',-2],['pitch',0],['bay',0]]){const bad=fresh();bad[key]=value;assert.ok(validate(bad).length);}
 assert.equal(normalize({wallColor:'<script>'}).wallColor,s.wallColor);
 for(const view of ['iso','plan','front','back','left','right'])for(const mode of ['shell','frame','insulation']){const svg=renderDrawing(s,{view,mode});assert.ok(!svg.includes('NaN'));assert.ok(!svg.includes('undefined'));}
@@ -29,8 +29,5 @@ assert.ok(quoteSpecs.some(r=>r.label==='Building'));
 assert.ok(spec(s,'es').some(([k])=>k==='Edificio'));
 const ls=buildLineState('barndominium',s,DEFAULT_PRICE_BOOK,{});assert.ok(ls.items.some(i=>i.key==='building-cee'&&i.unpriced));assert.ok(ls.items.some(i=>i.key==='building-zee'));assert.ok(!ls.items.some(i=>i.key==='building-wall-insulation'));
 const insulated={...s,wallInsulation:'fiberglass',roofInsulation:'spray-foam'};const edited=buildLineState('barndominium',insulated,DEFAULT_PRICE_BOOK,{items:{'building-cee':{rate:4.5}}});assert.equal(edited.items.find(i=>i.key==='building-cee').rate,4.5);assert.ok(edited.items.some(i=>i.key==='building-wall-insulation'));
-// Geometry must match. Viewer/editor adapters intentionally differ: the Suite has
-// frame inspection, quote exports and mouse containment unavailable on the public builder.
-const website=new URL('../../CJM/src/lib/barndominium/',import.meta.url);
-if(fs.existsSync(website))for(const name of ['model.js','drawing.js','editor.css','panels.js','framing3d.js','wall-framing.js','bolted-frame.js','part-inspector.js','opening-details.js'])assert.equal(fs.readFileSync(new URL(name,website),'utf8'),fs.readFileSync(new URL('../client/src/quote/lib/barndominium/'+name,import.meta.url),'utf8'),name+' must match between apps');
+await import('./check-shared-contracts.mjs');
 console.log('Barndominium geometry, constraints, takeoff, import, rates and shared-code parity passed.');

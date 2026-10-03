@@ -19,7 +19,7 @@ async function checkViewerMouse(page,canvas){
 }
 test('Website design imports, edits, persists and produces a quote specification',async({page})=>{
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
- const state=fresh();state.depth=64;state.porches=[{id:'porch-site',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];
+ const state=fresh();state.depth=64;state.openings[0].x=3;state.porches=[{id:'porch-site',wall:'front',x:0,width:16,depth:8,height:11,pitch:2}];
  const lead=await app.api('/api/public/leads','POST',{site:'metals',name:'Barndo customer',email:'barndo@example.test',service:'Barndominium',designRef:'CJM-B123ABC',designSource:'configurator-barndominium',designSpec:spec(state).map(r=>r.join(': ')).join('\n'),designState:JSON.stringify({type:'barndominium',state})},undefined,{'X-Lead-Key':'test-intake-key'});
  expect(lead.status).toBe(201);
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);
