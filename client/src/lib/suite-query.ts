@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { apiRequest } from "./queryClient";
 export function useSuiteQuery<T = any>(
   key: any[],

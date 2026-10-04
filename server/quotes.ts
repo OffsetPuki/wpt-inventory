@@ -24,7 +24,6 @@ import { onQuoteEvent, logEmailActivity } from "./crm";
 import { mailEnabled, sendMail } from "./mailer";
 import { renderTemplate, firstNameOf } from "./email-templates";
 import { insertNumbered } from "./finance";
-import { isElevated } from "./http-util";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the costing
 // report and buy list price with EXACTLY the math the builder uses. Same

@@ -1,13 +1,15 @@
+import {ActiveFilters} from '@/components/ActiveFilters';
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import DocumentActivityButton from '@/components/DocumentActivity';
 import InvoicePaymentEditor from '@/components/InvoicePaymentEditor';
 import { defaultPaymentOptions, invoicePaymentOptionsSchema, readPaymentOptions, type InvoicePaymentOptions } from '@shared/invoice-payment-options';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
-import { useRecordLink, readContext } from "@/lib/record-link";
+import { readContext } from "@/lib/record-link";
 import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { useApiMutation } from "@/hooks/useApiMutation";
@@ -1563,8 +1565,9 @@ const TABS: { key: string; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
-  const [tab, setTab] = useRememberedState("client/src/pages/finance/invoices.tsx:tab",readContext("status"));
+  const [tab, setTab] = useRememberedState("client/src/pages/finance/invoices.tsx:tab",readContext("status"), "status");
   const [q, setQ] = useRememberedState("client/src/pages/finance/invoices.tsx:q","");
+  useEffect(()=>{const apply=()=>{if(readContext('status'))setQ('');};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
   const [newOpen, setNewOpen] = useState(()=>readContext("new")==="1");
   const invoiceLink = useDeepLink("invoice");
   const [detailId, setDetailId] = useState<number | null>(invoiceLink ? Number(invoiceLink) : null);
@@ -1622,6 +1625,7 @@ export default function InvoicesPage() {
         />
       </div>
 
+      <ActiveFilters filters={[tab&&`Status: ${tab}`,q&&`Search: ${q}`]} onReset={()=>{setTab('');setQ('');setPage(0);}}/>
       <PageButtons page={page} setPage={setPage} count={rows.length}/>
       {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />

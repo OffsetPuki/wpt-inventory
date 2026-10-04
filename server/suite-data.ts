@@ -69,6 +69,7 @@ export function initializeSuite() {
     ],
     marketing: ["mk_portfolio", "mk_reviews", "mk_settings", "mk_spend_entries", "mk_preferences", "mk_campaign_links"],
     team: [
+      "users",
       "hr_employees",
       "hr_leave_requests",
       "hr_pay_rates", "hr_labor_policies",
@@ -107,15 +108,40 @@ export function jobRecord(id: number): any {
   if (!row) throw Object.assign(new Error("Job not found."), { status: 404 });
   return row;
 }
-export function jobMaterials(id: number) {
-  const rows = sqlite
+
+type ReadinessBatch = ReturnType<typeof loadReadiness>;
+function group(rows:any[],key:string){const m=new Map<number,any[]>();for(const row of rows){const id=row[key];const list=m.get(id);if(list)list.push(row);else m.set(id,[row]);}return m;}
+function loadReadiness(ids:number[]){
+ const json=JSON.stringify(ids), all=(q:string,...params:any[])=>sqlite.prepare(q).all(...params) as any[];
+ const jobs=all('SELECT * FROM projects WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL',json);
+ const rules=all('SELECT * FROM suite_job_rules WHERE project_id IN (SELECT value FROM json_each(?))',json);
+ const tasks=all("SELECT * FROM pm_tasks WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND status!='done'",json);
+ const crew=JSON.stringify([...new Set(tasks.map(t=>t.assignee_id).filter(Boolean))]);
+ const dates=jobs.flatMap(j=>[j.start_date,j.due_date]).filter(Boolean).sort(),from=dates[0]||'',to=dates.at(-1)||'';
+ const overlaps=all("SELECT id,title,assignee_id,project_id,coalesce(start_date,due_date) start_date,coalesce(due_date,start_date) due_date FROM pm_tasks WHERE assignee_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND status!='done' AND coalesce(start_date,due_date)<=? AND coalesce(due_date,start_date)>=?",crew,to,from);
+ const leave=all("SELECT l.*,e.user_id FROM hr_leave_requests l JOIN hr_employees e ON e.id=l.employee_id WHERE e.user_id IN (SELECT value FROM json_each(?)) AND l.status='approved' AND l.start_date<=? AND l.end_date>=?",crew,to,from);
+ const materials=all(`SELECT c.*,i.name AS item_name,i.unit AS stock_unit,i.quantity,i.quantity_reserved,i.last_cost_cents,i.supplier,i.material_key,coalesce((SELECT sum(r.quantity) FROM inventory_reservations r WHERE r.checklist_id=c.id),0) reserved FROM project_checklist c LEFT JOIN items i ON i.id=c.item_id AND i.deleted_at IS NULL WHERE c.project_id IN (SELECT value FROM json_each(?)) ORDER BY c.id`,json);
+ const orders=all("SELECT id,project_id,number,items,expected_date FROM fin_purchase_orders WHERE project_id IN (SELECT value FROM json_each(?)) AND order_type='supplier' AND status IN ('open','sent') AND deleted_at IS NULL",json);
+ const receipts=all('SELECT po_id,line_index,sum(quantity) n FROM inventory_receipts WHERE po_id IN (SELECT value FROM json_each(?)) GROUP BY po_id,line_index',JSON.stringify(orders.map(o=>o.id)));
+ const invoices=all("SELECT project_id,deposit_cents,paid_cents FROM fin_invoices WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND status!='void'",json);
+ const docs=all("SELECT project_id,kind FROM pm_documents WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>=date('now','localtime'))",json);
+ const accepted=all("SELECT id FROM quotes WHERE id IN (SELECT value FROM json_each(?)) AND status='accepted' AND deleted_at IS NULL",JSON.stringify(jobs.map(j=>j.quote_id).filter(Boolean)));
+ const toolIds=JSON.stringify([...new Set(rules.flatMap(r=>JSON.parse(r.tools)))]);
+ const tools=all('SELECT id,name,quantity,quantity_reserved FROM items WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL',toolIds);
+ const toolJobs=all("SELECT p.id,p.name,p.start_date,p.due_date,tool.value item_id FROM suite_job_rules r JOIN projects p ON p.id=r.project_id JOIN json_each(r.tools) tool WHERE tool.value IN (SELECT value FROM json_each(?)) AND p.status='active' AND p.schedule_state='confirmed' AND p.deleted_at IS NULL AND p.start_date<=? AND p.due_date>=?",toolIds,to,from);
+ return {jobs:new Map(jobs.map(j=>[j.id,j])),rules:new Map(rules.map(r=>[r.project_id,r])),tasks:group(tasks,'project_id'),overlaps:group(overlaps,'assignee_id'),leave:group(leave,'user_id'),materials:group(materials,'project_id'),orders:group(orders,'project_id'),receipts:new Map(receipts.map(r=>[r.po_id+':'+r.line_index,r.n])),invoices:group(invoices,'project_id'),docs:group(docs,'project_id'),accepted:new Set(accepted.map(q=>q.id)),tools:new Map(tools.map(t=>[t.id,t])),toolJobs:group(toolJobs,'item_id')};
+}
+export function jobReadinessMany(ids:number[]){if(!ids.length)return new Map<number,ReturnType<typeof jobReadiness>>();const batch=loadReadiness(ids);return new Map(ids.map(id=>[id,jobReadiness(id,batch)]));}
+
+export function jobMaterials(id: number, batch?: ReadinessBatch) {
+  const rows = batch ? batch.materials.get(id)||[] : sqlite
     .prepare(
       `SELECT c.*,i.name AS item_name,i.unit AS stock_unit,i.quantity,i.quantity_reserved,i.last_cost_cents,i.supplier,i.material_key,
     coalesce((SELECT sum(r.quantity) FROM inventory_reservations r WHERE r.checklist_id=c.id),0) AS reserved
     FROM project_checklist c LEFT JOIN items i ON i.id=c.item_id AND i.deleted_at IS NULL WHERE c.project_id=? ORDER BY c.id`,
     )
     .all(id) as any[];
-  const orders = sqlite
+  const orders = batch ? batch.orders.get(id)||[] : sqlite
     .prepare(
       "SELECT id,number,items,expected_date FROM fin_purchase_orders WHERE project_id=? AND order_type='supplier' AND status IN ('open','sent') AND deleted_at IS NULL",
     )
@@ -128,7 +154,7 @@ export function jobMaterials(id: number) {
     } catch {}
     lines.forEach((line, index) => {
       if (!line.inventoryItemId) return;
-      const received = (
+      const received = batch ? batch.receipts.get(po.id+':'+index)||0 : (
         sqlite
           .prepare(
             "SELECT coalesce(sum(quantity),0) AS n FROM inventory_receipts WHERE po_id=? AND line_index=?",
@@ -173,18 +199,18 @@ export function jobMaterials(id: number) {
     };
   });
 }
-export function jobReadiness(id: number) {
-  const job = jobRecord(id),
-    materials = jobMaterials(id);
-  const rules: any = sqlite
+export function jobReadiness(id: number, batch?: ReadinessBatch) {
+  const job = batch ? batch.jobs.get(id) : jobRecord(id), materials = jobMaterials(id,batch);
+  if(!job)throw Object.assign(new Error('Job not found.'),{status:404});
+  const rules: any = (batch ? batch.rules.get(id) : sqlite
     .prepare("SELECT * FROM suite_job_rules WHERE project_id=?")
-    .get(id) || { deposit_required: 0, documents_required: "[]", tools: "[]" };
-  const tasks = sqlite
+    .get(id)) || { deposit_required: 0, documents_required: "[]", tools: "[]" };
+  const tasks = batch ? batch.tasks.get(id)||[] : sqlite
     .prepare(
       "SELECT * FROM pm_tasks WHERE project_id=? AND deleted_at IS NULL AND status!='done'",
     )
     .all(id) as any[];
-  const invoices = sqlite
+  const invoices = batch ? batch.invoices.get(id)||[] : sqlite
     .prepare(
       "SELECT * FROM fin_invoices WHERE project_id=? AND deleted_at IS NULL AND status!='void'",
     )
@@ -193,7 +219,7 @@ export function jobReadiness(id: number) {
     (sum, i) => sum + Math.max(0, (i.deposit_cents || 0) - i.paid_cents),
     0,
   );
-  const docs = sqlite
+  const docs = batch ? batch.docs.get(id)||[] : sqlite
     .prepare(
       "SELECT kind FROM pm_documents WHERE project_id=? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>=date('now','localtime'))",
     )
@@ -209,11 +235,11 @@ export function jobReadiness(id: number) {
     });
   if (
     job.quote_id &&
-    !sqlite
+    !(batch ? batch.accepted.has(job.quote_id) : sqlite
       .prepare(
         "SELECT 1 FROM quotes WHERE id=? AND status='accepted' AND deleted_at IS NULL",
       )
-      .get(job.quote_id)
+      .get(job.quote_id))
   )
     blockers.push({
       kind: "approval",
@@ -251,15 +277,15 @@ export function jobReadiness(id: number) {
     for (const uid of new Set(
       tasks.map((t) => t.assignee_id).filter(Boolean),
     )) {
-      const overlaps = sqlite
+      const overlaps = batch ? (batch.overlaps.get(uid)||[]).filter(t=>t.project_id!==id && t.start_date<=job.due_date && t.due_date>=job.start_date) : sqlite
         .prepare(
           `SELECT t.id,t.title FROM pm_tasks t WHERE t.assignee_id=? AND t.project_id IS NOT ? AND t.deleted_at IS NULL AND t.status!='done'
       AND coalesce(t.start_date,t.due_date)<=? AND coalesce(t.due_date,t.start_date)>=?`,
         )
         .all(uid, id, job.due_date, job.start_date);
       for (const task of overlaps)
-        conflicts.push({ kind: "crew", userId: uid, ...(task as any) });
-      const leave = sqlite
+        conflicts.push({ kind: "crew", userId: uid, id:task.id, title:task.title });
+      const leave = batch ? (batch.leave.get(uid)||[]).filter(l=>l.start_date<=job.due_date&&l.end_date>=job.start_date) : sqlite
         .prepare(
           `SELECT l.id FROM hr_leave_requests l JOIN hr_employees e ON e.id=l.employee_id WHERE e.user_id=? AND l.status='approved' AND l.start_date<=? AND l.end_date>=?`,
         )
@@ -272,7 +298,7 @@ export function jobReadiness(id: number) {
         });
     }
   for (const itemId of tools) {
-    const item: any = sqlite
+    const item: any = batch ? batch.tools.get(itemId) : sqlite
       .prepare(
         "SELECT name,quantity,quantity_reserved FROM items WHERE id=? AND deleted_at IS NULL",
       )
@@ -283,7 +309,7 @@ export function jobReadiness(id: number) {
         title: item?.name || "Required tool unavailable",
       });
     if (job.start_date && job.due_date) {
-      const other = sqlite
+      const other = batch ? (batch.toolJobs.get(itemId)||[]).filter(p=>p.id!==id && p.start_date<=job.due_date && p.due_date>=job.start_date) : sqlite
         .prepare(
           `SELECT p.name FROM suite_job_rules r JOIN projects p ON p.id=r.project_id JOIN json_each(r.tools) tool
         WHERE tool.value=? AND p.id!=? AND p.status='active' AND p.schedule_state='confirmed' AND p.deleted_at IS NULL AND p.start_date<=? AND p.due_date>=?`,

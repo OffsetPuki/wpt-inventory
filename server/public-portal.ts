@@ -10,8 +10,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage } from "./storage";
 import { hasLeadKey } from "./public-api";
-import { mailEnabled, sendMail, sendOwnerMail, optOutEmail } from "./mailer";
-import { renderTemplate, firstNameOf } from "./email-templates";
+import { mailEnabled, sendOwnerMail, optOutEmail } from "./mailer";
 import { renderPublicPage } from "./legal";
 import { parseJson } from "./quotes";
 import {
@@ -19,18 +18,14 @@ import {
   type Quote, type QuoteDeclineReason,
 } from "../shared/quote-schema";
 import { reviews, marketingSettings } from "../shared/marketing-schema";
-import { pmTasks } from "../shared/pm-schema"; // Package C: tasks live on the pm board
 import { todayLocal, pid, usd } from "./http-util";
 import { requireElevated } from "./auth";
 import { clients, WIN_LOSS_REASON_LABELS } from "../shared/crm-schema";
-import { invoices } from "../shared/finance-schema";
-import { projects } from "../shared/schema";
-import { onQuoteEvent, findOrCreateClientByContact, logEmailActivity } from "./crm";
-import { insertNumbered } from "./finance";
+import { onQuoteEvent } from "./crm";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
 // prices a design with EXACTLY the math the builder and the printed quote use.
-import { deriveItems, lineCost, buildLineState, materialTotals, foldGroups } from "../client/src/quote/lib/estimate.js";
+import { deriveItems, lineCost, buildLineState, foldGroups } from "../client/src/quote/lib/estimate.js";
 import { computeTotals } from "../client/src/quote/lib/quote.js";
 import { distributeToTotal } from "../client/src/quote/lib/calc.js";
 // The same three helpers the builder uses to describe the design, so the
@@ -722,7 +717,6 @@ export function registerPublicPortalRoutes(app: Express): void {
   app.get("/api/public/review-request/:token", publicLimiter(60), (req, res) => {
     const rr = findReviewRequest(String(req.params.token));
     if (!rr) return res.json({ ok: false, reason: "unknown" });
-    const leadId=rr.lead_id ?? (rr.invoice_id == null ? null : (sqlite.prepare('SELECT COALESCE(i.lead_id,p.lead_id,q.lead_id) lead_id FROM fin_invoices i LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN quotes q ON q.id=i.quote_id WHERE i.id=?').get(rr.invoice_id) as any)?.lead_id);
     const site=resolveReviewSite(rr);
     const profiles:Record<string,{brand:string;googleProfileUrl:string}>={
       metals:{brand:'CJM Metals',googleProfileUrl:'https://maps.google.com/?cid=15884306771721707171'},

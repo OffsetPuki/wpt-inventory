@@ -1,10 +1,9 @@
+import {JOB_STATUS_LABELS} from "@shared/suite-contracts";
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { ExtraBilling } from "./suite-reviews";
 import { useSuiteQuery } from "@/lib/suite-query";
 import { lazy, Suspense, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { useDeepLink } from "@/lib/deep-link";
 import { useFormDraft } from "@/lib/form-draft";
@@ -18,10 +17,10 @@ import Header from "@/components/Header";
 const Checklist = lazy(() => import("@/components/ProjectChecklist"));
 const Documents = lazy(() => import("@/components/DocumentsCard"));
 const Contracts = lazy(() =>
-  import("./project-detail").then((m) => ({ default: m.ContractsCard })),
+  import("../components/JobAgreementCards").then((m) => ({ default: m.ContractsCard })),
 );
 const Changes = lazy(() =>
-  import("./project-detail").then((m) => ({ default: m.ChangeOrdersCard })),
+  import("../components/JobAgreementCards").then((m) => ({ default: m.ChangeOrdersCard })),
 );
 const Publish = lazy(() => import("./job-publish"));
 const TaskDialog = lazy(() =>
@@ -36,7 +35,7 @@ const Card = ({ title, children }: { title: string; children: any }) => (
 
 export default function JobWorkspace({ id }: { id: string }) {
   const { isElevated } = useAuth();
-  const [, navigate] = useLocation();
+  const [] = useLocation();
   const current = useDeepLink("tab");
   const tab = [
     "overview",
@@ -95,7 +94,7 @@ export default function JobWorkspace({ id }: { id: string }) {
       </Link>
       <Header
         title={j.name}
-        description={`${j.job_number} · ${j.site} · ${j.status.replace("_", " ")}`}
+        description={`${j.job_number} · ${j.site} · ${JOB_STATUS_LABELS[j.status]||j.status}`}
       />
       <div className="flex flex-wrap gap-2">
         <button
@@ -124,6 +123,7 @@ export default function JobWorkspace({ id }: { id: string }) {
           </>
         )}
       </div>
+      <div className="flex flex-wrap gap-3 text-sm" aria-label="Connected records">{isElevated&&j.client_id&&<Link className="rounded-full border px-3 py-2 hover:bg-muted" href={`/crm/clients?client=${j.client_id}`}>Customer history</Link>}{isElevated&&j.quote_id&&<Link className="rounded-full border px-3 py-2 hover:bg-muted" href={`/crm/quotes?quote=${j.quote_id}`}>Linked quote</Link>}<Link className="rounded-full border px-3 py-2 hover:bg-muted" href={`/pm/time?projectId=${id}`}>Job hours</Link></div>
       <nav
         aria-label="Job sections"
         className="flex gap-1 overflow-x-auto border-b pb-2"
@@ -295,7 +295,7 @@ export default function JobWorkspace({ id }: { id: string }) {
           <TaskDialog
             open
             task={null}
-            projects={[project]}
+           
             users={people.data as any}
             isElevated={isElevated}
             defaultProjectId={Number(id)}
@@ -1073,6 +1073,7 @@ function JobActivity({ id }: { id: number }) {
   );
 }
 function JobFiles({ id }: { id: number }) {
+  const sources=useSuiteQuery<any[]>(['suite-files','sources',id],`/api/suite/jobs/${id}/source-files`);
   const [kind, setKind] = useState("photo");
   const q = useSuiteQuery<any[]>(
     ["suite-files", id],
@@ -1107,6 +1108,8 @@ function JobFiles({ id }: { id: number }) {
   });
   return (
     <Card title="Photos, drawings & measurements">
+      <p className="mb-4 text-sm text-muted-foreground">One history of this job’s request, designs and files. Uploads here stay with your team; customer sharing happens in Design Studio.</p>
+      {sources.isError?<RetryBlock query={sources}/>:!!sources.data?.length&&<div className="mb-5 grid gap-3 sm:grid-cols-2">{sources.data.map(f=><a key={f.id} href={f.url} className="rounded-xl border p-3 hover:bg-muted" target="_blank" rel="noreferrer">{f.image&&<img src={f.url} alt={f.title} loading="lazy" className="mb-2 aspect-video w-full rounded-lg object-cover"/>}<strong className="text-sm">{f.title}</strong><p className="text-xs text-muted-foreground">{f.source} · {f.visibility}</p></a>)}</div>}
       <form
         className="mb-5 space-y-3"
         onSubmit={(e) => {
@@ -1205,7 +1208,7 @@ function JobFiles({ id }: { id: number }) {
                 {q.data.some((n) => n.replaces_id === f.id)
                   ? "Older revision"
                   : "Current"}{" "}
-                · {f.user_name}
+                · Team only · {f.user_name}
               </p>
             </a>
           ))}

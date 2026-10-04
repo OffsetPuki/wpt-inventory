@@ -1,3 +1,4 @@
+import {listWindow} from "./pagination";
 import { registerShareLinks } from './share-links';
 import { registerCustomerPreviews } from "./customer-previews";
 import { registerDocumentActivity } from "./document-activity";
@@ -466,7 +467,7 @@ export function registerRoutes(app: Express): void {
   // ─── Projects ───────────────────────────────────────────────────────────
 
   app.get("/api/projects", requireAuth, (req, res) => {
-    res.json(storage.getProjects());
+    const window=listWindow(req);res.json(storage.getProjects({site:String(req.query.site||'all'),q:String(req.query.q||''),limit:window.limit,offset:window.offset}));
   });
 
   // Same path-ordering reason as /api/items/deleted: must come before :id.

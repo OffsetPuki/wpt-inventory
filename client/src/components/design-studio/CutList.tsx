@@ -1,6 +1,6 @@
 import {useDeferredValue,useMemo,useState} from 'react';
-import {Download,Search,ArrowUpRight} from 'lucide-react';
-import type {ShopCatalog,ShopPart} from './types';
+import {Download,ArrowUpRight} from 'lucide-react';
+import type {ShopCatalog} from './types';
 import {dimension,exactMm} from './fractions';
 import {useUnit} from './MeasurementContext';
 import {cutCsv,downloadFile,fitNotes,stockName} from './manufacturing';

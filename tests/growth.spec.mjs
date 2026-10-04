@@ -85,6 +85,8 @@ test("Marketing report works on mobile and desktop without Google credentials", 
 });
 
 test('Marketing failures show recovery and current-period errors cannot be hidden',async({page})=>{
+ // Keep this test focused on the explicit Retry path; live recovery is covered separately.
+ await page.route('**/api/suite/events',route=>route.abort());
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
  await page.route('**/api/marketing/settings',route=>route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({message:'Synthetic failure'})}));
  await page.goto(app.base+'/#/marketing?tab=settings');

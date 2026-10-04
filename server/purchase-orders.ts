@@ -1,6 +1,6 @@
 import type { Express, Request } from 'express';
 import { z } from 'zod';
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, desc, and, isNull, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,11 +8,13 @@ import { sqlite, db, uploadsDir } from './storage';
 import { requireElevated } from './auth';
 import { purchaseOrders, insertPurchaseOrderSchema } from '../shared/finance-schema';
 import { orderInputSchema, orderTotals, ORDER_TRANSITIONS, emptyOrderDetails, ORDER_STATUSES } from '../shared/purchase-orders';
-import { parseLineItems, computeDocTotals } from '../shared/biz-common';
+import { computeDocTotals } from '../shared/biz-common';
 import { insertNumbered } from './numbering';
 import { docUpload, DOC_EXT_TO_MIME } from './pm';
 import { receivePoRemaining } from './inventory-receiving';
 import { audit } from './audit';
+import {listWindow} from './pagination';
+import {businessScope} from './business-scope';
 import { pid } from './http-util';
 import { specRows, summaryLine, finishLabel } from '../client/src/quote/data/configurators.js';
 import { quoteBusiness } from '../shared/business.js';
@@ -174,14 +176,14 @@ export function registerPurchaseOrders(app: Express) {
     });
     route('get', '/api/finance/purchase-orders/quote/:id', req => quoteData(pid(req.params.id)));
     route('get', '/api/finance/purchase-orders', req => {
-        let rows = db.select().from(purchaseOrders).where(isNull(purchaseOrders.deletedAt)).orderBy(desc(purchaseOrders.id)).all();
-        if (req.query.orderType)
-            rows = rows.filter(r => r.orderType === req.query.orderType);
-        if (req.query.status)
-            rows = rows.filter(r => r.status === req.query.status);
-        const needle = String(req.query.q || '').toLowerCase();
-        if (needle)
-            rows = rows.filter(r => [r.number, r.vendor, r.customerName, r.customerPoNumber, r.customerProjectNumber].some(v => v.toLowerCase().includes(needle)));
+        const filters=[isNull(purchaseOrders.deletedAt)];
+        if(req.query.orderType)filters.push(eq(purchaseOrders.orderType,z.enum(['supplier','customer']).parse(req.query.orderType)));
+        if(req.query.status)filters.push(eq(purchaseOrders.status,z.enum(ORDER_STATUSES).parse(req.query.status)));
+        const needle=String(req.query.q||'').trim().toLowerCase();
+        if(needle)filters.push(sql`instr(lower(${purchaseOrders.number}||' '||${purchaseOrders.vendor}||' '||${purchaseOrders.customerName}||' '||${purchaseOrders.customerPoNumber}||' '||${purchaseOrders.customerProjectNumber}),${needle})>0`);
+        filters.push(sql.raw(businessScope(req,"coalesce((SELECT site FROM projects WHERE id=fin_purchase_orders.project_id),CASE WHEN json_valid(fin_purchase_orders.details) THEN json_extract(fin_purchase_orders.details,'$.business') END)")));
+        const win=listWindow(req);
+        const rows=db.select().from(purchaseOrders).where(and(...filters)).orderBy(desc(purchaseOrders.id)).limit(win.limit).offset(win.offset).all();
         return rows.map(present);
     });
     // /detail avoids the older suite's lightweight GET /:id handler.

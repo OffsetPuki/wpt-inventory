@@ -9,7 +9,7 @@ import type { PublicUser, Role } from "@shared/schema";
 import { formatDate } from "@/lib/format";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
-import { UserPlus, Trash2, Loader2, ShieldCheck, HardHat } from "lucide-react";
+import { UserPlus, Loader2, ShieldCheck, HardHat } from "lucide-react";
 
 // One source of truth for how each role is labelled and badged in the UI.
 // Legacy manager/technician rows (pre-collapse) display as Owner.

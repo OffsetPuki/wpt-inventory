@@ -1,3 +1,6 @@
+import {buildQuoteProduct} from '../client/src/quote/lib/quote-product.js';
+import {Box3,Vector3} from 'three';
+import {disposeProduct} from '../client/src/quote/lib/product-studio.js';
 // =============================================================================
 //  Trade types check — concrete + insulation build types, sister-site refs and
 //  designState envelopes, end to end against the sister sites' published math.
@@ -10,8 +13,6 @@ import { deriveItems, buildLineState, deriveWarnings, lineCost } from '../client
 import { defaultState, summaryLine, specRows } from '../client/src/quote/data/configurators.js';
 import { normalizeRef, refTool } from '../client/src/quote/lib/refs.js';
 import { parseLead } from '../client/src/quote/lib/designSpec.js';
-import { renderConcrete } from '../client/src/quote/lib/preview/concrete.js';
-import { renderInsulation } from '../client/src/quote/lib/preview/insulation.js';
 
 let failures = 0;
 function check(name, cond, detail = '') {
@@ -204,15 +205,13 @@ console.log('\nWebsite designState envelopes:');
   check('bare sister lead opens concrete at defaults', bare?.type === 'concrete' && bare?.state.project === 'driveway' && bare?.hasSpec === false);
 }
 
-// ── Previews stay renderable strings ─────────────────────────────────────────
-console.log('\nPreviews:');
-{
-  const slab = renderConcrete(defaultState('concrete'));
-  check('concrete plan renders joints + dims', slab.includes('stroke-dasharray') && slab.includes("30'"), slab.slice(0, 80));
-  const pipe = renderInsulation(defaultState('insulation'));
-  check('pipe section renders the cutaway', pipe.includes('<circle') && pipe.includes('350°F'));
-  const clave = renderInsulation({ ...defaultState('insulation'), system: 'autoclave' });
-  check('autoclave section renders', clave.includes('<path') && clave.includes('⌀'));
+// Exercise the active 3D models, not retired SVG renderers.
+for(const [type,state] of [['concrete',defaultState('concrete')],['insulation',defaultState('insulation')],['insulation',{...defaultState('insulation'),system:'autoclave'}]]){
+ const model=await buildQuoteProduct(type,state),size=new Box3().setFromObject(model).getSize(new Vector3());
+ check(type+' active model has finite, positive bounds',size.toArray().every(n=>Number.isFinite(n)&&n>0));
+ if(type==='concrete')check('slab model matches quoted dimensions',Math.abs(size.x-Number(state.widthFt))<.001&&Math.abs(size.z-Number(state.lengthFt))<.001&&Math.abs(size.y-Number(state.thickness)/12)<.001);
+ else check('insulation model includes shell, core and end section',model.children.length===3);
+ disposeProduct(model);
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);

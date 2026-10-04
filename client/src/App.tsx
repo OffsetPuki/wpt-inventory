@@ -72,18 +72,20 @@ function ElevatedRoute({ children }: { children: ReactNode }) {
 // ─── Root redirect based on role ────────────────────────────────────────────
 
 function RoleRedirect() {
-  const { isElevated } = useAuth();
+  useAuth();
   return <Redirect to="/today" />;
 }
 
 // ─── Root app component ─────────────────────────────────────────────────────
 
 export default function App() {
-  const { isLoading, isAuthenticated, user } = useAuth();
+  const { isLoading, isAuthenticated, user, recoveryError, retrySession } = useAuth();
 
   if (isLoading) {
     return <LoadingSpinner />;
   }
+
+  if (recoveryError) return <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-5 p-6"><h1 className="text-2xl font-semibold">Let’s reconnect</h1><p role="status" className="text-muted-foreground">{recoveryError}</p><button className="min-h-12 rounded-xl bg-primary px-5 py-3 text-primary-foreground" onClick={retrySession}>Try again</button></main>;
 
   if (!isAuthenticated) {
     return (

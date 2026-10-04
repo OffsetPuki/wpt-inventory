@@ -23,6 +23,13 @@ export function registerRecordVersions(app: Express) {
    CREATE TRIGGER IF NOT EXISTS suite_version_${table}_update AFTER UPDATE ON ${table} BEGIN UPDATE suite_record_versions SET version=version+1 WHERE entity='${resource}' AND id=NEW.id; END;`);
   }
   app.use("/api", (req, res, next) => {
+    if(!['GET','HEAD','OPTIONS'].includes(req.method)){
+      const send=res.json.bind(res);
+      res.json=((body:any)=>{
+        if(res.statusCode<300 && req.user){const rows=sqlite.prepare('SELECT topic,version FROM suite_revisions').all().filter((r:any)=>['owner','manager'].includes(req.user!.role)||r.topic!=='finance');res.setHeader('X-Suite-Revisions',JSON.stringify(rows));}
+        return send(body);
+      }) as typeof res.json;
+    }
     const match = req.path.match(
       /^\/(crm\/clients|crm\/leads|hr\/employees|pm\/tasks|pm\/contracts|pm\/change-orders|finance\/invoices|finance\/expenses|finance\/purchase-orders|projects)(?:\/(\d+)(?:\/detail)?)?$/,
     );
@@ -31,16 +38,11 @@ export function registerRecordVersions(app: Express) {
       if (req.method === "GET") {
         const send = res.json.bind(res);
         res.json = ((body: any) => {
-          const add = (row: any) => {
-            if (!row || typeof row !== "object" || !Number.isInteger(row.id))
-              return row;
-            const v: any = sqlite
-              .prepare(
-                "SELECT version FROM suite_record_versions WHERE entity=? AND id=?",
-              )
-              .get(match[1], row.id);
-            return v ? { ...row, _version: v.version } : row;
-          };
+          const fields=['rows','invoice','client','lead','employee','contract'];
+          const candidates=Array.isArray(body)?body:[body,...fields.flatMap(f=>body?.[f] ? [body[f]].flat():[])];
+          const ids=[...new Set(candidates.filter(r=>r&&Number.isInteger(r.id)).map(r=>r.id))];
+          const versions=new Map((ids.length ? sqlite.prepare("SELECT id,version FROM suite_record_versions WHERE entity=? AND id IN (SELECT value FROM json_each(?))").all(match[1],JSON.stringify(ids)):[]).map((r:any)=>[r.id,r.version]));
+          const add=(row:any)=>row && versions.has(row.id)?{...row,_version:versions.get(row.id)}:row;
           if (Array.isArray(body)) body = body.map(add);
           else if (body && typeof body === "object") {
             body = add(body);

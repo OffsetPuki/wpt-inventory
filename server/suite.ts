@@ -1,3 +1,5 @@
+import {jobReadinessMany} from "./suite-data";
+import {businessScope} from "./business-scope";
 import {registerCustomerProjectPage} from './customer-project-page';
 import {registerBusinessReport} from './business-report';
 import { mailEnabled } from "./mailer";
@@ -6,7 +8,7 @@ import type { Express, Request } from "express";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { sqlite, storage, uploadsDir, db } from "./storage";
+import { sqlite, uploadsDir, db } from "./storage";
 import { requireAuth, requireElevated, getSession } from "./auth";
 import { payrollDate } from "./payroll";
 import { isElevated, todayLocal } from "./http-util";
@@ -23,7 +25,7 @@ import {
   validateQuantity,
 } from "./inventory-core";
 import { eq } from "drizzle-orm";
-import { purchaseOrders, invoices, expenses } from "../shared/finance-schema";
+import { purchaseOrders, expenses } from "../shared/finance-schema";
 import { insertNumbered } from "./numbering";
 import { audit } from "./audit";
 
@@ -493,6 +495,17 @@ export function registerSuiteRoutes(app: Express) {
       )
       .all(id);
   });
+  endpoint("get", "/api/suite/jobs/:id/source-files", false, req=>{
+    const job=jobRecord(idSchema.parse(req.params.id)), rows:any[]=[];
+    const lead:any=job.lead_id?sqlite.prepare('SELECT photos FROM crm_leads WHERE id=? AND deleted_at IS NULL').get(job.lead_id):null;
+    const photos=parse(lead?.photos,[]);
+    if(Array.isArray(photos))for(const [index,url] of photos.entries())if(typeof url==='string'&&/^\/uploads\/[A-Za-z0-9_.-]+$/.test(url))rows.push({id:'request-'+index,url,title:'Customer request photo '+(index+1),source:'Customer request',visibility:'Team only',image:true});
+    if(isElevated(req)){
+      const previews=sqlite.prepare('SELECT id,title,published FROM customer_previews WHERE deleted_at IS NULL AND (project_id=? OR (quote_id IS NOT NULL AND quote_id=?)) ORDER BY id DESC').all(job.id,job.quote_id) as any[];
+      for(const p of previews)rows.push({id:'preview-'+p.id,url:'/#/crm/previews?preview='+p.id,title:p.title,source:'Design Studio',visibility:p.published?'Shared with customer':'Team only',image:false});
+    }
+    return rows;
+  });
   endpoint("post", "/api/suite/photo-preview", false, (req) => {
     const b = z
       .object({ url: z.string(), thumbnailUrl: z.string() })
@@ -574,12 +587,12 @@ export function registerSuiteRoutes(app: Express) {
       uid = req.user!.userId;
     const tasks = sqlite
       .prepare(
-        `SELECT t.id,t.title,t.due_date,t.project_id,p.name AS project_name FROM pm_tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.deleted_at IS NULL AND t.status!='done' ${owner ? "" : "AND t.assignee_id=?"} ORDER BY t.due_date IS NULL,t.due_date,t.id LIMIT 25`,
+        `SELECT t.id,t.title,t.due_date,t.project_id,p.name AS project_name FROM pm_tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.deleted_at IS NULL AND t.status!='done' AND ${businessScope(req,"coalesce(p.site,(SELECT site FROM crm_leads WHERE id=t.lead_id))")} ${owner ? "" : "AND t.assignee_id=?"} ORDER BY t.due_date IS NULL,t.due_date,t.id LIMIT 25`,
       )
       .all(...(owner ? [] : [uid]));
     const jobs = sqlite
       .prepare(
-        `SELECT DISTINCT p.* FROM projects p LEFT JOIN pm_tasks t ON t.project_id=p.id WHERE p.deleted_at IS NULL AND p.status='active' ${owner ? "" : "AND t.assignee_id=? AND t.deleted_at IS NULL"} ORDER BY p.start_date IS NULL,p.start_date,p.id DESC LIMIT 12`,
+        `SELECT DISTINCT p.* FROM projects p LEFT JOIN pm_tasks t ON t.project_id=p.id WHERE p.deleted_at IS NULL AND p.status='active' AND ${businessScope(req,'p.site')} ${owner ? "" : "AND t.assignee_id=? AND t.deleted_at IS NULL"} ORDER BY p.start_date IS NULL,p.start_date,p.id DESC LIMIT 12`,
       )
       .all(...(owner ? [] : [uid])) as any[];
     const loans = sqlite
@@ -587,10 +600,11 @@ export function registerSuiteRoutes(app: Express) {
         `SELECT l.id,l.item_id,l.quantity-l.returned_quantity AS outstanding,i.name FROM inventory_loans l JOIN items i ON i.id=l.item_id WHERE l.quantity>l.returned_quantity ${owner ? "" : "AND l.borrower_id=?"} LIMIT 20`,
       )
       .all(...(owner ? [] : [uid]));
+    const readiness=jobReadinessMany(jobs.map(j=>j.id));
     return {
       tasks,
       jobs: jobs.map((p) => {
-        const r = jobReadiness(p.id);
+        const r = readiness.get(p.id)!;
         return {
           id: p.id,
           name: p.name,
@@ -710,7 +724,7 @@ export function registerSuiteRoutes(app: Express) {
         .all()
         .filter(
           (r: any) =>
-            session.role === "owner" || !["finance", "team"].includes(r.topic),
+            ["owner","manager"].includes(session.role) || r.topic!=="finance",
         );
       const data = JSON.stringify(revisions);
       if (data !== previous) {

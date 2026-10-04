@@ -1,5 +1,7 @@
+import {RecordSelect} from "@/components/RecordSelect";
+import {useListPage,PageButtons} from "@/lib/list-page";
 import { RetryBlock } from "@/components/RetryBlock";
-import { useRecordLink, readContext } from "@/lib/record-link";
+import { useRecordLink } from "@/lib/record-link";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
@@ -13,8 +15,6 @@ import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
 import { formatMoney, parseMoney, formatDate, ymdToDate, parseJsonObject } from "@/lib/format";
-import type { Project } from "@shared/schema";
-import type { Client } from "@shared/crm-schema";
 import {
   CONTRACT_STATUSES,
   CONTRACT_KIND_LABELS,
@@ -333,16 +333,12 @@ function ContractDialog({
   open,
   onClose,
   contract,
-  projects,
-  clients,
   onCreated,
   prefill,
 }: {
   open: boolean;
   onClose: () => void;
   contract: ContractRow | null;
-  projects: Project[];
-  clients: Client[];
   onCreated?: (row: Contract) => void;
   prefill?: ContractPrefill | null;
 }) {
@@ -548,24 +544,16 @@ function ContractDialog({
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Client</span>
-            <select
+            <span className="text-sm font-medium text-foreground">Customer</span>
+            <RecordSelect type="clients"
               className={inputCls}
               value={clientSel}
               onChange={(e) => setClientSel(e.target.value)}
-            >
-              <option value="">No linked client (type a name below)</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.company ? ` — ${c.company}` : ""}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           {!clientSel && (
             <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Client name (free text)</span>
+              <span className="text-sm font-medium text-foreground">Customer name (free text)</span>
               <input
                 className={inputCls}
                 value={clientNameText}
@@ -575,19 +563,12 @@ function ContractDialog({
             </label>
           )}
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Project (optional)</span>
-            <select
+            <span className="text-sm font-medium text-foreground">Job (optional)</span>
+            <RecordSelect type="jobs"
               className={inputCls}
               value={projectSel}
               onChange={(e) => setProjectSel(e.target.value)}
-            >
-              <option value="">No project</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Value ($)</span>
@@ -850,13 +831,13 @@ function ContractViewModal({
           </div>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
             <div>
-              <p className="text-xs uppercase text-muted-foreground">Client</p>
+              <p className="text-xs uppercase text-muted-foreground">Customer</p>
               <p className="mt-0.5 font-medium text-foreground">
                 {contract.clientName || "—"}
               </p>
             </div>
             <div>
-              <p className="text-xs uppercase text-muted-foreground">Project</p>
+              <p className="text-xs uppercase text-muted-foreground">Job</p>
               <p className="mt-0.5 font-medium text-foreground">
                 {contract.projectName || "—"}
               </p>
@@ -1035,23 +1016,16 @@ export default function PmContractsPage() {
   const [viewing, setViewing] = useState<ContractRow | null>(null);
   useRecordLink("contract", "/api/pm/contracts", setViewing);
 
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
-  });
 
-  const { data: clients = [] } = useQuery<Client[]>({
-    queryKey: ["crm-clients"],
-    queryFn: async () => (await apiRequest("GET", "/api/crm/clients")).json(),
-  });
 
-  const params = new URLSearchParams();
+  const {page,setPage}=useListPage("contracts",[kindTab,statusFilter]);
+  const params = new URLSearchParams({page:String(page),limit:"50"});
   if (kindTab) params.set("kind", kindTab);
   if (statusFilter) params.set("status", statusFilter);
   const qs = params.toString();
 
   const { data: contracts = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<ContractRow[]>({
-    queryKey: ["pm-contracts", kindTab, statusFilter],
+    queryKey: ["pm-contracts", kindTab, statusFilter,page],
     queryFn: async () =>
       (await apiRequest("GET", `/api/pm/contracts${qs ? `?${qs}` : ""}`)).json(),
   });
@@ -1146,8 +1120,8 @@ export default function PmContractsPage() {
               <tr className="text-left text-xs uppercase text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Title</th>
                 <th className="px-4 py-3 font-medium">Kind</th>
-                <th className="px-4 py-3 font-medium">Client</th>
-                <th className="px-4 py-3 font-medium">Project</th>
+                <th className="px-4 py-3 font-medium">Customer</th>
+                <th className="px-4 py-3 font-medium">Job</th>
                 <th className="px-4 py-3 text-right font-medium">Value</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Dates</th>
@@ -1200,30 +1174,14 @@ export default function PmContractsPage() {
           setDialogOpen(true);
         }}
       />
+      <PageButtons page={page} setPage={setPage} count={contracts.length}/>
       {isElevated && (
         <ContractDialog
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}
           contract={editing}
-          projects={projects}
-          clients={clients}
           prefill={prefill}
-          onCreated={(row) =>
-            setViewing({
-              ...row,
-              // POST returns the raw row — the list GET coalesces these via
-              // joins, so resolve them here for the immediately-opened view.
-              clientName:
-                row.clientName ??
-                (row.clientId != null
-                  ? clients.find((cl) => cl.id === row.clientId)?.name ?? null
-                  : null),
-              projectName:
-                row.projectId != null
-                  ? projects.find((p) => p.id === row.projectId)?.name ?? null
-                  : null,
-            })
-          }
+          onCreated={async row=>setViewing(await (await apiRequest('GET',`/api/pm/contracts/${row.id}`)).json())}
         />
       )}
     </div>

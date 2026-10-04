@@ -1,10 +1,12 @@
+import {ActiveFilters} from '@/components/ActiveFilters';
+import {useListPage,PageButtons} from "@/lib/list-page";
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {useBusiness} from '@/hooks/useBusiness';
 import {RetryBlock} from '@/components/RetryBlock';
 import { useApiMutation } from '@/hooks/useApiMutation';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
@@ -32,7 +34,6 @@ const inputCls =
   "h-11 w-full rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring";
 
 function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const [jobNumber, setJobNumber] = useState("");
   const [name, setName] = useState("");
@@ -75,7 +76,7 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Client</span><input aria-label="Find customer" className={inputCls} placeholder="Search customers" value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
+          <span className="text-sm font-medium text-foreground">Customer</span><input aria-label="Find customer" className={inputCls} placeholder="Search customers" value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
           <select
             className={inputCls}
             value={clientId ?? ""}
@@ -128,21 +129,16 @@ export default function ProjectsPage() {
   const { isElevated: isManager } = useAuth();
   const [, setLocation] = useLocation();
   const [q, setQ] = useState("");
+  const {page,setPage}=useListPage("jobs",[q,business]);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
 
   const { data: projects = [], isLoading, isError,error,refetch } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
+    queryKey: ["projects",q,page,business],
+    queryFn: async () => (await apiRequest("GET", `/api/projects?q=${encodeURIComponent(q)}&page=${page}&limit=50`)).json(),
   });
 
-  const filtered = projects.filter(p=>business==='all'||p.site===business).filter(
-    (p) =>
-      !q ||
-      p.name.toLowerCase().includes(q.toLowerCase()) ||
-      p.jobNumber.toLowerCase().includes(q.toLowerCase()) ||
-      (p.customer ?? "").toLowerCase().includes(q.toLowerCase())
-  );
+  const filtered=projects;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -212,6 +208,8 @@ export default function ProjectsPage() {
         </div>
       )}
 
+      <ActiveFilters filters={[q&&`Search: ${q}`]} onReset={()=>{setQ('');setPage(0);}}/>
+      <PageButtons page={page} setPage={setPage} count={projects.length}/>
       <FromTemplateDialog
         open={templateOpen}
         onClose={() => setTemplateOpen(false)}

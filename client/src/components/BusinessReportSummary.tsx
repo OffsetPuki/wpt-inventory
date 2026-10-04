@@ -1,26 +1,13 @@
-import {useBusiness} from '@/hooks/useBusiness';
-import { useQuery } from "@tanstack/react-query";
+import {useBusinessReport} from "@/hooks/useBusinessReport";
 import { Link } from "wouter";
 import { ArrowUpRight } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
 import { formatMoney } from "@/lib/format";
 import { RetryBlock } from "./RetryBlock";
 
-type FinanceStats = {
-  paidCents: number;
-  expensesCents: number;
-  cashDifferenceCents: number;
-  outstandingCents: number;
-};
 
 // Shares the report query and live updates; no separate totals to drift apart.
 export default function BusinessReportSummary() {
-  const site=useBusiness();
-  const finance = useQuery<any>({
-    refetchInterval:30000, staleTime:0, queryKey: ["business-report",site],
-    queryFn: async () => (await apiRequest("GET", `/api/business-report?site=${site}`)).json(),
-    retry: false,
-  });
+  const finance=useBusinessReport();
   return <section aria-labelledby="today-business-report" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div>

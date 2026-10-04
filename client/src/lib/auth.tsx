@@ -18,6 +18,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   // Owner and manager access to management screens.
   isElevated: boolean;
+  recoveryError: string | null;
+  retrySession: () => void;
   login: (name: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -31,39 +33,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<PublicUser | null>(null);
   // If we found a saved token, we're "loading" until we've validated it.
   const [isLoading, setIsLoading] = useState<boolean>(!!initialToken);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retrySession = useCallback(() => setAttempt(n => n + 1), []);
 
   // Rehydrate the session on first mount: if a token was saved last time,
   // ask the server who it belongs to. A 401 (e.g. server restarted) clears it.
   useEffect(() => {
-    if (!initialToken) return;
+    const token = getAuthToken();
+    if (!token) return;
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    setIsLoading(true);
+    setRecoveryError(null);
     (async () => {
       try {
-        const res = await apiRequest("GET", "/api/auth/me");
+        const res = await apiRequest("GET", "/api/auth/me", undefined, { signal: controller.signal });
         const me = (await res.json()) as PublicUser;
-        if (cancelled) return;
+        if (cancelled || getAuthToken() !== token) return;
         setDraftUser(me.id);
         setUser(me);
-      } catch {
+      } catch (error: any) {
         if (cancelled) return;
-        setAuthToken(null);
-        setDraftUser(null);
-        sessionStorage.removeItem("cjm.quote.prefillLead");
-        setUser(null);
+        if (error.status === 401 || getAuthToken() !== token) return;
+        setRecoveryError("We couldn’t reconnect. Your sign-in and saved drafts are still here.");
       } finally {
+        clearTimeout(timeout);
         if (!cancelled) setIsLoading(false);
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
+      controller.abort();
     };
     // initialToken is captured once at mount on purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
+
+  useEffect(() => {
+    const online = () => { if (recoveryError) retrySession(); };
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, [recoveryError, retrySession]);
 
   // React to mid-session token invalidations (apiRequest dispatches this on 401).
   useEffect(() => {
     const onInvalidated = () => {
+      setRecoveryError(null);
       setDraftUser(null);
         sessionStorage.removeItem("cjm.quote.prefillLead");
         setUser(null);
@@ -84,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(newToken); // also persists to localStorage
       setDraftUser(loggedInUser.id);
       setUser(loggedInUser);
+      setRecoveryError(null);
     } finally {
       setIsLoading(false);
     }
@@ -96,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Even if server logout fails, clear client state
     }
     setAuthToken(null); // also clears localStorage
+    setRecoveryError(null);
     setDraftUser(null);
         sessionStorage.removeItem("cjm.quote.prefillLead");
         setUser(null);
@@ -113,6 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         isAuthenticated,
         isElevated,
+        recoveryError,
+        retrySession,
         login,
         logout,
       }}

@@ -1,12 +1,14 @@
+import {RecordSelect} from "@/components/RecordSelect";
+import {validateTaskDates} from "@shared/suite-contracts";
 import { useDialogDraft } from "@/lib/dialog-draft";
 import { useApiMutation } from "@/hooks/useApiMutation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import Modal from "@/components/Modal";
 import { cn } from "@/lib/utils";
-import type { Project, PublicUser } from "@shared/schema";
+import type { PublicUser } from "@shared/schema";
 import {
   TASK_STATUSES,
   TASK_PRIORITIES,
@@ -39,7 +41,6 @@ export function TaskDialog({
   open,
   onClose,
   task,
-  projects,
   users,
   isElevated,
   defaultProjectId,
@@ -47,12 +48,13 @@ export function TaskDialog({
   open: boolean;
   onClose: () => void;
   task: TaskRow | null;
-  projects: Project[];
   users: PublicUser[];
   isElevated: boolean;
   defaultProjectId?: number;
 }) {
   const qc = useQueryClient();
+  const copyKey=useRef(crypto.randomUUID());
+  const copy=useApiMutation({request:()=>({method:'POST',url:`/api/pm/tasks/${task!.id}/copy`,body:{projectId:Number(projectId),requestKey:copyKey.current}}),invalidate:[['pm-tasks']],successTitle:'Task copied to the selected job',errorTitle:'Could not copy task',onSuccess:()=>{copyKey.current=crypto.randomUUID();onClose();}});
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -113,6 +115,7 @@ export function TaskDialog({
   );
 
   const buildPayload = () => {
+    validateTaskDates({startDate,dueDate});
     const eh = parseFloat(estimateHours);
     return {
       title: title.trim(),
@@ -204,6 +207,7 @@ export function TaskDialog({
         className="flex flex-col gap-4"
       >
         {recovered.notice}
+        {task && Number(projectId)!==task.projectId && projectId && <div className="rounded-xl border bg-muted/40 p-4 text-sm"><p>Keep the original task and its hours on its original job. Copy the task below to start future work on the selected job.</p><button type="button" disabled={copy.isPending} onClick={()=>copy.mutate()} className="mt-2 min-h-11 rounded-lg border px-4">Copy task to selected job</button></div>}
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Title</span>
           <input
@@ -225,19 +229,12 @@ export function TaskDialog({
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Project</span>
-            <select
+            <span className="text-sm font-medium text-foreground">Job</span>
+            <RecordSelect type="jobs"
               className={inputCls}
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
-            >
-              <option value="">No project</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Status</span>

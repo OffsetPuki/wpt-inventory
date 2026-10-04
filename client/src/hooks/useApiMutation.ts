@@ -1,6 +1,6 @@
+import {queueRefreshKeys} from "@/lib/suite-sync";
 import {
   useMutation,
-  useQueryClient,
   type QueryKey,
   type UseMutationResult,
 } from "@tanstack/react-query";
@@ -52,7 +52,6 @@ export interface ApiMutationOptions<TData, TVars> {
 export function useApiMutation<TData = any, TVars = void>(
   opts: ApiMutationOptions<TData, TVars>,
 ): UseMutationResult<TData, Error, TVars> {
-  const qc = useQueryClient();
   const retryIdentity=useRef<{request:string,key:string,storageKey:string}|null>(null);
   return useMutation<TData, Error, TVars>({
     mutationFn: async (vars: TVars) => {
@@ -69,7 +68,7 @@ export function useApiMutation<TData = any, TVars = void>(
     onSuccess: (data, vars) => {
       if(retryIdentity.current)try{sessionStorage.removeItem(retryIdentity.current.storageKey);}catch{}
       retryIdentity.current=null;
-      opts.invalidate?.forEach((key) => qc.invalidateQueries({ queryKey: key }));
+      if(opts.invalidate)queueRefreshKeys(opts.invalidate);
       const title =
         typeof opts.successTitle === "function"
           ? opts.successTitle(data, vars)

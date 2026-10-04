@@ -3,7 +3,7 @@ import {visitorContext} from './visitor-context';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Express, Request, Response, NextFunction } from 'express';
+import type { Express, Request, Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { sqlite } from './storage';
@@ -430,7 +430,7 @@ export function registerCustomerPreviews(app: Express): void {
     sqlite.prepare('UPDATE customer_previews SET published=?,updated_at=?,design_version=version+1,version=version+1 WHERE id=?').run(req.body.published?1:0,Date.now(),p.id);
     audit(req,req.body.published?'preview.shared':'preview.disabled',{targetType:'customer_preview',targetId:p.id,targetName:p.title});res.json(view(getPreview(p.id)!));
   });
-  app.post('/api/customer-previews/:id/models',requireElevated,(req,res,next:NextFunction) => {
+  app.post('/api/customer-previews/:id/models',requireElevated,(req,res) => {
     upload(req,res,(err:any) => {
       if(err){res.status(400).json({message:err.code==='LIMIT_FILE_SIZE'?'Choose a model smaller than 25 MB.':'Upload one GLB model at a time.'});return;}
       const p=record(req,res);if(!p||!current(req,res,p))return;

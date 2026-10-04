@@ -16,11 +16,11 @@ export default function LoginPage() {
   // that listed every user — removed because it handed an attacker half
   // of every credential pair. The field is just a typed name now.
 
-  const { data: settings } = useQuery<{ companyName: string; companyTagline?: string }>({
-    queryKey: ["settings"],
-    queryFn: async () => (await apiRequest("GET", "/api/settings")).json(),
-    refetchInterval: false,
-  });
+  useQuery<{ companyName: string; companyTagline?: string; }>({
+queryKey: ["settings"],
+queryFn: async () => (await apiRequest("GET","/api/settings")).json(),
+refetchInterval: false,
+});
 
   async function attemptLogin() {
     if (submitting || !name.trim() || pin.length < 4) return;

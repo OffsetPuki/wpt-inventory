@@ -5,7 +5,7 @@ import {useMarketingPlace} from '@/hooks/useMarketingPlace';
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
+import { inputCls, secondaryBtn } from "@/lib/ui-styles";
 import { formatMoney } from "@/lib/format";
 import { aiReferralProvider } from "@shared/ai-referrals";
 import SearchConnections from './SearchConnections';
@@ -86,7 +86,7 @@ export default function GrowthReport({view="overview"}:{view?:string}) {
   const [site, setSite] = useMarketingPlace<Site>("site","metals"),
     [end, setEnd] = useMarketingPlace<string>("end",""),
     [start,setStart]=useMarketingPlace<string>("start",""),
-    [includeTests, setIncludeTests] = useState(false),
+    [includeTests] = useState(false),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const client = useQueryClient();

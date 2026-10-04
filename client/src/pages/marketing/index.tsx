@@ -12,9 +12,9 @@ import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
 import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
-import { inputCls, primaryBtn, secondaryBtn, thCls, tdCls, chipCls } from "@/lib/ui-styles";
+import { inputCls, primaryBtn, secondaryBtn, chipCls } from "@/lib/ui-styles";
 import { cn } from "@/lib/utils";
-import { formatDate, formatMoney, formatPercent, parseMoney } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import {
   REVIEW_SOURCES,
   REVIEW_SOURCE_LABELS,
@@ -23,8 +23,6 @@ import {
   type ReviewSource,
   type PortfolioItem,
 } from "@shared/marketing-schema";
-import { uploadPhoto } from "@/lib/uploadPhoto";
-import { LEAD_SOURCE_LABELS } from "@shared/crm-schema";
 import {
   AlertTriangle,
   Check,
@@ -35,7 +33,6 @@ import {
   Plus,
   Star,
   Trash2,
-  Upload,
 } from "lucide-react";
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
@@ -49,22 +46,7 @@ const smallBtn =
 
 const neutralChip = "bg-muted text-muted-foreground";
 
-function sourceLabel(source: string): string {
-  return (LEAD_SOURCE_LABELS as Record<string, string>)[source] ?? source;
-}
 
-// ─── API payload shapes (server/marketing.ts) ────────────────────────────────
-
-interface OverviewPayload {
-  thisWeek: {
-    leads: number;
-    quotesSent: number;
-    closeRate: number | null;
-    revenueCents: number;
-    bestSource: { source: string; leads: number } | null;
-  };
-  alerts: string[];
-}
 
 interface MarketingStats {
   leadsThisWeek: number;
@@ -75,11 +57,6 @@ interface MarketingStats {
   alerts: string[];
 }
 
-// GET /api/marketing/attribution — all-time rollups; the Overview renders the
-// core by-source table (byCampaign/byUtmSource stay server-side, unused here).
-interface AttributionPayload {
-  bySource: { source: string; leads: number; won: number; revenueCents: number }[];
-}
 
 // ─── Small presentational helpers ─────────────────────────────────────────────
 
@@ -115,8 +92,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 // thCls / tdCls now come from @/lib/ui-styles; the right-aligned variants stay local.
-const thRight = "px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground";
-const tdRight = "px-3 py-2.5 text-right tabular-nums";
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
@@ -376,7 +351,6 @@ function PortfolioDialog({open,onClose,item}:{open:boolean;onClose:()=>void;item
 
 function PortfolioTab() {
   const {user}=useAuth(),manager=['owner','manager'].includes(user?.role||'');
-  const qc=useQueryClient();
   const [business,setBusiness]=useMarketingPlace<string>('portfolioBusiness','all'),[filter,setFilter]=useMarketingPlace<string>('portfolioFilter','active');
   const [search,setSearch]=useState(''),[limit,setLimit]=useState(20),[page,setPage]=useState(0);
   useEffect(()=>setPage(0),[search,business,filter]);
@@ -497,7 +471,7 @@ function PortfolioTab() {
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
 function SettingsForm({ settings }: { settings: MarketingSettings }) {
-  const {user}=useAuth();
+  useAuth();
   const [staleDays, setStaleDays] = useState(String(settings.staleLeadDays));
   const [followUpDays, setFollowUpDays] = useState(String(settings.quoteFollowUpDays));
   const [autoReview, setAutoReview] = useState(settings.autoReviewRequest);

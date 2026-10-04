@@ -759,9 +759,11 @@ export const storage = {
   // ── Projects ─────────────────────────────────────────────────────────────
   // Soft-deletes mirror the items table: read paths exclude rows with
   // deleted_at set; Trash page surfaces them for restore.
-  getProjects(): Project[] {
-    return db.select().from(projects).where(sql`${projects.deletedAt} IS NULL`)
-      .orderBy(desc(projects.createdAt)).all();
+  getProjects(opts:{site?:string;q?:string;limit?:number;offset?:number}={}): Project[] {
+    const conditions=[sql`${projects.deletedAt} IS NULL`];
+    if(opts.site&&opts.site!=='all')conditions.push(sql`coalesce(${projects.site},'unassigned')=${opts.site}`);
+    if(opts.q)conditions.push(sql`instr(lower(${projects.name}||${projects.jobNumber}||coalesce(${projects.customer},'')),lower(${opts.q}))>0`);
+    return db.select().from(projects).where(and(...conditions)).orderBy(desc(projects.createdAt),desc(projects.id)).limit(opts.limit??200).offset(opts.offset??0).all();
   },
 
   getProjectById(id: number): Project | undefined {

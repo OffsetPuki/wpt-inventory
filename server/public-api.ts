@@ -10,10 +10,10 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, sqlite, storage, uploadsDir } from "./storage";
-import { mailEnabled, sendMail, sendOwnerMail, queueMail, queueOwnerMail, isOptedOut } from "./mailer";
+import { mailEnabled, sendOwnerMail, queueMail, queueOwnerMail, isOptedOut } from "./mailer";
 import { renderTemplate, firstNameOf } from "./email-templates";
 import { leads, LEAD_SITES, SITE_DOMAINS, type LeadSource, type LeadSite } from "../shared/crm-schema";
-import { campaigns, reviews, portfolioItems } from "../shared/marketing-schema";
+import { reviews, portfolioItems } from "../shared/marketing-schema";
 
 // ─── Public API: how the outside world talks to the suite ────────────────────
 // No session auth on any of these:

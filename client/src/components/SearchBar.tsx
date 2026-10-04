@@ -105,7 +105,7 @@ export default function SearchBar() {
           if(e.key==='ArrowUp'){e.preventDefault();setActive(i=>Math.max(0,i-1));}
           if (e.key === "Enter" && !loading && ordered.length > 0) {e.preventDefault();go(ordered[Math.max(0,Math.min(active,ordered.length-1))]);}
         }}
-        placeholder="Search clients, invoices, items…"
+        placeholder="Search customers, invoices, items…"
         className="h-10 w-full rounded-full border border-input bg-background pl-10 pr-4 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring"
       />
       {/* On a phone the input only gets the slice of the topbar left over

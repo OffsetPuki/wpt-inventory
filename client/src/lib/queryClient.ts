@@ -1,3 +1,4 @@
+import {beginSave,endSave} from "./save-status";
 import { QueryClient } from "@tanstack/react-query";
 
 // ─── Persisted auth token ───────────────────────────────────────────────────
@@ -31,12 +32,19 @@ export async function apiRequest(
   body?: unknown,
   options?: { signal?: AbortSignal; expectedVersion?: number; idempotencyKey?:string; replacesSession?: boolean },
 ): Promise<Response> {
+  if(method==='GET' && typeof window!=='undefined') {
+    const u=new URL(url,window.location.origin);
+    if(/^\/api\/(suite\/(today|schedule)|pm\/(tasks|time)|finance\/(stats|reports|invoices|expenses|purchase-orders)|projects)$/.test(u.pathname)&&!u.searchParams.has('site')&&!u.searchParams.has('projectId')){
+      u.searchParams.set('site',localStorage.getItem('suite-business')||'all');url=u.pathname+u.search;
+    }
+  }
   const requestToken = authToken;
   let finishReplacement: (() => void) | undefined;
   if (options?.replacesSession) {
     if (sessionReplacement) throw new Error("A password change is already in progress.");
     sessionReplacement = new Promise(resolve => { finishReplacement = resolve; });
   }
+  const saving=!['GET','HEAD','OPTIONS'].includes(method);let saved=false;if(saving)beginSave();
   try {
   const headers: Record<string, string> = {};
 
@@ -88,9 +96,11 @@ export async function apiRequest(
   }
   if (method === "GET" && res.headers.get("ETag")) recordVersions.set(recordPath(url),res.headers.get("ETag")!);
   if (method !== "GET") recordVersions.delete(recordPath(url));
-  if (method !== "GET" && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("suite-mutation", { detail: url }));
+  if (method !== "GET" && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("suite-mutation", { detail: {url,revisions:JSON.parse(res.headers.get('X-Suite-Revisions')||'[]')} }));
+  saved=true;
   return res;
   } finally {
+    if(saving)endSave(url,saved);
     if (finishReplacement) {
       sessionReplacement = null;
       finishReplacement();

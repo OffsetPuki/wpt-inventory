@@ -26,8 +26,6 @@ import {
 } from "../client/src/quote/lib/estimate.js";
 import { deepMerge } from "../client/src/quote/lib/store.js";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
-import { sendOwnerMail, sendMail, mailEnabled } from "./mailer";
-import { renderTemplate, firstNameOf } from "./email-templates";
 
 // All required records commit together. Retries reuse explicit foreign links;
 // customer contact information never determines which job is being accepted.

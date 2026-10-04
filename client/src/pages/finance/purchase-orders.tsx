@@ -1,3 +1,6 @@
+import {ActiveFilters} from '@/components/ActiveFilters';
+import {useScopedQuery} from '@/hooks/useScopedQuery';
+import {useListPage,PageButtons} from '@/lib/list-page';
 import { useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest, getAuthToken } from '@/lib/queryClient';
@@ -133,13 +136,16 @@ function Editor({po,type,onClose}:{po:Po|null;type:OrderType;onClose:()=>void}) 
 export default function PurchaseOrdersPage(){
   const [type,setType]=useState<OrderType>(()=>readContext('category')==='supplier'?'supplier':'customer'),[status,setStatus]=useState(''),[search,setSearch]=useState(''),[editing,setEditing]=useState<Po|null>(null),[open,setOpen]=useState(false);
   useRecordLink('po','/api/finance/purchase-orders',row=>{setType(row.orderType||'supplier');setEditing(row);setOpen(true);});
-  const list=useQuery<Po[]>({queryKey:['finance-pos',type,status,search],queryFn:async()=> (await apiRequest('GET',`/api/finance/purchase-orders?orderType=${type}&status=${status}&q=${encodeURIComponent(search)}`)).json()});
+  const {page,setPage}=useListPage('purchase-orders',[type,status,search]);
+  const list=useScopedQuery<Po[]>({queryKey:['finance-pos',type,status,search,page],queryFn:async()=> (await apiRequest('GET',`/api/finance/purchase-orders?page=${page}&limit=50&orderType=${type}&status=${status}&q=${encodeURIComponent(search)}`)).json()});
   async function edit(row:Po){try{const fresh=await (await apiRequest('GET',`/api/finance/purchase-orders/${row.id}/detail`)).json();setEditing(fresh);setOpen(true);}catch(e:any){toast({variant:'destructive',title:'Could not open order',description:e.message});}}
   return <div className="mx-auto max-w-6xl">
     <Header title="Purchase orders" description="Customer orders received and supplier purchases issued"><button className={primaryBtn} onClick={()=>{setEditing(null);setOpen(true);}}><Plus className="h-5 w-5"/>New {type==='customer'?'customer':'supplier'} PO</button></Header>
     <nav aria-label="PO categories" className="mb-5 flex flex-wrap gap-2">{(['customer','supplier'] as const).map(v=><button className={v===type?primaryBtn:secondaryBtn} key={v} onClick={()=>{setType(v);setStatus('');}}>{v==='customer'?'Customer POs received':'Supplier POs issued'}</button>)}</nav>
     <div className="mb-5 grid gap-3 sm:grid-cols-[1fr_220px]"><Field label="Search orders"><div className="relative"><Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground"/><input className={inputCls+' pl-10'} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, PO number or customer project"/></div></Field><Field label="Status"><select className={inputCls} value={status} onChange={e=>setStatus(e.target.value)}><option value="">All statuses</option>{ORDER_STATUSES.map(s=><option key={s} value={s}>{ORDER_LABELS[s]}</option>)}</select></Field></div>
     {list.isError?<RetryBlock query={list}/>:list.isLoading?<p>Loading orders…</p>:!list.data?.length?<div className="rounded-xl border border-dashed p-8 text-center"><h2 className="font-semibold">No {type} POs found</h2><p className="mt-2 text-sm text-muted-foreground">{type==='customer'?'Record an incoming customer order, link the quote and attach the original PO.':'Create an order for materials or subcontracted services, then track its deliveries.'}</p></div>:<div className="overflow-x-auto rounded-xl border border-border"><table className="w-full text-left text-sm"><thead className="bg-accent"><tr>{['Order','Customer / supplier','Customer project','Expected','Total','Status'].map(h=><th key={h} className="p-3 font-medium">{h}</th>)}</tr></thead><tbody>{list.data.map(row=><tr key={row.id} className="border-t border-border"><td className="p-3"><button className="font-semibold underline" onClick={()=>edit(row)}>{row.number}</button>{row.customerPoNumber&&<p className="mt-1 text-xs">Customer PO: {row.customerPoNumber}</p>}</td><td className="p-3">{row.customerName||row.vendor}</td><td className="p-3">{row.customerProjectNumber||'—'}</td><td className="p-3 whitespace-nowrap">{row.expectedDate?formatDate(row.expectedDate):'—'}</td><td className="p-3 whitespace-nowrap tabular-nums">{formatMoney(row.totalCents)}</td><td className="p-3"><Status po={row}/></td></tr>)}</tbody></table></div>}
+    <ActiveFilters filters={[status&&`Status: ${status}`,search&&`Search: ${search}`]} onReset={()=>{setStatus('');setSearch('');setPage(0);}}/>
+    <PageButtons page={page} setPage={setPage} count={list.data?.length||0}/>
     {open&&<Editor key={editing?.id||type} po={editing} type={type} onClose={()=>{setOpen(false);setEditing(null);}}/>}
   </div>;
 }

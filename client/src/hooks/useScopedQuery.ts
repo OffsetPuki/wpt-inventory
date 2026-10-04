@@ -1,0 +1,3 @@
+import {useQuery,type UseQueryOptions,type QueryKey,type DefaultError} from '@tanstack/react-query';
+import {useBusiness} from './useBusiness';
+export function useScopedQuery<T=unknown,E=DefaultError,D=T,K extends QueryKey=QueryKey>(options:UseQueryOptions<T,E,D,K>){const business=useBusiness();const scoped=['projects','pm-tasks','pm-time','finance-stats','finance-reports','finance-invoices','finance-expenses','finance-pos','suite-today','suite-schedule'].includes(String(options.queryKey[0]));return useQuery({...options,queryKey:(scoped?[...options.queryKey,{business}]:options.queryKey) as unknown as K});}

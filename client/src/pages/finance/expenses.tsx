@@ -1,9 +1,13 @@
+import {ActiveFilters} from '@/components/ActiveFilters';
+import {RecordSelect} from "@/components/RecordSelect";
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
+import {ExpenseCorrection} from "@/components/ExpenseCorrection";
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useRecordLink, readContext } from "@/lib/record-link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import { useApiMutation } from "@/hooks/useApiMutation";
@@ -24,7 +28,6 @@ import {
   type ExpenseCategory,
   type PaymentMethod,
 } from "@shared/finance-schema";
-import type { Project } from "@shared/schema";
 import {
   BadgeCheck,
   Loader2,
@@ -65,12 +68,10 @@ function ExpenseFormModal({
   open,
   onClose,
   expense,
-  projects,
 }: {
   open: boolean;
   onClose: () => void;
   expense?: Expense | null;
-  projects: Project[];
 }) {
   const [date, setDate] = useState(todayYmd());
   const [vendor, setVendor] = useState("");
@@ -182,6 +183,7 @@ function ExpenseFormModal({
         className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
       >
         {recovered.notice}
+        {!!expense?.invoiceId && <ExpenseCorrection expense={expense} onDone={onClose}/>}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Date</span>
@@ -220,7 +222,7 @@ function ExpenseFormModal({
               className={inputCls}
               inputMode="decimal"
               placeholder="0.00"
-              value={amount}
+              disabled={!!expense?.invoiceId} value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
           </label>
@@ -239,26 +241,19 @@ function ExpenseFormModal({
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Project (optional)</span>
-            <select
+            <span className="text-sm font-medium text-foreground">Job (optional)</span>
+            <RecordSelect type="jobs"
               className={inputCls}
-              value={projectId}
+              disabled={!!expense?.invoiceId} value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
-            >
-              <option value="">— None —</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.jobNumber} — {p.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
         </div>
 
         <label className="flex items-center gap-2.5">
           <input
             type="checkbox"
-            checked={billable}
+            disabled={!!expense?.invoiceId} checked={billable}
             onChange={(e) => setBillable(e.target.checked)}
             className="h-5 w-5 rounded border-input accent-[hsl(var(--primary))]"
           />
@@ -331,7 +326,7 @@ function ExpenseFormModal({
           {expense && (
             <button
               type="button"
-              disabled={remove.isPending}
+              disabled={remove.isPending || !!expense?.invoiceId}
               onClick={() => {
                 if (window.confirm("Delete this expense?")) remove.mutate();
               }}
@@ -359,15 +354,7 @@ export default function ExpensesPage() {
   const [editing, setEditing] = useState<Expense | null>(null);
   useRecordLink("expense", "/api/suite/expenses", row=>{setEditing(row);setFormOpen(true);});
 
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
-  });
-  const projectName = (id: number | null) => {
-    if (id == null) return "—";
-    const p = projects.find((pr) => pr.id === id);
-    return p ? p.jobNumber : `#${id}`;
-  };
+
 
   const {page,setPage}=useListPage('rows:client/src/pages/finance/expenses.tsx',[category,projectId,from,to,q]);
   const url = useMemo(() => {
@@ -382,7 +369,7 @@ export default function ExpensesPage() {
     return `/api/finance/expenses${s ? `?${s}` : ""}`;
   }, [category, projectId, from, to, q,page]);
 
-  const { data, isLoading,isError,error,refetch } = useQuery<{ rows: Expense[]; totalCents: number }>({
+  const { data, isLoading,isError,error,refetch } = useQuery<{ rows: (Expense&{projectName:string|null})[]; totalCents: number; total:number }>({
     queryKey: ["finance-expenses", category, projectId, from, to, q,page],
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
@@ -418,18 +405,11 @@ export default function ExpensesPage() {
             </option>
           ))}
         </select>
-        <select
+        <RecordSelect type="jobs"
           className={inputCls}
           value={projectId}
           onChange={(e) => setProjectId(e.target.value)}
-        >
-          <option value="">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.jobNumber} — {p.name}
-            </option>
-          ))}
-        </select>
+        />
         <input
           type="date"
           className={inputCls}
@@ -455,18 +435,19 @@ export default function ExpensesPage() {
         </div>
       </div>
 
+      <ActiveFilters filters={[category&&`Category: ${category}`,projectId&&'Job selected',from&&`From: ${from}`,to&&`To: ${to}`,q&&`Search: ${q}`]} onReset={()=>{setCategory('');setProjectId('');setFrom('');setTo('');setQ('');setPage(0);}}/>
       {/* Running total of the filtered set */}
       <div className="mb-6 rounded-xl border border-border bg-card p-4">
         <p className="text-sm text-muted-foreground">
           {filtered ? "Total of filtered expenses" : "Total expenses"}
-          {rows.length > 0 && ` · ${rows.length} ${rows.length === 1 ? "entry" : "entries"}`}
+          {rows.length > 0 && ` · ${data?.total||0} matching entries · ${rows.length} on this page`}
         </p>
         <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
           {formatMoney(data?.totalCents)}
         </p>
       </div>
 
-      <PageButtons page={page} setPage={setPage} count={rows.length}/>
+      <PageButtons page={page} setPage={setPage} count={rows.length} total={data?.total}/>
       {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
@@ -495,7 +476,7 @@ export default function ExpensesPage() {
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Vendor</th>
                 <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Project</th>
+                <th className="px-4 py-3">Job</th>
                 <th className="px-4 py-3">Method</th>
                 <th className="px-4 py-3 text-right">Amount</th>
                 <th className="px-4 py-3 text-center">Billable</th>
@@ -521,7 +502,7 @@ export default function ExpensesPage() {
                       {EXPENSE_CATEGORY_LABELS[e.category]}
                     </Chip>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{projectName(e.projectId)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{e.projectName||"—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {PAYMENT_METHOD_LABELS[e.paymentMethod]}
                   </td>
@@ -564,7 +545,6 @@ export default function ExpensesPage() {
           setEditing(null);
         }}
         expense={editing}
-        projects={projects}
       />
     </div>
   );

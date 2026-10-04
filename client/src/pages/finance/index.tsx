@@ -1,7 +1,8 @@
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {RetryBlock} from '@/components/RetryBlock';
 import PaymentExceptions from "@/components/PaymentExceptions";
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useApiMutation } from "@/hooks/useApiMutation";
 import { LoadingBlock } from "@/components/ui/Feedback";

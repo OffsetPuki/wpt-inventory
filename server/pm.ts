@@ -1,3 +1,7 @@
+import { listWindow } from "./pagination";
+import {businessScope,taskBusiness} from "./business-scope";
+import { validateTaskDates, validateTimeInterval } from "../shared/suite-contracts";
+import { inventoryOnce } from "./inventory-core";
 import { lockedTime, closedPeriod, dateKey, payrollDate, rateOn } from "./payroll";
 import type { Express } from "express";
 import path from "path";
@@ -350,7 +354,7 @@ export function registerPmRoutes(app: Express): void {
   // handlers so "reorder" is never parsed as an id.
 
   app.get("/api/pm/tasks", requireAuth, (req, res) => {
-    const conditions: any[] = [isNull(pmTasks.deletedAt)];
+    const conditions: any[] = [isNull(pmTasks.deletedAt),sql.raw(businessScope(req,taskBusiness))];
     const projectId = qstr(req.query.projectId);
     const status = qstr(req.query.status);
     if (req.query.from && req.query.to) conditions.push(sql`coalesce(${pmTasks.startDate},${pmTasks.dueDate})<=${String(req.query.to)} AND coalesce(${pmTasks.dueDate},${pmTasks.startDate})>=${String(req.query.from)}`);
@@ -386,6 +390,7 @@ export function registerPmRoutes(app: Express): void {
     let body;
     try {
       body = insertPmTaskSchema.parse(req.body);
+      validateTaskDates(body);
     } catch (e: any) {
       return res.status(400).json({ message: e.message || "Invalid request" });
     }
@@ -441,9 +446,11 @@ export function registerPmRoutes(app: Express): void {
     let patch;
     try {
       patch = insertPmTaskSchema.partial().parse(req.body);
+      validateTaskDates({...existing,...patch});
     } catch (e: any) {
       return res.status(400).json({ message: e.message || "Invalid request" });
     }
+    if (patch.projectId !== undefined && patch.projectId !== existing.projectId && sqlite.prepare('SELECT 1 FROM pm_time_entries WHERE task_id=? LIMIT 1').get(id)) return res.status(409).json({message:'This task has recorded time. Copy it to the new job for future work; its existing hours stay with the original job.'});
     const set: Partial<typeof pmTasks.$inferInsert> = { ...patch };
     if (patch.status && patch.status !== existing.status) {
       // Completion timestamp follows the done column: stamped on entry,
@@ -464,11 +471,25 @@ export function registerPmRoutes(app: Express): void {
     action: "pm.task_delete", targetType: "pm_task", name: (t) => t.title, audit,
   });
 
+  app.post('/api/pm/tasks/:id/copy', requireAuth, (req,res) => {
+    try {
+      const id=pid(req.params.id), projectId=z.number().int().positive().parse(req.body.projectId), requestKey=z.string().min(8).max(100).parse(req.body.requestKey);
+      const result=inventoryOnce(sqlite,req.user!.userId,requestKey,{id,projectId},()=>{
+        const source=db.select().from(pmTasks).where(and(eq(pmTasks.id,id),isNull(pmTasks.deletedAt))).get();
+        if(!source) throw new Error('Task not found.');
+        if(!sqlite.prepare("SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL AND status!='done'").get(projectId)) throw new Error('Choose an active job.');
+        const row=db.insert(pmTasks).values({title:source.title,description:source.description,projectId,priority:source.priority,assigneeId:source.assigneeId,estimateHours:source.estimateHours,status:'todo'}).returning().get();
+        audit(req,'pm.task_copy',{targetType:'pm_task',targetId:row.id,details:{sourceId:id,projectId}});
+        return row;
+      });res.status(201).json(result);
+    }catch(e:any){res.status(e.status||400).json({message:e.message});}
+  });
+
   // ── Time tracking ──────────────────────────────────────────────────────────
   // Literal /time/start, /time/stop, /time/running before /time/:id.
 
   app.get("/api/pm/time", requireAuth, (req, res) => {
-    const conditions: any[] = [];
+    const conditions: any[] = [sql.raw(businessScope(req,"(SELECT site FROM projects WHERE id=pm_time_entries.project_id)"))];
     // Workers only ever see their own hours; managers/technicians may filter
     // by any user (or none, for the whole shop).
     if (!isElevated(req)) {
@@ -494,7 +515,9 @@ export function registerPmRoutes(app: Express): void {
     // default would make the Time page's initial load scan the whole table.
     // 500 covers months of a small shop's entries; callers paging further back
     // narrow with from/to or raise ?limit explicitly.
-    const rawLimit = parseInt(qstr(req.query.limit) ?? "", 10);
+    const paged=req.query.page!==undefined;
+    const page=Math.max(0,Math.min(1000000,Math.trunc(Number(req.query.page)||0)));
+    const rawLimit = parseInt(qstr(req.query.limit) ?? (paged ? '50' : ''), 10);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 5000) : 500;
     const rows = db.select({
       ...getTableColumns(timeEntries),
@@ -505,10 +528,14 @@ export function registerPmRoutes(app: Express): void {
       .leftJoin(projects, eq(timeEntries.projectId, projects.id))
       .leftJoin(pmTasks, eq(timeEntries.taskId, pmTasks.id))
       .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(desc(timeEntries.startedAt))
+      .orderBy(desc(timeEntries.startedAt),desc(timeEntries.id))
+      .offset(paged?page*limit:0)
       .limit(limit)
       .all();
-    res.json(rows.map((r) => ({ ...r, locked: lockedTime(r) })));
+    const summary=db.select({total:sql<number>`count(*)`,totalMinutes:sql<number>`coalesce(sum(${timeEntries.durationMin}),0)`}).from(timeEntries).where(conditions.length?and(...conditions):undefined).get()!;
+    res.setHeader('X-Total-Count',summary.total);
+    const result=rows.map(r=>({...r,locked:lockedTime(r)}));
+    res.json(paged?{rows:result,...summary,page,limit}:result);
   });
 
   app.get("/api/pm/time/running", requireAuth, (req, res) => {
@@ -583,6 +610,7 @@ export function registerPmRoutes(app: Express): void {
     } else {
       return res.status(400).json({ message: "Provide startedAt + endedAt, or durationMin with one of them" });
     }
+    try { validateTimeInterval(startedAt,endedAt,durationMin!); } catch(e:any) { return res.status(400).json({message:e.message}); }
     if (closedPeriod(dateKey(new Date(startedAt)),dateKey(new Date(Math.max(startedAt, endedAt! - 1))))) return res.status(409).json({message:"This payroll period is closed. Ask an owner to record a correction in an open period."});
     const entry = db.insert(timeEntries).values({
       userId: req.user!.userId,
@@ -651,6 +679,7 @@ export function registerPmRoutes(app: Express): void {
       && nextEnd != null) {
       set.durationMin = Math.max(0, Math.round((nextEnd - nextStart) / 60000));
     }
+    try { validateTimeInterval(nextStart,nextEnd,set.durationMin ?? existing.durationMin); } catch(e:any) { return res.status(400).json({message:e.message}); }
     if (nextEnd != null && nextEnd < nextStart) return res.status(400).json({message:"End must be after start."});
     if (closedPeriod(dateKey(new Date(nextStart)),dateKey(new Date(Math.max(nextStart,(nextEnd ?? nextStart)-1))))) return res.status(409).json({message:"Cannot move time into a closed payroll period."});
     const updated = db.update(timeEntries).set(set).where(eq(timeEntries.id, id)).returning().get();
@@ -699,7 +728,8 @@ export function registerPmRoutes(app: Express): void {
       .leftJoin(clients, eq(contracts.clientId, clients.id))
       .leftJoin(projects, eq(contracts.projectId, projects.id))
       .where(and(...conditions))
-      .orderBy(desc(contracts.createdAt))
+      .orderBy(desc(contracts.createdAt),desc(contracts.id))
+      .limit(listWindow(req).limit).offset(listWindow(req).offset)
       .all();
     res.json(rows);
   });

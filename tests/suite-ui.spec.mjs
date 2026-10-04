@@ -9,6 +9,7 @@ test('Navigation search, mobile keyboard access, and shared pages',async({page})
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
  await page.goto(app.base+'/#/today');
+ await page.getByText('More workspaces & follow-ups',{exact:true}).click();
  await expect(page.getByRole('region',{name:'Quick access'})).toBeVisible();
  await page.getByRole('button',{name:'Open menu'}).click();
  const menu=page.getByRole('dialog',{name:'Navigation menu'});
@@ -28,12 +29,13 @@ test('Navigation search, mobile keyboard access, and shared pages',async({page})
  await expect(menu.getByText('No matching pages. Try another name.')).toBeVisible();
  await page.keyboard.press('Escape');
  await expect(page.getByRole('button',{name:'Open menu'})).toBeFocused();
- for(const [route,title] of [['/crm/leads','Leads'],['/crm/clients','Clients'],['/crm/quotes','New quote'],['/projects','Jobs'],['/pm/board','Task board'],['/pm/schedule','Schedule'],['/finance/invoices','Invoices'],['/finance/expenses','Expenses'],['/finance/purchase-orders','Purchase orders'],['/home','Inventory'],['/hr/employees','Employees'],['/hr/leave','Time off'],['/settings','Settings']]){
+ for(const [route,title] of [['/crm/leads','Leads'],['/crm/clients','Customers'],['/crm/quotes','New quote'],['/projects','Jobs'],['/pm/board','Task board'],['/pm/schedule','Schedule'],['/finance/invoices','Invoices'],['/finance/expenses','Expenses'],['/finance/purchase-orders','Purchase orders'],['/home','Inventory'],['/hr/employees','Employees'],['/hr/leave','Time off'],['/settings','Settings']]){
   await page.goto(app.base+'/#'+route);
   await expect(page.locator('#suite-main').getByRole('heading',{name:title,exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),route+' fits mobile').toBe(true);
  }
  await page.goto(app.base+'/#/today');
+ await page.getByText('More workspaces & follow-ups',{exact:true}).click();
  await expect(page.getByRole('region',{name:'Quick access'})).toBeVisible();
  await page.screenshot({animations:'disabled',path:'test-results/suite-today-mobile.png',fullPage:true});
  await page.setViewportSize({width:1440,height:1000});
@@ -57,3 +59,4 @@ test('Navigation search, mobile keyboard access, and shared pages',async({page})
  expect(new Set(actions).size,'Quote actions fit on one row').toBe(1);
  expect(errors).toEqual([]);
 });
+

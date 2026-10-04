@@ -13,11 +13,19 @@ export function registerBusinessReport(app:Express){
   const invoiceSite="coalesce(p.site,l.site,CASE WHEN json_valid(q.payload) THEN coalesce(json_extract(q.payload,'$.business'),CASE q.type WHEN 'concrete' THEN 'concrete' WHEN 'insulation' THEN 'insulation' ELSE 'metals' END) END,'unassigned')";
   const joins='LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN crm_leads l ON l.id=i.lead_id LEFT JOIN quotes q ON q.id=i.quote_id';
   const paymentDate="coalesce(nullif(t.paid_at,''),date(t.created_at/1000,'unixepoch','localtime'))";
-  const paid=sqlite.prepare(`SELECT 'paid' kind,t.id,${paymentDate} date,i.number label,t.amount_cents amountCents,${invoiceSite} site,'/finance/invoices?invoice='||i.id href FROM fin_invoice_payments t JOIN fin_invoices i ON i.id=t.invoice_id ${joins} WHERE i.status!='void' AND ${paymentDate} BETWEEN ? AND ?`).all(from,to);
-  const expenses=sqlite.prepare("SELECT 'expense' kind,e.id,e.date,coalesce(e.vendor,'Expense') label,e.amount_cents amountCents,coalesce(p.site,'unassigned') site,'/finance/expenses?expense='||e.id href FROM fin_expenses e LEFT JOIN projects p ON p.id=e.project_id WHERE e.deleted_at IS NULL AND e.date BETWEEN ? AND ?").all(from,to);
-  const outstanding=sqlite.prepare(`SELECT 'outstanding' kind,i.id,i.due_date date,i.number label,max(0,i.total_cents-coalesce(i.retainage_cents,0)-i.paid_cents) amountCents,${invoiceSite} site,'/finance/invoices?invoice='||i.id href FROM fin_invoices i ${joins} WHERE i.deleted_at IS NULL AND i.status IN ('sent','partial','overdue')`).all();
-  const rows=([...paid,...expenses,...outstanding] as any[]).filter(r=>site==='all'||r.site===site).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||b.id-a.id);
-  const sum=(kind:string)=>rows.filter(r=>r.kind===kind).reduce((v,r)=>v+r.amountCents,0);
-  res.json({from,to,site,paidCents:sum('paid'),expensesCents:sum('expense'),cashDifferenceCents:sum('paid')-sum('expense'),outstandingCents:sum('outstanding'),rows});
+  const kind=String(req.query.kind||'all'),search=String(req.query.q||'').slice(0,100),page=Math.max(0,Math.min(100000,Math.trunc(Number(req.query.page)||0))),limit=25;
+  if(!['all','paid','expense','cash','outstanding'].includes(kind))return res.status(400).json({message:'Choose a valid report filter.'});
+  const cte=`WITH records AS (
+    SELECT 'paid' kind,t.id,${paymentDate} date,i.number label,t.amount_cents amountCents,${invoiceSite} site,'/finance/invoices?invoice='||i.id href FROM fin_invoice_payments t JOIN fin_invoices i ON i.id=t.invoice_id ${joins} WHERE i.status!='void' AND ${paymentDate} BETWEEN @from AND @to
+    UNION ALL SELECT 'expense',e.id,e.date,coalesce(e.vendor,'Expense'),e.amount_cents,coalesce(p.site,'unassigned'),'/finance/expenses?expense='||e.id FROM fin_expenses e LEFT JOIN projects p ON p.id=e.project_id WHERE e.deleted_at IS NULL AND e.date BETWEEN @from AND @to
+    UNION ALL SELECT 'outstanding',i.id,i.due_date,i.number,max(0,i.total_cents-coalesce(i.retainage_cents,0)-i.paid_cents),${invoiceSite},'/finance/invoices?invoice='||i.id FROM fin_invoices i ${joins} WHERE i.deleted_at IS NULL AND i.status IN ('sent','partial','overdue')
+  ), scoped AS (SELECT * FROM records WHERE @site='all' OR site=@site)`;
+  const params={from,to,site};
+  const sums=sqlite.prepare(cte+" SELECT coalesce(sum(CASE WHEN kind='paid' THEN amountCents ELSE 0 END),0) paidCents,coalesce(sum(CASE WHEN kind='expense' THEN amountCents ELSE 0 END),0) expensesCents,coalesce(sum(CASE WHEN kind='outstanding' THEN amountCents ELSE 0 END),0) outstandingCents FROM scoped").get(params) as any;
+  const filtered=" FROM scoped WHERE (@kind='all' OR kind=@kind OR (@kind='cash' AND kind!='outstanding')) AND instr(lower(label),lower(@search))>0";
+  const filterParams={...params,kind,search};
+  const total=(sqlite.prepare(cte+' SELECT count(*) total'+filtered).get(filterParams) as any).total;
+  const rows=sqlite.prepare(cte+' SELECT *'+filtered+" ORDER BY coalesce(date,'') DESC,id DESC,kind LIMIT @limit OFFSET @offset").all({...filterParams,limit,offset:page*limit});
+  res.json({from,to,site,...sums,cashDifferenceCents:sums.paidCents-sums.expensesCents,rows,total,page,limit});
  });
 }

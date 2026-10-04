@@ -1,8 +1,9 @@
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import BusinessReportSummary from "@/components/BusinessReportSummary";
 import {PencilRuler,Users,FolderKanban,Box,Timer,ArrowUpRight} from 'lucide-react';
 import { LeadQueue } from '@/components/LeadIntake';
 import { TimeReview } from "./suite-reviews";
-import { useQuery } from "@tanstack/react-query";
+import { } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
@@ -39,21 +40,7 @@ export default function TodayPage() {
             : "Your work, materials and messages."
         }
       />
-      {isElevated && <BusinessReportSummary />}
-      <section aria-label="Quick access" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[
-          {icon:PencilRuler,href:'/crm/quotes',label:'Quotes',detail:'Design, price and send'},
-          {icon:Users,href:'/crm/clients',label:'Customers',detail:'Contacts and history'},
-          {icon:FolderKanban,href:'/projects',label:'Jobs',detail:'Schedules and progress'},
-          isElevated?{icon:Box,href:'/crm/previews',label:'Customer previews',detail:'Designs and feedback'}:{icon:Timer,href:'/pm/time',label:'My time',detail:'Track time spent on your work'}
-        ].map(item=><Link key={item.href} href={item.href} className="suite-shortcut group rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary"><div className="suite-shortcut-icon"><item.icon size={21} strokeWidth={1.7}/><ArrowUpRight size={16} className="suite-shortcut-arrow" aria-hidden="true"/></div><span className="flex items-center justify-between gap-3 font-semibold">{item.label}</span><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.detail}</p></Link>)}
-      </section>
-      <div className="flex flex-wrap gap-2">
-        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/home">Inventory</Link>
-        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/crm/leads">Customers & leads</Link>
-        {isElevated&&<><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/finance/invoices?status=overdue">Money to collect</Link><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/suite-health">Owner controls</Link></>}
-      </div>
-      {isElevated && <LeadQueue />}
+      <div className="flex flex-wrap gap-2"><Link className="min-h-11 rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground" href="/projects">Open a job</Link><Link className="min-h-11 rounded-xl border px-4 py-3 text-sm" href="/pm/time">Track my time</Link>{isElevated&&<Link className="min-h-11 rounded-xl border px-4 py-3 text-sm" href="/finance/invoices?status=overdue">Money to collect</Link>}</div>
       {data.isError ? (
         <RetryBlock query={data} />
       ) : data.isPending ? (
@@ -109,7 +96,23 @@ export default function TodayPage() {
           )}
         </div>
       )}
-      <TimeReview />
+      {isElevated && <BusinessReportSummary />}
+      <details className="rounded-2xl border bg-card p-5"><summary className="cursor-pointer font-semibold">More workspaces & follow-ups</summary><div className="mt-5 space-y-5">
+      <section aria-label="Quick access" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          {icon:PencilRuler,href:'/crm/quotes',label:'Quotes',detail:'Design, price and send'},
+          {icon:Users,href:'/crm/clients',label:'Customers',detail:'Contacts and history'},
+          {icon:FolderKanban,href:'/projects',label:'Jobs',detail:'Schedules and progress'},
+          isElevated?{icon:Box,href:'/crm/previews',label:'Customer previews',detail:'Designs and feedback'}:{icon:Timer,href:'/pm/time',label:'My time',detail:'Track time spent on your work'}
+        ].map(item=><Link key={item.href} href={item.href} className="suite-shortcut group rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary"><div className="suite-shortcut-icon"><item.icon size={21} strokeWidth={1.7}/><ArrowUpRight size={16} className="suite-shortcut-arrow" aria-hidden="true"/></div><span className="flex items-center justify-between gap-3 font-semibold">{item.label}</span><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.detail}</p></Link>)}
+      </section>
+      <div className="flex flex-wrap gap-2">
+        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/home">Inventory</Link>
+        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/crm/leads">Customers & leads</Link>
+        {isElevated&&<><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/finance/invoices?status=overdue">Money to collect</Link><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/suite-health">Owner controls</Link></>}
+      </div>
+      {isElevated && <LeadQueue />}
+<TimeReview /></div></details>
       <section id="inbox" className="rounded-xl border bg-card p-5">
         <h2 className="mb-3 font-semibold">Inbox</h2>
         {inbox.isError ? (

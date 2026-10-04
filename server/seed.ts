@@ -1,14 +1,11 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { storage, sqlite } from "./storage";
+import { storage } from "./storage";
 import { DEFAULT_CJM_EQUIPMENT_PRESETS } from "../shared/cjm-presets";
 
 const BCRYPT_ROUNDS = 10;
 const BCRYPT_PREFIX = /^\$2[aby]\$/;
 
-function randomPin(): string {
-  return Math.floor(Math.random() * 10000).toString().padStart(4, "0");
-}
 
 /**
  * One-time silent migration: existing installs stored PINs as plaintext. Hash

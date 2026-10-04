@@ -43,7 +43,7 @@ export async function suiteWorkflow(page, browser, app, expect) {
   await expect(
     page.getByRole("heading", { name: "Connected mobile job", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Up to date", { exact: true })).toBeVisible();
+  await expect(page.getByText("Saved · live updates", { exact: true })).toBeVisible();
   const evidenceDir = path.resolve("../_audit/2026-09-10/evidence");
   fs.mkdirSync(evidenceDir, { recursive: true });
   fs.writeFileSync(
@@ -94,7 +94,7 @@ export async function suiteWorkflow(page, browser, app, expect) {
   try {
     await second.goto(app.base + `/#/project/${job.id}?tab=work`);
     await expect(
-      second.getByText("Up to date", { exact: true }),
+      second.getByText("Saved · live updates", { exact: true }),
     ).toBeVisible();
     await api(`/api/pm/tasks/${task.id}`, "PATCH", {
       title: "Crew task updated on another screen",
@@ -167,7 +167,7 @@ export async function suiteWorkflow(page, browser, app, expect) {
 
     // Exact search opens the customer even outside the current list page.
     await page
-      .locator('input[placeholder="Search clients, invoices, items…"]:visible')
+      .locator('input[placeholder="Search customers, invoices, items…"]:visible')
       .fill("Suite workflow customer");
     await page.getByRole("button", { name: /Suite workflow customer/ }).click();
     await expect(page.getByRole("dialog")).toContainText(
@@ -175,13 +175,13 @@ export async function suiteWorkflow(page, browser, app, expect) {
     );
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.goto(app.base + "/#/crm/clients");
-    await page.getByRole("button", { name: "New client", exact: true }).click();
+    await page.getByRole("button", { name: "New customer", exact: true }).click();
     await page
       .getByRole("dialog")
       .getByLabel("Name", { exact: true })
       .fill("Recovered unsaved customer");
     await page.reload();
-    await page.getByRole("button", { name: "New client", exact: true }).click();
+    await page.getByRole("button", { name: "New customer", exact: true }).click();
     await expect(
       page.getByRole("dialog").getByLabel("Name", { exact: true }),
     ).toHaveValue("Recovered unsaved customer");

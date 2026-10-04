@@ -1,8 +1,9 @@
+import {ActiveFilters} from '@/components/ActiveFilters';
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
 import { RetryBlock } from '@/components/RetryBlock';
-import { useRecordLink, readContext } from "@/lib/record-link";
+import { useRecordLink } from "@/lib/record-link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -102,13 +103,13 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
         : { method: "POST", url: "/api/crm/clients", body };
     },
     invalidate: [["crm-clients"], ["crm-client-detail"]],
-    successTitle: client ? "Client updated" : "Client created",
-    errorTitle: "Could not save client",
+    successTitle: client ? "Customer updated" : "Customer created",
+    errorTitle: "Could not save customer",
     onSuccess: () => {recovered.clear();onClose();},
   });
 
   return (
-    <Modal preservesDraft open onClose={onClose} title={client ? "Edit client" : "New client"} maxWidth="max-w-lg">
+    <Modal preservesDraft open onClose={onClose} title={client ? "Edit customer" : "New customer"} maxWidth="max-w-lg">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -171,7 +172,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {save.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          {client ? "Save changes" : "Create client"}
+          {client ? "Save changes" : "Create customer"}
         </button>
       </form>
     </Modal>
@@ -294,7 +295,7 @@ function ClientDetailModal({
                 {isElevated && (
                   <button
                     onClick={() => {
-                      if (window.confirm(`Delete client "${client.name}"? This can't be undone from the app. Their jobs and invoices are kept (the name still shows on them).`)) {
+                      if (window.confirm(`Delete customer "${client.name}"? This can't be undone from the app. Their jobs and invoices are kept (the name still shows on them).`)) {
                         del.mutate();
                       }
                     }}
@@ -483,12 +484,12 @@ export default function ClientsPage() {
     invalidate: [["crm-clients"]],
     successTitle: (_data, vars) =>
       vars.next === "archived" ? "Client archived" : "Client restored",
-    errorTitle: "Could not update client",
+    errorTitle: "Could not update customer",
   });
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Clients" description="Customer records, history, and contact info">
+      <Header title="Customers" description="Customer records, history, and contact info">
         <button
           onClick={() => {
             setEditing(null);
@@ -497,7 +498,7 @@ export default function ClientsPage() {
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
         >
           <Plus className="h-5 w-5" />
-          New client
+          New customer
         </button>
       </Header>
 
@@ -507,7 +508,7 @@ export default function ClientsPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search clients…"
+            placeholder="Search customers…"
             className="h-11 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring"
           />
         </div>
@@ -522,11 +523,12 @@ export default function ClientsPage() {
         </select>
       </div>
 
+      <ActiveFilters shared filters={[status&&`Status: ${status}`,q&&`Search: ${q}`]} onReset={()=>{setStatus('');setQ('');setPage(0);}}/>
       <PageButtons page={page} setPage={setPage} count={clients.length}/>
       {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : clients.length === 0 ? (
-        <EmptyState icon={Contact} message="No clients yet">
+        <EmptyState icon={Contact} message="No customers yet">
           <button
             onClick={() => {
               setEditing(null);

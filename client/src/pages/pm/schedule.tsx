@@ -1,7 +1,8 @@
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { useSuiteQuery } from '@/lib/suite-query';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
@@ -9,7 +10,7 @@ import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
 import { todayYmd, ymdToDate, formatDate } from "@/lib/format";
-import type { Project, PublicUser } from "@shared/schema";
+import type { PublicUser } from "@shared/schema";
 import { TASK_STATUS_LABELS, type TaskStatus } from "@shared/pm-schema";
 import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
 import { TaskDialog, type TaskRow } from "./task-dialog";
@@ -60,10 +61,6 @@ export default function PmSchedulePage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TaskRow | null>(null);
 
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
-  });
 
   const { data: users = [] } = useQuery<PublicUser[]>({
     queryKey: ["users"],
@@ -302,7 +299,6 @@ export default function PmSchedulePage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         task={editing}
-        projects={projects}
         users={users}
         isElevated={isElevated}
       />

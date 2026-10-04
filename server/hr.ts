@@ -87,7 +87,6 @@ try {
 // ─── Local helpers ───────────────────────────────────────────────────────────
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MS_PER_DAY = 86_400_000;
 
 // `pid` (req.params → number) and `todayLocal` (local YYYY-MM-DD; payroll
 // periods are wall-clock concepts, so comparing against UTC would flip the
@@ -95,12 +94,6 @@ const MS_PER_DAY = 86_400_000;
 
 // "YYYY-MM-DD" → unix ms at local midnight (start) / end-of-day (end).
 // Returns NaN on garbage input so callers can just skip the filter.
-function dayStartMs(date: string): number {
-  return new Date(`${date}T00:00:00`).getTime();
-}
-function dayEndMs(date: string): number {
-  return new Date(`${date}T23:59:59.999`).getTime();
-}
 
 function fullName(e: Pick<Employee, "firstName" | "lastName">): string {
   return `${e.firstName} ${e.lastName}`.trim();

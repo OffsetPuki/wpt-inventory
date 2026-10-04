@@ -1,5 +1,5 @@
 import {registerMarketingWorkflows} from './marketing-workflows';
-import {marketingMigrations,marketingManager,resolveReviewSite,syncReviewTask,versionConflict} from './marketing-core';
+import {marketingMigrations,marketingManager,syncReviewTask,versionConflict} from './marketing-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import { uploadsDir } from './storage';
@@ -23,7 +23,7 @@ import { pmTasks, type TaskKind } from "../shared/pm-schema";
 // Cross-module READ: the CRM module owns crm_leads (tables + endpoints).
 // Marketing only reads them for source/attribution reporting.
 import { leads, clients } from "../shared/crm-schema";
-import { pid, qstr, todayLocal, registerCreate } from "./http-util";
+import { pid, qstr, todayLocal } from "./http-util";
 import { projectReadiness, portfolioServices } from '../shared/portfolio';
 
 // Technicians may prepare drafts; publishing remains manager-controlled below.

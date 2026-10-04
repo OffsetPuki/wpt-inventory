@@ -1,3 +1,5 @@
+import {businessScope,invoiceBusiness,expenseBusiness} from "./business-scope";
+import {inventoryOnce} from "./inventory-core";
 import { initializePurchaseOrders, registerPurchaseOrders } from './purchase-orders';
 import {resolveReviewSite} from './marketing-core';
 import { defaultPaymentOptions, wireDetailsSchema, stripeAllowed } from '../shared/invoice-payment-options';
@@ -5,29 +7,28 @@ import { listWindow } from './pagination';
 import { enqueueFollowup } from './outbox';
 import { jobStockCost,unbilledStock } from './stock-cost';
 import { projectLabor } from './labor-cost';
-import { registerReceivingRoutes, receivePoRemaining } from "./inventory-receiving";
+import { registerReceivingRoutes } from "./inventory-receiving";
 import { insertNumbered } from "./numbering";
 import { communicationContext, localizedLink } from "./communication";
 import type { Express, Request, Response } from "express";
-import type { z } from "zod";
+import { z } from "zod";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { eq, and, or, desc, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, or, desc, isNull, inArray, sql, getTableColumns } from "drizzle-orm";
 import { sqlite, db, uploadsDir } from "./storage";
 import { auditQuiet as audit } from "./audit";
 import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, queueMail, isOptedOut } from "./mailer";
 import { renderTemplate, firstNameOf, shopBrand } from "./email-templates";
 import {
-  invoices, invoicePayments, expenses, purchaseOrders,
+  invoices, invoicePayments, expenses, 
   finSettings,
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
-  insertPurchaseOrderSchema,
   updateFinSettingsSchema, pullUnbilledSchema, retainagePctSchema,
   discountInputSchema, attachmentsSchema,
   EXPENSE_CATEGORY_LABELS,
-  type Invoice, type InvoiceStatus, type Expense, type PurchaseOrder, type InvoiceAttachment,
+  type Invoice, type InvoiceStatus, type Expense, type InvoiceAttachment,
 } from "../shared/finance-schema";
 import { clients } from "../shared/crm-schema";
 import { projects } from "../shared/schema";
@@ -48,7 +49,7 @@ import { marketingSettings } from "../shared/marketing-schema";
 // dir, same allowlist. pm.ts imports nothing from here, so no cycle.
 import { docUpload, DOC_EXT_TO_MIME } from "./pm";
 import { parseLineItems, computeDocTotals, lineItemsTotalCents } from "../shared/biz-common";
-import { pid, qstr, todayLocal, ymdLocal, usd, registerSoftDelete, registerCreate } from "./http-util";
+import { pid, qstr, todayLocal, ymdLocal, usd, registerCreate } from "./http-util";
 
 // ─── Table creation (synchronous DDL) ────────────────────────────────────────
 // Mirrors shared/finance-schema.ts exactly. client_id / estimate_id are soft
@@ -344,7 +345,7 @@ function getInvoice(id: number): Invoice | undefined {
 const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://www.cjmmetals.com";
 
 function queueReviewRequest(inv: Invoice): void { enqueueFollowup(`invoice-review:${inv.id}`,"queueReviewRequest",{inv}); }
-export async function run_queueReviewRequest(inv: Invoice, deliveryKey:string) {
+export async function run_queueReviewRequest(inv: Invoice, _deliveryKey:string) {
  return sqlite.transaction(()=>{
       // Owner opt-out lives in mk_settings; a missing row/table means default on.
       const cfg = db.select({ on: marketingSettings.autoReviewRequest })
@@ -614,7 +615,7 @@ export function recordInvoicePayment(
   source?: string,
   beforeRecord?: (current: Invoice) => Invoice,
 ): { payment: typeof invoicePayments.$inferSelect; invoice: Invoice } {
-  const { payment, invoice, inserted, previousStatus } = sqlite.transaction(() => {
+  const { payment, invoice, inserted } = sqlite.transaction(() => {
     let current = db.select().from(invoices).where(eq(invoices.id, inv.id)).get();
     if (!current || current.deletedAt != null) throw new Error("Invoice not found");
     const previousStatus = current.status;
@@ -749,6 +750,7 @@ function collectUnbilled(projectId: number): { expenses: Expense[]; time: Unbill
 }
 
 // Void/delete releases the stamps so the work becomes billable again.
+function activeExpenseAdjustment(invoiceId:number){return sqlite.prepare("SELECT i.number FROM fin_expense_corrections c JOIN fin_invoices i ON i.id=c.adjustment_invoice_id WHERE c.original_invoice_id=? AND i.id<>? AND i.deleted_at IS NULL AND i.status<>'void' LIMIT 1").get(invoiceId,invoiceId) as {number:string}|undefined;}
 function releaseBilledItems(invoiceId: number): void {
   sqlite.prepare("UPDATE suite_stock_costs SET invoice_id=NULL WHERE invoice_id=?").run(invoiceId);
   sqlite.prepare("UPDATE fin_expenses SET invoice_id = NULL WHERE invoice_id = ?").run(invoiceId);
@@ -807,13 +809,14 @@ export function registerFinanceRoutes(app: Express): void {
   });
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 
-  app.get("/api/finance/stats", requireElevated, (_req, res) => {
+  app.get("/api/finance/stats", requireElevated, (req, res) => {
     const today = todayLocal();
     const monthPrefix = today.slice(0, 7); // "YYYY-MM"
     const now = new Date();
     const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
     const receivableWhere = and(
+      sql.raw(businessScope(req,invoiceBusiness)),
       isNull(invoices.deletedAt),
       inArray(invoices.status, RECEIVABLE_STATUSES)
     );
@@ -834,6 +837,7 @@ export function registerFinanceRoutes(app: Express): void {
     const paidThisMonthCents = db.select({
       v: sql<number>`COALESCE(SUM(${invoicePayments.amountCents}), 0)`,
     }).from(invoicePayments).where(and(
+      sql.raw('fin_invoice_payments.invoice_id IN (SELECT id FROM fin_invoices WHERE '+businessScope(req,invoiceBusiness)+')'),
       or(
         sql`${invoicePayments.paidAt} LIKE ${monthPrefix + "%"}`,
         and(
@@ -848,13 +852,14 @@ export function registerFinanceRoutes(app: Express): void {
     const expensesThisMonthCents = db.select({
       v: sql<number>`COALESCE(SUM(${expenses.amountCents}), 0)`,
     }).from(expenses).where(and(
+      sql.raw(businessScope(req,expenseBusiness)),
       isNull(expenses.deletedAt),
       sql`${expenses.date} LIKE ${monthPrefix + "%"}`
     )).get()?.v ?? 0;
 
     const draftInvoices = db.select({ c: sql<number>`COUNT(*)` })
       .from(invoices)
-      .where(and(isNull(invoices.deletedAt), eq(invoices.status, "draft")))
+      .where(and(sql.raw(businessScope(req,invoiceBusiness)),isNull(invoices.deletedAt), eq(invoices.status, "draft")))
       .get()?.c ?? 0;
 
     res.json({
@@ -869,7 +874,7 @@ export function registerFinanceRoutes(app: Express): void {
 
   // ─── Reports (accounting rollups, all over the trailing 12 months) ───────
 
-  app.get("/api/finance/reports", requireElevated, (_req, res) => {
+  app.get("/api/finance/reports", requireElevated, (req, res) => {
     const today = todayLocal();
     const now = new Date();
 
@@ -881,11 +886,11 @@ export function registerFinanceRoutes(app: Express): void {
     const monthSet = new Set(months);
     const windowStart = `${months[0]}-01`;
 
-    const paymentsAll = db.select().from(invoicePayments).all();
-    const invoicesAll = db.select().from(invoices).all();
+    const paymentsAll = db.select().from(invoicePayments).where(sql.raw('fin_invoice_payments.invoice_id IN (SELECT id FROM fin_invoices WHERE '+businessScope(req,invoiceBusiness)+')')).all();
+    const invoicesAll = db.select().from(invoices).where(sql.raw(businessScope(req,invoiceBusiness))).all();
     const invoiceById = new Map(invoicesAll.map((i) => [i.id, i]));
     const expenseRows = db.select().from(expenses)
-      .where(and(isNull(expenses.deletedAt), sql`${expenses.date} >= ${windowStart}`))
+      .where(and(sql.raw(businessScope(req,expenseBusiness)),isNull(expenses.deletedAt), sql`${expenses.date} >= ${windowStart}`))
       .all();
 
     const paymentMonth = (p: (typeof paymentsAll)[number]): string =>
@@ -988,7 +993,7 @@ export function registerFinanceRoutes(app: Express): void {
     const projectId = qstr(req.query.projectId);
     const q = qstr(req.query.q);
 
-    const conds = [isNull(invoices.deletedAt)];
+    const conds = [isNull(invoices.deletedAt),sql.raw(businessScope(req,invoiceBusiness))];
     if (clientId) conds.push(eq(invoices.clientId, parseInt(clientId, 10)));
     if (projectId) conds.push(eq(invoices.projectId, parseInt(projectId, 10)));
 
@@ -1189,6 +1194,7 @@ export function registerFinanceRoutes(app: Express): void {
       return res.json(presentInvoice(inv, todayLocal()));
     }
 
+    if(body.status==='void'){const adjustment=activeExpenseAdjustment(inv.id);if(adjustment)return res.status(409).json({message:`Void the linked expense adjustment ${adjustment.number} first so the expense cannot be billed twice.`});}
     const row=sqlite.transaction(()=>{
 
     const row = db.update(invoices).set(updates).where(eq(invoices.id, inv.id)).returning().get();
@@ -1227,6 +1233,7 @@ export function registerFinanceRoutes(app: Express): void {
         message: "Invoice has recorded payments and cannot be deleted — set its status to void instead.",
       });
     }
+    const adjustment=activeExpenseAdjustment(inv.id);if(adjustment)return res.status(409).json({message:`Void or remove the linked expense adjustment ${adjustment.number} first.`});
     db.update(invoices).set({ deletedAt: Date.now() }).where(eq(invoices.id, inv.id)).run();
     // Fix 4: deleting releases the billed-on stamps (same as voiding).
     releaseBilledItems(inv.id);
@@ -1626,7 +1633,7 @@ export function registerFinanceRoutes(app: Express): void {
     const to = qstr(req.query.to);
     const q = qstr(req.query.q);
 
-    const conds = [isNull(expenses.deletedAt)];
+    const conds = [isNull(expenses.deletedAt),sql.raw(businessScope(req,expenseBusiness))];
     if (category) conds.push(eq(expenses.category, category as any));
     if (projectId) conds.push(eq(expenses.projectId, parseInt(projectId, 10)));
     if (from) conds.push(sql`${expenses.date} >= ${from}`);
@@ -1635,9 +1642,9 @@ export function registerFinanceRoutes(app: Express): void {
     if(q)conds.push(sql`(instr(lower(coalesce(${expenses.vendor},'')),lower(${q}))>0 OR instr(lower(coalesce(${expenses.notes},'')),lower(${q}))>0)`);
     const window=listWindow(req);
     const totals=db.select({n:sql<number>`count(*)`,cents:sql<number>`coalesce(sum(${expenses.amountCents}),0)`}).from(expenses).where(and(...conds)).get()!;
-    const rows=db.select().from(expenses).where(and(...conds)).orderBy(desc(expenses.date),desc(expenses.id)).limit(window.limit).offset(window.offset).all();
+    const rows=db.select({...getTableColumns(expenses),projectName:sql<string|null>`(SELECT job_number||' — '||name FROM projects WHERE id=${expenses.projectId})`}).from(expenses).where(and(...conds)).orderBy(desc(expenses.date),desc(expenses.id)).limit(window.limit).offset(window.offset).all();
     const totalCents=totals.cents;res.setHeader('X-Total-Count',String(totals.n));
-    res.json({ rows, totalCents });
+    res.json({ rows, totalCents, total:totals.n });
   });
 
   registerCreate(app, "/api/finance/expenses", requireElevated, {
@@ -1658,6 +1665,7 @@ export function registerFinanceRoutes(app: Express): void {
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
+    if (existing.invoiceId && (['amountCents','projectId','billable'] as const).some(k=>body[k]!==undefined && body[k]!==existing[k])) return res.status(409).json({message:'This expense is already billed. Use Review correction to reconcile its cost and customer charge. To change jobs, void the linked invoice first.'});
     if (Object.keys(body).length === 0) return res.json(existing);
     const row = db.update(expenses).set(body).where(eq(expenses.id, existing.id)).returning().get();
     res.json(row);
@@ -1668,6 +1676,7 @@ export function registerFinanceRoutes(app: Express): void {
       .where(and(eq(expenses.id, pid(req.params.id)), isNull(expenses.deletedAt)))
       .get();
     if (!existing) return res.status(404).json({ message: "Expense not found" });
+    if(existing.invoiceId) return res.status(409).json({message:'This expense is already billed. Review a correction or void the linked invoice before deleting it.'});
     db.update(expenses).set({ deletedAt: Date.now() }).where(eq(expenses.id, existing.id)).run();
     audit(req, "finance.expense_delete", {
       targetType: "expense", targetId: existing.id, targetName: existing.vendor ?? existing.category,
@@ -1676,5 +1685,36 @@ export function registerFinanceRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
+
+  sqlite.exec('CREATE TABLE IF NOT EXISTS fin_expense_corrections(id INTEGER PRIMARY KEY,expense_id INTEGER NOT NULL,original_invoice_id INTEGER NOT NULL,adjustment_invoice_id INTEGER,before_cents INTEGER NOT NULL,after_cents INTEGER NOT NULL,customer_delta_cents INTEGER NOT NULL,reason TEXT NOT NULL,user_id INTEGER NOT NULL,created_at INTEGER NOT NULL)');
+  app.get('/api/finance/expenses/:id/corrections',requireElevated,(req,res)=>res.json(sqlite.prepare('SELECT * FROM fin_expense_corrections WHERE expense_id=? ORDER BY id DESC').all(pid(req.params.id))));
+  app.post('/api/finance/expenses/:id/corrections',requireElevated,(req,res)=>{
+    try {
+      const id=pid(req.params.id),b=z.object({requestKey:z.string().min(8).max(100),expectedAmountCents:z.number().int(),amountCents:z.number().int().nonnegative().max(1000000000),customerDeltaCents:z.number().int().min(-1000000000).max(1000000000),draftInvoiceId:z.number().int().positive().nullable().optional(),reason:z.string().trim().min(3).max(1000),reviewed:z.literal(true)}).parse(req.body);
+      const result=inventoryOnce(sqlite,req.user!.userId,b.requestKey,{id,...b},()=>{
+        const e=db.select().from(expenses).where(and(eq(expenses.id,id),isNull(expenses.deletedAt))).get();
+        if(!e?.invoiceId)throw new Error('This expense is no longer linked to an invoice. Reload it.');
+        if(e.amountCents!==b.expectedAmountCents)throw Object.assign(new Error('This expense changed. Reload before correcting it.'),{status:409});
+        if(e.notes?.startsWith('auto:') || e.category==='payroll')throw new Error('Correct this generated expense through its payroll or purchasing source.');
+        const original=getInvoice(e.invoiceId);
+        if(!original||original.status==='void')throw new Error('Reload this expense after its invoice was voided.');
+        let destination:Invoice|undefined;
+        if(b.customerDeltaCents!==0){
+          destination=b.draftInvoiceId?getInvoice(b.draftInvoiceId):original.status==='draft'?original:undefined;
+          if(!destination && b.customerDeltaCents>0){destination=insertNumbered('fin_invoices','INV',number=>db.insert(invoices).values({number,clientId:original.clientId,clientName:original.clientName,projectId:original.projectId,leadId:original.leadId,quoteId:original.quoteId,status:'draft',items:'[]',taxRateBp:original.taxRateBp,notes:'Expense correction for '+original.number}).returning().get());}
+          if(!destination)throw new Error('For a credit, select an unpaid draft for this same job and customer with enough charges to absorb the credit, or void and reissue the original invoice.');
+          if(destination.status!=='draft'||destination.paidCents!==0||destination.projectId!==original.projectId||destination.clientId!==original.clientId)throw new Error('Choose an unpaid draft for the same job and customer.');
+          const items=JSON.stringify([...parseLineItems(destination.items),{description:'Expense correction #'+id+' — '+b.reason,qty:1,unitPriceCents:b.customerDeltaCents}]);
+          const totals=computeTotals(items,destination.taxRateBp,destination.discountCents||0);
+          if((destination.retainageCents||0)>totals.totalCents) throw new Error('Review the draft’s retainage before applying this credit.');
+          db.update(invoices).set({items,...totals}).where(eq(invoices.id,destination.id)).run();
+        }
+        db.update(expenses).set({amountCents:b.amountCents}).where(eq(expenses.id,id)).run();
+        sqlite.prepare('INSERT INTO fin_expense_corrections(expense_id,original_invoice_id,adjustment_invoice_id,before_cents,after_cents,customer_delta_cents,reason,user_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id,original.id,destination?.id??null,e.amountCents,b.amountCents,b.customerDeltaCents,b.reason,req.user!.userId,Date.now());
+        audit(req,'finance.expense_correction',{targetType:'expense',targetId:id,details:{...b,originalInvoiceId:original.id,adjustmentInvoiceId:destination?.id}});
+        return {id,invoiceId:destination?.id??original.id};
+      });res.json(result);
+    }catch(e:any){res.status(e.status||400).json({message:e.message});}
+  });
   registerPurchaseOrders(app);
 }

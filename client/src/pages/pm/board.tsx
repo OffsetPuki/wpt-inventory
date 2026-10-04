@@ -1,15 +1,16 @@
+import {RecordSelect} from "@/components/RecordSelect";
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { RetryBlock } from "@/components/RetryBlock";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useRecordLink } from '@/lib/record-link';
-import { useDeepLink } from "@/lib/deep-link";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
 import Header from "@/components/Header";
 import { cn } from "@/lib/utils";
 import { formatDate, todayYmd } from "@/lib/format";
-import type { Project, PublicUser } from "@shared/schema";
+import type { PublicUser } from "@shared/schema";
 import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
@@ -51,10 +52,6 @@ export default function PmBoardPage() {
   const [editing, setEditing] = useState<TaskRow | null>(null);
   const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
 
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
-  });
 
   const { data: users = [] } = useQuery<PublicUser[]>({
     queryKey: ["users"],
@@ -134,18 +131,11 @@ export default function PmBoardPage() {
             className={cn(inputCls, "pl-9")}
           />
         </div>
-        <select
+        <RecordSelect type="jobs"
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value)}
           className={cn(inputCls, "w-auto min-w-[170px]")}
-        >
-          <option value="">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        />
         {isElevated && (
           <select
             value={assigneeFilter}
@@ -287,7 +277,6 @@ export default function PmBoardPage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         task={editing}
-        projects={projects}
         users={users}
         isElevated={isElevated}
       />

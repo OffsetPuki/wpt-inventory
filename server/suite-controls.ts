@@ -1,3 +1,5 @@
+import {businessScope} from "./business-scope";
+import { CUSTOMER_REFERENCE_TABLES } from "../shared/suite-contracts";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 import { deepMerge } from "../client/src/quote/lib/store.js";
 import type { Express } from "express";
@@ -7,7 +9,7 @@ import { sqlite, db } from "./storage";
 import { requireAuth, requireElevated } from "./auth";
 import { isElevated } from "./http-util";
 import { audit } from "./audit";
-import { jobRecord, jobReadiness } from "./suite-data";
+import { jobRecord, jobReadinessMany } from "./suite-data";
 import { inventoryOnce } from "./inventory-core";
 import { insertNumbered } from "./numbering";
 import { pmTasks } from "../shared/pm-schema";
@@ -15,14 +17,7 @@ import { eq } from "drizzle-orm";
 import { invoices } from "../shared/finance-schema";
 const key = z.string().min(8).max(100),
   positive = z.coerce.number().int().positive();
-const customerTables = [
-  "projects",
-  "crm_leads",
-  "pm_contracts",
-  "fin_invoices",
-  "mk_reviews",
-  "review_requests",
-];
+const customerTables = CUSTOMER_REFERENCE_TABLES;
 function customerMerge(source: number, target: number) {
   if (source === target) throw new Error("Choose two different customers.");
   const clients = sqlite
@@ -31,7 +26,7 @@ function customerMerge(source: number, target: number) {
     )
     .all(source, target) as any[];
   if (clients.length !== 2) throw new Error("Both customers must be active.");
-  const references = customerTables.map((table) => ({
+  const references: {table:string;rows:unknown[]}[] = customerTables.map((table) => ({
     table,
     rows: sqlite
       .prepare(`SELECT id FROM ${table} WHERE client_id=? ORDER BY id`)
@@ -80,13 +75,15 @@ export function registerSuiteControls(app: Express) {
       }
     });
 
-  endpoint("get", "/api/suite/pickers/:type", true, (req: any) => {
-    const type = z.enum(["clients", "jobs", "quotes"]).parse(req.params.type),
+  endpoint("get", "/api/suite/pickers/:type", false, (req: any) => {
+    const type = z.enum(["clients", "jobs", "quotes", "invoice-drafts"]).parse(req.params.type),
       q = String(req.query.q || "")
         .trim()
         .slice(0, 100),
       id = Number(req.query.id) || 0;
+    if(['quotes','invoice-drafts'].includes(type)&&!isElevated(req))throw Object.assign(new Error('Management access required.'),{status:403});
     const configs = {
+      "invoice-drafts": {table:"fin_invoices",columns:"id,number AS name,project_id AS projectId",search:"number",extra:" AND status='draft' AND paid_cents=0"},
       clients: {
         table: "crm_clients",
         columns: "id,name,company,email",
@@ -150,7 +147,7 @@ export function registerSuiteControls(app: Express) {
         );
       for (const table of customerTables)
         sqlite
-          .prepare(`UPDATE ${table} SET client_id=? WHERE client_id=?`)
+          .prepare(`UPDATE ${table} SET client_id=?${table==='customer_previews'?',version=version+1,updated_at=unixepoch()*1000':''} WHERE client_id=?`)
           .run(b.target, b.source);
       sqlite
         .prepare(
@@ -402,14 +399,16 @@ export function registerSuiteControls(app: Express) {
         .parse(req.query.to);
     if (to < from || Date.parse(to) - Date.parse(from) > 62 * 86400000)
       throw new Error("Choose up to two months.");
-    return (
+    const jobs = (
       sqlite
         .prepare(
-          "SELECT id,name,start_date,due_date,schedule_state FROM projects WHERE deleted_at IS NULL AND status='active' AND start_date<=? AND due_date>=? ORDER BY start_date,id LIMIT 200",
+          `SELECT id,name,start_date,due_date,schedule_state FROM projects WHERE deleted_at IS NULL AND status='active' AND start_date<=? AND due_date>=? AND ${businessScope(req,'site')} ORDER BY start_date,id LIMIT 200`,
         )
         .all(to, from) as any[]
-    ).map((job) => {
-      const r = jobReadiness(job.id);
+    );
+    const readiness=jobReadinessMany(jobs.map(j=>j.id));
+    return jobs.map((job) => {
+      const r = readiness.get(job.id)!;
       return {
         ...job,
         blockers: r.blockers,

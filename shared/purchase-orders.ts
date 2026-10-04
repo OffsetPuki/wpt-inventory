@@ -66,7 +66,7 @@ export function orderTotals(items: LineItem[], input: {
 // Apply order-level costs cumulatively so split deliveries sum to the exact
 // approved total, including the final rounding cent. Credits use the legacy path.
 export function receivedOrderCost(order: any, lines: LineItem[], received: Map<number, number>) {
-    return lines.reduce((sum, line, index) => sum + receivedLineCost(order, lines, index, received.get(index) || 0), 0);
+    return lines.reduce((sum, _line, index) => sum + receivedLineCost(order, lines, index, received.get(index) || 0), 0);
 }
 export function receivedLineCost(order: any, lines: LineItem[], index: number, quantity: number) {
     const line = lines[index];

@@ -48,7 +48,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
       () => document.documentElement.scrollWidth <= window.innerWidth + 1,
     ),
   ).toBe(true);
-  await page.route("**/api/finance/stats", (route) =>
+  await page.route("**/api/finance/stats*", (route) =>
     route.fulfill({
       status: 503,
       contentType: "application/json",
@@ -59,7 +59,7 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   await expect(
     page.getByText("Finance could not load.", { exact: false }),
   ).toBeVisible();
-  await page.unroute("**/api/finance/stats");
+  await page.unroute("**/api/finance/stats*");
   await page
     .getByRole("alert")
     .filter({ hasText: "Finance could not load" })

@@ -1,6 +1,6 @@
 import CreateCustomerPreview from './CreateCustomerPreview.jsx';
 import {useEffect,useRef,useState} from 'react';
-import {tableBaseFootprint} from '../data/configurators.js';
+import {websitePreviewState} from '../lib/website-preview-state.js';
 const TYPES=['gate','fence','carport','pergola','railing','table'];
 export const websitePreviewAvailable=type=>TYPES.includes(type);
 export default function WebsitePreview({type,state,customer}){
@@ -9,9 +9,7 @@ export default function WebsitePreview({type,state,customer}){
  const [frameOnly,setFrameOnly]=useState(false),view=useRef(false);view.current=frameOnly;
  const base=import.meta.env.VITE_DESIGN_PREVIEW_ORIGIN||'https://www.cjmmetals.com';
  const origin=new URL(base).origin;
- function send(){const s=latest.current;const data=Object.fromEntries(Object.entries(s).filter(([,v])=>['string','number','boolean'].includes(typeof v)));
-  if(type==='carport')data.previewMode=view.current?'frame':'finished';
-  if(type==='table'){const size=tableBaseFootprint(s);Object.assign(data,{frameLengthFt:size.lengthFt,frameWidthIn:size.widthIn,type:s.tableType,top:s.includeTop==='yes'?'show':'hide',lengthFt:s.lengthFt,widthIn:s.widthIn,heightIn:Number(s.frameHeightIn)+Number(s.topThicknessIn||2)});}
+ function send(){const data=websitePreviewState(type,latest.current,view.current);
   frame.current?.contentWindow?.postMessage({kind:'cjm-design-preview',state:data},origin);
  }
  useEffect(()=>{setReady(false);setError('');const timer=setTimeout(()=>setError('The website model could not load. Check your connection and retry.'),15000);const message=e=>{if(e.source!==frame.current?.contentWindow||e.origin!==origin)return;if(e.data?.kind==='cjm-preview-error')setError(e.data.error);if(e.data?.kind==='cjm-preview-applied')setError('');if(e.data?.kind==='cjm-preview-ready'){clearTimeout(timer);setError('');setReady(true);send();}};window.addEventListener('message',message);return()=>{clearTimeout(timer);window.removeEventListener('message',message);};},[type,origin,reload]);

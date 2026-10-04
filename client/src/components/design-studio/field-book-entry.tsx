@@ -1,6 +1,6 @@
-import React,{useState} from 'react';
+import {useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import type {ShopCatalog,ShopPart} from './types';
+import type {ShopCatalog} from './types';
 import type {Unit} from './fractions';
 import {MeasurementContext} from './MeasurementContext';
 import CutList from './CutList';

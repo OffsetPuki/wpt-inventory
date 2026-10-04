@@ -16,6 +16,7 @@ test('Website request opens from Today beyond the list page; contact and qualifi
   expect(input.status).toBe(201);
   for(let n=0;n<52;n++)await app.api('/api/crm/leads','POST',{name:`Later request ${n}`,site:'metals'},token);
   await page.goto(app.base+'/#/today');
+  await page.getByText('More workspaces & follow-ups',{exact:true}).click();
   await page.getByRole('link',{name:'Website project to contact',exact:true}).click();
   const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
   const gallery=dialog.getByRole('region',{name:'Request photos'});

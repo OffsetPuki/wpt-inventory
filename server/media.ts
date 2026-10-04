@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import type { Response, Request } from "express";
+import type { Request, Response } from "express";
 import { uploadsDir } from "./storage";
 
 export function saveLeadPhoto(data: string): string {
@@ -28,7 +28,7 @@ export function saveLeadPhoto(data: string): string {
   return `/uploads/${name}`;
 }
 export function setMediaCookie(
-  req: Request,
+  _req: Request,
   res: Response,
   token: string | null,
 ) {

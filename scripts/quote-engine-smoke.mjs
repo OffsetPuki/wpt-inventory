@@ -11,7 +11,7 @@ import {
 import { computeTotals } from '../client/src/quote/lib/quote.js';
 import { defaultState, summaryLine, specRows, tableBaseFootprint } from '../client/src/quote/data/configurators.js';
 import { deepMerge, duplicateSession } from '../client/src/quote/lib/store.js';
-import { renderTable } from '../client/src/quote/lib/preview/table.js';
+import {websitePreviewState} from '../client/src/quote/lib/website-preview-state.js';
 
 let failures = 0;
 function check(name, cond, detail = '') {
@@ -472,8 +472,8 @@ console.log('\nOptional tabletop pricing and scope:');
   const specs = specRows('table', included);
   check('customer specs include material and scope but no cost basis', specs.some(r => r.value === 'Finished white oak') && specs.some(r => r.value === 'Steel frame and tabletop included') && !JSON.stringify(specs).includes('450.25'));
   check('frame-only specs omit all tabletop details', !specRows('table', off).some(r => ['Top size', 'Tabletop material', 'Overall height', 'Steel base'].includes(r.label)) && specRows('table', off).some(r => r.value === 'Steel frame only'));
-  check('preview and summary distinguish included top', renderTable(included).includes('TABLETOP INCLUDED') && !renderTable(included).includes('TOP BY CUSTOMER') && summaryLine('table', included).includes('Frame + tabletop'));
-  check('frame-only preview contains no top', !renderTable(off).includes('TOP') && !renderTable(off).includes('#B89472') && !summaryLine('table', off).includes(' top'));
+  check('preview and summary distinguish included top', websitePreviewState('table',included).top==='show' && summaryLine('table', included).includes('Frame + tabletop'));
+  check('frame-only preview contains no top', websitePreviewState('table',off).top==='hide' && !summaryLine('table', off).includes(' top'));
 }
 
 console.log('\nDirect frame dimensions and legacy quote compatibility:');
@@ -491,11 +491,11 @@ console.log('\nDirect frame dimensions and legacy quote compatibility:');
   check('frame-only specification names the entered frame', specRows('table', direct).some(r => r.label === 'Frame size' && r.value === '2 ft 9 in × 16-3/4 in'));
   const hiddenTopChanged = { ...direct, lengthFt: 20, widthIn: 80, topThicknessIn: 9 };
   check('hidden top dimensions cannot resize or reprice an explicit frame', JSON.stringify(deriveItems('table', direct, pb)) === JSON.stringify(deriveItems('table', hiddenTopChanged, pb)));
-  check('hidden top dimensions cannot change the frame-only drawing', renderTable(direct) === renderTable(hiddenTopChanged));
+  check('hidden top dimensions cannot change the frame-only drawing', JSON.stringify(tableBaseFootprint(websitePreviewState('table',direct))) === JSON.stringify(tableBaseFootprint(websitePreviewState('table',hiddenTopChanged))));
   const included = { ...direct, includeTop: 'yes', lengthFt: 3, widthIn: 20, topCost: 150, topMaterial: 'Oak' };
   check('adding a larger top keeps the entered frame', JSON.stringify(tableBaseFootprint(included)) === JSON.stringify(base));
   check('included quote distinguishes top and frame sizes', specRows('table', included).some(r => r.label === 'Top size' && r.value === '3 ft × 20 in') && specRows('table', included).some(r => r.label === 'Frame size' && r.value === '2 ft 9 in × 16-3/4 in'));
-  check('larger included top renders without invalid geometry', !/NaN|Infinity/.test(renderTable(included)) && renderTable(included).includes('TABLETOP INCLUDED'));
+  check('larger included top renders without invalid geometry', ['frameLengthFt','frameWidthIn','heightIn','lengthFt','widthIn'].every(k=>Number.isFinite(Number(websitePreviewState('table',included)[k]))) && websitePreviewState('table',included).top==='show');
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED ✓' : `\n${failures} CHECK(S) FAILED ✗`);

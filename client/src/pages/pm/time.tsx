@@ -1,7 +1,10 @@
+import {RecordSelect} from "@/components/RecordSelect";
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
+import {useListPage,PageButtons} from "@/lib/list-page";
 import { RetryBlock } from "@/components/RetryBlock";
 import { readContext } from '@/lib/record-link';
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
@@ -69,12 +72,10 @@ function EntryDialog({
   open,
   onClose,
   entry,
-  projects,
 }: {
   open: boolean;
   onClose: () => void;
   entry: TimeRow | null;
-  projects: Project[];
 }) {
   const [date, setDate] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -239,22 +240,15 @@ function EntryDialog({
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Project</span>
-            <select
+            <span className="text-sm font-medium text-foreground">Job</span>
+            <RecordSelect type="jobs"
               className={inputCls}
               value={projectSel}
               onChange={(e) => {
                 setProjectSel(e.target.value);
                 setTaskSel("");
               }}
-            >
-              <option value="">No project</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">Task</span>
@@ -326,16 +320,14 @@ export default function PmTimePage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [userFilter, setUserFilter] = useState("");
+  const [projectFilter,setProjectFilter]=useState(()=>readContext('projectId'));
+  const {page,setPage}=useListPage('time-history',[from,to,userFilter,projectFilter]);
 
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [correcting, setCorrecting] = useState<TimeRow | null>(null);
   const [editingEntry, setEditingEntry] = useState<TimeRow | null>(null);
 
-  const { data: projects = [] } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => (await apiRequest("GET", "/api/projects")).json(),
-  });
 
   const { data: users = [] } = useQuery<PublicUser[]>({
     queryKey: ["users"],
@@ -359,12 +351,16 @@ export default function PmTimePage() {
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (isElevated && userFilter) params.set("userId", userFilter);
+  if(projectFilter)params.set('projectId',projectFilter);
+  params.set('page',String(page));params.set('limit','50');
   const qs = params.toString();
 
-  const { data: entries = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<TimeRow[]>({
-    queryKey: ["pm-time", from, to, userFilter],
+  const { data: history, isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<{rows:TimeRow[];total:number;totalMinutes:number}>({
+    queryKey: ["pm-time", from, to, userFilter,projectFilter,page],
     queryFn: async () => (await apiRequest("GET", `/api/pm/time${qs ? `?${qs}` : ""}`)).json(),
   });
+
+  const entries=history?.rows||[];
 
   // Ticking clock for the running timer.
   useEffect(() => {
@@ -408,9 +404,7 @@ export default function PmTimePage() {
     errorTitle: "Could not delete",
   });
 
-  const runningProject = running?.projectId
-    ? projects.find((p) => p.id === running.projectId)
-    : undefined;
+  const {data:runningProject}=useQuery<Project>({queryKey:["project",running?.projectId],enabled:!!running?.projectId,queryFn:async()=>(await apiRequest("GET",`/api/projects/${running!.projectId}`)).json()});
 
   const userName = (id: number) =>
     id === user?.id ? "You" : users.find((u) => u.id === id)?.name ?? `User #${id}`;
@@ -492,22 +486,15 @@ export default function PmTimePage() {
               />
             </label>
             <label className="flex flex-col gap-1.5 lg:w-52">
-              <span className="text-sm font-medium text-foreground">Project</span>
-              <select
+              <span className="text-sm font-medium text-foreground">Job</span>
+              <RecordSelect type="jobs"
                 className={inputCls}
                 value={projectSel}
                 onChange={(e) => {
                   setProjectSel(e.target.value);
                   setTaskSel("");
                 }}
-              >
-                <option value="">No project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label className="flex flex-col gap-1.5 lg:w-52">
               <span className="text-sm font-medium text-foreground">Task</span>
@@ -592,6 +579,8 @@ export default function PmTimePage() {
         )}
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><label className="text-sm">Job<RecordSelect type="jobs" aria-label="Filter time by job" className={inputCls} value={projectFilter} onChange={e=>setProjectFilter(e.target.value)}/></label><p className="text-sm"><strong>{formatHours(history?.totalMinutes||0)}</strong> across {history?.total||0} matching entries. Day totals below cover this page.</p></div>
+      <PageButtons page={page} setPage={setPage} count={entries.length} total={history?.total}/>
       {/* Entries grouped by day */}
       {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />
@@ -675,7 +664,6 @@ export default function PmTimePage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         entry={editingEntry}
-        projects={projects}
       />
     </div>
   );

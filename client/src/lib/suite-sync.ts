@@ -66,6 +66,8 @@ export const TOPIC_KEYS: Record<string, string[]> = {
   marketing: ["marketing"],
   crm: ["business-report", "marketing", "crm-", "quote", "quotes", "suite-job", "suite-today"],
   team: [
+    "suite-people",
+    "pm-tasks",
     "suite-schedule",
     "quote-costing",
     "project-fin-summary",
@@ -88,12 +90,12 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "quote-settings",
   ],
 };
-export function refreshTopics(topics: string[]) {
-  const prefixes = topics.flatMap((t) => TOPIC_KEYS[t] || []);
-  void queryClient.invalidateQueries({
-    predicate: (q) => prefixes.some((p) => String(q.queryKey[0]).startsWith(p)),
-  });
-}
+let refreshTimer:ReturnType<typeof setTimeout>|undefined;
+const pendingPrefixes=new Set<string>();
+let extraKeys:readonly (readonly unknown[])[]=[];
+function scheduleRefresh(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{const prefixes=[...pendingPrefixes],keys=extraKeys;pendingPrefixes.clear();extraKeys=[];void queryClient.invalidateQueries({predicate:q=>prefixes.some(p=>String(q.queryKey[0]).startsWith(p))||keys.some(k=>k.every((v,i)=>JSON.stringify(q.queryKey[i])===JSON.stringify(v)))});},120);}
+export function queueRefreshKeys(keys:readonly (readonly unknown[])[]){extraKeys=[...extraKeys,...keys];scheduleRefresh();}
+export function refreshTopics(topics:string[]){if(!topics.length)return;for(const t of topics)for(const p of TOPIC_KEYS[t]||[])pendingPrefixes.add(p);scheduleRefresh();}
 export function useSuiteSync() {
   const [connected, setConnected] = useState(false);
   useEffect(() => {
@@ -133,10 +135,10 @@ export function useSuiteSync() {
               for (const row of rows) {
                 if (
                   versions.has(row.topic) &&
-                  versions.get(row.topic) !== row.version
+                  (versions.get(row.topic)||0) < row.version
                 )
                   changed.push(row.topic);
-                versions.set(row.topic, row.version);
+                versions.set(row.topic, Math.max(versions.get(row.topic)||0,row.version));
               }
               refreshTopics(changed);
             }
@@ -158,7 +160,10 @@ export function useSuiteSync() {
       }
     };
     const mutate = (event: Event) => {
-      const url = (event as CustomEvent<string>).detail;
+      const detail=(event as CustomEvent<string|{url:string;revisions?:{topic:string;version:number}[]}>).detail;
+      const url=typeof detail==='string'?detail:detail.url;
+      const changed:string[]=[];
+      if(typeof detail!=='string')for(const row of detail.revisions||[]){if(versions.has(row.topic)&&versions.get(row.topic)!==row.version)changed.push(row.topic);versions.set(row.topic,Math.max(versions.get(row.topic)||0,row.version));}
       const topics =
         url.includes("/customer-previews")
           ? ["previews"]
@@ -168,12 +173,12 @@ export function useSuiteSync() {
             ? ["finance", "inventory", "jobs"]
             : url.includes("/pm/time")
               ? ["time"]
-              : url.includes("/hr")
+              : url.includes("/hr") || url.includes("/users")
                 ? ["team", "time"]
                 : url.includes("/crm") || url.includes("/quotes")
                   ? ["crm", "jobs", "finance"]
                   : ["jobs", "communication"];
-      refreshTopics(topics);
+      refreshTopics([...topics,...changed]);
     };
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("online", wake);
