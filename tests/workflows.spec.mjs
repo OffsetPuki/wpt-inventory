@@ -15,6 +15,8 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   page,
 }) => {
   test.setTimeout(120000);
+  // Exercise explicit Retry deterministically; two-session tests cover stream recovery.
+  await page.route('**/api/suite/events', route => route.abort());
   // Customer preview comes from the public site. Route it to a synthetic
   // document; all pricing assertions still use the fixture's real API.
   await page.route('https://www.cjmmetals.com/**', route => route.fulfill({contentType:'text/html',body:`<html><body><h1>Synthetic customer preview</h1><script>addEventListener('message',async e=>{if(e.data?.kind==='cjm-design-preview')document.body.dataset.state=JSON.stringify(e.data.state);if(e.data?.kind==='cjm-export-product'){const bytes=await(await fetch('/fixture-model.glb')).arrayBuffer();parent.postMessage({kind:'cjm-product-export',requestId:e.data.requestId,bytes},e.origin,[bytes]);}});parent.postMessage({kind:'cjm-preview-ready'},'*');</script></body></html>`}));

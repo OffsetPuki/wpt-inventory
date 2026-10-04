@@ -37,6 +37,7 @@ test('Website request opens from Today beyond the list page; contact and qualifi
   await expect.poll(()=>app.sqlite.prepare('SELECT first_contact_at FROM crm_lead_intake WHERE lead_id=?').get(input.data.id)?.first_contact_at).toBeTruthy();
   fs.mkdirSync('test-results',{recursive:true});await page.screenshot({animations:'disabled',path:'test-results/lead-request-mobile.png'});
   await page.keyboard.press('Escape');await page.goto(app.base+'/#/today');
+  await page.getByText('More workspaces & follow-ups',{exact:true}).click();
   await expect(page.getByRole('link',{name:'Website project to contact',exact:true})).toHaveCount(0);
   await page.getByText('Lead results · last 90 days',{exact:true}).click();await expect(page.getByRole('table').first()).toContainText('insulation');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
