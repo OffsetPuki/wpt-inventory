@@ -186,7 +186,7 @@ export function createPlantFilmModel(){
   const q=T.MathUtils.smoothstep(seconds,9,22),z=-2.72+5.43*q;
   carriage.position.z=z;const length=z+2.97;
   for(const web of [...webs,...tapes]){web.scale.y=length;web.position.z=-2.97+length/2;}
-  for(const spinner of spinners)spinner.group.rotation.x=-q*5.43/spinner.radius;
+  for(const spinner of spinners)spinner.group.rotation.x=q*5.43/spinner.radius;
   root.updateMatrixWorld(true);
   return {progress:q,barZ:z,step:PLANT_STEPS.find(s=>seconds<s.end)||PLANT_STEPS.at(-1)};
  }
