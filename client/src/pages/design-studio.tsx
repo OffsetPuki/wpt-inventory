@@ -7,7 +7,7 @@ import '@/components/design-studio/project-gallery.css';
 const FilmTableWorkspace=lazy(()=>import('@/components/design-studio/FilmTableWorkspace'));
 const WalnutTableWorkspace=lazy(()=>import('@/components/design-studio/WalnutTableWorkspace'));
 const projects=[
-  {id:'film-table',title:'Film stretching table',description:'6 × 6 m · Six staggered rolls · Bolted assembly',detail:'Inspect the process, individual parts, drawings and cut list.',Icon:Layers3},
+  {id:'film-table',title:'Film stretching table',description:'6 × 6 m · PVC film rack · Taped overlaps',detail:'Explore the plant setup and animation, or open the earlier design and drawings.',Icon:Layers3},
   {id:'dallas-table',title:'Dallas table',description:'11′ × 48″ walnut dining table · Bridge frame · 10 seats',detail:'Inspect the frame, individual parts and both tabletop options.',Icon:Table2},
 ];
 
