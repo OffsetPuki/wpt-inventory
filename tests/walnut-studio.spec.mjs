@@ -27,8 +27,12 @@ test('Walnut dimensions follow part and top selection without changing customer 
   const download=page.waitForEvent('download');await workspace.getByRole('button',{name:'Download parts CSV'}).click();
   expect((await download).suggestedFilename()).toMatch(/^walnut-parts-2in-top-/);
   await page.emulateMedia({media:'print'});
-  await expect(workspace.locator('.wt-print')).toBeVisible();
-  await expect(workspace.locator('.wt-print')).toContainText('Foot sole closure');
+  // Print hides the surrounding on-screen region from the accessibility tree.
+  const printed=page.locator('.wt-print');
+  await expect(printed).toBeVisible();
+  await expect(printed).toContainText('Foot sole closure');
+  await expect(printed.locator('h2')).toBeVisible();
+  await page.screenshot({path:'test-results/walnut-parts-print.png',fullPage:true});
   await page.emulateMedia({media:'screen'});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
   expect((await app.api('/api/customer-previews','GET',undefined,app.owner)).data).toEqual(before);
