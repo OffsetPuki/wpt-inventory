@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {testApp} from './test-app.mjs';
 import {modelDimensions,partGroups} from '../client/src/components/design-studio/walnut-dimensions.ts';
+import {cuttingItems,emptyCutEntry,validCutEntry,readCutEntries,cuttingStorageKey,cuttingCsv} from '../client/src/components/design-studio/walnut-cutting.ts';
 
 const model=JSON.parse(fs.readFileSync('server/design-studio/walnut-table/model.json','utf8'));
 const near=(a,b,message)=>assert(Math.abs(a-b)<.00001,message+`: ${a} / ${b}`);
@@ -9,6 +10,20 @@ for(const [top,variant] of Object.entries(model.variants)){
   assert.equal(variant.parts.length,53);
   assert.equal(new Set(variant.parts.map(p=>p.id)).size,53);
   assert.equal(variant.parts.filter(p=>p.category==='Legs').length,4);
+  const cuts=cuttingItems(variant);
+  assert.equal(cuts.reduce((n,p)=>n+p.quantity,0),57,'Includes steel pieces and all integrated closures, excludes wood and bearings');
+  assert.equal(cuts.filter(p=>p.kind==='closure').reduce((n,p)=>n+p.quantity,0),18);
+  assert(cuts.every(p=>!emptyCutEntry(p).confirmed),'Nothing is factory-approved for cutting');
+  assert(cuts.filter(p=>p.kind==='angle'||p.kind==='plate'||p.kind==='closure').every(p=>p.suggestedSize===''),'Bounding boxes never become cut sizes');
+  const rail=cuts.find(p=>p.name==='Long upper rail');
+  assert.equal(rail.suggestedSize,'96');
+  assert.equal(validCutEntry({size:'96',ends:'Square',confirmed:false,done:2},rail).done,0);
+  assert.equal(validCutEntry({size:'96',ends:'Square',confirmed:true,done:999},rail).done,2);
+  assert.equal(validCutEntry({size:'',ends:'Square',confirmed:true,done:2},rail).confirmed,false);
+  assert.equal(readCutEntries('{broken',cuts)[rail.id].done,0);
+  assert.notEqual(cuttingStorageKey(1,model.revision,'2'),cuttingStorageKey(1,model.revision,'3'));
+  assert.notEqual(cuttingStorageKey(1,model.revision,'3'),cuttingStorageKey(2,model.revision,'3'));
+  assert(cuttingCsv([rail],{[rail.id]:{size:'96',ends:'Square',confirmed:false,done:0}}).includes('Needs cut detail'));
   const stretcher=variant.parts.find(p=>p.name==='Lower center stretcher');
   near(stretcher.measurements.find(m=>m.label==='Tube length between bridges').inches,96,'Lower stretcher length');
   assert.equal(partGroups(variant.parts).flat().length,53,'Visual groups retain every piece');
