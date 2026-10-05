@@ -21,7 +21,8 @@ test('Plant preview has staggered film, tape, inspect/hide and animation without
  await expect(page.getByLabel('Selected plant part')).toContainText('Tape on the third PVC pipe');
  await page.getByRole('button',{name:'Hide this part',exact:true}).click();await expect(canvas).toHaveAttribute('data-hidden-count','1');
  await page.getByRole('button',{name:'Show all (1 hidden)',exact:true}).click();await expect(canvas).toHaveAttribute('data-hidden-count','0');
- await page.getByLabel('Choose plant part',{exact:true}).selectOption('caster-2.83--1');
+ await expect(page.getByLabel('Choose plant part',{exact:true}).locator('option').filter({hasText:/^Upper wheel \d and outrigger/})).toHaveCount(4);
+ await page.getByLabel('Choose plant part',{exact:true}).selectOption('caster-2.83-1');
  await expect(page.getByLabel('Selected plant part')).toContainText('Field measurements are needed');
  await page.getByLabel('Choose plant part',{exact:true}).selectOption('side-guide-wheel-right');
  await expect(canvas).toHaveAttribute('data-selected-part','side-guide-wheel-right');
@@ -36,6 +37,7 @@ test('Plant preview has staggered film, tape, inspect/hide and animation without
  await page.getByLabel('Plant process step',{exact:true}).selectOption('hold');
  await page.setViewportSize({width:1440,height:1100});
  await page.getByRole('button',{name:'Whole setup',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-overall-desktop.png')});
+ await page.getByRole('button',{name:'Top view',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-top-desktop.png')});
  await page.getByRole('button',{name:'Film & tape rack',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-rack-desktop.png')});
  await page.getByRole('button',{name:'Side guide wheels',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-side-guide-desktop.png')});
  await page.getByRole('button',{name:'Wheeled bar',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-bar-desktop.png')});

@@ -7,7 +7,13 @@ assert.equal(new Set(m.parts.map(p=>p.id)).size,m.parts.length);
 assert.equal(m.parts.filter(p=>p.id.startsWith('rack-pipe-')).length,3);
 assert.equal(m.parts.filter(p=>p.id.startsWith('film-roll-')).length,6);
 assert.equal(m.parts.filter(p=>p.id.startsWith('tape-roll-')).length,5);
-assert.equal(m.parts.filter(p=>p.id.startsWith('caster-')).length,6);
+const upper=m.parts.filter(p=>p.id.startsWith('caster-')).sort((a,b)=>bounds(a.id).min.x-bounds(b.id).min.x);
+assert.equal(upper.length,4);
+for(let i=0;i<upper.length;i++){
+ const center=bounds(upper[i].id).getCenter(new Vector3());
+ assert.ok((center.z-m.carriage.position.z)*(i%2===0?-1:1)>0,'four upper wheels alternate sides in a zigzag');
+ if(i)assert.ok(bounds(upper[i-1].id).max.x<bounds(upper[i].id).min.x,'upper wheel stations are separated along the bar');
+}
 assert.equal(m.parts.filter(p=>p.id.startsWith('side-guide-wheel-')).length,2);
 for(let i=0;i<6;i++){
  const roll=part('film-roll-'+i).group,pipe=part('rack-pipe-'+(i%2)).group;
@@ -25,7 +31,7 @@ for(const route of m.webs.filter(o=>o.userData.tapeFeed))for(const row of [0,1])
  assert.ok(clearance,'tape route passes under each film row');
 }
 const rack=bounds('rack-frame'),table=bounds('table');assert.ok(rack.max.z<table.min.z-.5,'rack separated from table');
-for(const id of ['caster-2.83--1','caster-2.83-1'])assert.ok(Math.abs(bounds(id).min.y-.9)<1e-6,'wheel touches work surface');
+for(const p of upper)assert.ok(Math.abs(bounds(p.id).min.y-.9)<1e-6,'upper wheel touches work surface');
 const states=[0,4,9,15,22,28].map(t=>{
  const state=m.pose(t);
  for(const [suffix,side] of [['left',-1],['right',1]]){

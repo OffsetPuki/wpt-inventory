@@ -6,7 +6,7 @@ export const PLANT_REVISION='plant-rear-tape-guide-wheels-2026-10-04';
 export const PLANT_FACTS={
   tableSize:6, pipeOD:.073025, pipeWall:.0051562, rackPipes:3,
   references:['IMG_0716','IMG_0717','IMG_0718','IMG_0719','IMG_0720','IMG_0721','IMG_0722'],
-  known:'Confirmed: 6 × 6 m table, PVC pipes, six staggered film rolls, tape on the pipe behind both film rows, and a wheel on each vertical end guide touching the table side. Guide pipe: 2½″ Schedule 40 from your earlier specification.',
+  known:'Confirmed: 6 × 6 m table, PVC pipes, six staggered film rolls, tape behind both film rows, four upper wheels in a zigzag, and two separate wheels on the vertical end guides touching the table sides. Guide pipe: 2½″ Schedule 40 from your earlier specification.',
   unconfirmed:'Roll width, overlap, tape width, rack spacing, extrusion sections, wheel positions and bracket hole centers need field measurements. Preview sizes are not cutting dimensions.',
 };
 export const PLANT_STEPS=[
@@ -152,8 +152,9 @@ export function createPlantFilmModel(){
   cyl(.0055,.004,[wheelX,.879,0],mat.aluminum,mount);
   cyl(.0055,.004,[wheelX,.846,0],mat.aluminum,mount);
  }
- for(const x of [-2.83,0,2.83])for(const side of [-1,1]){
-  const g=part(`caster-${x}-${side}`,'Holding-bar wheel and outrigger','Moving bar',[.13,.106,.25],'Six wheel stations retained from the earlier plan. Black wheels and short T-slot outriggers follow the photos; confirm wheel size and spacing.',carriage);
+ for(const [i,x] of [-2.83,-.94,.94,2.83].entries()){
+  const side=i%2===0?-1:1;
+  const g=part(`caster-${x}-${side}`,'Upper wheel '+(i+1)+' and outrigger','Moving bar',[.13,.106,.25],'One of four upper wheels, alternating sides of the bar in a zigzag. The two table-edge guide wheels are separate. Confirm wheel size and spacing.',carriage);
   profile(.23,[x,.99,side*.135],g,'z');
   angle([x,.969,side*.041],g,side>0);
   box([.075,.005,.065],[x,.963,side*.21],mat.aluminum,g);
