@@ -80,13 +80,15 @@ export async function apiRequest(
       }
     }
     let message = res.statusText;
+    let code: string | undefined;
     try {
       const errorBody = await res.json();
       message = errorBody.message || errorBody.error || message;
+      code = typeof errorBody.code === "string" ? errorBody.code : undefined;
     } catch {
       // response wasn't JSON, keep statusText
     }
-    throw Object.assign(new Error(message), { status: res.status });
+    throw Object.assign(new Error(message), { status: res.status, code });
   }
 
   if (options?.replacesSession) {
@@ -94,7 +96,14 @@ export async function apiRequest(
     if (typeof data.token !== "string" || !data.token) throw new Error("Sign in again to finish your password change.");
     setAuthToken(data.token);
   }
-  if (method === "GET" && res.headers.get("ETag")) recordVersions.set(recordPath(url),res.headers.get("ETag")!);
+  if (method === "GET") {
+    const revision = res.headers.get("X-Record-Version");
+    // Legacy servers expose only a numeric ETag; compression can prepend W/.
+    // Never mistake Express's content-hash ETag for a record revision.
+    const version = revision && /^[1-9]\d*$/.test(revision)
+      ? revision : res.headers.get("ETag")?.match(/^(?:W\/)?"([1-9]\d*)"$/)?.[1];
+    if (version) recordVersions.set(recordPath(url), `"${version}"`);
+  }
   if (method !== "GET") recordVersions.delete(recordPath(url));
   if (method !== "GET" && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("suite-mutation", { detail: {url,revisions:JSON.parse(res.headers.get('X-Suite-Revisions')||'[]')} }));
   saved=true;

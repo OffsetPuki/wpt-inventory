@@ -58,7 +58,7 @@ import {
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
-type InvoiceRow = Invoice & { balanceCents: number; payUrl: string | null };
+type InvoiceRow = Invoice & { balanceCents: number; payUrl: string | null; _version?: number };
 
 // The `attachments` column is JSON text; a row from before the column may
 // carry nothing usable.
@@ -1080,7 +1080,7 @@ function InvoiceDetailModal({
   // Set when the form was opened via "Deposit paid" — pre-fills that amount.
   const [payPrefill, setPayPrefill] = useState<number | null>(null);
 
-  const { data, isLoading, isError: detailFailed, error: detailError, refetch: retryDetail } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
+  const { data, isLoading, isFetching: detailRefreshing, isError: detailFailed, error: detailError, refetch: retryDetail } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
     queryKey: ["finance-invoice", id],
     queryFn: async () => (await apiRequest("GET", `/api/finance/invoices/${id}`)).json(),
   });
@@ -1090,6 +1090,7 @@ function InvoiceDetailModal({
       method: "PATCH",
       url: `/api/finance/invoices/${id}`,
       body: { status },
+      expectedVersion: data?.invoice._version,
     }),
     invalidate: INVOICE_KEYS,
     // Say whether the customer is actually being emailed. The server skips the
@@ -1117,7 +1118,7 @@ function InvoiceDetailModal({
   });
 
   const del = useApiMutation({
-    request: () => ({ method: "DELETE", url: `/api/finance/invoices/${id}` }),
+    request: () => ({ method: "DELETE", url: `/api/finance/invoices/${id}`, expectedVersion: data?.invoice._version }),
     invalidate: INVOICE_KEYS,
     successTitle: "Invoice deleted",
     errorTitle: "Could not delete",
@@ -1153,6 +1154,7 @@ function InvoiceDetailModal({
       method: "PATCH",
       url: `/api/finance/invoices/${id}`,
       body: { attachments },
+      expectedVersion: data?.invoice._version,
     }),
     invalidate: INVOICE_KEYS,
     successTitle: "Attachments updated",
@@ -1183,6 +1185,9 @@ function InvoiceDetailModal({
   const items = inv ? parseLineItems(inv.items) : [];
   const attachments = parseAttachments(inv);
   const receivable = inv && (inv.status === "sent" || inv.status === "partial" || inv.status === "overdue");
+  const versionConflict = [setStatus.error, del.error, saveAttachments.error].some(
+    error => (error as (Error & { code?: string }) | null)?.code === "RECORD_VERSION_CONFLICT",
+  );
 
   return (
     <Modal
@@ -1425,6 +1430,19 @@ function InvoiceDetailModal({
           )}
 
           {/* Actions by state */}
+          {versionConflict && (
+            <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+              <p className="font-semibold">This invoice changed</p>
+              <p className="mt-1">Reload to review the latest details, then try your action again. Your last action was not applied.</p>
+              <button type="button" className={cn(secondaryBtn, "mt-3")} disabled={detailRefreshing}
+                onClick={async () => {
+                  const result = await retryDetail();
+                  if (!result.isError) { setStatus.reset(); del.reset(); saveAttachments.reset(); }
+                }}>
+                {detailRefreshing ? "Reloading…" : "Reload invoice"}
+              </button>
+            </div>
+          )}
           {paying && receivable ? (
             <RecordPaymentForm
               invoice={inv}
@@ -1477,7 +1495,7 @@ function InvoiceDetailModal({
                   </button>
                   <button
                     onClick={() => setStatus.mutate("sent")}
-                    disabled={setStatus.isPending}
+                    disabled={setStatus.isPending || detailRefreshing || preview.isPending || versionConflict}
                     className={primaryBtn}
                   >
                     <Send className="h-4 w-4" />

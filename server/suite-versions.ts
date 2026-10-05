@@ -42,6 +42,15 @@ export function registerRecordVersions(app: Express) {
           const candidates=Array.isArray(body)?body:[body,...fields.flatMap(f=>body?.[f] ? [body[f]].flat():[])];
           const ids=[...new Set(candidates.filter(r=>r&&Number.isInteger(r.id)).map(r=>r.id))];
           const versions=new Map((ids.length ? sqlite.prepare("SELECT id,version FROM suite_record_versions WHERE entity=? AND id IN (SELECT value FROM json_each(?))").all(match[1],JSON.stringify(ids)):[]).map((r:any)=>[r.id,r.version]));
+          // Read the revision once for both the body and headers. Transport
+          // proxies may weaken ETags when compressing responses, so expose the
+          // application revision separately from the HTTP cache validator.
+          if (res.statusCode < 300 && match[2] && versions.has(Number(match[2]))) {
+            const version = versions.get(Number(match[2]));
+            res.setHeader("ETag", `"${version}"`);
+            res.setHeader("X-Record-Version", String(version));
+            res.setHeader("Cache-Control", "private, no-store");
+          }
           const add=(row:any)=>row && versions.has(row.id)?{...row,_version:versions.get(row.id)}:row;
           if (Array.isArray(body)) body = body.map(add);
           else if (body && typeof body === "object") {
@@ -65,7 +74,7 @@ export function registerRecordVersions(app: Express) {
           return send(body);
         }) as typeof res.json;
       }
-      if (!match[2]) return next();
+      if (!match[2] || !["PATCH", "DELETE"].includes(req.method)) return next();
       const row: any = sqlite
         .prepare(
           "SELECT version FROM suite_record_versions WHERE entity=? AND id=?",
@@ -81,12 +90,12 @@ export function registerRecordVersions(app: Express) {
         res
           .status(409)
           .json({
+            code: "RECORD_VERSION_CONFLICT",
             message:
               "This record changed on another screen. Reload it before saving.",
           });
         return;
       }
-      if (req.method === "GET") res.setHeader("ETag", etag);
       next();
     });
   });
