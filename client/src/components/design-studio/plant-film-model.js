@@ -2,9 +2,9 @@ import * as T from 'three';
 
 // Photo reconstruction, metres. These envelopes are for the preview, not a
 // fabrication release. No measured dimensions are inferred from perspective.
-export const PLANT_REVISION='plant-rear-tape-guide-wheels-2026-10-04';
+export const PLANT_REVISION='plant-photo-construction-2026-10-04';
 export const PLANT_FACTS={
-  tableSize:6, pipeOD:.073025, pipeWall:.0051562, rackPipes:3,
+  tableSize:6, tableEdgeHalf:3.006, pipeOD:.073025, pipeWall:.0051562, rackPipes:3,
   references:['IMG_0716','IMG_0717','IMG_0718','IMG_0719','IMG_0720','IMG_0721','IMG_0722'],
   known:'Confirmed: 6 × 6 m table, PVC pipes, six staggered film rolls, tape behind both film rows, four upper wheels in a zigzag, and two separate wheels on the vertical end guides touching the table sides. Guide pipe: 2½″ Schedule 40 from your earlier specification.',
   unconfirmed:'Roll width, overlap, tape width, rack spacing, extrusion sections, wheel positions and bracket hole centers need field measurements. Preview sizes are not cutting dimensions.',
@@ -23,7 +23,7 @@ export function createPlantFilmModel(){
   aluminum:new T.MeshStandardMaterial({color:'#c7cdd0',metalness:.65,roughness:.37}),
   steel:new T.MeshStandardMaterial({color:'#313a3b',metalness:.45,roughness:.55}),
   brown:new T.MeshStandardMaterial({color:'#635147',metalness:.3,roughness:.65}),
-  dark:new T.MeshStandardMaterial({color:'#555957',metalness:.15,roughness:.75}),
+  dark:new T.MeshStandardMaterial({color:'#343736',metalness:.12,roughness:.65}),
   cream:new T.MeshStandardMaterial({color:'#dddccf',roughness:.85}),
   rubber:new T.MeshStandardMaterial({color:'#202725',roughness:.9}),
   white:new T.MeshStandardMaterial({color:'#ecebe0',roughness:.4,metalness:.03}),
@@ -32,6 +32,17 @@ export function createPlantFilmModel(){
   tape:new T.MeshStandardMaterial({color:'#d0c9bb',roughness:.85}),
   film:new T.MeshPhysicalMaterial({color:'#edd576',transparent:true,opacity:.24,roughness:.26,side:T.DoubleSide,depthWrite:false}),
  };
+ // A repeating dot texture represents the perforated light worktop without
+ // thousands of tiny meshes. Only its upper face uses this material.
+ const dotPixels=new Uint8Array(64*64*4);
+ for(let y=0;y<64;y++)for(let x=0;x<64;x++){
+  const k=(y*64+x)*4,d=Math.hypot(x-31.5,y-31.5),shade=d<2.5?90:d<3.3?173:235;
+  dotPixels.set([shade,shade,Math.round(shade*.95),255],k);
+ }
+ const dotTexture=new T.DataTexture(dotPixels,64,64);dotTexture.colorSpace=T.SRGBColorSpace;
+ dotTexture.wrapS=dotTexture.wrapT=T.RepeatWrapping;dotTexture.repeat.set(240,60);
+ dotTexture.generateMipmaps=true;dotTexture.minFilter=T.LinearMipmapLinearFilter;dotTexture.magFilter=T.LinearFilter;dotTexture.needsUpdate=true;
+ mat.perforated=mat.cream.clone();mat.perforated.map=dotTexture;
  const geo=(key,create)=>{if(!geometries.has(key))geometries.set(key,create());return geometries.get(key);};
  function mesh(g,m,p,parent){const o=new T.Mesh(g,m);o.position.set(...p);parent.add(o);return o;}
  function box(size,p,m,parent){return mesh(geo('box:'+size.join(','),()=>new T.BoxGeometry(...size)),m,p,parent);}
@@ -45,28 +56,40 @@ export function createPlantFilmModel(){
  }
  // Concave T slots are geometry, so the open extrusion ends and grooves stay
  // visible from all angles without stacking decorative strips along the bar.
- function profile(length,p,parent,axis='x',width=.08,height=.04){
+ function profile(length,p,parent,axis='x',width=.08,height=.04,tall=false){
   const geometry=geo(`slot:${width}:${height}:${length}`,()=>{
-   const w=width/2,h=height/2,s=.004,d=.006;
+   const w=width/2,h=height/2,s=.0032,inner=.006,d=.0085,lip=.0025,cells=width>.06?[-.02,.02]:[0];
    const points=[[-w,-h]];
-   for(const x of [-w/2,w/2])points.push([x-s,-h],[x-s,-h+d],[x+s,-h+d],[x+s,-h]);
-   points.push([w,-h],[w,-s],[w-d,-s],[w-d,s],[w,s],[w,h]);
-   for(const x of [w/2,-w/2])points.push([x+s,h],[x+s,h-d],[x-s,h-d],[x-s,h]);
-   points.push([-w,h],[-w,s],[-w+d,s],[-w+d,-s],[-w,-s]);
+   for(const x of cells)points.push([x-s,-h],[x-s,-h+lip],[x-inner,-h+lip],[x-inner,-h+d],[x+inner,-h+d],[x+inner,-h+lip],[x+s,-h+lip],[x+s,-h]);
+   points.push([w,-h],[w,-s],[w-lip,-s],[w-lip,-inner],[w-d,-inner],[w-d,inner],[w-lip,inner],[w-lip,s],[w,s],[w,h]);
+   for(const x of [...cells].reverse())points.push([x+s,h],[x+s,h-lip],[x+inner,h-lip],[x+inner,h-d],[x-inner,h-d],[x-inner,h-lip],[x-s,h-lip],[x-s,h]);
+   points.push([-w,h],[-w,s],[-w+lip,s],[-w+lip,inner],[-w+d,inner],[-w+d,-inner],[-w+lip,-inner],[-w+lip,-s],[-w,-s]);
    const shape=new T.Shape(points.map(q=>new T.Vector2(...q)));shape.closePath();
-   for(const x of [-w/2,w/2]){const hole=new T.Path();hole.absellipse(x,0,w*.27,h*.46,0,Math.PI*2,true,0);shape.holes.push(hole);}
+   for(const x of cells){
+    const hole=new T.Path(),r=.010;
+    hole.moveTo(x-r,-.004);hole.lineTo(x-r,.004);hole.quadraticCurveTo(x-r,r,x-.004,r);hole.lineTo(x+.004,r);hole.quadraticCurveTo(x+r,r,x+r,.004);hole.lineTo(x+r,-.004);hole.quadraticCurveTo(x+r,-r,x+.004,-r);hole.lineTo(x-.004,-r);hole.quadraticCurveTo(x-r,-r,x-r,-.004);shape.holes.push(hole);
+    for(const dx of [-.013,.013])for(const dy of [-.013,.013]){const core=new T.Path();core.absarc(x+dx,dy,.0028,0,Math.PI*2,true);shape.holes.push(core);}
+   }
    const g=new T.ExtrudeGeometry(shape,{depth:length,bevelEnabled:false,curveSegments:8});g.translate(0,0,-length/2);return g;
   });
-  const o=mesh(geometry,mat.aluminum,p,parent);if(axis==='x')o.rotation.y=Math.PI/2;if(axis==='y')o.rotation.x=-Math.PI/2;return o;
+  const o=mesh(geometry,mat.aluminum,p,parent);if(axis==='x')o.rotation.y=Math.PI/2;if(axis==='y')o.rotation.x=-Math.PI/2;if(tall)o.rotateZ(Math.PI/2);o.userData.extrusion={width,height,length,axis,tall};return o;
  }
  function pipe(length,p,parent,od=PLANT_FACTS.pipeOD,wall=PLANT_FACTS.pipeWall,material=mat.white){
   const g=geo(`pipe:${od}:${wall}:${length}`,()=>{
    const shape=new T.Shape();shape.absarc(0,0,od/2,0,Math.PI*2,false);
    const hole=new T.Path();hole.absarc(0,0,od/2-wall,0,Math.PI*2,true);shape.holes.push(hole);
-   const g=new T.ExtrudeGeometry(shape,{depth:length,bevelEnabled:false,curveSegments:20});g.translate(0,0,-length/2);return g;
+   const g=new T.ExtrudeGeometry(shape,{depth:length,bevelEnabled:false,curveSegments:32});g.translate(0,0,-length/2);return g;
   });const o=mesh(g,material,p,parent);o.rotation.y=Math.PI/2;return o;
  }
- function bolt(p,parent,axis='z'){cyl(.007,.008,p,mat.aluminum,parent,axis);}
+ function bolt(p,parent,axis='z'){
+  cyl(.0085,.002,p,mat.aluminum,parent,axis);
+  const head=mesh(geo('socket-head',()=>new T.CylinderGeometry(.006,.006,.005,6)),mat.aluminum,p,parent);
+  if(axis==='x')head.rotation.z=Math.PI/2;if(axis==='z')head.rotation.x=Math.PI/2;
+ }
+ function strap(a,b,width,thickness,parent,material=mat.aluminum){
+  const start=new T.Vector3(...a),end=new T.Vector3(...b),o=box([width,start.distanceTo(end),thickness],start.clone().add(end).multiplyScalar(.5).toArray(),material,parent);
+  o.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),end.sub(start).normalize());return o;
+ }
  function angle(p,parent,reverse=false){
   box([.075,.006,.055],[p[0],p[1],p[2]],mat.aluminum,parent);
   box([.075,.055,.006],[p[0],p[1]+.025,p[2]+(reverse?1:-1)*.025],mat.aluminum,parent);
@@ -82,20 +105,39 @@ export function createPlantFilmModel(){
   }
  }
  for(const x of [-2.94,0,2.94])box([.055,.1,6],[x,.765,0],mat.brown,table);
+ for(const x of [-2.9,2.9])for(const z of [-2.93,0]){
+  strap([x,.10,z],[x,.71,z+2.93],.025,.004,table);
+  bolt([x,.12,z+.08],table,'x');bolt([x,.69,z+2.85],table,'x');
+ }
+ const feet=part('table-foot-angles','Table foot mounting angles','Table',[5.98,.08,.10],'Low bolted angle plates at the table legs, visible in IMG_0722. Individual dimensions and hole positions are estimated.');
+ for(const x of [-2.9,0,2.9]){
+  box([.18,.006,.10],[x,.008,-2.93],mat.aluminum,feet);
+  box([.18,.08,.004],[x,.046,-2.98],mat.aluminum,feet);
+  for(const dx of [-.06,.06])bolt([x+dx,.032,-2.983],feet);
+ }
  for(let row=0;row<4;row++){
   const panel=part('panel-'+row,row===0?'Light work-surface panel':'Dark work-surface panel '+row,'Table',[6,.06,1.498],'Panel proportions and surface thickness estimated from photos.');
-  box([6,.06,1.498],[0,.87,-2.25+row*1.5],row===0?mat.cream:mat.dark,panel);
+  box([6,.06,1.498],[0,.87,-2.25+row*1.5],row===0?[mat.cream,mat.cream,mat.perforated,mat.cream,mat.cream,mat.cream]:mat.dark,panel);
   if(row>0)box([6,.0008,.012],[0,.9005,-3+row*1.5],mat.tape,panel);
  }
  // Outer stainless-colored table edge and narrow side trough seen in IMG_0720.
  const edge=part('edge','Table edge and side channel','Table',[6.08,.14,.12],'Existing edge channel; measure its actual section and mounting faces.');
  box([6.08,.12,.006],[0,.82,-3.015],mat.aluminum,edge);
  box([6.08,.006,.12],[0,.762,-3.07],mat.aluminum,edge);
- const fixed=part('fixed-rail','Table-side aluminum support rail','Table-side supports',[6.16,.04,.08],'T-slot rail profile and cut length are illustrative.');
- profile(6.16,[0,.75,-3.24],fixed);
+ for(const x of [-3.003,3.003])box([.006,.06,6],[x,.87,0],mat.aluminum,edge);
+ box([6,.06,.006],[0,.87,3.003],mat.aluminum,edge);
+ for(const x of [-1.5,0,1.5]){
+  box([.16,.065,.004],[x,.818,-3.021],mat.aluminum,edge);
+  for(const dx of [-.056,0,.056])for(const y of [.798,.838])bolt([x+dx,y,-3.026],edge);
+ }
+ const fixed=part('fixed-rail','Upright table-side aluminum rail','Table-side supports',[6.16,.08,.04],'The lower rail stands on its narrow edge, with two slots on the vertical face, as in IMG_0720. Section and cut length are approximate.');
+ profile(6.16,[0,.794,-3.24],fixed,'x',.08,.04,true);
  for(const x of [-2.92,0,2.92]){
-  const arm=part('arm-'+x,'Bolted pipe-support outrigger','Table-side supports',[.08,.08,.64],'Horizontal extrusion with bolted angle connections, based on the photographed arrangement.');
-  profile(.64,[x,.71,-3.32],arm,'z');angle([x,.756,-3.04],arm);
+  const arm=part('arm-'+x,'Bolted pipe-support outrigger','Table-side supports',[.04,.08,.70],'Upright extrusion with bolted angle connections, based on the photographed arrangement.');
+  profile(.70,[x,.714,-3.31],arm,'z',.08,.04,true);angle([x,.758,-3.025],arm);
+  box([.07,.13,.005],[x,.672,-2.963],mat.aluminum,arm);
+  for(const y of [.625,.70])bolt([x,y,-2.969],arm);
+  angle([x,.756,-3.235],arm,true);
   const support=part('pipe-support-'+x,'Upright plate for the guide pipe','Table-side supports',[.12,.125,.005],'Open round bore shown in the photos. Bore diameter and hole locations require measurement.');
   const shape=new T.Shape([new T.Vector2(-.06,0),new T.Vector2(.06,0),new T.Vector2(.06,.125),new T.Vector2(-.06,.125)]);
   const hole=new T.Path();hole.absarc(0,.075,.039,0,Math.PI*2,true);shape.holes.push(hole);
@@ -106,6 +148,10 @@ export function createPlantFilmModel(){
  }
  const guide=part('guide-pipe','Table-side PVC guide pipe','Table-side supports',[6.28,PLANT_FACTS.pipeOD,PLANT_FACTS.pipeOD],'PVC confirmed. 2½″ Schedule 40 from your earlier specification. Cut length and bracket details require measurement. Shown in its installed position.');
  pipe(6.28,[0,.829,-3.55],guide);
+ for(const x of [-2.82,2.82]){
+  pipe(.09,[x,.829,-3.55],guide,.084,.0045);
+  pipe(.003,[x+.035,.829,-3.55],guide,.0844,.001,mat.blue);
+ }
  // A freestanding, three-pipe extrusion rack with a clear aisle beside the table.
  const rackZ=-4.65,pipeZ=[rackZ,rackZ+.235,rackZ-.235],joinZ=rackZ+.57;
  const rack=part('rack-frame','Separate aluminum pipe rack','Supply rack',[6.4,.88,.72],'Separate rectangular extrusion stand. Gap, height, member sections and length are approximate.');
@@ -114,29 +160,33 @@ export function createPlantFilmModel(){
   profile(.8,[x,.06,rackZ],rack,'z',.04,.04);profile(.72,[x,.88,rackZ],rack,'z',.04,.04);
   for(const z of [rackZ-.32,rackZ+.32])angle([x,.08,z],rack);
  }
- for(const z of [rackZ-.34,rackZ+.34]){profile(6.32,[0,.86,z],rack,'x',.04,.04);profile(6.32,[0,.16,z],rack,'x',.04,.04);}
+ for(const z of [rackZ-.34,rackZ+.34])profile(6.32,[0,.86,z],rack,'x',.04,.04);
  for(let i=0;i<3;i++){
   const z=pipeZ[i];
   const holder=part('rack-pipe-'+i,'PVC pipe '+(i+1)+(i===2?' · tape at the back':' · staggered film rolls'),'Supply rack',[6.6,.073025,.073025],'PVC confirmed. '+(i===2?'Tape pipe is behind both film rows, furthest from the table.':'Three staggered film rolls on this pipe.')+' Rack pipe diameter and cut length require measurement.');
   pipe(6.6,[0,.936,z],holder);
   for(const x of [-2.75,2.75]){
    pipe(.085,[x,.936,z],holder,.084,.0045);
-   const band=cyl(.0425,.005,[x+.032,.936,z],mat.blue,holder,'x');band.name='Blue coupling witness mark';
+   const band=pipe(.003,[x+.032,.936,z],holder,.0844,.001,mat.blue);band.name='Blue coupling witness mark';
   }
   for(const x of [-3.14,3.14]){
    const collar=part(`rack-collar-${i}-${x}`,'Pipe retaining plate','Supply rack',[.008,.1,.105],'Black end plates around the pipes, as photographed. Confirm the bore and fixing arrangement.');
    const shape=new T.Shape([new T.Vector2(-.0525,-.05),new T.Vector2(.0525,-.05),new T.Vector2(.0525,.05),new T.Vector2(-.0525,.05)]);
    const hole=new T.Path();hole.absarc(0,0,.038,0,Math.PI*2,true);shape.holes.push(hole);
    const g=geo('rack-collar',()=>new T.ExtrudeGeometry(shape,{depth:.008,bevelEnabled:false,curveSegments:16}));
-   const o=mesh(g,mat.steel,[x,.936,z],collar);o.rotation.y=Math.PI/2;
+   const o=mesh(g,i===2?mat.aluminum:mat.steel,[x,.936,z],collar);o.rotation.y=Math.PI/2;
+   for(const dz of [-.042,.042])bolt([x+.008,.896,z+dz],collar,'x');
   }
  }
  const carriage=new T.Group();carriage.name='Wheeled holding bar';root.add(carriage);
  const beam=part('holding-bar','Long aluminum holding bar','Moving bar',[6.24,.04,.08],'Long T-slot aluminum bar from the photos. Extrusion section and cut length require measurement.',carriage);
  profile(6.24,[0,1.006,0],beam);
+ const barPlate=part('bar-top-plate','Small top mounting plate','Moving bar',[.12,.005,.065],'Flat mounting plate visible on top of the holding bar. Purpose, size and screw centers require field confirmation.',carriage);
+ box([.12,.005,.065],[0,1.0285,0],mat.aluminum,barPlate);
+ for(const x of [-.045,.045])for(const z of [-.020,.020])bolt([x,1.033,z],barPlate,'y');
  const guideWheels=[],guideRadius=.03175/2,guideWidth=.0079375;
  for(const x of [-3.05,3.05]){
-  const side=Math.sign(x),label=side>0?'Right':'Left',suffix=label.toLowerCase(),dropX=side*3.08,wheelX=side*(3+guideRadius);
+  const side=Math.sign(x),label=side>0?'Right':'Left',suffix=label.toLowerCase(),dropX=side*3.08,wheelX=side*(PLANT_FACTS.tableEdgeHalf+guideRadius);
   const drop=part('bar-drop-'+x,'Vertical end guide','Moving bar',[.08,.42,.04],'Vertical extrusion with a side-contact guide wheel. Position and length estimated.',carriage);
   profile(.42,[dropX,.776,0],drop,'y');angle([dropX,.976,.015],drop);
   const wheel=part('side-guide-wheel-'+suffix,label+' side guide wheel','Moving bar',[.03175,guideWidth,.03175],'Touches the vertical table edge and rolls along it to guide the bar. Preview uses the earlier purchased 1¼″ OD × 5/16″ wide wheel; confirm its final mounting.',carriage);
@@ -155,13 +205,23 @@ export function createPlantFilmModel(){
  for(const [i,x] of [-2.83,-.94,.94,2.83].entries()){
   const side=i%2===0?-1:1;
   const g=part(`caster-${x}-${side}`,'Upper wheel '+(i+1)+' and outrigger','Moving bar',[.13,.106,.25],'One of four upper wheels, alternating sides of the bar in a zigzag. The two table-edge guide wheels are separate. Confirm wheel size and spacing.',carriage);
-  profile(.23,[x,.99,side*.135],g,'z');
-  angle([x,.969,side*.041],g,side>0);
-  box([.075,.005,.065],[x,.963,side*.21],mat.aluminum,g);
-  cyl(.017,.013,[x,.954,side*.21],mat.aluminum,g);
-  for(const dx of [-.013,.013])box([.004,.025,.028],[x+dx,.942,side*.21],mat.aluminum,g);
-  cyl(.025,.018,[x,.925,side*.21],mat.rubber,g,'x');
-  cyl(.007,.031,[x,.925,side*.21],mat.aluminum,g,'x');
+  profile(.23,[x,.986,side*.155],g,'z');
+  // The photo shows a vertical wraparound connector with a bolt in each face,
+  // not a horizontal shelf between the bar and its short wheel arm.
+  const corner=new T.Group();corner.position.set(x+.04,.997,side*.042);if(side<0)corner.rotation.y=Math.PI;g.add(corner);
+  const plateShape=new T.Shape();plateShape.moveTo(0,-.025);plateShape.lineTo(.058,-.025);plateShape.lineTo(.058,.014);plateShape.quadraticCurveTo(.058,.025,.047,.025);plateShape.lineTo(.011,.025);plateShape.quadraticCurveTo(0,.025,0,.014);plateShape.closePath();
+  const plateGeo=geo('wheel-corner-plate',()=>new T.ExtrudeGeometry(plateShape,{depth:.004,bevelEnabled:false,curveSegments:6}));
+  mesh(plateGeo,mat.aluminum,[0,0,0],corner);
+  const returnPlate=mesh(plateGeo,mat.aluminum,[0,0,0],corner);returnPlate.rotation.y=-Math.PI/2;
+  bolt([.035,0,.006],corner);bolt([-.006,0,.035],corner,'x');
+  box([.052,.004,.052],[x,.964,side*.225],mat.aluminum,g);
+  cyl(.016,.010,[x,.957,side*.225],mat.aluminum,g);
+  const forkShape=new T.Shape();forkShape.moveTo(-.022,.022);forkShape.lineTo(.022,.022);forkShape.lineTo(.012,-.012);forkShape.quadraticCurveTo(0,-.020,-.012,-.012);forkShape.closePath();
+  const forkGeo=geo('caster-fork',()=>new T.ExtrudeGeometry(forkShape,{depth:.003,bevelEnabled:false,curveSegments:6}));
+  for(const dx of [-.014,.011]){const fork=mesh(forkGeo,mat.aluminum,[x+dx,.933,side*.225],g);fork.rotation.y=Math.PI/2;}
+  const tire=cyl(.025,.018,[x,.925,side*.225],mat.rubber,g,'x');tire.userData.upperWheel=true;
+  cyl(.009,.021,[x,.925,side*.225],mat.aluminum,g,'x');
+  cyl(.004,.034,[x,.925,side*.225],mat.aluminum,g,'x');
  }
  // Loose toggle clamp from IMG_0720/0718; no invented fitted clamp mechanism.
  const toggle=part('loose-clamp','Loose hold-down toggle clamp','Loose hardware',[.18,.07,.07],'One loose red-handled toggle clamp is on the worktop in the photos. Its final mounting is not shown.');

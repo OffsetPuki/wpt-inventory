@@ -39,6 +39,8 @@ test('Plant preview has staggered film, tape, inspect/hide and animation without
  await page.getByRole('button',{name:'Whole setup',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-overall-desktop.png')});
  await page.getByRole('button',{name:'Top view',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-top-desktop.png')});
  await page.getByRole('button',{name:'Film & tape rack',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-rack-desktop.png')});
+ await page.getByLabel('Plant process step',{exact:true}).selectOption('setup');
+ await page.getByRole('button',{name:'Plant photo angle',exact:true}).click();await expect(page.getByRole('button',{name:'Plant photo angle',exact:true})).toHaveAttribute('aria-pressed','true');await canvas.screenshot({path:testInfo.outputPath('plant-photo-angle.png')});
  await page.getByRole('button',{name:'Side guide wheels',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-side-guide-desktop.png')});
  await page.getByRole('button',{name:'Wheeled bar',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-bar-desktop.png')});
  await page.getByRole('button',{name:'View parts',exact:true}).click();

@@ -7,7 +7,7 @@ import {createPlantFilmModel,PLANT_FACTS,PLANT_STEPS} from './plant-film-model';
 import {useUnit} from './MeasurementContext';
 import {dimension} from './fractions';
 
-const VIEWS=[['overall','Whole setup'],['rack','Film & tape rack'],['bar','Wheeled bar'],['guides','Side guide wheels'],['supports','Pipe supports'],['top','Top view']];
+const VIEWS=[['overall','Whole setup'],['photo','Plant photo angle'],['rack','Film & tape rack'],['bar','Wheeled bar'],['guides','Side guide wheels'],['supports','Pipe supports'],['top','Top view']];
 export default function PlantFilmModel({inspect=false}){
  const host=useRef(null),control=useRef(null),inspectRef=useRef(inspect),unit=useUnit();inspectRef.current=inspect;
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0),[parts,setParts]=useState([]),[selected,setSelected]=useState(''),[hidden,setHidden]=useState([]),[playing,setPlaying]=useState(false),[time,setTime]=useState(0),[view,setView]=useState('overall');
@@ -43,6 +43,7 @@ export default function PlantFilmModel({inspect=false}){
     if(selection){fit(bounds([map.get(selection).group]),new T.Vector3(1,.7,1));return;}
     let targets=model.parts,dir=new T.Vector3(1,.85,-1.3);
     if(preset==='rack'){targets=targets.filter(p=>['Supply rack','Film and tape'].includes(p.category));dir.set(.16,1.9,-.9);}
+    if(preset==='photo'){targets=targets.filter(p=>['Supply rack','Moving bar','Table-side supports'].includes(p.category));dir.set(-1,.40,-.27);}
     if(preset==='bar'){targets=targets.filter(p=>p.id==='caster-2.83-1'||p.id==='bar-drop-3.05');dir.set(1,.7,1);}
     if(preset==='guides'){targets=targets.filter(p=>p.id==='side-guide-wheel-right'||p.id==='side-guide-mount-right');dir.set(.75,.5,1.5);}
     if(preset==='supports'){targets=targets.filter(p=>p.id==='pipe-support-2.92'||p.id==='arm-2.92');dir.set(1,.8,-1);}
@@ -65,7 +66,7 @@ export default function PlantFilmModel({inspect=false}){
    function contextLost(e){e.preventDefault();pause();setReady(false);setError('The 3D view paused. Reopen it to continue.');}
    const canvas=renderer.domElement;canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerdown',pointerDown);canvas.addEventListener('pointerup',pointerUp);canvas.addEventListener('pointerleave',leave);canvas.addEventListener('webglcontextlost',contextLost);
    el.dataset.ready='true';setParts(model.parts.map(({group,...p})=>p));setReady(true);refresh();request();
-   cleanup=()=>{cancelAnimationFrame(raf);ro.disconnect();io.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();canvas.removeEventListener('webglcontextlost',contextLost);const gs=new Set(),ms=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>m.dispose());env.dispose();renderer.dispose();renderer.forceContextLoss();canvas.remove();control.current=null;delete el.dataset.ready;};
+   cleanup=()=>{cancelAnimationFrame(raf);ro.disconnect();io.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();canvas.removeEventListener('webglcontextlost',contextLost);const gs=new Set(),ms=new Set(),textures=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>{if(m.map)textures.add(m.map);m.dispose();});textures.forEach(t=>t.dispose());env.dispose();renderer.dispose();renderer.forceContextLoss();canvas.remove();control.current=null;delete el.dataset.ready;};
   }catch(e){setError(e.message||'Could not open the plant preview.');}
   return()=>{disposed=true;cleanup();};
  },[retry]);

@@ -31,12 +31,21 @@ for(const route of m.webs.filter(o=>o.userData.tapeFeed))for(const row of [0,1])
  assert.ok(clearance,'tape route passes under each film row');
 }
 const rack=bounds('rack-frame'),table=bounds('table');assert.ok(rack.max.z<table.min.z-.5,'rack separated from table');
+const rail=bounds('fixed-rail').getSize(new Vector3()),arm=new Box3().setFromObject(part('arm-2.92').group.children.find(o=>o.userData.extrusion),true);
+assert.ok(Math.abs(rail.y-.08)<1e-6&&Math.abs(rail.z-.04)<1e-6,'fixed rail is upright, as photographed');
+assert.ok(Math.abs(arm.max.y-bounds('fixed-rail').min.y)<1e-6,'support arm supports the bottom of the upright rail');
+const rackProfiles=part('rack-frame').group.children.filter(o=>o.userData.extrusion);
+assert.equal(rackProfiles.filter(o=>o.userData.extrusion.length>6).length,2,'rack has two upper longitudinal rails and open lower spans');
+assert.ok(rackProfiles.every(o=>o.userData.extrusion.width===.04),'rack uses single-cell sections');
+assert.ok(part('panel-0').group.children[0].material[2].map.isDataTexture,'light worktop uses one efficient perforation texture');
+for(let i=0;i<3;i++)assert.equal(part('rack-pipe-'+i).group.children.filter(o=>o.name==='Blue coupling witness mark').every(o=>o.geometry.type==='ExtrudeGeometry'),true,'coupling marks are open rings, not solid caps');
+assert.ok(part('bar-top-plate'));assert.ok(part('table-foot-angles'));
 for(const p of upper)assert.ok(Math.abs(bounds(p.id).min.y-.9)<1e-6,'upper wheel touches work surface');
 const states=[0,4,9,15,22,28].map(t=>{
  const state=m.pose(t);
  for(const [suffix,side] of [['left',-1],['right',1]]){
   const wheel=part('side-guide-wheel-'+suffix),b=bounds(wheel.id),contact=side>0?b.min.x:b.max.x;
-  assert.ok(Math.abs(contact-side*3)<.0001,'guide wheel stays against the vertical table side');
+  assert.ok(Math.abs(contact-side*PLANT_FACTS.tableEdgeHalf)<.0001,'guide wheel stays against the metal table edge');
   assert.ok(b.min.y>.84&&b.max.y<.9,'guide wheel contacts the table edge below its surface');
   const drop=bounds('bar-drop-'+side*3.05);assert.ok(side>0?drop.min.x>b.max.x:drop.max.x<b.min.x,'wheel clears the vertical guide');
   const position=wheel.group.getWorldPosition(new Vector3());assert.ok(Math.abs(position.z-state.barZ)<1e-6,'side wheels travel with the bar');
@@ -49,5 +58,5 @@ assert.ok(Math.abs(part('film-roll-0').group.rotation.x*.115-5.43)<1e-9);
 assert.ok(Math.abs(part('tape-roll-0').group.rotation.x*.085+5.43)<1e-9);
 assert.ok(part('side-guide-wheel-right').group.rotation.y>0&&part('side-guide-wheel-left').group.rotation.y<0);
 let triangles=0;const geometries=new Set();m.root.traverse(o=>{if(!o.isMesh)return;const p=o.geometry.attributes.position;for(const value of p.array)assert.ok(Number.isFinite(value));geometries.add(o.geometry);triangles+=(o.geometry.index?.count||p.count)/3;});
-assert.ok(m.pickable.every(o=>part(o.userData.plantPartId)));assert.ok(m.pickable.length<400);assert.ok(triangles<150000);
+assert.ok(m.pickable.every(o=>part(o.userData.plantPartId)));assert.ok(m.pickable.length<450);assert.ok(triangles<75000);
 console.log(JSON.stringify({plantParts:m.parts.length,pickableMeshes:m.pickable.length,uniqueGeometries:geometries.size,triangles,checks:'layout, staggered rolls, tape alignment, animation, finite geometry and render budget passed'}));
