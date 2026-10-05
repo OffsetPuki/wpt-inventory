@@ -1,5 +1,6 @@
 import PreviewConnections from '@/components/PreviewConnections';
 import FilmTableWorkspace from '@/components/design-studio/FilmTableWorkspace';
+import WalnutTableWorkspace from '@/components/design-studio/WalnutTableWorkspace';
 import PreviewLive from '@/components/PreviewLive';
 import {useRecordLink} from '@/lib/record-link';
 import {useAuth} from '@/lib/auth';
@@ -107,6 +108,7 @@ export default function CustomerPreviewsPage({studio=false}:{studio?:boolean}){
   };
   const copy=async(p:Preview)=>{try{await navigator.clipboard.writeText((p.shortUrl||p.url));toast({title:'Customer link copied'});}catch{setEditing(p);}};
   return <div className="mx-auto max-w-6xl p-4 sm:p-6"><Header title={studio?"CJM Design Studio":"Customer previews"} description={studio?"Share interactive designs with customer engineering teams and review their activity.":"Review the design with your customer before creating a quote."}><button className={secondaryBtn} disabled={query.isFetching} onClick={()=>query.refetch()}><RefreshCw size={16}/>Refresh</button><button className={primaryBtn} onClick={()=>setEditing(null)}><Plus size={18}/>New preview</button></Header>
+    <WalnutTableWorkspace/>
     {studio&&<FilmTableWorkspace/>}
     {notifications.data&&<p className="mb-5 rounded-lg border border-border p-3 text-sm">{notifications.data.enabled?<>Feedback and design acceptance emails go to <strong>{notifications.data.recipient}</strong>.</>:<>Email alerts need setup. Customer responses are saved here; check email configuration in System health.</>}</p>}
     {!!query.data?.length&&<div className="mb-4 flex flex-wrap items-center gap-3"><p className="text-sm text-muted-foreground">Select previews to combine their designs into one customer link.</p><button className={secondaryBtn} disabled={chosen.length<2||optionCount>6||chosen.some(p=>!p.options.length)} onClick={()=>{setMergeRequest(null);setMergeError('');setMergeTitle('Combined design options');setMergeCustomer(chosen.every(p=>p.customer===chosen[0].customer)?chosen[0].customer:'');setMerging(true);}}>Merge selected ({chosen.length})</button>{!!selected.length&&<button className={secondaryBtn} onClick={()=>setSelected([])}>Clear selection</button>}{optionCount>6&&<p role="alert">Choose previews totaling no more than six options.</p>}</div>}
