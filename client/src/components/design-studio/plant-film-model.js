@@ -2,16 +2,16 @@ import * as T from 'three';
 
 // Photo reconstruction, metres. These envelopes are for the preview, not a
 // fabrication release. No measured dimensions are inferred from perspective.
-export const PLANT_REVISION='plant-photos-2026-10-04';
+export const PLANT_REVISION='plant-rear-tape-guide-wheels-2026-10-04';
 export const PLANT_FACTS={
   tableSize:6, pipeOD:.073025, pipeWall:.0051562, rackPipes:3,
   references:['IMG_0716','IMG_0717','IMG_0718','IMG_0719','IMG_0720','IMG_0721','IMG_0722'],
-  known:'Confirmed: 6 × 6 m table, PVC pipes, six film rolls staggered on the first two rack pipes, and overlap tape on the third pipe. Guide pipe: 2½″ Schedule 40 from your earlier specification.',
+  known:'Confirmed: 6 × 6 m table, PVC pipes, six staggered film rolls, tape on the pipe behind both film rows, and a wheel on each vertical end guide touching the table side. Guide pipe: 2½″ Schedule 40 from your earlier specification.',
   unconfirmed:'Roll width, overlap, tape width, rack spacing, extrusion sections, wheel positions and bracket hole centers need field measurements. Preview sizes are not cutting dimensions.',
 };
 export const PLANT_STEPS=[
-  {id:'setup',title:'Six rolls · two staggered rows',description:'Three film rolls on each of the first two PVC pipes. The third pipe carries tape behind the five overlaps.',start:0,end:4},
-  {id:'feed',title:'Bring the strips together',description:'Film strips overlap side by side. Tape feeds against the back of each overlap from the third PVC pipe.',start:4,end:9},
+  {id:'setup',title:'Film in front · tape at the back',description:'Six film rolls on two PVC pipes. The tape pipe sits behind both film rows, furthest from the table.',start:0,end:4},
+  {id:'feed',title:'Bring the strips together',description:'Tape feeds from the rear pipe, underneath the film rolls and onto the back of the five overlaps. Routing clearances are illustrative.',start:4,end:9},
   {id:'draw',title:'Pull film and apply tape',description:'As the bar moves, the film and tape unwind together. Travel, roll sizes and routing are illustrative.',start:9,end:22},
   {id:'hold',title:'Joined film on the table',description:'Five taped seams join the six strips. Exact overlap, tape contact and clamping details need field measurements.',start:22,end:28},
 ];
@@ -107,7 +107,8 @@ export function createPlantFilmModel(){
  const guide=part('guide-pipe','Table-side PVC guide pipe','Table-side supports',[6.28,PLANT_FACTS.pipeOD,PLANT_FACTS.pipeOD],'PVC confirmed. 2½″ Schedule 40 from your earlier specification. Cut length and bracket details require measurement. Shown in its installed position.');
  pipe(6.28,[0,.829,-3.55],guide);
  // A freestanding, three-pipe extrusion rack with a clear aisle beside the table.
- const rackZ=-4.65,rack=part('rack-frame','Separate aluminum pipe rack','Supply rack',[6.4,.88,.72],'Separate rectangular extrusion stand. Gap, height, member sections and length are approximate.');
+ const rackZ=-4.65,pipeZ=[rackZ,rackZ+.235,rackZ-.235],joinZ=rackZ+.57;
+ const rack=part('rack-frame','Separate aluminum pipe rack','Supply rack',[6.4,.88,.72],'Separate rectangular extrusion stand. Gap, height, member sections and length are approximate.');
  for(const x of [-3.14,0,3.14]){
   for(const z of [rackZ-.34,rackZ+.34])profile(.81,[x,.465,z],rack,'y',.04,.04);
   profile(.8,[x,.06,rackZ],rack,'z',.04,.04);profile(.72,[x,.88,rackZ],rack,'z',.04,.04);
@@ -115,8 +116,8 @@ export function createPlantFilmModel(){
  }
  for(const z of [rackZ-.34,rackZ+.34]){profile(6.32,[0,.86,z],rack,'x',.04,.04);profile(6.32,[0,.16,z],rack,'x',.04,.04);}
  for(let i=0;i<3;i++){
-  const z=rackZ+(i-1)*.235;
-  const holder=part('rack-pipe-'+i,'PVC pipe '+(i+1)+(i===2?' · overlap tape':' · staggered film rolls'),'Supply rack',[6.6,.073025,.073025],'PVC confirmed. '+(i===2?'Tape is aligned behind the film overlaps.':'Three staggered film rolls on this pipe.')+' Rack pipe diameter and cut length require measurement.');
+  const z=pipeZ[i];
+  const holder=part('rack-pipe-'+i,'PVC pipe '+(i+1)+(i===2?' · tape at the back':' · staggered film rolls'),'Supply rack',[6.6,.073025,.073025],'PVC confirmed. '+(i===2?'Tape pipe is behind both film rows, furthest from the table.':'Three staggered film rolls on this pipe.')+' Rack pipe diameter and cut length require measurement.');
   pipe(6.6,[0,.936,z],holder);
   for(const x of [-2.75,2.75]){
    pipe(.085,[x,.936,z],holder,.084,.0045);
@@ -131,11 +132,25 @@ export function createPlantFilmModel(){
   }
  }
  const carriage=new T.Group();carriage.name='Wheeled holding bar';root.add(carriage);
- const beam=part('holding-bar','Long aluminum holding bar','Moving bar',[6.18,.04,.08],'Long T-slot aluminum bar from the photos. Extrusion section and cut length require measurement.',carriage);
- profile(6.18,[0,1.006,0],beam);
+ const beam=part('holding-bar','Long aluminum holding bar','Moving bar',[6.24,.04,.08],'Long T-slot aluminum bar from the photos. Extrusion section and cut length require measurement.',carriage);
+ profile(6.24,[0,1.006,0],beam);
+ const guideWheels=[],guideRadius=.03175/2,guideWidth=.0079375;
  for(const x of [-3.05,3.05]){
-  const drop=part('bar-drop-'+x,'Vertical end guide','Moving bar',[.08,.42,.04],'Vertical extrusion hanging down at each end of the bar; length estimated.',carriage);
-  profile(.42,[x,.776,0],drop,'y');angle([x,.976,.015],drop);
+  const side=Math.sign(x),label=side>0?'Right':'Left',suffix=label.toLowerCase(),dropX=side*3.08,wheelX=side*(3+guideRadius);
+  const drop=part('bar-drop-'+x,'Vertical end guide','Moving bar',[.08,.42,.04],'Vertical extrusion with a side-contact guide wheel. Position and length estimated.',carriage);
+  profile(.42,[dropX,.776,0],drop,'y');angle([dropX,.976,.015],drop);
+  const wheel=part('side-guide-wheel-'+suffix,label+' side guide wheel','Moving bar',[.03175,guideWidth,.03175],'Touches the vertical table edge and rolls along it to guide the bar. Preview uses the earlier purchased 1¼″ OD × 5/16″ wide wheel; confirm its final mounting.',carriage);
+  wheel.position.set(wheelX,.854,0);
+  const tire=pipe(guideWidth,[0,0,0],wheel,.03175,guideRadius-.00635,mat.white);tire.rotation.set(-Math.PI/2,0,0);
+  const bearing=pipe(guideWidth,[0,0,0],wheel,.0127,.003175,mat.aluminum);bearing.rotation.set(-Math.PI/2,0,0);
+  box([.003,.0004,.009],[0,guideWidth/2+.0002,.0105],mat.dark,wheel);
+  guideWheels.push({group:wheel,side,radius:guideRadius});
+  const mount=part('side-guide-mount-'+suffix,label+' guide-wheel bracket and axle','Moving bar',[.038,.041,.05],'Estimated bracket on the inside of the vertical end guide, with a vertical ¼″ axle. Mounting holes and fastener lengths need measurement.',carriage);
+  box([.034,.005,.05],[side*3.024,.873,0],mat.aluminum,mount);
+  box([.006,.035,.05],[side*3.037,.883,0],mat.aluminum,mount);
+  cyl(.003175,.034,[wheelX,.86,0],mat.aluminum,mount);
+  cyl(.0055,.004,[wheelX,.879,0],mat.aluminum,mount);
+  cyl(.0055,.004,[wheelX,.846,0],mat.aluminum,mount);
  }
  for(const x of [-2.83,0,2.83])for(const side of [-1,1]){
   const g=part(`caster-${x}-${side}`,'Holding-bar wheel and outrigger','Moving bar',[.13,.106,.25],'Six wheel stations retained from the earlier plan. Black wheels and short T-slot outriggers follow the photos; confirm wheel size and spacing.',carriage);
@@ -168,25 +183,28 @@ export function createPlantFilmModel(){
  }
  const fixedRoutes=[];
  for(let i=0;i<6;i++){
-  const x=(i-2.5)*pitch,z=rackZ+(i%2-1)*.235;
+  const x=(i-2.5)*pitch,z=pipeZ[i%2];
   const g=part('film-roll-'+i,'Film roll '+(i+1)+' · row '+(i%2+1),'Film and tape',[filmWidth,.23,.23],'One of six film rolls, staggered across two PVC pipes. Width, diameter and overlap are illustrative.');g.position.set(x,.936,z);
   pipe(filmWidth,[0,0,0],g,.23,.073,woundFilm);pipe(filmWidth+.018,[0,0,0],g,.084,.004,mat.cream);
-  box([filmWidth,.002,.012],[0,.115,0],mat.tape,g);spinners.push({group:g,radius:.115});
-  fixedRoutes.push(ribbon(filmWidth,x,[[1.051,z],[1.024,rackZ+.235],[.869,-3.55],[.905,-2.97]],i%2?filmMat2:mat.film));
+  box([filmWidth,.002,.012],[0,.115,0],mat.tape,g);spinners.push({group:g,radius:.115,direction:1});
+  const clearance=i%2?[]:[[1.055,z+.12],[1.055,pipeZ[1]+.13]];
+  fixedRoutes.push(ribbon(filmWidth,x,[[1.051,z],...clearance,[1.024,joinZ],[.869,-3.55],[.905,-2.97]],i%2?filmMat2:mat.film));
   const web=new T.Mesh(new T.PlaneGeometry(filmWidth,1),i%2?filmMat2:mat.film);web.rotation.x=-Math.PI/2;web.position.set(x,.906+i*.00015,0);web.renderOrder=2;web.userData.filmWeb=true;root.add(web);webs.push(web);
  }
  for(let i=0;i<5;i++){
-  const x=(i-2)*pitch,z=rackZ+.235;
-  const g=part('tape-roll-'+i,'Overlap tape '+(i+1),'Film and tape',[.048,.17,.17],'Tape on the third PVC pipe joins the back of adjacent film strips. Five overlaps across six strips; tape width and contact geometry need confirmation.');g.position.set(x,.936,z);
-  pipe(.048,[0,0,0],g,.17,.043,tapeMat);pipe(.052,[0,0,0],g,.084,.004,mat.cream);box([.048,.002,.01],[0,.085,0],mat.dark,g);spinners.push({group:g,radius:.085});
-  fixedRoutes.push(ribbon(.048,x,[[1.021,z],[.866,-3.55],[.903,-2.97]],tapeMat));
+  const x=(i-2)*pitch,z=pipeZ[2];
+  const g=part('tape-roll-'+i,'Overlap tape '+(i+1)+' · rear pipe','Film and tape',[.048,.17,.17],'Tape on the third PVC pipe, behind both film rows, joins the back of adjacent film strips. Five overlaps across six strips; tape width and contact geometry need confirmation.');g.position.set(x,.936,z);
+  pipe(.048,[0,0,0],g,.17,.043,tapeMat);pipe(.052,[0,0,0],g,.084,.004,mat.cream);box([.048,.002,.01],[0,.085,0],mat.dark,g);spinners.push({group:g,radius:.085,direction:-1});
+  const route=ribbon(.048,x,[[.851,z],[.790,z+.1],[.790,pipeZ[1]+.165],[1.0232,joinZ],[.8682,-3.55],[.9042,-2.97]],tapeMat);
+  route.userData.tapeFeed=true;fixedRoutes.push(route);
   const seam=new T.Mesh(new T.PlaneGeometry(.048,1),tapeMat);seam.rotation.x=-Math.PI/2;seam.position.set(x,.904,0);seam.userData.filmWeb=true;root.add(seam);tapes.push(seam);
  }
  function pose(seconds){
   const q=T.MathUtils.smoothstep(seconds,9,22),z=-2.72+5.43*q;
   carriage.position.z=z;const length=z+2.97;
   for(const web of [...webs,...tapes]){web.scale.y=length;web.position.z=-2.97+length/2;}
-  for(const spinner of spinners)spinner.group.rotation.x=q*5.43/spinner.radius;
+  for(const spinner of spinners)spinner.group.rotation.x=spinner.direction*q*5.43/spinner.radius;
+  for(const wheel of guideWheels)wheel.group.rotation.y=wheel.side*q*5.43/wheel.radius;
   root.updateMatrixWorld(true);
   return {progress:q,barZ:z,step:PLANT_STEPS.find(s=>seconds<s.end)||PLANT_STEPS.at(-1)};
  }

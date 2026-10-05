@@ -23,6 +23,9 @@ test('Plant preview has staggered film, tape, inspect/hide and animation without
  await page.getByRole('button',{name:'Show all (1 hidden)',exact:true}).click();await expect(canvas).toHaveAttribute('data-hidden-count','0');
  await page.getByLabel('Choose plant part',{exact:true}).selectOption('caster-2.83--1');
  await expect(page.getByLabel('Selected plant part')).toContainText('Field measurements are needed');
+ await page.getByLabel('Choose plant part',{exact:true}).selectOption('side-guide-wheel-right');
+ await expect(canvas).toHaveAttribute('data-selected-part','side-guide-wheel-right');
+ await expect(page.getByLabel('Selected plant part')).toContainText('Touches the vertical table edge');
  await page.getByRole('button',{name:'Fullscreen',exact:true}).click();await expect(page.getByLabel('Film table design workspace')).toHaveAttribute('data-fullscreen','true');
  await page.getByRole('button',{name:'Exit fullscreen',exact:true}).click();
  await page.getByRole('button',{name:'View model',exact:true}).click();
@@ -34,6 +37,7 @@ test('Plant preview has staggered film, tape, inspect/hide and animation without
  await page.setViewportSize({width:1440,height:1100});
  await page.getByRole('button',{name:'Whole setup',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-overall-desktop.png')});
  await page.getByRole('button',{name:'Film & tape rack',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-rack-desktop.png')});
+ await page.getByRole('button',{name:'Side guide wheels',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-side-guide-desktop.png')});
  await page.getByRole('button',{name:'Wheeled bar',exact:true}).click();await canvas.screenshot({path:testInfo.outputPath('plant-bar-desktop.png')});
  await page.getByRole('button',{name:'View parts',exact:true}).click();
  await canvas.click({position:{x:Math.round((await canvas.boundingBox()).width*.46),y:250}});

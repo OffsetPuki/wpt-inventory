@@ -7,7 +7,7 @@ import {createPlantFilmModel,PLANT_FACTS,PLANT_STEPS} from './plant-film-model';
 import {useUnit} from './MeasurementContext';
 import {dimension} from './fractions';
 
-const VIEWS=[['overall','Whole setup'],['rack','Film & tape rack'],['bar','Wheeled bar'],['supports','Pipe supports'],['top','Top view']];
+const VIEWS=[['overall','Whole setup'],['rack','Film & tape rack'],['bar','Wheeled bar'],['guides','Side guide wheels'],['supports','Pipe supports'],['top','Top view']];
 export default function PlantFilmModel({inspect=false}){
  const host=useRef(null),control=useRef(null),inspectRef=useRef(inspect),unit=useUnit();inspectRef.current=inspect;
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0),[parts,setParts]=useState([]),[selected,setSelected]=useState(''),[hidden,setHidden]=useState([]),[playing,setPlaying]=useState(false),[time,setTime]=useState(0),[view,setView]=useState('overall');
@@ -44,6 +44,7 @@ export default function PlantFilmModel({inspect=false}){
     let targets=model.parts,dir=new T.Vector3(1,.85,-1.3);
     if(preset==='rack'){targets=targets.filter(p=>['Supply rack','Film and tape'].includes(p.category));dir.set(.16,1.9,-.9);}
     if(preset==='bar'){targets=targets.filter(p=>p.id==='caster-2.83--1'||p.id==='bar-drop-3.05');dir.set(1,.7,-1);}
+    if(preset==='guides'){targets=targets.filter(p=>p.id==='side-guide-wheel-right'||p.id==='side-guide-mount-right');dir.set(.75,.5,1.5);}
     if(preset==='supports'){targets=targets.filter(p=>p.id==='pipe-support-2.92'||p.id==='arm-2.92');dir.set(1,.8,-1);}
     if(preset==='top')dir.set(0,1,-.001);
     fit(bounds(targets.map(p=>p.group)),dir);
@@ -70,7 +71,7 @@ export default function PlantFilmModel({inspect=false}){
  },[retry]);
  const part=parts.find(p=>p.id===selected),step=PLANT_STEPS.find(s=>time<s.end)||PLANT_STEPS.at(-1);
  return <section aria-label="Plant film setup" className="plant-model">
-  <div className="plant-summary"><span><b>6 × 6 m</b> work table</span><span><b>6 film rolls</b> staggered on 2 pipes</span><span><b>5 tape seams</b> from the third pipe</span></div>
+  <div className="plant-summary"><span><b>6 × 6 m</b> work table</span><span><b>6 film rolls</b> staggered on 2 pipes</span><span><b>5 tape seams</b> from the rear pipe</span></div>
   <div className="fs-actions" aria-label="Plant camera views">{VIEWS.map(([id,label])=><button key={id} disabled={!ready} aria-pressed={view===id&&!selected} onClick={()=>control.current?.view(id)}>{label}</button>)}</div>
   {inspect&&<div className="plant-inspect"><label className="fs-unit-label">Choose a part<select aria-label="Choose plant part" value={selected} disabled={!ready} onChange={e=>control.current?.select(e.target.value)}><option value="">Hover and click a part in the model</option>{[...new Set(parts.map(p=>p.category))].map(category=><optgroup key={category} label={category}>{parts.filter(p=>p.category===category).map(p=><option key={p.id} value={p.id}>{p.name}{hidden.includes(p.id)?' (hidden)':''}</option>)}</optgroup>)}</select></label><div className="fs-actions">{selected&&<><button onClick={()=>control.current?.select('')}><Eye size={15}/>Back to all parts</button><button onClick={()=>control.current?.hide()}><EyeOff size={15}/>Hide this part</button></>}{hidden.length>0&&<button onClick={()=>control.current?.showAll()}>Show all ({hidden.length} hidden)</button>}</div></div>}
   {error&&<div role="alert" className="fs-notice">{error} <button onClick={()=>setRetry(n=>n+1)}>Reopen model</button></div>}
