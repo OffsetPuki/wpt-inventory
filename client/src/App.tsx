@@ -33,6 +33,7 @@ const NotFoundPage = lazy(() => import("./pages/not-found"));
 // Business-suite modules
 const CrmOverviewPage = lazy(() => import("./pages/crm/index"));
 const CustomerPreviewsPage = lazy(() => import("./pages/crm/customer-previews"));
+const DesignStudioPage = lazy(() => import("./pages/design-studio"));
 const CrmLeadsPage = lazy(() => import("./pages/crm/leads"));
 const CrmClientsPage = lazy(() => import("./pages/crm/clients"));
 const CrmQuoteBuilderPage = lazy(() => import("./pages/crm/quotes"));
@@ -166,8 +167,9 @@ export default function App() {
             <CrmQuoteBuilderPage />
           </Route>
           <Route path="/design-studio">
-            <ElevatedRoute><CustomerPreviewsPage studio /></ElevatedRoute>
+            <ElevatedRoute><DesignStudioPage /></ElevatedRoute>
           </Route>
+          <Route path="/design-studio/:project">{params=><ElevatedRoute><DesignStudioPage project={params.project}/></ElevatedRoute>}</Route>
           <Route path="/crm/previews">
             <ElevatedRoute><CustomerPreviewsPage /></ElevatedRoute>
           </Route>

@@ -1,6 +1,8 @@
 # Walnut table parts workspace
 
-This private model snapshot is available to owners/managers in Customer previews and CJM Design Studio. Open either route with `?workspace=walnut` to expand it.
+This private model snapshot is available to owners/managers in CJM Design Studio. The `/design-studio` project chooser lists Film stretching table and Dallas table; it mounts neither model until a project is selected. Open `/design-studio/dallas-table` for this workspace. Legacy `?workspace=walnut` links redirect here. Customer previews remains a separate customer-sharing area.
+
+View model shows the assembly. View parts supports picking and isolating a component, searching, hiding/restoring pieces, and viewing dimensioned projections. Parts schedule, overall dimensions, both top variants, unit controls, CSV and print remain available. This follows the film workspace interaction pattern without presenting model envelopes as a released cut list.
 
 `model.json` preserves the actual triangles, normals and edges from the verified local `Open-3D-Table.html`. No customer preview record or published option is edited by this workspace. Both top thicknesses share stable part IDs. Chairs are illustrative and excluded; the 53 selectable components comprise 52 frame pieces and one top. Integrated caps and sole closures are counted separately as included details.
 

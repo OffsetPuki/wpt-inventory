@@ -6,3 +6,16 @@
  .wt-workspace[data-open=true] .wt-print{display:block;position:static;width:100%;background:white;color:black;padding:12px}
  .wt-print table{font-size:9px}.wt-print tr{break-inside:avoid}.wt-print button{border:0}.wt-print .wt-table-scroll{overflow:visible}.wt-print .wt-measures{grid-template-columns:1fr 1fr}.wt-print .wt-drawing{min-width:0}
 }
+
+/* Project workspace: keep the same model/part flow as the film table. */
+.film-studio.wt-workspace{color:var(--fs-ink);background:#f5f8f6;border-color:var(--fs-line);border-radius:20px}
+.wt-workspace .fs-header-actions button{color:#fff;background:#ffffff12;border-color:#ffffff35}
+.wt-workspace .fs-tabs button[aria-pressed=true]{background:var(--fs-accent);color:#fff;border-color:var(--fs-accent)}
+.wt-workspace select,.wt-workspace input[type=search]{background:white;color:var(--fs-ink)}
+.wt-workspace .wt-finder{grid-template-columns:1fr 1fr;background:#f5f8f6;padding:14px;border:1px solid #dce6e1;border-radius:12px;margin-bottom:14px}
+.wt-finder .wt-list{grid-column:1/-1;max-height:300px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.wt-workspace .wt-part-detail{margin:0;min-width:0;overflow:hidden}
+.wt-workspace .wt-part-detail .wt-measures{grid-template-columns:1fr}
+.wt-drawing-scroll{overflow:auto;max-width:100%}.wt-drawing-scroll .wt-drawing{min-width:0;margin:0}.wt-drawing-scroll.is-enlarged .wt-drawing{min-width:1100px}
+.wt-workspace.is-fullscreen{border-radius:0}
+@media(max-width:480px){.wt-workspace .wt-finder{grid-template-columns:1fr}.wt-finder .wt-list{grid-template-columns:1fr}.wt-workspace .wt-toolbar>label{width:100%}.wt-workspace .wt-toolbar select{width:100%}.wt-workspace .wt-canvas{height:340px}.wt-workspace .wt-part-detail{padding:12px}}

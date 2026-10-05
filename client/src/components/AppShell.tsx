@@ -174,6 +174,7 @@ const NAV_GROUPS: NavGroup[] = [
 function groupForLocation(location: string): string | null {
   const path=location.split('?')[0];
   if(path.startsWith('/project/'))return 'projects';
+  if(path.startsWith('/design-studio/'))return NAV_GROUPS.find(g=>g.entries.some(e=>e.to==='/design-studio'))?.key || null;
   return NAV_GROUPS.find(g=>g.entries.some(e=>e.to===path))?.key || null;
 }
 
@@ -240,7 +241,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                   // prefix of /crm/leads), so prefix matching would light up
                   // two entries at once. Detail pages (/project/:id …) use
                   // different path roots, so nothing is lost.
-                  const active = location.split('?')[0] === e.to || e.to==='/projects'&&location.startsWith('/project/');
+                  const active = location.split('?')[0] === e.to || e.to==='/projects'&&location.startsWith('/project/') || e.to==='/design-studio'&&location.startsWith('/design-studio/');
                   const Icon = e.icon;
                   return (
                     <div key={e.to}>

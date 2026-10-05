@@ -1,10 +1,10 @@
 import {useEffect,useRef,useState} from 'react';
 
-export default function WalnutModel({parts,selected,isolate,showTop,onSelect}){
-  const host=useRef(null),control=useRef(null),latest=useRef({selected,isolate,showTop,onSelect});
-  latest.current={selected,isolate,showTop,onSelect};
+export default function WalnutModel({parts,selected,isolate,showTop,hiddenParts,onSelect}){
+  const host=useRef(null),control=useRef(null),latest=useRef({selected,isolate,showTop,hiddenParts,onSelect});
+  latest.current={selected,isolate,showTop,hiddenParts,onSelect};
   const [error,setError]=useState('');
-  useEffect(()=>{control.current?.apply();},[selected,isolate,showTop]);
+  useEffect(()=>{control.current?.apply();},[selected,isolate,showTop,hiddenParts]);
   useEffect(()=>{
     let stopped=false,cleanup;setError('');
     (async()=>{
@@ -49,10 +49,10 @@ export default function WalnutModel({parts,selected,isolate,showTop,onSelect}){
       };
       const apply=()=>{
         const state=latest.current;
-        for(const obj of objects){obj.visible=state.isolate&&state.selected?obj.userData.id===state.selected:obj.userData.group!=='top'||state.showTop||obj.userData.id===state.selected;
+        for(const obj of objects){obj.visible=!state.hiddenParts.includes(obj.userData.id)&&(state.isolate&&state.selected?obj.userData.id===state.selected:obj.userData.group!=='top'||state.showTop||obj.userData.id===state.selected);
           obj.material.color.setHex(obj.userData.id===state.selected?0xbd7a2b:obj.userData.color);}
         const key=state.isolate&&state.selected?state.selected:'assembly';if(key!==lastFit){lastFit=key;fit();}else draw();
-        if(host.current){host.current.dataset.selectedPart=state.selected;host.current.dataset.ready='true';}
+        if(host.current){host.current.dataset.selectedPart=state.selected;host.current.dataset.visibleParts=String(objects.filter(o=>o.visible).length);host.current.dataset.ready='true';}
       };
       const resize=new ResizeObserver(()=>{if(stopped||!host.current)return;const w=host.current.clientWidth,h=host.current.clientHeight;if(!w||!h)return;renderer.setSize(w,h);fit(lastView);});resize.observe(host.current);
       renderer.setSize(host.current.clientWidth,host.current.clientHeight);

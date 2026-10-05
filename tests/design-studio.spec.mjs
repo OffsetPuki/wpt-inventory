@@ -8,6 +8,7 @@ test('Engineering studio opens the current model and selectable hardware and dim
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
  await page.goto(app.base+'/#/design-studio');
  await expect(page.getByRole('heading',{name:'CJM Design Studio',exact:true})).toBeVisible();
+ await page.getByRole('link',{name:'Open Film stretching table',exact:true}).click();
  const before=app.sqlite.prepare('SELECT count(*) AS n FROM customer_previews').get().n;
  await page.getByRole('button',{name:'View parts',exact:true}).click();
  await expect(page.locator('[aria-label="Select parts in the 3D model"]')).toHaveAttribute('data-ready','true',{timeout:60000});
