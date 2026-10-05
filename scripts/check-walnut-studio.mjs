@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {testApp} from './test-app.mjs';
+import {modelDimensions,partGroups} from '../client/src/components/design-studio/walnut-dimensions.ts';
 
 const model=JSON.parse(fs.readFileSync('server/design-studio/walnut-table/model.json','utf8'));
 const near=(a,b,message)=>assert(Math.abs(a-b)<.00001,message+`: ${a} / ${b}`);
@@ -8,6 +9,17 @@ for(const [top,variant] of Object.entries(model.variants)){
   assert.equal(variant.parts.length,53);
   assert.equal(new Set(variant.parts.map(p=>p.id)).size,53);
   assert.equal(variant.parts.filter(p=>p.category==='Legs').length,4);
+  const stretcher=variant.parts.find(p=>p.name==='Lower center stretcher');
+  near(stretcher.measurements.find(m=>m.label==='Tube length between bridges').inches,96,'Lower stretcher length');
+  assert.equal(partGroups(variant.parts).flat().length,53,'Visual groups retain every piece');
+  for(const group of ['table','frame','layout','rails','clearance'])for(const d of modelDimensions(variant,'',group)){
+    near(d.value,Math.hypot(...d.b.map((v,i)=>v-d.a[i])),'Dimension line matches measured geometry');
+    assert([...d.a,...d.b,...d.from,...d.to].every(Number.isFinite));
+  }
+  assert.deepEqual(modelDimensions(variant,'','layout').slice(0,2).map(d=>d.value),[14,14]);
+  assert.equal(modelDimensions(variant,'','rails')[0].value,15);
+  const leg=variant.parts.find(p=>p.category==='Legs');
+  near(modelDimensions(variant,leg.id,'table')[2].value,leg.bounds[2],'Part annotation follows selected top');
   assert.equal(variant.parts.filter(p=>p.category==='Bearing strips').length,13);
   assert.equal(variant.integratedDetails.reduce((n,d)=>n+d.quantity,0),18);
   const headers=variant.parts.filter(p=>p.name==='Top trestle header');

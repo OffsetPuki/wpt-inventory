@@ -6,19 +6,8 @@ import './film-studio.css';
 import './walnut-studio.css';
 
 const WalnutModel=lazy(()=>import('./WalnutModel'));
-type Unit='inch'|'fraction'|'mm';
-type Measure={label:string;inches:number};
-type Part={id:string;name:string;sourceName:string;category:string;quantity:number;location:string;material:string;stock:string;bounds:number[];min:number[];max:number[];measurements:Measure[];notes:string[];p:number[];n:number[];e:number[];materialIndex:number;group:string};
-type Variant={topThickness:number;table:number[];frame:number[];supportHeight:number;parts:Part[];assemblyDimensions:Measure[];integratedDetails:{name:string;quantity:number;profile:number[];note:string}[]};
-type Catalog={revision:string;modelRevision:string;notes:string[];variants:Record<string,Variant>};
-function format(value:number,unit:Unit):string{
-  if(unit==='mm')return `${Math.round((value*25.4+1e-9)*100)/100} mm`;
-  if(unit==='inch')return `${Number(value.toFixed(4))}″`;
-  if(value!==0&&Math.abs(value)<1/32)return `${value<0?'−':''}<1/16″`;
-  const n=Math.round(Math.abs(value)*16),whole=Math.floor(n/16);let numerator=n%16,denominator=16;
-  while(numerator&&numerator%2===0){numerator/=2;denominator/=2;}
-  return `${value<0?'−':''}${whole||!numerator?whole:''}${whole&&numerator?' ':''}${numerator?`${numerator}/${denominator}`:''}″`;
-}
+import {format,dimensionGroups,partFamily,type Unit,type Measure,type Part,type Variant,type Catalog} from './walnut-dimensions';
+import WalnutVisualParts from './WalnutVisualParts';
 function saveCsv(variant:Variant,revision:string){
   const rows=[['Part ID','Part','Quantity','Category','Material / stock','X envelope (in)','Y envelope (in)','Z envelope (in)','Measurements (in)','Notes']];
   for(const p of variant.parts)rows.push([p.id,p.sourceName,String(p.quantity),p.category,p.stock,...p.bounds.map(v=>v.toFixed(6)),p.measurements.map(m=>`${m.label}: ${m.inches.toFixed(6)}`).join('; '),p.notes.join(' ')]);
@@ -47,14 +36,14 @@ function Schedule({variant,unit,onSelect}:{variant:Variant;unit:Unit;onSelect:(i
 function IntegratedDetails({variant,unit,notes}:{variant:Variant;unit:Unit;notes:string[]}){return <><p>These closures are included in the tube meshes. They are listed here so the parts schedule does not omit them.</p><table><thead><tr><th>Included detail</th><th>Qty</th><th>Nominal profile × thickness</th><th>Notes</th></tr></thead><tbody>{variant.integratedDetails.map(d=><tr key={d.name}><td>{d.name}</td><td>{d.quantity}</td><td>{d.profile.map(v=>format(v,unit)).join(' × ')}</td><td>{d.note}</td></tr>)}</tbody></table><ul>{notes.map(n=><li key={n}>{n}</li>)}</ul></>;}
 export default function WalnutTableWorkspace(){
   const [top,setTop]=useState('3'),[unit,setUnit]=useState<Unit>('fraction');
-  const [mode,setMode]=useState('model'),[selected,setSelected]=useState(''),[tab,setTab]=useState('3d');
+  const [mode,setMode]=useState('model'),[selected,setSelected]=useState('');
   const [finder,setFinder]=useState(false),[filter,setFilter]=useState(''),[category,setCategory]=useState('All');
   const [hiddenParts,setHiddenParts]=useState<string[]>([]),[showTop,setShowTop]=useState(false);
-  const [fullscreen,setFullscreen]=useState(false),[enlarge,setEnlarge]=useState(false);
+  const [fullscreen,setFullscreen]=useState(false),[enlarge,setEnlarge]=useState(false),[dimensions,setDimensions]=useState(true),[dimensionMode,setDimensionMode]=useState('table');
   const query=useQuery<Catalog>({queryKey:['walnut-table-parts'],queryFn:async({signal})=>(await apiRequest('GET','/api/design-studio/walnut-table',undefined,{signal})).json(),staleTime:60000});
   const data=query.data,variant=data?.variants[top],part=variant?.parts.find(p=>p.id===selected);
-  const choose=(id:string)=>{setSelected(id);setHiddenParts(v=>v.filter(p=>p!==id));setMode('parts');setTab('3d');setFinder(false);setEnlarge(false);};
-  const allParts=()=>{setSelected('');setTab('3d');};
+  const choose=(id:string)=>{setSelected(id);setHiddenParts(v=>v.filter(p=>p!==id));setMode('parts');setDimensions(true);setFinder(false);setEnlarge(false);};
+  const allParts=()=>{setSelected('');};
   useEffect(()=>{if(!fullscreen)return;const old=document.body.style.overflow;document.body.style.overflow='hidden';const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setFullscreen(false);};window.addEventListener('keydown',escape);return()=>{document.body.style.overflow=old;window.removeEventListener('keydown',escape);};},[fullscreen]);
   return <section className={'film-studio wt-workspace'+(fullscreen?' is-fullscreen':'')} aria-label="Walnut table parts and dimensions" data-fullscreen={fullscreen} data-open="true">
     <header className="fs-header"><div><span className="fs-eyebrow">Parts &amp; dimensions · Internal workspace</span><h2>Dallas table</h2><p>11′ × 48″ walnut dining table · Bridge frame · 10 seats</p></div><div className="fs-header-actions"><button onClick={()=>setFullscreen(v=>!v)}>{fullscreen?<Minimize size={16}/>:<Maximize size={16}/>} {fullscreen?'Exit fullscreen':'Fullscreen'}</button></div></header>
@@ -62,39 +51,39 @@ export default function WalnutTableWorkspace(){
       <button aria-pressed={mode==='model'} onClick={()=>{setMode('model');allParts();setFinder(false);}}><Box size={16}/>View model</button>
       <button aria-pressed={mode==='parts'} onClick={()=>setMode('parts')}><PencilRuler size={16}/>View parts</button>
       <button aria-pressed={mode==='schedule'} onClick={()=>setMode('schedule')}>Parts schedule</button>
-      <button aria-pressed={mode==='dimensions'} onClick={()=>setMode('dimensions')}>Overall dimensions</button>
+      <button aria-pressed={mode==='dimensions'} onClick={()=>{setMode('dimensions');setDimensions(true);}}>Overall dimensions</button>
     </nav></div>
     <div className="fs-body wt-body">
       {query.isPending&&<p role="status">Loading current Dallas model…</p>}
       {query.isError&&<div role="alert">Could not load the parts. <button onClick={()=>query.refetch()}>Try again</button></div>}
       {data&&variant&&<>
         <div className="wt-toolbar"><label>Walnut top<select aria-label="Walnut top thickness" value={top} onChange={e=>setTop(e.target.value)}><option value="3">3 inches · 418 lb top</option><option value="2">2 inches · 280 lb top</option></select></label><label>Dimensions<select aria-label="Walnut dimension units" value={unit} onChange={e=>setUnit(e.target.value as Unit)}><option value="fraction">Inches · nearest 1/16</option><option value="inch">Decimal inches</option><option value="mm">Millimeters</option></select></label><div className="wt-actions"><button onClick={()=>saveCsv(variant,data.revision)}><Download size={15}/>Download parts CSV</button><button onClick={()=>window.print()}><Printer size={15}/>Print parts &amp; dimensions</button></div></div>
-        <p className="wt-scope">Model dimensions for design review. Confirm material, joints, tolerances and cut allowances before fabrication. Fractional display rounds to 1/16″; use decimal inches for exact model values.</p>
-        {(mode==='model'||mode==='parts')&&<>
-          {mode==='parts'&&part&&<div className="fs-mobile-tabs fs-tabs" role="group" aria-label="Selected part view"><button aria-pressed={tab==='3d'} onClick={()=>setTab('3d')}>3D part</button><button aria-pressed={tab==='drawing'} onClick={()=>setTab('drawing')}>Drawing &amp; dimensions</button></div>}
-          <div className={mode==='parts'&&part?'fs-work-grid':''}>
-            <div className={'fs-viewer-card'+(mode==='parts'&&part&&tab==='drawing'?' fs-mobile-hidden':'')}>
+        <p className="wt-brief">Model dimensions · Design review</p>
+        {(mode==='model'||mode==='parts'||mode==='dimensions')&&<>
+          <div className="wt-visual-inspector">
+            <div className="fs-viewer-card">
+              {mode==='parts'&&part&&<div className="wt-selected-summary"><h3>{part.name}</h3><span>{part.stock}</span><select aria-label="Selected piece" value={selected} onChange={e=>choose(e.target.value)}>{variant.parts.filter(p=>partFamily(p)===partFamily(part)).map(p=><option key={p.id} value={p.id}>{p.id} · {p.location}</option>)}</select></div>}
               <div className="fs-actions">
                 {mode==='parts'&&<><button aria-expanded={finder} onClick={()=>setFinder(v=>!v)}>Find a part</button>{part&&<><button onClick={allParts}>Back to all parts</button><button onClick={()=>{setHiddenParts(v=>[...new Set([...v,selected])]);allParts();}}>Hide this piece</button></>}</>}
                 {hiddenParts.length>0&&<button onClick={()=>setHiddenParts([])}>Show all ({hiddenParts.length} hidden)</button>}
-                {!part&&<label><input type="checkbox" checked={showTop} onChange={e=>setShowTop(e.target.checked)}/> Show walnut top</label>}
+                {(mode!=='parts'||!part)&&<label><input type="checkbox" checked={showTop} onChange={e=>setShowTop(e.target.checked)}/> Show walnut top</label>}
               </div>
               {mode==='parts'&&finder&&<aside className="wt-part-list wt-finder"><label>Search parts<input type="search" aria-label="Search walnut parts" placeholder="Leg, rail, foot, tab…" value={filter} onChange={e=>setFilter(e.target.value)}/></label><label>Part type<select aria-label="Walnut part category" value={category} onChange={e=>setCategory(e.target.value)}><option>All</option>{Array.from(new Set(variant.parts.map(p=>p.category))).map(c=><option key={c}>{c}</option>)}</select></label><div className="wt-list" aria-label="Walnut components">{variant.parts.filter(p=>(category==='All'||p.category===category)&&`${p.id} ${p.name} ${p.sourceName} ${p.stock}`.toLowerCase().includes(filter.toLowerCase())).map(p=><button key={p.id} aria-current={selected===p.id?'true':undefined} onClick={()=>choose(p.id)}><strong>{p.id} · {p.name}</strong><span>{p.location} · Qty {p.quantity}{hiddenParts.includes(p.id)?' · Hidden':''}</span><small>{p.sourceName}</small></button>)}</div></aside>}
-              <Suspense fallback={<p role="status">Opening 3D view…</p>}><WalnutModel parts={variant.parts} selected={mode==='parts'?selected:''} isolate={mode==='parts'&&!!part} showTop={showTop} hiddenParts={hiddenParts} onSelect={choose}/></Suspense>
-              {!part&&<p className="wt-hint">Click any piece to inspect it on its own, with its drawings and dimensions.</p>}
+              <div className="wt-dimension-controls"><label><input type="checkbox" checked={dimensions} onChange={e=>setDimensions(e.target.checked)}/> Dimensions on model</label>{!(mode==='parts'&&part)&&<select aria-label="Measurement group" value={dimensionMode} onChange={e=>{setDimensionMode(e.target.value);setShowTop(false);setDimensions(true);}}>{dimensionGroups.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>}</div>
+              <Suspense fallback={<p role="status">Opening 3D view…</p>}><WalnutModel parts={variant.parts} selected={mode==='parts'?selected:''} isolate={mode==='parts'&&!!part} showTop={showTop} hiddenParts={mode==='dimensions'?[]:hiddenParts} onSelect={choose} variant={variant} unit={unit} dimensions={dimensions} dimensionMode={dimensionMode}/></Suspense>
+              {mode==='parts'&&part&&<div className="wt-part-facts">{part.measurements.filter(m=>!m.label.startsWith('Tube outside')).slice(0,3).map(m=><div key={m.label}><strong>{format(m.inches,unit)}</strong><span>{m.label}</span></div>)}</div>}
             </div>
-            {mode==='parts'&&part&&<article className={'fs-sheet wt-part-detail'+(tab==='3d'?' fs-mobile-hidden':'')} aria-label="Walnut selected part">
-              <span className="wt-eyebrow">{part.id} · {part.category} · Quantity {part.quantity}</span><h3>{part.name}</h3><p>{part.sourceName}</p><p><strong>{part.stock}</strong></p>
-              <Measurements values={part.measurements} unit={unit}/>
+            {mode==='parts'&&part&&<article className="fs-sheet wt-part-detail" aria-label="Walnut selected part">
+              <details><summary>Drawing &amp; full measurements</summary><h3>{part.name}</h3><p>{part.id} · {part.stock}</p><Measurements values={part.measurements} unit={unit}/>
               <div className="fs-actions"><button onClick={()=>setEnlarge(v=>!v)}>{enlarge?'Fit drawing':'Enlarge drawing'}</button></div><div className={'wt-drawing-scroll'+(enlarge?' is-enlarged':'')}><PartDrawing part={part} unit={unit}/></div>
-              <h4>Position and outside dimensions</h4><Measurements values={part.bounds.map((v,i)=>({label:`${['X · table length','Y · across table','Z · vertical'][i]} envelope`,inches:v}))} unit={unit}/><p className="wt-hint">X: {format(part.min[0],unit)} to {format(part.max[0],unit)} · Y: {format(part.min[1],unit)} to {format(part.max[1],unit)} · Z: {format(part.min[2],unit)} to {format(part.max[2],unit)}</p><ul>{part.notes.map(note=><li key={note}>{note}</li>)}</ul>
+              <h4>Position and outside dimensions</h4><Measurements values={part.bounds.map((v,i)=>({label:`${['X · table length','Y · across table','Z · vertical'][i]} envelope`,inches:v}))} unit={unit}/><p className="wt-hint">X: {format(part.min[0],unit)} to {format(part.max[0],unit)} · Y: {format(part.min[1],unit)} to {format(part.max[1],unit)} · Z: {format(part.min[2],unit)} to {format(part.max[2],unit)}</p><ul>{part.notes.map(note=><li key={note}>{note}</li>)}</ul></details>
             </article>}
           </div>
         </>}
-        {mode==='schedule'&&<Schedule variant={variant} unit={unit} onSelect={choose}/>}
-        {mode==='dimensions'&&<div className="wt-overall"><h3>Assembly dimensions · {top}″ walnut top</h3><Measurements values={variant.assemblyDimensions} unit={unit}/><p>All four angled legs lean 15° from vertical. Their bottom outside corners align with the bridge-to-foot seams.</p></div>}
-        <details className="wt-integrated"><summary>End caps, sole closures &amp; drawing notes</summary><IntegratedDetails variant={variant} unit={unit} notes={data.notes}/></details>
-        <p className="wt-revision"><span>{variant.parts.length} modeled components</span> · Model revision: {data.modelRevision} · Snapshot {data.revision}. Changes to the customer model require refreshing this model export.</p>
+        {mode==='schedule'&&<WalnutVisualParts parts={variant.parts} unit={unit} onSelect={choose}/>}
+        {mode==='dimensions'&&<details className="wt-overall wt-detail-drawer"><summary>All measurement values</summary><Measurements values={variant.assemblyDimensions} unit={unit}/></details>}
+        <details className="wt-integrated"><summary>Notes &amp; included closures</summary><p>Confirm joints, tolerances and cut allowances before fabrication. Fractions round to 1/16″; decimal inches preserve model precision.</p><IntegratedDetails variant={variant} unit={unit} notes={data.notes}/></details>
+        <p className="wt-revision"><span>{variant.parts.length} modeled components</span> · Revision {data.revision}</p>
         <div className="wt-print"><h2>Dallas table — parts &amp; dimensions</h2><p>{top}″ top · 30″ finished height · Revision {data.revision}</p><p>Model measurements only. Not a released cutting schedule. X = table length; Y = width; Z = height.</p><Measurements values={variant.assemblyDimensions} unit={unit}/><Schedule variant={variant} unit={unit} onSelect={choose}/><h3>End caps, sole closures &amp; drawing notes</h3><IntegratedDetails variant={variant} unit={unit} notes={data.notes}/>{part&&<><h3>{part.id} · {part.name}</h3><PartDrawing part={part} unit={unit}/><Measurements values={part.measurements} unit={unit}/>{part.notes.map(n=><p key={n}>{n}</p>)}</>}</div>
       </>}
     </div>

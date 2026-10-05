@@ -36,7 +36,7 @@ for key,model in models.items():
             category='Feet & bridges';name='Flush-cut outward foot'
             dim('Horizontal reach from miter center',7);dim('Floor contact length',model['footProfile']['soleContactLength']);dim('Sole closure thickness',.1875)
             notes=[f'Parent tube slopes {model["footProfile"]["slopeDegrees"]:.3f}° from horizontal.','Floor cut is at height 0. Vertical toe lip is removed.','Includes one shaped 3/16-inch sole closure; it is integrated in this mesh.','Floor contact rectangle: 4 × 4.948 inches. Tip finishing and weld allowances require shop detailing.']
-        elif 'raised bridge' in n:
+        elif n.startswith('Trestle') and 'raised bridge' in n:
             category='Feet & bridges';name='Raised lower bridge'
             dim('Between miter centers',22);dim('Upper edge span',bounds[1]);dim('Bridge top above floor',3);dim('Bridge bottom above floor',1)
             notes=[f'Bridge/foot joint angle: {model["footProfile"]["slopeDegrees"]/2:.3f}° from square in the end-view plane.','Leg outside corners meet the upper ends of this tube.']

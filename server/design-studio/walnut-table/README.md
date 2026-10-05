@@ -4,6 +4,8 @@ This private model snapshot is available to owners/managers in CJM Design Studio
 
 View model shows the assembly. View parts supports picking and isolating a component, searching, hiding/restoring pieces, and viewing dimensioned projections. Parts schedule, overall dimensions, both top variants, unit controls, CSV and print remain available. This follows the film workspace interaction pattern without presenting model envelopes as a released cut list.
 
+The model now displays projected dimension lines that follow rotation, zoom, units and top selection. Measurement groups cover table size, steel frame, leg layout, rails, and clearances. Selected pieces show their outside X/Y/Z spans beside the geometry. Parts schedule uses illustrated size groups with individual-piece selection; detailed drawings, notes and the complete numeric schedule remain available in expandable sections and exports. The lower center stretcher is correctly classified separately from the transverse raised bridges.
+
 `model.json` preserves the actual triangles, normals and edges from the verified local `Open-3D-Table.html`. No customer preview record or published option is edited by this workspace. Both top thicknesses share stable part IDs. Chairs are illustrative and excluded; the 53 selectable components comprise 52 frame pieces and one top. Integrated caps and sole closures are counted separately as included details.
 
 To refresh after an approved geometry change:
