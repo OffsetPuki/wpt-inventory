@@ -346,7 +346,10 @@ export function registerHrRoutes(app: Express): void {
   });
 
   app.get("/api/hr/payroll/runs", requireElevated, (_req,res) => {
-    res.json(sqlite.prepare("SELECT id,from_date,to_date,total_cents,expense_id,closed_at FROM hr_payroll_runs ORDER BY closed_at DESC").all());
+    res.json([
+      ...sqlite.prepare("SELECT id,from_date,to_date,total_cents,expense_id,closed_at FROM hr_payroll_runs ORDER BY closed_at DESC").all(),
+      ...sqlite.prepare("SELECT 'legacy-'||id AS id,period_start AS from_date,period_end AS to_date,NULL AS total_cents,NULL AS expense_id,NULL AS closed_at,status AS legacy_status FROM hr_legacy_payroll_runs ORDER BY created_at DESC").all(),
+    ]);
   });
   app.get("/api/hr/employees/:id/pay-rates", requireElevated, (req,res) => {
     res.json(sqlite.prepare("SELECT effective_date,pay_type,rate_cents FROM hr_pay_rates WHERE employee_id=? ORDER BY effective_date DESC").all(pid(req.params.id)));

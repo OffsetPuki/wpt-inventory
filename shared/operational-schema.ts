@@ -49,6 +49,15 @@ export const payRates = sqliteTable(
   },
   (t) => [unique().on(t.employeeId, t.effectiveDate)],
 );
+export const legacyPayrollRuns = sqliteTable('hr_legacy_payroll_runs', {
+  id: integer('id').primaryKey({autoIncrement:true}),
+  periodStart: text('period_start').notNull(),
+  periodEnd: text('period_end').notNull(),
+  payDate: text('pay_date'),
+  status: text('status').notNull().default('draft'),
+  notes: text('notes'),
+  createdAt: integer('created_at').notNull(),
+});
 export const payrollRuns = sqliteTable(
   "hr_payroll_runs",
   {

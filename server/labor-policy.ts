@@ -1,4 +1,5 @@
 import {sqlite} from './storage';
+import {payrollPeriodLocked} from './payroll-schema';
 import type {Express} from 'express';
 import {requireElevated} from './auth';
 import {z} from 'zod';
@@ -46,7 +47,7 @@ export function registerLaborPolicy(app:Express){
   const parsed=schema.safeParse(req.body);if(!parsed.success)return res.status(400).json({message:'Review the weekly hours, multiplier, burden and effective date.'});
   const b=parsed.data,d=new Date(b.effectiveDate+'T00:00:00');
   if(!Number.isFinite(d.getTime())||dayKey(d)!==b.effectiveDate||d.getDay()!==1)return res.status(400).json({message:'Choose a Monday so the rule starts with a complete workweek.'});
-  if(sqlite.prepare('SELECT 1 FROM hr_payroll_runs WHERE to_date>=? LIMIT 1').get(b.effectiveDate))return res.status(409).json({message:'Choose a date after closed payroll. Historical pay remains unchanged.'});
+  if(payrollPeriodLocked(sqlite,b.effectiveDate,'9999-12-31'))return res.status(409).json({message:'Choose a date after closed payroll and older payroll awaiting review. Historical pay remains unchanged.'});
   try{sqlite.prepare('INSERT INTO hr_labor_policies VALUES(?,?,?,?,?,?)').run(b.effectiveDate,b.weeklyHours,b.multiplier,b.burdenPct,req.user!.userId,Date.now());audit(req,'payroll.policy_added',{details:b});res.status(201).json({ok:true});}
   catch{res.status(409).json({message:'A rule already starts on this date. Choose a later workweek.'});}
  });

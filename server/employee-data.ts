@@ -1,4 +1,5 @@
 import { sqlite } from './storage';
+import { payrollPeriodLocked } from './payroll-schema';
 
 export function initializeEmployeeTime() {
   const columns = new Set((sqlite.prepare('PRAGMA table_info(pm_time_entries)').all() as any[]).map(c => c.name));
@@ -69,7 +70,7 @@ export const dayKey = (ms: number) => { const d = new Date(ms); return `${d.getF
 
 export function intervalProblem(userId: number, start: number, end: number, exceptId = 0): string | null {
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end - start > 86400000 || end > Date.now() + 60000) return 'Use a completed time interval of up to 24 hours, ending no later than now.';
-  if (sqlite.prepare('SELECT 1 FROM hr_payroll_runs WHERE from_date<=? AND to_date>=?').get(dayKey(end-1), dayKey(start))) return 'This payroll period is closed. Ask the owner to record a payroll correction in an open period.';
+  if (payrollPeriodLocked(sqlite,dayKey(start),dayKey(end-1))) return 'This payroll period is closed or contains older payroll awaiting review. Ask the owner to record a payroll correction in an open period.';
   if (sqlite.prepare('SELECT 1 FROM pm_time_entries WHERE user_id=? AND id<>? AND started_at<? AND coalesce(ended_at,?)>? LIMIT 1').get(userId, exceptId, end, Date.now()+1, start)) return 'These times overlap another recorded entry. Review the existing hours first.';
   return null;
 }

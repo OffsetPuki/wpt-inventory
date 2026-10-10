@@ -5,7 +5,7 @@ import { join } from "node:path";
 import crypto from "node:crypto";
 import express from "express";
 
-export async function testApp({ serve = false } = {}) {
+export async function testApp({ serve = false, prepareDatabase } = {}) {
   process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "cjm-release-"));
   for (const key of [
     "RESEND_API_KEY",
@@ -83,6 +83,7 @@ export async function testApp({ serve = false } = {}) {
       headers: { "Content-Type": "application/json" },
     });
   };
+  if (prepareDatabase) await prepareDatabase(process.env.DATA_DIR);
   const { registerRoutes } = await import("../server/routes.ts");
   const { registerAttentionRoute } = await import("../server/automations.ts");
   const { seedDefaults } = await import("../server/seed.ts");

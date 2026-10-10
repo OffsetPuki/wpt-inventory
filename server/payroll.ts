@@ -1,16 +1,14 @@
 import {laborPremiums} from './labor-policy';
 import { sqlite } from "./storage";
+import { initializePayrollRuns, legacyPayrollOverlap, payrollPeriodLocked } from './payroll-schema';
+
+initializePayrollRuns(sqlite);
 
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS hr_pay_rates (
     id INTEGER PRIMARY KEY, employee_id INTEGER NOT NULL, effective_date TEXT NOT NULL,
     pay_type TEXT NOT NULL, rate_cents INTEGER NOT NULL, created_at INTEGER NOT NULL,
     UNIQUE(employee_id, effective_date)
-  );
-  CREATE TABLE IF NOT EXISTS hr_payroll_runs (
-    id INTEGER PRIMARY KEY, from_date TEXT NOT NULL, to_date TEXT NOT NULL, snapshot TEXT NOT NULL,
-    total_cents INTEGER NOT NULL, expense_id INTEGER, closed_by INTEGER NOT NULL, closed_at INTEGER NOT NULL,
-    UNIQUE(from_date, to_date)
   );
   CREATE TABLE IF NOT EXISTS hr_time_corrections (
     id INTEGER PRIMARY KEY, time_entry_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
@@ -46,11 +44,7 @@ export function payrollRange(from: string, to: string) {
   return { start: start.getTime(), end: end.getTime() };
 }
 export function closedPeriod(from: string, to = from): boolean {
-  return !!sqlite
-    .prepare(
-      "SELECT 1 FROM hr_payroll_runs WHERE from_date <= ? AND to_date >= ? LIMIT 1",
-    )
-    .get(to, from);
+  return payrollPeriodLocked(sqlite,from,to);
 }
 export function lockedTime(entry: {
   invoiceId?: number | null;
@@ -95,6 +89,7 @@ export function rateOn(
 
 export function payrollSummary(from: string, to: string) {
   const { start, end } = payrollRange(from, to);
+  if (legacyPayrollOverlap(sqlite,from,to)) throw new Error('This period contains older payroll records without a saved pay breakdown. Review those records before using this period; their amounts have not been recalculated.');
   const closed = sqlite
     .prepare(
       "SELECT snapshot FROM hr_payroll_runs WHERE from_date=? AND to_date=?",

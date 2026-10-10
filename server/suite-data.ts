@@ -74,6 +74,7 @@ export function initializeSuite() {
       "hr_leave_requests",
       "hr_pay_rates", "hr_labor_policies",
       "hr_payroll_runs",
+      "hr_legacy_payroll_runs",
     ],
     communication: [
       "suite_comments",

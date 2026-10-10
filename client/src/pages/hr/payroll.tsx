@@ -63,7 +63,8 @@ export default function HrPayrollPage() {
     enabled: isElevated && rangeValid,
   });
 
-  const { data: runs = [], isError: runsFailed } = useQuery<{ id: number; from_date: string; to_date: string; total_cents: number }[]>({ queryKey: ["hr-payroll-runs"], queryFn: async () => (await apiRequest("GET", "/api/hr/payroll/runs")).json(), enabled: isElevated });
+  const { data: runs = [], isError: runsFailed } = useQuery<{ id: number|string; from_date: string; to_date: string; total_cents: number|null; legacy_status?: string }[]>({ queryKey: ["hr-payroll-runs"], queryFn: async () => (await apiRequest("GET", "/api/hr/payroll/runs")).json(), enabled: isElevated });
+  const olderRuns = runs.filter(r => r.legacy_status !== undefined);
   const overlappingRun = runs.find((r) => r.from_date <= to && r.to_date >= from);
   const totalCents = rows.reduce((s, r) => s + r.grossCents, 0);
 
@@ -147,7 +148,8 @@ export default function HrPayrollPage() {
       </div>
 
       {runsFailed && <p role="alert" className="mb-4">Closed periods could not load. Refresh before closing payroll.</p>}
-      {overlappingRun && <p className="mb-4 rounded-xl border border-border p-4 text-sm">This range includes closed payroll ({overlappingRun.from_date} to {overlappingRun.to_date}). Corrections belong in an open period.</p>}
+      {!!olderRuns.length && <div role="alert" className="mb-4 rounded-xl border border-amber-500/40 p-4 text-sm"><p className="font-semibold">Older payroll needs review</p><p className="mt-2">These records are preserved, but have no saved pay breakdown. Their amounts are not included in this worksheet or reports. These periods remain locked to prevent duplicate payroll.</p><ul className="mt-2 space-y-1">{olderRuns.map(r=><li key={r.id}>{r.from_date} to {r.to_date} · Previous status: {r.legacy_status}</li>)}</ul></div>}
+      {overlappingRun && <p className="mb-4 rounded-xl border border-border p-4 text-sm">{overlappingRun.legacy_status !== undefined ? 'This range includes older payroll awaiting review' : 'This range includes closed payroll'} ({overlappingRun.from_date} to {overlappingRun.to_date}). Corrections belong in an open period.</p>}
       {runs.length > 0 && <details className="mb-4 rounded-xl border border-border p-4 text-sm"><summary>Closed periods</summary>{runs.map((r) => <button className="mt-2 block underline" key={r.id} onClick={() => { setFrom(r.from_date); setTo(r.to_date); }}>{r.from_date} to {r.to_date} · {formatMoney(r.total_cents)}</button>)}</details>}
       {loadFailed ? <RetryBlock query={{error:loadError,refetch:retryLoad}}/> : isLoading ? (
         <LoadingBlock />

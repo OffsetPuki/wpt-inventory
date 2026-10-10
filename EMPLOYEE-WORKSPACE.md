@@ -78,6 +78,14 @@ hours retain their legacy eligibility; existing payroll snapshots and approved
 time off are preserved. A running legacy timer is closed explicitly into a
 reviewable shift without creating another time entry.
 
+Early databases also contain a draft-period table named `hr_payroll_runs` with
+`period_start`/`period_end` fields. Startup preserves that table and its records
+as `hr_legacy_payroll_runs`, then creates the current snapshot-based table.
+Older periods appear in Payroll as needing review. Their amounts are unknown,
+are never reconstructed automatically, and are excluded from current reports.
+Overlapping payroll, time corrections, and retroactive labor-policy changes
+remain blocked. Existing modern payroll snapshots are unchanged on restart.
+
 Use the normal database backup and release process. Before enabling employee
 access, review login/profile links, dated rates, assignments, and break settings.
 This phase connects the existing payroll worksheet; it does not add a third-party
