@@ -648,7 +648,7 @@ function runBusinessSweep(): void {
     const rows = sqlite.prepare(`
       SELECT te.id, te.started_at, u.name AS user_name
       FROM pm_time_entries te JOIN users u ON u.id = te.user_id
-      WHERE te.ended_at IS NULL AND te.started_at < ?
+      WHERE te.ended_at IS NULL AND te.shift_id IS NULL AND te.started_at < ?
     `).all(now - 12 * HOUR_MS) as any[];
     if (rows.length === 0) return;
     const stop = sqlite.prepare("UPDATE pm_time_entries SET ended_at = ?, duration_min = ? WHERE id = ?");

@@ -13,7 +13,7 @@ try{
   assert.ok(d.revision);
   const path=`/api/public/document-activity/${d.kind}/${d.token}`,report=`/api/document-activity/${d.kind}/${d.id}`,b=body(d);
   assert.equal((await api(report)).status,401);
-  assert.equal((await api(report,'GET',undefined,worker)).status,d.kind==='invoice'?403:200);
+  assert.equal((await api(report,'GET',undefined,worker)).status,403);
   assert.equal((await api(path,'POST',b)).status,404);
   for(const bad of [{...b,revision:'bad'},{...b,visitId:'bad'},{...b,seq:-1},{...b,activeMs:-1},{...b,extra:'private text'},{...b,actions:{...b.actions,unknown:1}}])assert.ok([400,409].includes((await api(path,'POST',bad,undefined,key)).status));
   assert.equal((await api(path,'POST',b,undefined,key)).status,201);

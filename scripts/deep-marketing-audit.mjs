@@ -73,7 +73,7 @@ try {
  assert.equal((await api('/api/marketing/growth?site=metals','GET',undefined,owner)).status,403);
  assert.equal((await api('/api/marketing/spending','POST',entry,owner)).status,403);
  assert.equal((await api('/api/marketing/reviews','POST',{rating:5,site:'metals',published:true},owner)).status,403);
- assert.equal((await api('/api/marketing/reviews','POST',{rating:5,site:'metals',published:false},owner)).status,201);
+ assert.equal((await api('/api/marketing/reviews','POST',{rating:5,site:'metals',published:false},owner)).status,403);
  sqlite.prepare("UPDATE users SET role='owner' WHERE name='Owner'").run();
  console.log('Marketing regressions passed.');
 } finally {await app.close();}

@@ -77,6 +77,9 @@ export const pmTasks = sqliteTable("pm_tasks", {
 
 export const timeEntries = sqliteTable("pm_time_entries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  shiftId: integer('shift_id'),
+  workKind: text('work_kind').notNull().default('work'),
+  approvalStatus: text('approval_status').notNull().default('legacy'),
   userId: integer("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),

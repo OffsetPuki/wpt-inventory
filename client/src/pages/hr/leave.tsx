@@ -60,13 +60,13 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
       },
     }),
     invalidate: [["hr-leave"]],
-    successTitle: "Time off added",
+    successTitle: isElevated ? "Time off saved" : "Time-off request sent for review",
     errorTitle: "Could not add time off",
     onSuccess: onClose,
   });
 
   return (
-    <Modal open onClose={onClose} title="Add time off">
+    <Modal open onClose={onClose} title={isElevated ? 'Add time off' : 'Request time off'}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -165,7 +165,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Add time off
+          {isElevated ? 'Add time off' : 'Send request'}
         </button>
       </form>
     </Modal>
@@ -173,7 +173,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-// A plain list — time off filed is fact, no approval ceremony.
+// Employee requests remain pending until an owner decision.
 
 export default function HrLeavePage() {
   const { isElevated } = useAuth();
@@ -197,10 +197,11 @@ export default function HrLeavePage() {
   });
 
   const canAdd = isElevated || !!me;
-  const canDelete = (r: LeaveRow) => isElevated || (me != null && r.employeeId === me.id);
+  const canDelete = (r: LeaveRow) => isElevated || (me != null && r.employeeId === me.id && r.status==='pending');
+  const decide=useApiMutation<any,{id:number;action:string}>({request:v=>({method:'POST',url:`/api/employee/leave/${v.id}/decision`,body:{action:v.action}}),invalidate:[['hr-leave']],successTitle:'Time-off decision saved',errorTitle:'Could not save decision'});
 
   const typeSummary = LEAVE_TYPES.map((t) => {
-    const ofType = rows.filter((r) => r.type === t);
+    const ofType = rows.filter((r) => r.type === t && r.status === 'approved');
     return { type: t, count: ofType.length, days: ofType.reduce((s, r) => s + r.days, 0) };
   }).filter((s) => s.count > 0);
 
@@ -213,7 +214,7 @@ export default function HrLeavePage() {
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           <Plus className="h-5 w-5" />
-          Add time off
+          {isElevated ? 'Add time off' : 'Request time off'}
         </button>
       </Header>
 
@@ -235,7 +236,7 @@ export default function HrLeavePage() {
             <div className="mb-4 flex flex-wrap gap-2">
               {typeSummary.map((s) => (
                 <Chip key={s.type} className="bg-zinc-500/10 text-zinc-700 dark:text-zinc-400">
-                  {LEAVE_TYPE_LABELS[s.type]} · {s.days}d
+                  {LEAVE_TYPE_LABELS[s.type]} · {s.days}d approved
                 </Chip>
               ))}
             </div>
@@ -253,6 +254,7 @@ export default function HrLeavePage() {
                   <tr className="text-left text-xs uppercase text-muted-foreground">
                     {isElevated && <th className="px-4 py-3 font-medium">Employee</th>}
                     <th className="px-4 py-3 font-medium">Type</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Dates</th>
                     <th className="px-4 py-3 text-right font-medium">Days</th>
                     <th className="px-4 py-3 font-medium">Note</th>
@@ -268,6 +270,7 @@ export default function HrLeavePage() {
                         </td>
                       )}
                       <td className="px-4 py-3 text-foreground">{LEAVE_TYPE_LABELS[r.type]}</td>
+                      <td className="px-4 py-3"><p>{r.status==='pending'?'Awaiting approval':r.status}</p>{isElevated&&r.status==='pending'&&<div className="mt-2 flex flex-wrap gap-2"><button disabled={decide.isPending} className="min-h-11 rounded-lg border px-3" onClick={()=>decide.mutate({id:r.id,action:'approved'})}>Approve</button><button disabled={decide.isPending} className="min-h-11 rounded-lg border px-3" onClick={()=>decide.mutate({id:r.id,action:'denied'})}>Deny</button></div>}</td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {formatDate(r.startDate)} – {formatDate(r.endDate)}
                       </td>
