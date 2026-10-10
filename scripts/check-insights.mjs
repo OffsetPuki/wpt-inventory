@@ -67,6 +67,11 @@ try{
  const receiving=chart(await report('purchasing'),'receiving');
  assert.equal(receiving.rows.find(r=>r.key==='Still needed:ft').value,6);assert.equal(receiving.rows.find(r=>r.key==='Received:ft').value,4);
  assert.equal(chart(await report('purchasing','concrete'),'receiving').rows.length,0);
+ const unknownPo=await post('/api/finance/purchase-orders',{orderType:'supplier',vendor:'Unknown units',projectId:m.id,items:[{description:'First material',qty:2,unitPriceCents:100},{description:'Second material',qty:3,unitPriceCents:100}]});
+ sqlite.prepare("UPDATE fin_purchase_orders SET status='sent',created_at=? WHERE id=?").run(start,unknownPo.id);
+ const unknownRows=chart(await report('purchasing'),'receiving').rows.filter(r=>r.key.startsWith('Ordered:unit not recorded'));
+ assert.equal(unknownRows.length,2,'Unknown units must remain separate by order line');
+ assert.deepEqual(unknownRows.map(r=>r.value).sort(),[2,3]);
  sqlite.prepare('INSERT INTO hr_payroll_runs(from_date,to_date,snapshot,total_cents,closed_by,closed_at) VALUES(?,?,?,?,1,?)').run('2026-10-01','2026-10-07',JSON.stringify([{grossCents:10000,overtimeCents:2000}]),10000,start);
  const payroll=chart(await report('payroll','all'),'payroll');assert.equal(payroll.total,10000);assert.equal(payroll.rows.find(r=>r.key.startsWith('Overtime premium')).value,2000);
  assert.equal((await api('/api/insights/payroll?site=metals','GET',undefined,owner)).status,400);

@@ -17,7 +17,7 @@ test('Graphs open matching records, then the exact invoice; mobile layout and fi
  const graph=page.getByRole('region',{name:'Money to collect',exact:true});
  await expect(graph).toBeVisible();
  await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('concrete');
- await expect(graph.getByText('No matching records.',{exact:false})).toBeVisible();
+ await expect(graph.getByText('No matching records for these filters.',{exact:true})).toBeVisible();
  await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('metals');
  await graph.getByRole('button',{name:'1–30 days overdue: $250. View records',exact:true}).click();
  await expect(page.getByRole('heading',{name:'1–30 days overdue',exact:true})).toBeVisible();
