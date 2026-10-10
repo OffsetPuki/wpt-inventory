@@ -29,8 +29,10 @@ export function initializeEmployeeTime() {
     CREATE TABLE IF NOT EXISTS employee_clock_policy (
       id INTEGER PRIMARY KEY CHECK(id=1), break_paid INTEGER NOT NULL, meal_paid INTEGER NOT NULL
     );
-    INSERT OR IGNORE INTO employee_clock_policy VALUES(1,1,0);
+    INSERT OR IGNORE INTO employee_clock_policy(id,break_paid,meal_paid) VALUES(1,1,0);
   `);
+  const policyColumns = new Set((sqlite.prepare('PRAGMA table_info(employee_clock_policy)').all() as any[]).map(c => c.name));
+  for (const name of ['period_from','period_to']) if (!policyColumns.has(name)) sqlite.exec(`ALTER TABLE employee_clock_policy ADD COLUMN ${name} TEXT`);
 }
 
 export const assignedJobSql = (alias = 'p') => `(

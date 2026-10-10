@@ -1,11 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { saveLeadPhoto } from './media';
+import { employeeHours, employeePeriod } from './employee-hours';
 import type { Express, Request } from 'express';
 import { z } from 'zod';
-import { sqlite } from './storage';
+import { sqlite, uploadsDir } from './storage';
 import { getSession, requireAuth, requireElevated } from './auth';
 import { inventoryOnce } from './inventory-core';
 import { audit } from './audit';
 import { closedPeriod, lockedTime, payrollRange } from './payroll';
-import { assignedJobSql, dayKey, employeeHasJob, employeePayrollIssues, intervalProblem, recalculateShift, setupIssues, shiftEntries } from './employee-data';
+import { assignedJobSql, dayKey, employeeFileAllowed, employeeHasJob, employeePayrollIssues, intervalProblem, recalculateShift, setupIssues, shiftEntries } from './employee-data';
 
 const id = z.coerce.number().int().positive();
 const reason = z.string().trim().min(3).max(1000);
@@ -65,7 +70,12 @@ export function registerEmployeeRoutes(app: Express) {
     },0);
     const me = sqlite.prepare('SELECT first_name,last_name,email,phone,job_title,emergency_contact FROM hr_employees WHERE user_id=? AND deleted_at IS NULL').get(uid) || null;
     const legacy = sqlite.prepare('SELECT id,started_at FROM pm_time_entries WHERE user_id=? AND ended_at IS NULL AND shift_id IS NULL').get(uid) || null;
-    return {serverNow:Date.now(),current:current?displayShift(current):null,legacy,jobs:jobs(uid),profile:me,setup:setupIssues(uid),todayMinutes:minutesSince(start.getTime()),weekMinutes:minutesSince(week.getTime()),policy:sqlite.prepare('SELECT break_paid,meal_paid FROM employee_clock_policy WHERE id=1').get()};
+    const nextTasks=sqlite.prepare(`SELECT t.id,t.title,t.status,t.due_date,t.project_id,p.name AS project_name FROM pm_tasks t JOIN projects p ON p.id=t.project_id WHERE t.assignee_id=@uid AND t.deleted_at IS NULL AND t.status<>'done' AND p.deleted_at IS NULL AND p.status NOT IN ('done','on_hold') AND ${assignedJobSql()} ORDER BY t.status='in_progress' DESC,t.due_date IS NULL,t.due_date,t.id LIMIT 5`).all({uid});
+    const lastWork=sqlite.prepare("SELECT project_id FROM pm_time_entries WHERE user_id=? AND work_kind IN ('work','shop') ORDER BY started_at DESC,id DESC LIMIT 1").get(uid) as any;
+    const lastProjectId=lastWork?.project_id && employeeHasJob(uid,lastWork.project_id)?lastWork.project_id:null;
+    const unread=(sqlite.prepare('SELECT count(*) n FROM suite_notifications WHERE user_id=? AND read_at IS NULL AND resolved_at IS NULL AND (snoozed_until IS NULL OR snoozed_until<=?)').get(uid,Date.now()) as any).n;
+    const lastShift=sqlite.prepare('SELECT id,status FROM employee_shifts WHERE user_id=? AND ended_at IS NOT NULL ORDER BY ended_at DESC,id DESC LIMIT 1').get(uid);
+    return {lastShift,nextTasks,lastProjectId,unread,period:employeePeriod(),serverNow:Date.now(),current:current?displayShift(current):null,legacy,jobs:jobs(uid),profile:me,setup:setupIssues(uid),todayMinutes:minutesSince(start.getTime()),weekMinutes:minutesSince(week.getTime()),policy:sqlite.prepare('SELECT * FROM employee_clock_policy WHERE id=1').get()};
   });
   endpoint('post','/api/employee/clock',false,req => {
     const body = z.object({action:z.enum(['in','out','switch','break','meal','resume','stop_legacy']),version:z.number().int().nonnegative(),projectId:z.number().int().positive().nullable().optional()}).parse(req.body);
@@ -107,8 +117,12 @@ export function registerEmployeeRoutes(app: Express) {
       recalculateShift(current.id);
       audit(req,`employee.clock_${body.action}`,{targetType:'employee_shift',targetId:current.id,details:{at:now,kind,projectId}});
       if(body.action==='out') notifyOwners(`shift:${current.id}`,`${req.user!.name}'s hours are ready for review`);
-      return {savedAt:now,shiftId:current.id};
+      return {savedAt:now,shiftId:current.id,...(body.action==='out'?{receipt:displayShift(sqlite.prepare('SELECT * FROM employee_shifts WHERE id=?').get(current.id))}: {})};
     });
+  });
+  endpoint('get','/api/employee/hours',false,req=>{
+    const period=employeePeriod(), from=String(req.query.from||period.from),to=String(req.query.to||period.to);
+    return {...employeeHours(req.user!.userId,from,to),label:from===period.from&&to===period.to?period.label:'Selected dates'};
   });
   endpoint('get','/api/employee/time',false,req => {
     const uid=req.user!.userId,page=Math.max(0,Math.trunc(Number(req.query.page)||0));
@@ -154,7 +168,11 @@ export function registerEmployeeRoutes(app: Express) {
       tasks:sqlite.prepare(`SELECT t.id,t.title,t.description,t.status,t.due_date,t.assignee_id,u.name AS assignee_name FROM pm_tasks t LEFT JOIN users u ON u.id=t.assignee_id WHERE t.project_id=? AND t.deleted_at IS NULL ORDER BY t.status='done',t.order_index,t.id`).all(projectId),
       materials:sqlite.prepare('SELECT id,label AS name,qty,unit,status FROM project_checklist WHERE project_id=?').all(projectId),
       files:sqlite.prepare('SELECT id,title,url,kind FROM suite_files WHERE project_id=? AND NOT EXISTS(SELECT 1 FROM suite_files newer WHERE newer.replaces_id=suite_files.id) ORDER BY id DESC LIMIT 50').all(projectId),
-      comments:sqlite.prepare("SELECT c.id,c.body,c.created_at,u.name FROM suite_comments c JOIN users u ON u.id=c.user_id WHERE c.project_id=? AND c.visibility='team' ORDER BY c.id DESC LIMIT 40").all(projectId)};
+      comments:(sqlite.prepare("SELECT c.id,c.body,c.attachments,c.created_at,u.name FROM suite_comments c JOIN users u ON u.id=c.user_id WHERE c.project_id=? AND c.visibility='team' ORDER BY c.id DESC LIMIT 40").all(projectId) as any[]).map(c=>{
+        let photos:string[]=[];
+        try {const attachments=JSON.parse(c.attachments||'[]');if(Array.isArray(attachments))photos=attachments.filter(url=>typeof url==='string'&&/^\/uploads\/[\w.-]+$/.test(url)&&employeeFileAllowed(uid,url));}catch{/* Older comments may have invalid attachments. */}
+        return {...c,attachments:JSON.stringify(photos)};
+      })};
   });
   endpoint('patch','/api/employee/tasks/:id',false,req=>{
     const body=z.object({status:z.enum(['todo','in_progress','review','done']),previousStatus:z.string()}).parse(req.body);
@@ -175,6 +193,34 @@ export function registerEmployeeRoutes(app: Express) {
       audit(req,'employee.job_comment',{targetType:'project',targetId:projectId});return result;
     });
   });
+  endpoint('post','/api/employee/jobs/:id/updates',false,req=>{
+    const projectId=id.parse(req.params.id),body=z.object({kind:z.enum(['progress','problem']),body:z.string().trim().max(4000),photo:z.string().max(900000).nullable().optional()}).parse(req.body);
+    jobFor(req.user!.userId,projectId);
+    if(body.kind==='problem' && body.body.length<3)fail('Tell the owner what needs attention.');
+    if(!body.body && !body.photo)fail('Add a note or a photo.');
+    const created:string[]=[];
+    try {
+      // Store only a digest in the retry ledger, not another copy of the photo.
+      return once(req,{...body,photo:body.photo?createHash('sha256').update(body.photo).digest('hex'):null},()=>{
+        if(body.photo)created.push(saveLeadPhoto(body.photo));
+        const text=body.kind==='problem'?`Problem reported: ${body.body}`:body.body||'Progress photo';
+        const result=sqlite.prepare("INSERT INTO suite_comments(project_id,user_id,body,visibility,attachments) VALUES(?,?,?,'team',?) RETURNING id").get(projectId,req.user!.userId,text,JSON.stringify(created)) as any;
+        for(const url of created)sqlite.prepare("INSERT INTO suite_files(project_id,title,url,kind,user_id) VALUES(?,?,?,'photo',?)").run(projectId,`${body.kind==='problem'?'Problem':'Progress'} photo · ${req.user!.name}`,url,req.user!.userId);
+        let taskId:number|null=null;
+        if(body.kind==='problem') {
+          const task=sqlite.prepare("INSERT INTO pm_tasks(project_id,title,description,priority) VALUES(?,?,?,'high') RETURNING id").get(projectId,`Problem: ${body.body.slice(0,90)}`,`Reported by ${req.user!.name}:\n${body.body}`) as any;
+          taskId=task.id;
+          sqlite.prepare('UPDATE suite_comments SET task_id=? WHERE id=?').run(taskId,result.id);
+        }
+        notifyOwners(`employee-update:${result.id}`,`${req.user!.name} ${body.kind==='problem'?'reported a job problem':'posted a job update'}`,`/project/${projectId}?tab=activity`);
+        audit(req,'employee.job_update',{targetType:'project',targetId:projectId,details:{kind:body.kind,commentId:result.id,taskId,photos:created.length}});
+        return {id:result.id,taskId,photos:created};
+      });
+    } catch(error) {
+      for(const url of created)try{fs.unlinkSync(path.join(uploadsDir,path.basename(url)));}catch{/* Keep the original save error. */}
+      throw error;
+    }
+  });
   endpoint('get','/api/employee/messages',false,req=>{
     const rows=sqlite.prepare('SELECT id,title,href,read_at,created_at FROM suite_notifications WHERE user_id=? AND resolved_at IS NULL AND (snoozed_until IS NULL OR snoozed_until<=?) ORDER BY id DESC LIMIT 100').all(req.user!.userId,Date.now()) as any[];
     return rows.map(n=>{
@@ -189,7 +235,7 @@ export function registerEmployeeRoutes(app: Express) {
   });
 
   endpoint('get','/api/employee/review',true,()=>({
-    shifts:(sqlite.prepare("SELECT s.*,u.name FROM employee_shifts s JOIN users u ON u.id=s.user_id WHERE s.status<>'approved' ORDER BY s.ended_at IS NULL DESC,s.started_at LIMIT 150").all() as any[]).map(displayShift),
+    shifts:(sqlite.prepare("SELECT s.*,u.name FROM employee_shifts s JOIN users u ON u.id=s.user_id WHERE s.status<>'approved' ORDER BY s.ended_at IS NULL DESC,s.started_at LIMIT 150").all() as any[]).map(s=>({...displayShift(s),payrollIssues:employeePayrollIssues(s.started_at,s.ended_at||Date.now()).filter(i=>i.userId===s.user_id&&['profile','rate','overlap'].includes(i.kind))})),
     requests:sqlite.prepare("SELECT r.*,u.name,t.shift_id,p.name AS project_name FROM employee_time_requests r JOIN users u ON u.id=r.user_id JOIN pm_time_entries t ON t.id=r.entry_id LEFT JOIN projects p ON p.id=t.project_id WHERE r.status='pending' ORDER BY r.id").all(),
     people:(sqlite.prepare("SELECT id,name FROM users WHERE role NOT IN ('owner','manager') AND disabled_at IS NULL ORDER BY name").all() as any[]).map(u=>({...u,issues:setupIssues(u.id)})),
     jobs:sqlite.prepare("SELECT id,name FROM projects WHERE deleted_at IS NULL AND status<>'done' ORDER BY name").all(),
@@ -265,8 +311,16 @@ export function registerEmployeeRoutes(app: Express) {
     });
   });
   endpoint('post','/api/employee/clock-policy',true,req=>{
-    const body=z.object({breakPaid:z.boolean(),mealPaid:z.boolean()}).parse(req.body);
-    sqlite.prepare('UPDATE employee_clock_policy SET break_paid=?,meal_paid=? WHERE id=1').run(Number(body.breakPaid),Number(body.mealPaid));audit(req,'employee.clock_policy',{details:body});return {ok:true};
+    const body=z.object({breakPaid:z.boolean(),mealPaid:z.boolean(),periodFrom:z.string().nullable().optional(),periodTo:z.string().nullable().optional()}).parse(req.body);
+    if(body.periodFrom!==undefined || body.periodTo!==undefined) {
+      if(!!body.periodFrom!==!!body.periodTo)fail('Choose both pay-period dates.');
+      if(body.periodFrom&&body.periodTo)payrollRange(body.periodFrom,body.periodTo);
+    }
+    return once(req,body,()=>{
+      sqlite.prepare('UPDATE employee_clock_policy SET break_paid=?,meal_paid=? WHERE id=1').run(Number(body.breakPaid),Number(body.mealPaid));
+      if(body.periodFrom!==undefined || body.periodTo!==undefined)sqlite.prepare('UPDATE employee_clock_policy SET period_from=?,period_to=? WHERE id=1').run(body.periodFrom||null,body.periodTo||null);
+      audit(req,'employee.clock_policy',{details:body});return {ok:true};
+    });
   });
   endpoint('get','/api/employee/payroll-check',true,req=>{
     const range=payrollRange(String(req.query.from||''),String(req.query.to||''));return {issues:employeePayrollIssues(range.start,range.end)};

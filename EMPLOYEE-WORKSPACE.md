@@ -1,7 +1,8 @@
-# Employee workspace — phase 1
+# Employee workspace
 
-Employee accounts open a phone-friendly workspace: Today, My jobs, My time,
-Messages, and Me. Owners use **Team → Employee approvals** for time review,
+Employee accounts open a phone-friendly workspace with three tabs: **Today,
+My jobs, and My hours**. Messages and My account are in the header.
+Owners use **Team → Employee approvals** for time review,
 job assignments, and payroll setup.
 
 ## Connected workflow
@@ -20,6 +21,29 @@ Regular breaks initially count as paid; meals initially count as unpaid. Review
 these settings under Team setup. Setting changes apply only to future segments.
 Signing out does not clock out. Long shifts are flagged rather than auto-stopped.
 Owners can record a missed finish time with an explanation, then review the shift.
+
+## Daily use
+
+- Today shows one main clock action, the current job, the next task, and the
+  upcoming job. A job page can start work or switch the existing shift directly.
+- Breaks show their own elapsed timer and paid/unpaid label. Resume returns to
+  the previous job when it is still assigned and active. Clock-out shows a
+  receipt with paid hours, unpaid breaks, and the submission status.
+- My hours separates approved, waiting, and correction-needed hours, with daily
+  job/break details available on demand. Owner adjustments are shown separately.
+  Totals use the same recorded minutes and date boundaries as payroll.
+- Team setup can specify the current pay-period dates. Update these each period;
+  blank dates show the current Monday–Sunday week. Employees can inspect other
+  dates. The display setting does not change payroll calculations or close payroll.
+- Job pages put directions, contact, and the employee's checklist first. Progress
+  updates accept one compressed photo each. Report a problem creates an owner
+  notification and a high-priority follow-up task in the same job.
+- The owner review queue groups hours by employee/week, highlights exceptions,
+  and keeps routine shift details collapsed. Payroll problems block approval.
+- Unsent job updates, photos, time corrections, time-off forms, and review notes
+  stay in login-scoped storage on that device. Send success clears employee drafts;
+  storage failures are shown explicitly. Saved updates have retry identifiers so
+  resending after a lost response does not create duplicate photos or tasks.
 
 ## Corrections and safeguards
 
@@ -43,7 +67,8 @@ employees' HR data, and management APIs are restricted on the server.
 
 Time off stays pending until an owner decides it. Approval status and review
 notifications are visible to the employee. Account security and sign-out remain
-available under Me. Inventory management remains with owners in this phase.
+available under My account. Time-off history uses phone-friendly cards.
+Inventory management remains with owners in this phase.
 
 ## Rollout
 
@@ -61,11 +86,12 @@ payroll provider, tax calculation, pay stubs, or bank transfers.
 ## Verification
 
 - `npm run test:employee`: real isolated API/SQLite workflow, authorization,
-  retries, paid/unpaid segments, corrections, historical locks, and payroll.
+  retries, paid/unpaid segments, corrections, historical locks, cross-midnight
+  summaries, payroll parity, private photos, and problem-report follow-up.
 - `npm run check` and `npm run build`: types and production bundles.
 - `node --import tsx node_modules/@playwright/test/cli.js test --project=employee`:
   phone layouts at 320/390 pixels, offline controls, saved-response recovery,
-  tasks, messages, approval, and payroll integration.
+  persistent note/photo drafts, tasks, messages, approval, and payroll integration.
 - `npm test`: existing business-suite regression coverage plus employee checks.
 
 Tests use temporary databases and mock external services; they do not change

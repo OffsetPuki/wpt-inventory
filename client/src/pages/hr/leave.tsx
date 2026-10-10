@@ -1,3 +1,4 @@
+import {useEmployeeDraft,DraftNote} from '@/components/employee/shared';
 import { RetryBlock } from "@/components/RetryBlock";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -33,12 +34,9 @@ function daysLabel(days: number): string {
 
 function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }) {
   const { isElevated } = useAuth();
-  const [employeeId, setEmployeeId] = useState(me ? String(me.id) : "");
-  const [type, setType] = useState<LeaveType>("vacation");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [days, setDays] = useState("1");
-  const [reason, setReason] = useState("");
+  const {draft,setDraft,reset,persisted}=useEmployeeDraft('time-off',{employeeId:me?String(me.id):'',type:'vacation' as LeaveType,startDate:'',endDate:'',days:'1',reason:''});
+  const {employeeId,type,startDate,endDate,days,reason}=draft;
+  const setEmployeeId=(employeeId:string)=>setDraft({...draft,employeeId}),setType=(type:LeaveType)=>setDraft({...draft,type}),setStartDate=(startDate:string)=>setDraft({...draft,startDate,endDate:draft.endDate||startDate}),setEndDate=(endDate:string)=>setDraft({...draft,endDate}),setDays=(days:string)=>setDraft({...draft,days}),setReason=(reason:string)=>setDraft({...draft,reason});
 
   const { data: employees = [] } = useQuery<Employee[]>({
     queryKey: ["hr-employees"],
@@ -62,11 +60,11 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
     invalidate: [["hr-leave"]],
     successTitle: isElevated ? "Time off saved" : "Time-off request sent for review",
     errorTitle: "Could not add time off",
-    onSuccess: onClose,
+    onSuccess: ()=>{reset(draft);onClose();},
   });
 
   return (
-    <Modal open onClose={onClose} title={isElevated ? 'Add time off' : 'Request time off'}>
+    <Modal open preservesDraft onClose={onClose} title={isElevated ? 'Add time off' : 'Request time off'}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -95,6 +93,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
             <span className="text-sm font-medium text-foreground">Employee</span>
             <select
               className={inputCls}
+              disabled={create.isPending}
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value)}
             >
@@ -111,6 +110,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
           <span className="text-sm font-medium text-foreground">Type</span>
           <select
             className={inputCls}
+              disabled={create.isPending}
             value={type}
             onChange={(e) => setType(e.target.value as LeaveType)}
           >
@@ -125,6 +125,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
             <input
               type="date"
               className={inputCls}
+              disabled={create.isPending}
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
             />
@@ -134,6 +135,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
             <input
               type="date"
               className={inputCls}
+              disabled={create.isPending}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
             />
@@ -146,6 +148,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
             step="0.5"
             min="0.5"
             className={inputCls}
+              disabled={create.isPending}
             value={days}
             onChange={(e) => setDays(e.target.value)}
           />
@@ -155,6 +158,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
           <span className="text-sm font-medium text-foreground">Reason (optional)</span>
           <textarea
             className={textareaCls}
+            disabled={create.isPending}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -167,7 +171,7 @@ function AddDialog({ me, onClose }: { me: Employee | null; onClose: () => void }
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           {isElevated ? 'Add time off' : 'Send request'}
         </button>
-      </form>
+      <DraftNote persisted={persisted}/></form>
     </Modal>
   );
 }
@@ -247,7 +251,7 @@ export default function HrLeavePage() {
               <CalendarDays className="h-12 w-12" />
               <p className="text-lg">No time off filed yet</p>
             </div>
-          ) : (
+          ) : !isElevated ? (<div className="space-y-3">{rows.map(r=><section key={r.id} className="rounded-2xl border border-border bg-card p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">{LEAVE_TYPE_LABELS[r.type]}</h2><span className="rounded-lg bg-muted px-2 py-1 text-sm">{r.status==='pending'?'Waiting for approval':r.status==='approved'?'Approved':'Declined'}</span></div><p className="mt-3">{formatDate(r.startDate)} – {formatDate(r.endDate)}</p><p className="mt-1 text-sm">{daysLabel(r.days)}</p>{r.reason&&<p className="mt-3 whitespace-pre-wrap break-words text-sm">{r.reason}</p>}{canDelete(r)&&<button disabled={del.isPending} className="mt-3 min-h-12 rounded-xl border px-4 text-sm font-medium" onClick={()=>{if(window.confirm('Cancel this time-off request?'))del.mutate(r.id);}}>Cancel request</button>}</section>)}</div>) : (
             <div className="overflow-x-auto rounded-xl border border-border bg-card">
               <table className="w-full text-sm">
                 <thead>
