@@ -112,7 +112,7 @@ export function payrollSummary(from: string, to: string) {
         : (sqlite
             .prepare(
               `SELECT * FROM pm_time_entries
-      WHERE user_id=? AND ended_at IS NOT NULL AND started_at < ? AND ended_at > ?`,
+      WHERE user_id=? AND ended_at IS NOT NULL AND approval_status IN ('legacy','approved') AND started_at < ? AND ended_at > ?`,
             )
             .all(employee.user_id, end, start) as any[]);
     const corrections =

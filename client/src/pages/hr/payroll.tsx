@@ -1,4 +1,5 @@
 import {useDeepLink} from '@/lib/deep-link';
+import {Link} from 'wouter';
 import {useEffect} from 'react';
 import {readContext} from '@/lib/record-link';
 import Insights from '@/components/Insights';
@@ -53,6 +54,7 @@ export default function HrPayrollPage() {
   const linkedFrom=useDeepLink('from'),linkedTo=useDeepLink('to');
   useEffect(()=>{if(linkedFrom)setFrom(linkedFrom);if(linkedTo)setTo(linkedTo);},[linkedFrom,linkedTo]);
   const rangeValid = !!from && !!to && from <= to;
+  const checks = useQuery<{issues:{userId:number;name:string;message:string;kind:string}[]}>({queryKey:['employee','payroll-check',from,to],queryFn:async()=>(await apiRequest('GET',`/api/employee/payroll-check?from=${from}&to=${to}`)).json(),enabled:isElevated&&rangeValid,staleTime:0,refetchInterval:15000});
 
   const { data: rows = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<SummaryRow[]>({
     queryKey: ["hr-payroll-summary", from, to],
@@ -100,7 +102,7 @@ export default function HrPayrollPage() {
               record.mutate();
             }
           }}
-          disabled={totalCents <= 0 || record.isPending || !rangeValid || !!overlappingRun || runsFailed}
+          disabled={totalCents <= 0 || record.isPending || !rangeValid || !!overlappingRun || runsFailed || checks.isPending || checks.isError || !!checks.data?.issues.length || isLoading || loadFailed}
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {record.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Receipt className="h-5 w-5" />}
@@ -108,6 +110,7 @@ export default function HrPayrollPage() {
         </button>
       </Header>
       <Insights area="payroll"/>
+      <div className="my-5 rounded-xl border border-border bg-card p-4"><Link href="/employee-approvals" className="font-semibold underline">Employee approvals & payroll setup</Link><p className="mt-2 text-sm text-muted-foreground">New employee shifts enter this worksheet after approval. Recorded hours stay visible to employees while waiting for review.</p>{checks.isPending?<p role="status" className="mt-3 text-sm">Checking recorded hours…</p>:checks.isError?<p role="alert" className="mt-3 text-sm">Could not check employee hours. Refresh before closing payroll.</p>:checks.data?.issues.length?<ul className="mt-3 space-y-2">{checks.data.issues.map(i=><li key={`${i.userId}-${i.kind}`} className="text-sm text-amber-700 dark:text-amber-300"><strong>{i.name}:</strong> {i.message}</li>)}</ul>:<p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">No unresolved employee time or payroll links in this period.</p>}</div>
 
 
       <p className="mb-3 text-sm text-muted-foreground">Gross-pay worksheet, not take-home pay. Review overtime rules, deductions and taxes with your payroll provider before closing.</p>

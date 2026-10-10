@@ -8,6 +8,8 @@ import { Suspense, lazy, type ReactNode } from "react";
 // small and the user only downloads code for the screens they actually open.
 
 import AppShell from "./components/AppShell";
+const EmployeeWorkspace = lazy(() => import('./pages/employee'));
+const EmployeeApprovals = lazy(() => import('./pages/employee-approvals'));
 const BusinessReportPage = lazy(()=>import("./pages/business-report"));
 const TodayPage = lazy(() => import("./pages/today"));
 const SuiteHealthPage = lazy(() => import("./pages/suite-health"));
@@ -107,11 +109,14 @@ export default function App() {
 
   if (user?.securitySetupRequired) return <Suspense fallback={<LoadingSpinner />}><SecurityPage /></Suspense>;
 
+  if (user && !['owner','manager'].includes(user.role)) return <Router hook={useAppLocation}><Suspense fallback={<LoadingSpinner />}><EmployeeWorkspace/></Suspense></Router>;
+
   return (
     <Router hook={useAppLocation}>
       <AppShell>
         <Suspense fallback={<LoadingSpinner />}>
         <Switch>
+          <Route path="/employee-approvals"><ElevatedRoute><EmployeeApprovals/></ElevatedRoute></Route>
           <Route path="/today"><TodayPage /></Route>
           <Route path="/suite-health"><ElevatedRoute><SuiteHealthPage /></ElevatedRoute></Route>
           <Route path="/security"><SecurityPage /></Route>
