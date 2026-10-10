@@ -20,7 +20,7 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.10.0",
     "clsx": "^2.1.1",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.5.1",
@@ -73,7 +73,11 @@
     },
     "qs": "^6.16.0",
     "braces": "https://codeload.github.com/FSDevelop/braces/tar.gz/28d440b5dd449dbf1fe6f3506cf94ecca4d02660",
-    "ip-address": "10.7.3"
+    "ip-address": "10.7.3",
+    "proxy-addr": "2.0.8",
+    "shell-quote": "1.11.0",
+    "source-map-js": "1.2.2",
+    "postcss-selector-parser": "7.1.6"
   },
   "engines": {
     "node": ">=22.12.0"
