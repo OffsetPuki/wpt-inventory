@@ -1,3 +1,5 @@
+import { analyticsDefinitions, collectWebsiteReport, withReportingSlot } from './website-reporting';
+import type { ReportName } from '../shared/website-analytics';
 import { reportingAccessToken } from "./google-auth";
 export { reportingIdentity } from "./google-auth";
 import { sqlite } from "./storage";
@@ -56,7 +58,7 @@ export function googleReport(
   if (!row) return null;
   const payload = JSON.parse(row.payload);
   // Older cached traffic includes preview hosts. Refresh it before displaying totals.
-  if (kind === "traffic" && payload.productionHost !== GOOGLE_SITES[site].domain)
+  if ((kind === "traffic" || kind.startsWith("analytics:")) && payload.productionHost !== GOOGLE_SITES[site].domain)
     return null;
   if(Array.isArray(payload.rows))payload.rows=payload.rows.map((r:any)=>r.page?{...r,page:safeGooglePage(r.page)}:r);
   return { ...payload, fetchedAt: row.fetched_at };
@@ -81,7 +83,7 @@ export async function refreshGoogleReports(
   try {
     const run = async (kind: string, fn: () => Promise<unknown>) => {
       try {
-        save(kind, await fn());
+        save(kind, await withReportingSlot(fn));
         recordReportingStatus('google',site,kind,null,start,end);
         results[kind] = "updated";
       } catch (error) {
@@ -91,6 +93,7 @@ export async function refreshGoogleReports(
       }
     };
     await Promise.all([
+      ...Object.keys(analyticsDefinitions).map(name=>run("analytics:"+name,()=>collectWebsiteReport(name as ReportName,config,start,end,googlePost,safeGooglePage))),
       run('sitemaps',async()=>{
         const data=await googleGet(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent('https://'+config.domain+'/')}/sitemaps`);
         return {rows:(data.sitemap||[]).map((r:any)=>({path:r.path,pending:!!r.isPending,errors:Number(r.errors)||0,warnings:Number(r.warnings)||0,lastDownloaded:r.lastDownloaded||null,submitted:(r.contents||[]).reduce((n:number,c:any)=>n+(Number(c.submitted)||0),0)}))};
@@ -201,7 +204,7 @@ export async function refreshGoogleReports(
           { startDate: start, endDate: end, dimensions: [], type: "web", dataState: "final" },
         );
         // Property totals must not be inferred by adding page or query rows.
-        return { totals: r.rows?.[0] ? { clicks: r.rows[0].clicks, impressions: r.rows[0].impressions } : null };
+        return { totals: r.rows?.[0] ? { clicks: r.rows[0].clicks, impressions: r.rows[0].impressions, position:r.rows[0].position } : {clicks:0,impressions:0,position:0} };
       }),
       run("queries", async () => {
         const r = await googlePost(
@@ -211,7 +214,7 @@ export async function refreshGoogleReports(
             endDate: end,
             dimensions: ["query"],
             type: "web",
-            rowLimit: 100,
+            rowLimit: 5000,
             dataState: "final",
           },
         );
@@ -223,7 +226,7 @@ export async function refreshGoogleReports(
             ctr: r.ctr,
             position: r.position,
           })),
-          partial: true,
+          partial: (r.rows?.length || 0) >= 5000,
         };
       }),
     ]);

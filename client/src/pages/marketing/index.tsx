@@ -3,7 +3,7 @@ import {useMarketingPlace} from '@/hooks/useMarketingPlace';
 import {useAuth} from '@/lib/auth';
 import PublicWorkEditor from '@/components/PublicWorkEditor';
 import { portfolioDomains } from '@shared/portfolio';
-import { useState,useEffect } from "react";
+import { useState,useEffect,lazy,Suspense } from "react";
 import GrowthReport from '@/components/GrowthReport';
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -34,6 +34,8 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
+
+const WebsiteAnalytics=lazy(()=>import('@/components/WebsiteAnalytics'));
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
@@ -577,6 +579,7 @@ function SettingsTab() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
+  { id: "analytics", label: "Website analytics" },
   { id: "overview", label: "Overview" },
   { id: "campaigns", label: "Campaigns" },
   { id: "reviews", label: "Reviews" },
@@ -589,12 +592,12 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function MarketingPage() {
   const {user}=useAuth();const manager=['owner','manager'].includes(user?.role||'');
-  const [tab, setTab] = useMarketingPlace<TabId>("tab","overview");
+  const [tab, setTab] = useMarketingPlace<TabId>("tab","analytics");
   useEffect(()=>{if(!manager&&!['reviews','portfolio'].includes(tab))setTab("portfolio");},[manager,tab]);
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Marketing" description="Website inquiries, job outcomes, reviews and approved project photos" />
+      <Header title="Marketing" description="Website analytics, search visibility, inquiries and business growth" />
 
       <div className="mb-6 flex flex-wrap gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1">
         {TABS.filter(t=>manager||['reviews','portfolio'].includes(t.id)).map((t) => (
@@ -613,7 +616,8 @@ export default function MarketingPage() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab />}
+      {tab === "analytics" && <Suspense fallback={<p role="status">Loading website analytics…</p>}><WebsiteAnalytics/></Suspense>}
+      {tab === "overview" && <><button className={secondaryBtn+" mb-4"} onClick={()=>setTab("analytics")}>Explore detailed analytics for all websites →</button><OverviewTab /></>}
       {tab === "campaigns" && <GrowthReport view="campaigns"/>}
       {tab === "connections" && <GrowthReport view="connections"/>}
       {tab === "reviews" && <ReviewsTab />}

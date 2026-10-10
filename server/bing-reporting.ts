@@ -72,7 +72,7 @@ export function bingReport(site:Site,start:string,end:string):BingReport {
   const snapshot=(kind:'GetPageStats'|'GetQueryStats')=>{
     const all:BingTop[]=cache(site,kind)?.rows||[];
     const date=all.filter(r=>r.date<=end).map(r=>r.date).sort().at(-1)||null;
-    return {date,rows:all.filter(r=>r.date===date).sort((a,b)=>b.impressions-a.impressions).slice(0,10)};
+    return {date,rows:all.filter(r=>r.date===date).sort((a,b)=>b.impressions-a.impressions)};
   };
   const pages=snapshot('GetPageStats'),queries=snapshot('GetQueryStats');
   const crawls=cache(site,'GetCrawlStats'),feeds=cache(site,'GetFeeds');

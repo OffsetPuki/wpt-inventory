@@ -25,7 +25,7 @@ test("Marketing report works on mobile and desktop without Google credentials", 
   );
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(app.base + "/#/marketing");
+  await page.goto(app.base + "/#/marketing?tab=overview");
   await expect(
     page.getByRole("heading", { name: "Marketing", exact: true }),
   ).toBeVisible();

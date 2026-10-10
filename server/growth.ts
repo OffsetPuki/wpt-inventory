@@ -1,3 +1,4 @@
+import { analyticsPeriod } from './website-analytics';
 import {marketingManager} from './marketing-core';
 import type { Express } from "express";
 import { z } from "zod";
@@ -218,6 +219,18 @@ function cohort(site: Site, start: string, end: string, includeTests: boolean) {
 }
 export function registerGrowthRoutes(app: Express) {
   app.use('/api/marketing/growth',requireElevated,marketingManager,(req,res,next)=>{const b=req.method==='GET'?req.query:req.body;for(const key of ['start','end'])if(b?.[key]){const value=String(b[key]);if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||Number.isNaN(Date.parse(value))||new Date(value).toISOString().slice(0,10)!==value||value>=new Date().toISOString().slice(0,10))return res.status(400).json({message:'Choose valid, completed reporting days.'});}if(b?.start&&b?.end&&(b.start>b.end||Date.parse(b.end)-Date.parse(b.start)>365*86400000))return res.status(400).json({message:'Choose a date range of up to one year.'});next();});
+  app.get("/api/marketing/growth/analytics", (req,res)=>{
+    const parsed=z.enum(['all','metals','concrete','insulation','trades']).safeParse(req.query.site||'all');
+    if(!parsed.success)return res.status(400).json({message:'Choose a website or All websites.'});
+    const range=periods(req.query.end,req.query.start);
+    const sites=(Object.keys(GOOGLE_SITES) as Site[]).filter(site=>parsed.data==='all'||site===parsed.data);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({...range,generatedAt:Date.now(),sites:sites.map(site=>({site,domain:GOOGLE_SITES[site].domain,
+      current:analyticsPeriod(site,cohort(site,range.current.start,range.current.end,false)),
+      previous:analyticsPeriod(site,cohort(site,range.previous.start,range.previous.end,false)),
+      connections:searchConnections(site,range.current.start,range.current.end),
+    }))});
+  });
   app.get("/api/marketing/growth/overview", requireElevated, (req, res) => {
     const { current } = periods(req.query.end,req.query.start);
     const includeTests = req.query.includeTests === "1";
@@ -370,7 +383,7 @@ export function startGrowthReporting() {
         if(!reportingIdentity())continue;
         for (const period of [range.current, range.previous]) {
           const cache = googleReport(site, period.start, period.end, "traffic");
-          if (cache && Date.now() - cache.fetchedAt < 6 * 3600000 && googleReport(site,period.start,period.end,'sitemaps') && googleReport(site,period.start,period.end,'indexing')) continue;
+          if (cache && Date.now() - cache.fetchedAt < 6 * 3600000 && googleReport(site,period.start,period.end,'sitemaps') && googleReport(site,period.start,period.end,'indexing') && googleReport(site,period.start,period.end,'analytics:summary')) continue;
           await refreshGoogleReports(site, period.start, period.end);
         }
       }
