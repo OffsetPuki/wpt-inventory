@@ -176,14 +176,10 @@ try {
     category: "tools",
     quantity: 2,
   });
-  const loan = ok(
-    await post(
-      `/api/items/${tool.id}/checkout`,
-      { quantity: 1, projectId: job.id, requestKey: key() },
-      worker.token,
-    ),
-    201,
-  );
+  assert.equal((await post(`/api/items/${tool.id}/checkout`,{quantity:1},worker.token)).status,403);
+  // Existing worker-held tools remain returnable by the owner after migration.
+  const {moveStock}=await import('../server/inventory-core.ts');
+  const loan={id:moveStock(sqlite,tool.id,worker.user.id,'check_out',{quantity:1,projectId:job.id,requestKey:key()})};
   assert.equal(
     ok(await get(`/api/items/${tool.id}/availability`)).loans[0].borrowerName,
     "Worker",

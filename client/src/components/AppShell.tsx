@@ -126,6 +126,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     key: "hr",
     label: "Team",
     entries: [
+      { to: '/employee-approvals', label: 'Employee approvals', icon: ClipboardCheck, needs: 'elevated' },
       { to: "/hr/employees", label: "Employees", icon: Users2, needs: "elevated" },
       { to: "/hr/payroll", label: "Payroll", icon: Banknote, needs: "elevated" },
       { to: "/hr/leave", label: "Time off", icon: CalendarDays },

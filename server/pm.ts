@@ -1,3 +1,4 @@
+import { initializeEmployeeTime } from './employee-data';
 import { listWindow } from "./pagination";
 import {businessScope,taskBusiness} from "./business-scope";
 import { validateTaskDates, validateTimeInterval } from "../shared/suite-contracts";
@@ -534,7 +535,7 @@ export function registerPmRoutes(app: Express): void {
       .all();
     const summary=db.select({total:sql<number>`count(*)`,totalMinutes:sql<number>`coalesce(sum(${timeEntries.durationMin}),0)`}).from(timeEntries).where(conditions.length?and(...conditions):undefined).get()!;
     res.setHeader('X-Total-Count',summary.total);
-    const result=rows.map(r=>({...r,locked:lockedTime(r)}));
+    const result=rows.map(r=>({...r,locked:lockedTime(r)||r.shiftId!=null}));
     res.json(paged?{rows:result,...summary,page,limit}:result);
   });
 
@@ -581,6 +582,7 @@ export function registerPmRoutes(app: Express): void {
       .where(and(eq(timeEntries.userId, req.user!.userId), isNull(timeEntries.endedAt)))
       .get();
     if (!running) return res.status(404).json({ message: "No running timer" });
+    if ((sqlite.prepare('SELECT shift_id FROM pm_time_entries WHERE id=?').get(running.id) as any)?.shift_id) return res.status(409).json({message:'Use the employee clock to close this shift.'});
     const now = Date.now();
     const updated = db.update(timeEntries)
       .set({ endedAt: now, durationMin: Math.max(0, Math.round((now - running.startedAt) / 60000)) })
@@ -655,6 +657,7 @@ export function registerPmRoutes(app: Express): void {
     const id = pid(req.params.id);
     const existing = db.select().from(timeEntries).where(eq(timeEntries.id, id)).get();
     if (!existing) return res.status(404).json({ message: "Time entry not found" });
+    if ((sqlite.prepare('SELECT shift_id FROM pm_time_entries WHERE id=?').get(id) as any)?.shift_id) return res.status(409).json({message:'Review employee shift corrections in Employee approvals.'});
     if (lockedTime(existing)) return res.status(409).json({ message: "This time is billed or in closed payroll. An owner can record a correction without changing the original." });
     if (existing.userId !== req.user!.userId && !isElevated(req)) {
       return res.status(403).json({ message: "You can only edit your own time entries" });
@@ -691,6 +694,7 @@ export function registerPmRoutes(app: Express): void {
     const id = pid(req.params.id);
     const existing = db.select().from(timeEntries).where(eq(timeEntries.id, id)).get();
     if (!existing) return res.status(404).json({ message: "Time entry not found" });
+    if ((sqlite.prepare('SELECT shift_id FROM pm_time_entries WHERE id=?').get(id) as any)?.shift_id) return res.status(409).json({message:'Employee clock records are preserved. Use a reviewed correction.'});
     if (lockedTime(existing)) return res.status(409).json({ message: "This time is billed or in closed payroll. An owner can record a correction without changing the original." });
     if (existing.userId !== req.user!.userId && !isElevated(req)) {
       return res.status(403).json({ message: "You can only delete your own time entries" });
@@ -1007,3 +1011,5 @@ export function registerPmRoutes(app: Express): void {
     action: "pm.document_delete", targetType: "pm_document", name: (d) => d.title, audit,
   });
 }
+
+initializeEmployeeTime();

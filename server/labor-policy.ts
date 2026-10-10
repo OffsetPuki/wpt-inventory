@@ -14,7 +14,7 @@ export function laborPremiums(userId:number,from:number,to:number){
  const employee=sqlite.prepare('SELECT id FROM hr_employees WHERE user_id=?').all(userId) as any[];
  if(employee.length!==1)return [];
  const rates=sqlite.prepare('SELECT * FROM hr_pay_rates WHERE employee_id=? ORDER BY effective_date DESC').all(employee[0].id) as any[];
- const entries=sqlite.prepare('SELECT * FROM pm_time_entries WHERE user_id=? AND ended_at IS NOT NULL AND started_at<? AND ended_at>? ORDER BY started_at,id').all(userId,end.getTime(),start.getTime()) as any[];
+ const entries=sqlite.prepare("SELECT * FROM pm_time_entries WHERE user_id=? AND ended_at IS NOT NULL AND approval_status IN ('legacy','approved') AND started_at<? AND ended_at>? ORDER BY started_at,id").all(userId,end.getTime(),start.getTime()) as any[];
  const result:any[]=[];
  for(let week=new Date(start);week<end;week.setDate(week.getDate()+7)){
   const next=new Date(week);next.setDate(next.getDate()+7);const policy=laborPolicy(dayKey(week));if(!policy)continue;

@@ -10,7 +10,7 @@ export function projectLabor(projectId: number, unbilledOnly = false) {
       `SELECT t.*,u.name AS user_name,e.id AS employee_id,(SELECT count(*) FROM hr_employees all_employees WHERE all_employees.user_id=t.user_id) AS employee_matches
     FROM pm_time_entries t JOIN users u ON u.id=t.user_id
     LEFT JOIN hr_employees e ON e.id=(SELECT e2.id FROM hr_employees e2 WHERE e2.user_id=t.user_id ORDER BY e2.deleted_at IS NULL DESC,e2.id DESC LIMIT 1)
-    WHERE t.project_id=? AND t.ended_at IS NOT NULL
+    WHERE t.project_id=? AND t.ended_at IS NOT NULL AND t.approval_status IN ('legacy','approved')
     ${unbilledOnly ? "AND t.billable=1 AND t.invoice_id IS NULL" : ""}`,
     )
     .all(projectId) as any[];

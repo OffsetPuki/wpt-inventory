@@ -1,4 +1,5 @@
 import Insights from '@/components/Insights';
+import { EmployeeReviewSummary } from './employee-approvals';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import BusinessReportSummary from "@/components/BusinessReportSummary";
 import {PencilRuler,Users,FolderKanban,Box,Timer,ArrowUpRight} from 'lucide-react';
@@ -100,6 +101,7 @@ export default function TodayPage() {
         </div>
       )}
       {isElevated && <BusinessReportSummary />}
+      {isElevated && <EmployeeReviewSummary />}
       <details className="rounded-2xl border bg-card p-5"><summary className="cursor-pointer font-semibold">More workspaces & follow-ups</summary><div className="mt-5 space-y-5">
       <section aria-label="Quick access" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {[

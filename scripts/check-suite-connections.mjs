@@ -7,7 +7,7 @@ const app = await testApp();
 const { api, owner, sqlite } = app;
 const key = () => crypto.randomUUID();
 async function call(url, method = "GET", body, token = owner) {
-  const r = await api(url, method, body, token);
+  const r = await api(url, method, body, token, {"Idempotency-Key":key()});
   assert.ok(
     [200, 201].includes(r.status),
     `${url}: ${r.status} ${JSON.stringify(r.data)}`,
@@ -66,19 +66,17 @@ try {
         "/api/pm/time/start",
         "POST",
         { projectId: jobs[1].id, taskId: task.id },
-        worker,
+        owner,
       )
     ).status,
     400,
   );
-  await call("/api/pm/time/start", "POST", { taskId: task.id }, worker);
-  assert.equal(
-    (await call("/api/pm/time/running", "GET", undefined, worker)).projectId,
-    job.id,
-  );
-  await call("/api/pm/time/stop", "POST", undefined, worker);
+  await call('/api/employee/clock','POST',{action:'in',version:0,projectId:job.id},worker);
+  const clock=(await call('/api/employee/home','GET',undefined,worker)).current;
+  assert.equal(clock.entries[0].project_id,job.id);
+  await call('/api/employee/clock','POST',{action:'out',version:clock.version},worker);
   assert.ok(
-    (await call("/api/suite/notifications", "GET", undefined, worker)).some(
+    (await call("/api/employee/messages", "GET", undefined, worker)).some(
       (n) => n.title.includes("Synthetic crew"),
     ),
   );
@@ -99,12 +97,12 @@ try {
     mentions: [],
   });
   const workerComments = await call(
-    `/api/suite/jobs/${job.id}/activity`,
+    `/api/employee/jobs/${job.id}`,
     "GET",
     undefined,
     worker,
   );
-  assert.equal(workerComments.length, 1);
+  assert.equal(workerComments.comments.length, 1);
   assert.equal(
     (await api("/api/suite/health", "GET", undefined, worker)).status,
     403,
@@ -156,12 +154,8 @@ try {
     )
     .run(emp.id, Date.now());
   const start = Date.parse("2026-07-09T23:00:00-05:00");
-  const entry = await call(
-    "/api/pm/time",
-    "POST",
-    { projectId: job.id, startedAt: start, endedAt: start + 2 * 3600000 },
-    worker,
-  );
+  // A pre-migration record must retain its historical rate and billed-cost behavior.
+  const entry=sqlite.prepare('INSERT INTO pm_time_entries(user_id,project_id,started_at,ended_at,duration_min) VALUES(?,?,?,?,120) RETURNING id').get(user.id,job.id,start,start+2*3600000);
   sqlite
     .prepare(
       "INSERT INTO hr_time_corrections(time_entry_id,user_id,minutes_delta,effective_date,rate_cents,reason,created_by,created_at) VALUES(?,?,30,'2026-09-10',2500,'Synthetic correction',1,?)",

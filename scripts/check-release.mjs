@@ -389,14 +389,8 @@ try {
     await api("/api/auth/login", "POST", { name: "Test Worker", pin: "5678" })
   ).data.token;
   const start = new Date("2026-01-05T08:00:00-06:00").getTime();
-  const hours = (
-    await api(
-      "/api/pm/time",
-      "POST",
-      { startedAt: start, endedAt: start + 8 * 3600000 },
-      workerToken,
-    )
-  ).data;
+  // Preserve the old ledger in this historical payroll/snapshot regression.
+  const hours = sqlite.prepare('INSERT INTO pm_time_entries(user_id,started_at,ended_at,duration_min) VALUES(?,?,?,480) RETURNING id').get(worker.id,start,start+8*3600000);
   const period = "/api/hr/payroll/summary?from=2026-01-05&to=2026-01-11";
   const summary = await api(period, "GET", undefined, owner);
   assert.equal(summary.data[0].grossCents, 16000);
@@ -429,7 +423,7 @@ try {
   assert.equal(
     (await api(`/api/pm/time/${hours.id}`, "DELETE", undefined, workerToken))
       .status,
-    409,
+    403,
   );
   assert.equal(
     (await api(`/api/pm/time/${hours.id}`, "PATCH", { durationMin: 1 }, owner))

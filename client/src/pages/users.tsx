@@ -28,7 +28,7 @@ const ROLE_BADGE: Record<Role, string> = {
 };
 const ROLE_HELP: Record<Role, string> = {
   owner: "Everything — dashboard, finance, users, settings.",
-  worker: "Shop work, time tracking, projects, customer leads and quotes. Finance, payroll and account settings are owner-only.",
+  worker: "Employee workspace: clock in/out, assigned jobs, own hours, time-off requests and messages. Business records and approvals remain with the owner.",
 };
 
 const inputCls =

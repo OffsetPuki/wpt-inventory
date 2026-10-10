@@ -100,7 +100,7 @@ try{
  const worker=user.data, token=(await api('/api/auth/login','POST',{name:worker.name,pin:'4321'})).data.token;
  const crewTask=await call('/api/pm/tasks','POST',{title:'Crew conflict one',projectId:a.id,assigneeId:worker.id,startDate:'2026-10-01',dueDate:'2026-10-10'});
  await call('/api/pm/tasks','POST',{title:'Crew conflict two',projectId:b.id,assigneeId:worker.id,dueDate:'2026-10-02'});
- await api('/api/pm/time/start','POST',{taskId:crewTask.id},token);
+ await call('/api/pm/time/start','POST',{taskId:crewTask.id});
  await reject('/api/pm/tasks/'+crewTask.id,'PATCH',{projectId:b.id},409);
  const item=await call('/api/items','POST',{name:'Audit readiness material',category:'raw_materials',itemType:'raw_material',unit:'ft',quantity:0});
  sqlite.prepare("INSERT INTO project_checklist(project_id,label,item_id,qty,unit) VALUES(?,'Audit stock',?,10,'ft')").run(a.id,item.id);
@@ -124,7 +124,8 @@ try{
  const version=sqlite.prepare("SELECT version FROM suite_revisions WHERE topic='team'").get().version;
  sqlite.prepare('UPDATE users SET name=? WHERE id=?').run('Renamed audit teammate',worker.id);
  assert.ok(sqlite.prepare("SELECT version FROM suite_revisions WHERE topic='team'").get().version>version);
- assert.ok((await api('/api/suite/people','GET',undefined,token)).data.some(u=>u.name==='Renamed audit teammate'));
+ assert.equal((await api('/api/suite/people','GET',undefined,token)).status,403);
+ assert.equal((await api('/api/auth/me','GET',undefined,token)).data.name,'Renamed audit teammate');
  controller.abort();await reader.cancel().catch(()=>{});
  await call('/api/users/'+worker.id+'/access','PATCH',{active:false});
  assert.ok(!(await call('/api/suite/people')).some(u=>u.id===worker.id));

@@ -1,3 +1,4 @@
+import { employeePayrollIssues } from './employee-data';
 import {registerLaborPolicy} from './labor-policy';
 import { initializePayRates, payrollSummary, payrollRange, payrollDate, closedPeriod } from "./payroll";
 import type { Express } from "express";
@@ -76,13 +77,7 @@ sqlite.exec(`
 
 initializePayRates();
 
-// One-time: the approve/deny workflow is gone — time off filed is fact, so
-// anything still "pending" from the old world counts as approved.
-try {
-  sqlite.exec("UPDATE hr_leave_requests SET status = 'approved' WHERE status = 'pending'");
-} catch {
-  /* best-effort */
-}
+// Pending time off remains pending across restarts. Existing approvals stay intact.
 
 // ─── Local helpers ───────────────────────────────────────────────────────────
 
@@ -129,6 +124,14 @@ const recordExpenseSchema = z.object({
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerHrRoutes(app: Express): void {
+  // Preserve historical links and reject duplicate profiles before CRUD handlers.
+  app.use('/api/hr/employees', requireElevated, (req,res,next) => {
+    if (!['POST','PATCH'].includes(req.method) || req.body?.userId == null) return next();
+    const userId = Number(req.body.userId), existingId = Number(req.path.slice(1)) || 0;
+    if (!Number.isSafeInteger(userId) || !storage.getUserById(userId)) return res.status(400).json({message:'Choose an existing login.'});
+    if (sqlite.prepare('SELECT 1 FROM hr_employees WHERE user_id=? AND id<>?').get(userId,existingId)) return res.status(409).json({message:'This login already has an employee profile. Reuse that profile to preserve its payroll history.'});
+    next();
+  });
   registerLaborPolicy(app);
   // ─── Stats ────────────────────────────────────────────────────────────────
 
@@ -258,10 +261,7 @@ export function registerHrRoutes(app: Express): void {
   });
 
   // ─── Time off ─────────────────────────────────────────────────────────────
-  // A plain list — filed time off is fact, not a request. Rows insert as
-  // "approved" so the Schedule/Gantt leave-clash markers (which filter on
-  // status "approved") keep working unchanged.
-
+  // Employee requests stay pending until an owner decides them.
   app.get("/api/hr/leave", requireAuth, (req, res) => {
     // userId (the employee's linked login) rides along so the Gantt can match
     // task assignees against time off (Phase D #24c).
@@ -292,6 +292,8 @@ export function registerHrRoutes(app: Express): void {
   app.post("/api/hr/leave", requireAuth, (req, res) => {
     try {
       const data = insertLeaveRequestSchema.parse(req.body);
+      payrollDate(data.startDate); payrollDate(data.endDate);
+      if(data.endDate<data.startDate || (data.days??1)<=0 || !Number.isFinite(data.days??1)) return res.status(400).json({message:'Choose valid dates and a positive number of days.'});
       const emp = getEmployee(data.employeeId);
       if (!emp) {
         return res.status(400).json({ message: "Employee not found" });
@@ -303,8 +305,10 @@ export function registerHrRoutes(app: Express): void {
           return res.status(403).json({ message: "You may only file time off for yourself" });
         }
       }
-      const row = db.insert(leaveRequests).values({ ...data, status: "approved" })
+      const row = db.insert(leaveRequests).values({ ...data, status: elevatedRole(req) && emp.userId!==req.user!.userId ? 'approved' : 'pending' })
         .returning().get();
+      if(row.status==='pending') for(const owner of sqlite.prepare("SELECT id FROM users WHERE role IN ('owner','manager') AND disabled_at IS NULL").all() as any[]) sqlite.prepare('INSERT INTO suite_notifications(user_id,event_key,title,href) VALUES(?,?,?,?)').run(owner.id,`leave-request:${row.id}`,`${req.user!.name} requested time off`,'/hr/leave');
+      audit(req,'hr.leave_requested',{targetType:'leave',targetId:row.id,details:{status:row.status}});
       res.status(201).json(row);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
@@ -321,6 +325,7 @@ export function registerHrRoutes(app: Express): void {
       if (!mine || mine.id !== row.employeeId) {
         return res.status(403).json({ message: "You may only delete your own time off" });
       }
+      if (row.status !== 'pending') return res.status(409).json({message:'Ask the owner to change approved time off.'});
     }
     db.delete(leaveRequests).where(eq(leaveRequests.id, id)).run();
     res.json({ ok: true });
@@ -354,6 +359,8 @@ export function registerHrRoutes(app: Express): void {
       const body = recordExpenseSchema.parse(req.body);
       const period = payrollRange(body.from,body.to);
       const row = sqlite.transaction(() => {
+        const issues = employeePayrollIssues(period.start,period.end);
+        if (issues.length) throw new Error(`Payroll needs review: ${issues[0].name} — ${issues[0].message}`);
         if (sqlite.prepare("SELECT 1 FROM fin_expenses WHERE category='payroll' AND notes LIKE ? LIMIT 1").get(`auto:payroll:${body.from}:${body.to}%`)) throw new Error("An expense already records this payroll period. Review it before creating another.");
         if (sqlite.prepare("SELECT 1 FROM pm_time_entries WHERE ended_at IS NULL AND started_at < ? LIMIT 1").get(period.end)) throw new Error("Stop running timers before closing this period.");
         if (closedPeriod(body.from,body.to)) throw new Error("This period overlaps closed payroll. Choose an open period.");

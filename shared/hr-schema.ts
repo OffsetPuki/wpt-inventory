@@ -17,8 +17,7 @@ export type PayType = (typeof PAY_TYPES)[number];
 export const LEAVE_TYPES = ["vacation", "sick", "personal", "unpaid", "other"] as const;
 export type LeaveType = (typeof LEAVE_TYPES)[number];
 
-// Historical statuses — new entries are always "approved" (time off filed is
-// fact); the enum stays so old "denied" rows still type-check.
+// Employee requests require an owner decision.
 export const LEAVE_STATUSES = ["pending", "approved", "denied"] as const;
 export type LeaveStatus = (typeof LEAVE_STATUSES)[number];
 

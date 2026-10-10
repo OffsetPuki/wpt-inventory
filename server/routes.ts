@@ -1,3 +1,5 @@
+import { registerEmployeeBoundary, registerEmployeeRoutes } from './employee';
+import { employeeFileAllowed } from './employee-data';
 import {registerInsightRoutes} from './insights';
 import {listWindow} from "./pagination";
 import { registerShareLinks } from './share-links';
@@ -121,6 +123,8 @@ const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
+  registerEmployeeBoundary(app);
+  registerEmployeeRoutes(app);
   registerCustomerPreviews(app);
   registerShareLinks(app);
   registerDocumentActivity(app);
@@ -855,6 +859,7 @@ export function registerRoutes(app: Express): void {
     const token=(req.headers['x-auth'] as string | undefined) || cookie;
     if(!publicImage && !hasLeadKey(req) && (!token || !getSession(token))) return res.status(401).json({message:"Sign in to view this private image."});
     const mediaSession = token ? getSession(token) : null;
+    if (!publicImage && mediaSession && !['owner','manager'].includes(mediaSession.role) && !employeeFileAllowed(mediaSession.userId, `/uploads/${safeName}`)) return res.status(403).json({message:'This file is not part of your assigned jobs.'});
     if(!publicImage && !hasLeadKey(req) && mediaSession && process.env.NODE_ENV === "production" && toPublicUser(storage.getUserById(mediaSession.userId)!).securitySetupRequired)
       return res.status(428).json({message:"Set your owner password before viewing private files."});
     if(!publicImage&&mediaSession?.role!=='owner'){
