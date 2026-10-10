@@ -344,7 +344,7 @@ export default function DashboardPage() {
           href="/finance/invoices"
         />
         <StatCard
-          label="Net this month"
+          label="Cash difference this month"
           value={fin.data && formatMoney(fin.data.netThisMonthCents)}
           tone={fin.data ? (fin.data.netThisMonthCents >= 0 ? "good" : "danger") : "default"}
           href="/finance"
