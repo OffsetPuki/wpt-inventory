@@ -1,3 +1,6 @@
+import {useState as useGraphState} from 'react';
+import {useAuth as useGraphAuth} from '@/lib/auth';
+import Insights from '@/components/Insights';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {RetryBlock} from '@/components/RetryBlock';
 import PaymentExceptions from "@/components/PaymentExceptions";
@@ -219,7 +222,7 @@ const AGING_BUCKETS: {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function FinanceOverviewPage() {
+function LegacyFinanceOverviewPage() {
   const { data: stats, isLoading: statsLoading,isError:statsFailed,error:statsError,refetch:retryStats } = useQuery<FinanceStats>({
     queryKey: ["finance-stats"],
     queryFn: async () => (await apiRequest("GET", "/api/finance/stats")).json(),
@@ -230,12 +233,12 @@ export default function FinanceOverviewPage() {
     queryFn: async () => (await apiRequest("GET", "/api/finance/reports")).json(),
   });
 
-  if(statsFailed||reportsFailed)return <div><Header title="Finance" description="Accounting overview"/>{statsFailed&&<RetryBlock query={{error:statsError,refetch:retryStats}}/>}{reportsFailed&&<RetryBlock query={{error:reportsError,refetch:retryReports}}/>}</div>;
+  if(statsFailed||reportsFailed)return <div>{statsFailed&&<RetryBlock query={{error:statsError,refetch:retryStats}}/>}{reportsFailed&&<RetryBlock query={{error:reportsError,refetch:retryReports}}/>}</div>;
   if (statsLoading || reportsLoading) {
     return (
       <div className="mx-auto max-w-6xl">
-        <Header title="Finance" description="Accounting overview" />
-      <PaymentExceptions />
+        
+
         <LoadingBlock />
       </div>
     );
@@ -251,7 +254,9 @@ export default function FinanceOverviewPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Finance" description="Accounting overview" />
+      
+
+
       <PaymentExceptions />
 
       {/* KPI row */}
@@ -268,7 +273,7 @@ export default function FinanceOverviewPage() {
           value={formatMoney(stats?.expensesThisMonthCents)}
         />
         <Kpi
-          label="Net this month"
+          label="Cash difference this month"
           value={formatMoney(stats?.netThisMonthCents)}
           tone={
             (stats?.netThisMonthCents ?? 0) > 0
@@ -280,7 +285,7 @@ export default function FinanceOverviewPage() {
         />
       </div>
 
-      {/* Income vs expenses */}
+      {/* Cash received vs recorded expenses */}
       <div className="mt-6 rounded-xl border border-border bg-card p-5">
         <h2 className="mb-4 font-semibold text-foreground">
           Income vs expenses{" "}
@@ -319,7 +324,7 @@ export default function FinanceOverviewPage() {
               />
               <Bar
                 dataKey="incomeCents"
-                name="Income"
+                name="Cash received"
                 fill="hsl(var(--primary))"
                 radius={[3, 3, 0, 0]}
               />
@@ -428,3 +433,5 @@ export default function FinanceOverviewPage() {
     </div>
   );
 }
+
+export default function FinanceOverviewPage(){const {isElevated}=useGraphAuth();const [details,setDetails]=useGraphState(!isElevated);return <div className="mx-auto max-w-6xl"><Header title="Finance" description="Cash, receivables and spending"/><PaymentExceptions/><Insights area="finance"/><details open={details} onToggle={e=>setDetails(e.currentTarget.open)} className="mt-5"><summary className="cursor-pointer rounded-xl border p-4 text-sm">Additional reports and settings · periods shown on each report</summary>{details&&<LegacyFinanceOverviewPage/>}</details></div>;}

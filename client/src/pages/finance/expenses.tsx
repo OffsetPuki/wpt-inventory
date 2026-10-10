@@ -1,3 +1,4 @@
+import Insights from '@/components/Insights';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {RecordSelect} from "@/components/RecordSelect";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
@@ -346,10 +347,11 @@ function ExpenseFormModal({
 
 export default function ExpensesPage() {
   const [category, setCategory] = useRememberedState("client/src/pages/finance/expenses.tsx:category","");
-  const [projectId, setProjectId] = useRememberedState("client/src/pages/finance/expenses.tsx:projectId","");
+  const [projectId, setProjectId] = useRememberedState("client/src/pages/finance/expenses.tsx:projectId",readContext("projectId"),"projectId");
   const [from, setFrom] = useRememberedState("client/src/pages/finance/expenses.tsx:from","");
   const [to, setTo] = useRememberedState("client/src/pages/finance/expenses.tsx:to","");
   const [q, setQ] = useRememberedState("client/src/pages/finance/expenses.tsx:q","");
+  useEffect(()=>{const apply=()=>{if(readContext('projectId')){setCategory('');setFrom('');setTo('');setQ('');}};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
   const [formOpen, setFormOpen] = useState(()=>readContext("new")==="1");
   const [editing, setEditing] = useState<Expense | null>(null);
   useRecordLink("expense", "/api/suite/expenses", row=>{setEditing(row);setFormOpen(true);});
@@ -390,6 +392,8 @@ export default function ExpensesPage() {
           Add expense
         </button>
       </Header>
+      {!projectId&&<Insights area="expenses"/>}
+
 
       {/* Filters */}
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

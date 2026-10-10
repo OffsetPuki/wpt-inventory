@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {
   ResponsiveContainer,
   BarChart,

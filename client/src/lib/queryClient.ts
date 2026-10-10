@@ -34,7 +34,7 @@ export async function apiRequest(
 ): Promise<Response> {
   if(method==='GET' && typeof window!=='undefined') {
     const u=new URL(url,window.location.origin);
-    if(/^\/api\/(suite\/(today|schedule)|pm\/(tasks|time)|finance\/(stats|reports|invoices|expenses|purchase-orders)|projects)$/.test(u.pathname)&&!u.searchParams.has('site')&&!u.searchParams.has('projectId')){
+    if(/^\/api\/(crm\/(stats|reports)|suite\/(today|schedule)|pm\/(tasks|time)|finance\/(stats|reports|invoices|expenses|purchase-orders)|projects)$/.test(u.pathname)&&!u.searchParams.has('site')&&!u.searchParams.has('projectId')){
       u.searchParams.set('site',localStorage.getItem('suite-business')||'all');url=u.pathname+u.search;
     }
   }

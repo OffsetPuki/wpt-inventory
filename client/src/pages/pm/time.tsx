@@ -1,3 +1,5 @@
+import {useDeepLink} from '@/lib/deep-link';
+import Insights from '@/components/Insights';
 import {RecordSelect} from "@/components/RecordSelect";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {useListPage,PageButtons} from "@/lib/list-page";
@@ -317,12 +319,14 @@ export default function PmTimePage() {
   const [now, setNow] = useState(Date.now());
 
   // Filters
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [userFilter, setUserFilter] = useState("");
+  const [from, setFrom] = useState(()=>readContext("from"));
+  const [to, setTo] = useState(()=>readContext("to"));
+  const [userFilter, setUserFilter] = useState(()=>readContext("userId"));
   const [projectFilter,setProjectFilter]=useState(()=>readContext('projectId'));
   const {page,setPage}=useListPage('time-history',[from,to,userFilter,projectFilter]);
 
+  const linkedFrom=useDeepLink('from'),linkedTo=useDeepLink('to'),linkedUser=useDeepLink('userId'),linkedProject=useDeepLink('projectId');
+  useEffect(()=>{if(linkedFrom!==null)setFrom(linkedFrom);if(linkedTo!==null)setTo(linkedTo);if(linkedUser!==null)setUserFilter(linkedUser);if(linkedProject!==null)setProjectFilter(linkedProject);},[linkedFrom,linkedTo,linkedUser,linkedProject]);
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [correcting, setCorrecting] = useState<TimeRow | null>(null);
@@ -434,6 +438,8 @@ export default function PmTimePage() {
           Add manual entry
         </button>
       </Header>
+      {!projectFilter&&<Insights area="time"/>}
+
 
       {/* Hero timer card */}
       <div className="mb-8 rounded-xl border border-border bg-card p-5">

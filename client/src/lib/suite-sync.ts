@@ -95,7 +95,7 @@ const pendingPrefixes=new Set<string>();
 let extraKeys:readonly (readonly unknown[])[]=[];
 function scheduleRefresh(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{const prefixes=[...pendingPrefixes],keys=extraKeys;pendingPrefixes.clear();extraKeys=[];void queryClient.invalidateQueries({predicate:q=>prefixes.some(p=>String(q.queryKey[0]).startsWith(p))||keys.some(k=>k.every((v,i)=>JSON.stringify(q.queryKey[i])===JSON.stringify(v)))});},120);}
 export function queueRefreshKeys(keys:readonly (readonly unknown[])[]){extraKeys=[...extraKeys,...keys];scheduleRefresh();}
-export function refreshTopics(topics:string[]){if(!topics.length)return;for(const t of topics)for(const p of TOPIC_KEYS[t]||[])pendingPrefixes.add(p);scheduleRefresh();}
+export function refreshTopics(topics:string[]){if(!topics.length)return;pendingPrefixes.add("insights");for(const t of topics)for(const p of TOPIC_KEYS[t]||[])pendingPrefixes.add(p);scheduleRefresh();}
 export function useSuiteSync() {
   const [connected, setConnected] = useState(false);
   useEffect(() => {

@@ -1,3 +1,7 @@
+import {useDeepLink} from '@/lib/deep-link';
+import {useEffect} from 'react';
+import {readContext} from '@/lib/record-link';
+import Insights from '@/components/Insights';
 import LaborPolicy from "@/components/LaborPolicy";
 import { RetryBlock } from "@/components/RetryBlock";
 import { useState } from "react";
@@ -43,9 +47,11 @@ function rateLabel(r: SummaryRow): string {
 export default function HrPayrollPage() {
   const { isElevated } = useAuth();
   // Default period: the last 14 days, inclusive.
-  const [from, setFrom] = useState(() => ymdLocal(new Date(Date.now() - 13 * 86_400_000)));
-  const [to, setTo] = useState(() => ymdLocal(new Date()));
+  const [from, setFrom] = useState(() => readContext("from")||ymdLocal(new Date(Date.now() - 13 * 86_400_000)));
+  const [to, setTo] = useState(() => readContext("to")||ymdLocal(new Date()));
 
+  const linkedFrom=useDeepLink('from'),linkedTo=useDeepLink('to');
+  useEffect(()=>{if(linkedFrom)setFrom(linkedFrom);if(linkedTo)setTo(linkedTo);},[linkedFrom,linkedTo]);
   const rangeValid = !!from && !!to && from <= to;
 
   const { data: rows = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<SummaryRow[]>({
@@ -101,6 +107,8 @@ export default function HrPayrollPage() {
           Close period and record expense
         </button>
       </Header>
+      <Insights area="payroll"/>
+
 
       <p className="mb-3 text-sm text-muted-foreground">Gross-pay worksheet, not take-home pay. Review overtime rules, deductions and taxes with your payroll provider before closing.</p>
       <button className="mb-4 rounded-lg border px-4 py-3" disabled={isLoading||loadFailed||!rangeValid||!rows.length} onClick={()=>{

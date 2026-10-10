@@ -1,3 +1,4 @@
+import Insights from '@/components/Insights';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import DocumentActivityButton from '@/components/DocumentActivity';
@@ -1583,27 +1584,29 @@ const TABS: { key: string; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
+ const [projectFilter,setProjectFilter]=useRememberedState("invoice-project",readContext("projectId"),"projectId");
   const [tab, setTab] = useRememberedState("client/src/pages/finance/invoices.tsx:tab",readContext("status"), "status");
   const [q, setQ] = useRememberedState("client/src/pages/finance/invoices.tsx:q","");
-  useEffect(()=>{const apply=()=>{if(readContext('status'))setQ('');};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
+  useEffect(()=>{const apply=()=>{if(readContext('status')||readContext('projectId'))setQ('');if(readContext('projectId'))setTab('');};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
   const [newOpen, setNewOpen] = useState(()=>readContext("new")==="1");
   const invoiceLink = useDeepLink("invoice");
   const [detailId, setDetailId] = useState<number | null>(invoiceLink ? Number(invoiceLink) : null);
   useEffect(() => { if (invoiceLink) {setDetailId(Number(invoiceLink));consumeRecordLink("invoice");} }, [invoiceLink]);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
 
-  const {page,setPage}=useListPage('rows:client/src/pages/finance/invoices.tsx',[tab,q]);
+  const {page,setPage}=useListPage('rows:client/src/pages/finance/invoices.tsx',[tab,q,projectFilter]);
   const url = useMemo(() => {
     const params = new URLSearchParams();
     params.set('page',String(page));params.set('limit','50');
     if (tab) params.set("status", tab);
+    if(projectFilter)params.set("projectId",projectFilter);
     if (q.trim()) params.set("q", q.trim());
     const s = params.toString();
     return `/api/finance/invoices${s ? `?${s}` : ""}`;
-  }, [tab, q,page]);
+  }, [tab, q,page,projectFilter]);
 
   const { data: rows = [], isLoading,isError,error,refetch } = useQuery<InvoiceRow[]>({
-    queryKey: ["finance-invoices", tab, q,page],
+    queryKey: ["finance-invoices", tab, q,page,projectFilter],
     queryFn: async () => (await apiRequest("GET", url)).json(),
   });
 
@@ -1615,6 +1618,8 @@ export default function InvoicesPage() {
           New invoice
         </button>
       </Header>
+      {!projectFilter?<Insights area="invoices"/>:<p className="my-4 text-sm">Invoices for job #{projectFilter} <button className="ml-2 underline" onClick={()=>setProjectFilter('')}>Show all jobs</button></p>}
+
 
       <div className="mb-4 flex flex-wrap gap-2">
         {TABS.map((t) => (

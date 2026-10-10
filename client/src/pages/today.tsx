@@ -1,3 +1,4 @@
+import Insights from '@/components/Insights';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import BusinessReportSummary from "@/components/BusinessReportSummary";
 import {PencilRuler,Users,FolderKanban,Box,Timer,ArrowUpRight} from 'lucide-react';
@@ -40,6 +41,8 @@ export default function TodayPage() {
             : "Your work, materials and messages."
         }
       />
+      <Insights area="today"/>
+
       <div className="flex flex-wrap gap-2"><Link className="min-h-11 rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground" href="/projects">Open a job</Link><Link className="min-h-11 rounded-xl border px-4 py-3 text-sm" href="/pm/time">Track my time</Link>{isElevated&&<Link className="min-h-11 rounded-xl border px-4 py-3 text-sm" href="/finance/invoices?status=overdue">Money to collect</Link>}</div>
       {data.isError ? (
         <RetryBlock query={data} />

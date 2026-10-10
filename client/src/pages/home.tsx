@@ -1,3 +1,4 @@
+import Insights from '@/components/Insights';
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
@@ -113,6 +114,8 @@ export default function HomePage() {
           Add item
         </Link>
       </Header>
+      <Insights area="inventory"/>
+
       <div className="sticky top-0 z-10 mb-4 space-y-3 bg-background py-3">
         <label className="relative block">
           <span className="sr-only">Search inventory</span>

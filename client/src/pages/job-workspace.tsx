@@ -1,3 +1,4 @@
+import JobMoneyGraphs from '@/components/JobMoneyGraphs';
 import {JOB_STATUS_LABELS} from "@shared/suite-contracts";
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { ExtraBilling } from "./suite-reviews";
@@ -779,7 +780,7 @@ function JobMoney({ project, actions }: { project: any; actions: any[] }) {
   const t = q.data.totals;
   return (
     <div className="space-y-5">
-      <Card title="Job money">
+      <JobMoneyGraphs id={project.id} totals={t}/><Card title="Job money">
         <p className="mb-3">
           Billing:{" "}
           {project.billing_mode === "fixed"

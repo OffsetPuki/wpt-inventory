@@ -1,4 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import {useState as useGraphState} from 'react';
+import {useAuth as useGraphAuth} from '@/lib/auth';
+import Insights from '@/components/Insights';
+import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { apiRequest } from "@/lib/queryClient";
 import { formatMoney, formatPercent } from "@/lib/format";
 import Header from "@/components/Header";
@@ -81,7 +84,7 @@ const tooltipStyle = {
   fontSize: 13,
 };
 
-export default function CrmOverviewPage() {
+function LegacyCrmOverviewPage() {
   const { data: stats, isLoading: statsLoading } = useQuery<CrmStats>({
     queryKey: ["crm-stats"],
     queryFn: async () => (await apiRequest("GET", "/api/crm/stats")).json(),
@@ -95,7 +98,7 @@ export default function CrmOverviewPage() {
   if (statsLoading || reportsLoading) {
     return (
       <div className="mx-auto max-w-6xl">
-        <Header title="Sales" description="Pipeline, revenue, and lead performance" />
+        
         <div className="flex justify-center py-16 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
@@ -118,13 +121,15 @@ export default function CrmOverviewPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <Header title="Sales" description="Pipeline, revenue, and lead performance" />
+      
+
+
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Kpi label="Open leads" value={String(stats?.openLeads ?? 0)} />
         <Kpi label="Pipeline value" value={formatMoney(stats?.pipelineValueCents)} />
         <Kpi
-          label="Close rate"
+          label="Close rate · all time"
           value={stats?.closeRate == null ? "—" : formatPercent(stats.closeRate, 0)}
         />
         <Kpi label="Quotes sent (30d)" value={String(stats?.quotesSentLast30 ?? 0)} />
@@ -132,7 +137,7 @@ export default function CrmOverviewPage() {
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Monthly revenue (accepted quotes)">
+        <ChartCard title="Accepted quote value · last 12 months">
           {revenueData.every((d) => d.revenue === 0) ? (
             <div className="flex h-[240px] flex-col items-center justify-center gap-2 text-muted-foreground">
               <TrendingUp className="h-8 w-8" />
@@ -167,7 +172,7 @@ export default function CrmOverviewPage() {
           )}
         </ChartCard>
 
-        <ChartCard title="Leads by source">
+        <ChartCard title="Leads by source · all time">
           {sourceData.length === 0 ? (
             <div className="flex h-[240px] flex-col items-center justify-center gap-2 text-muted-foreground">
               <TrendingUp className="h-8 w-8" />
@@ -204,7 +209,7 @@ export default function CrmOverviewPage() {
           )}
         </ChartCard>
 
-        <ChartCard title="Funnel by stage">
+        <ChartCard title="Leads by current stage · all time">
           {byStage.length === 0 ? (
             <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-muted-foreground">
               <TrendingUp className="h-8 w-8" />
@@ -239,7 +244,7 @@ export default function CrmOverviewPage() {
           )}
         </ChartCard>
 
-        <ChartCard title="Win / loss reasons (lost leads)">
+        <ChartCard title="Loss reasons · all time">
           {winLoss.length === 0 ? (
             <div className="flex h-[200px] flex-col items-center justify-center gap-2 text-muted-foreground">
               <TrendingUp className="h-8 w-8" />
@@ -262,3 +267,5 @@ export default function CrmOverviewPage() {
     </div>
   );
 }
+
+export default function CrmOverviewPage(){const {isElevated}=useGraphAuth();const [details,setDetails]=useGraphState(!isElevated);return <div className="mx-auto max-w-6xl"><Header title="Sales" description="Follow-ups, accepted quotes and current pipeline"/><Insights area="sales"/><details open={details} onToggle={e=>setDetails(e.currentTarget.open)} className="mt-5"><summary className="cursor-pointer rounded-xl border p-4 text-sm">Additional reports and settings · periods shown on each report</summary>{details&&<LegacyCrmOverviewPage/>}</details></div>;}

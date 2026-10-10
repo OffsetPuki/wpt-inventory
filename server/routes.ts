@@ -1,3 +1,4 @@
+import {registerInsightRoutes} from './insights';
 import {listWindow} from "./pagination";
 import { registerShareLinks } from './share-links';
 import { registerCustomerPreviews } from "./customer-previews";
@@ -826,6 +827,7 @@ export function registerRoutes(app: Express): void {
   registerMarketingRoutes(app);
   registerGrowthRoutes(app);
   registerCrmRoutes(app);
+  registerInsightRoutes(app);
   registerPmRoutes(app);
   registerHrRoutes(app);
   registerFinanceRoutes(app);

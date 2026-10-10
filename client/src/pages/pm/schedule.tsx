@@ -1,3 +1,4 @@
+import Insights from '@/components/Insights';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { useSuiteQuery } from '@/lib/suite-query';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -148,6 +149,8 @@ export default function PmSchedulePage() {
   return (
     <div className="mx-auto max-w-full">
       <Header title="Schedule" description="Who is doing what, day by day, this week" />
+      <Insights area="schedule"/>
+
 
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-1.5">

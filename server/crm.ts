@@ -1,9 +1,10 @@
+import {crmStats,crmReports} from './crm-reporting';
 import { recordHumanContact } from './lead-experience';
 import { listWindow } from './pagination';
 import { acceptQuote } from "./quote-lifecycle";
 import type { Express } from "express";
 import {
-  eq, and, or, desc, isNull, sql, like, gte, lte, notInArray, type SQL,
+  eq, and, or, desc, isNull, sql, like, gte, lte, type SQL,
 } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
@@ -585,170 +586,8 @@ export function registerCrmRoutes(app: Express): void {
 
   // ─── Stats (literal path — registered before any /:id routes) ────────────
 
-  app.get("/api/crm/stats", requireAuth, (_req, res) => {
-    const now = Date.now();
-    const weekAgo = new Date(now - 7 * DAY_MS);
-    const monthAgoMs = now - 30 * DAY_MS;
-    const monthAgo = new Date(monthAgoMs);
-
-    const openLeads = db.select({ n: sql<number>`count(*)` }).from(leads)
-      .where(and(isNull(leads.deletedAt), notInArray(leads.stage, ["won", "lost"])))
-      .get()?.n ?? 0;
-
-    const leadsThisWeek = db.select({ n: sql<number>`count(*)` }).from(leads)
-      .where(and(isNull(leads.deletedAt), gte(leads.createdAt, weekAgo)))
-      .get()?.n ?? 0;
-
-    // Pipeline = everything still in play: open leads' estimated value.
-    const leadPipeline = db.select({ v: sql<number>`coalesce(sum(${leads.estimatedValueCents}), 0)` })
-      .from(leads)
-      .where(and(isNull(leads.deletedAt), notInArray(leads.stage, ["won", "lost"])))
-      .get()?.v ?? 0;
-
-    // Builder quotes are THE quoting system. Raw sqlite for the quotes table
-    // (quote module owns it), try/catch'd in case that module isn't loaded.
-    let quotesSentLast30 = 0;
-    try {
-      quotesSentLast30 = (sqlite.prepare(
-        "SELECT count(*) AS n FROM quotes WHERE deleted_at IS NULL AND sent_at >= ?",
-      ).get(monthAgoMs) as { n: number }).n;
-    } catch {
-      /* quotes table not created */
-    }
-
-    const closed = db.select({
-      won: sql<number>`coalesce(sum(case when ${leads.stage} = 'won' then 1 else 0 end), 0)`,
-      lost: sql<number>`coalesce(sum(case when ${leads.stage} = 'lost' then 1 else 0 end), 0)`,
-    }).from(leads).where(isNull(leads.deletedAt)).get() ?? { won: 0, lost: 0 };
-    const closeRate = closed.won + closed.lost > 0
-      ? closed.won / (closed.won + closed.lost)
-      : null;
-
-    // "Revenue closed in the last 30 days" = accepted builder quotes bucketed
-    // by accepted_at — the one money-date the schema actually records (leads
-    // have no close timestamp). Same honest-date rule as the monthly report.
-    let revenueClosed30dCents = 0;
-    try {
-      revenueClosed30dCents = (sqlite.prepare(
-        "SELECT coalesce(sum(total_cents), 0) AS v FROM quotes WHERE deleted_at IS NULL AND status = 'accepted' AND accepted_at >= ?",
-      ).get(monthAgoMs) as { v: number }).v;
-    } catch {
-      /* quotes table not created */
-    }
-
-    // Per-site split of new leads this month. Scoped exactly like the
-    // dashboard's "New leads (month)" number, which reads the current bucket
-    // of /api/crm/reports monthlyLeads: calendar month by the same
-    // strftime('%Y-%m', …, 'unixepoch') (UTC) bucketing.
-    const monthKey = new Date().toISOString().slice(0, 7);
-    const leadsBySite = Object.fromEntries(
-      LEAD_SITES.map((s) => [s, 0]),
-    ) as Record<LeadSite, number>;
-    for (const r of db.select({ site: leads.site, n: sql<number>`count(*)` })
-      .from(leads)
-      .where(and(
-        isNull(leads.deletedAt),
-        sql`strftime('%Y-%m', ${leads.createdAt} / 1000, 'unixepoch') = ${monthKey}`,
-      ))
-      .groupBy(leads.site)
-      .all()) {
-      if (r.site in leadsBySite) leadsBySite[r.site] = r.n;
-    }
-
-    const topSourceRow = db.select({
-      source: leads.source,
-      count: sql<number>`count(*)`,
-    }).from(leads)
-      .where(and(isNull(leads.deletedAt), gte(leads.createdAt, monthAgo)))
-      .groupBy(leads.source)
-      .orderBy(desc(sql`count(*)`))
-      .limit(1)
-      .get();
-
-    res.json({
-      openLeads,
-      leadsThisWeek,
-      pipelineValueCents: leadPipeline,
-      quotesSentLast30,
-      closeRate,
-      revenueClosed30dCents,
-      leadsBySite,
-      topSource: topSourceRow
-        ? { source: topSourceRow.source, count: topSourceRow.count }
-        : null,
-    });
-  });
-
-  // ─── Reports ─────────────────────────────────────────────────────────────
-
-  app.get("/api/crm/reports", requireAuth, (_req, res) => {
-    const nowDate = new Date();
-    // First day of the month 11 months back → 12 buckets incl. the current one.
-    const cutoffMs = new Date(nowDate.getFullYear(), nowDate.getMonth() - 11, 1).getTime();
-    const cutoffDate = new Date(cutoffMs);
-
-    // Monthly revenue = ACCEPTED builder quotes bucketed by the month they
-    // were accepted (accepted_at is when the money became real). The quote
-    // module owns the table → raw sqlite + try/catch, like the stats endpoint.
-    let monthlyRevenue: { month: string; revenueCents: number }[] = [];
-    try {
-      monthlyRevenue = (sqlite.prepare(`
-        SELECT strftime('%Y-%m', accepted_at / 1000, 'unixepoch') AS month,
-               coalesce(sum(total_cents), 0) AS revenueCents
-        FROM quotes
-        WHERE deleted_at IS NULL AND status = 'accepted' AND accepted_at >= ?
-        GROUP BY month
-        ORDER BY month
-      `).all(cutoffMs) as { month: string; revenueCents: number }[]);
-    } catch {
-      /* quotes table not created */
-    }
-
-    const leadMonth = sql<string>`strftime('%Y-%m', ${leads.createdAt} / 1000, 'unixepoch')`;
-    const monthlyLeads = db.select({
-      month: leadMonth,
-      count: sql<number>`count(*)`,
-    }).from(leads)
-      .where(and(isNull(leads.deletedAt), gte(leads.createdAt, cutoffDate)))
-      .groupBy(leadMonth)
-      .orderBy(leadMonth)
-      .all();
-
-    const bySource = db.select({
-      source: leads.source,
-      leads: sql<number>`count(*)`,
-      won: sql<number>`coalesce(sum(case when ${leads.stage} = 'won' then 1 else 0 end), 0)`,
-      revenueCents: sql<number>`coalesce(sum(case when ${leads.stage} = 'won' then ${leads.revenueClosedCents} else 0 end), 0)`,
-    }).from(leads)
-      .where(isNull(leads.deletedAt))
-      .groupBy(leads.source)
-      .orderBy(desc(sql`count(*)`))
-      .all();
-
-    const byStage = db.select({
-      stage: leads.stage,
-      count: sql<number>`count(*)`,
-      valueCents: sql<number>`coalesce(sum(${leads.estimatedValueCents}), 0)`,
-    }).from(leads)
-      .where(isNull(leads.deletedAt))
-      .groupBy(leads.stage)
-      .all();
-
-    const winLoss = db.select({
-      reason: leads.winLossReason,
-      count: sql<number>`count(*)`,
-    }).from(leads)
-      .where(and(
-        isNull(leads.deletedAt),
-        eq(leads.stage, "lost"),
-        sql`${leads.winLossReason} IS NOT NULL`,
-      ))
-      .groupBy(leads.winLossReason)
-      .orderBy(desc(sql`count(*)`))
-      .all();
-
-    res.json({ monthlyRevenue, monthlyLeads, bySource, byStage, winLoss });
-  });
+  app.get("/api/crm/stats", requireAuth, (req,res)=>res.json(crmStats(req)));
+  app.get("/api/crm/reports", requireAuth, (req,res)=>res.json(crmReports(req)));
 
   // ─── Leads ───────────────────────────────────────────────────────────────
 

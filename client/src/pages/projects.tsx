@@ -1,3 +1,4 @@
+import Insights from '@/components/Insights';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {useListPage,PageButtons} from "@/lib/list-page";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
@@ -162,6 +163,8 @@ export default function ProjectsPage() {
           </>
         )}
       </Header>
+      <Insights area="jobs"/>
+
 
       <div className="relative mb-6">
         <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
