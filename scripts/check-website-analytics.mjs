@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import './check-page-performance.mjs';
 import {testApp} from './test-app.mjs';
 import {seedWebsiteAnalytics} from './fixtures/website-analytics.mjs';
 import {coveredSum,searchSummary,trendRows,csvCell,ratio} from '../shared/website-analytics.ts';

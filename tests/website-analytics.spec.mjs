@@ -78,3 +78,52 @@ test('Refresh all continues after a provider failure, and failed loading can rec
   await page.reload();
   await expect(page.getByRole('region',{name:'Every website at a glance'})).toBeVisible();
 });
+
+test('Visual comparisons explain page quality, select pages and remain usable on mobile',async({page},info)=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.route('**/api/marketing/growth/analytics?**',async route=>{
+    const data=await(await route.fetch()).json();
+    for(const site of data.sites){
+      site.current.reports.landing.rows.push({landingPagePlusQueryString:'/services/engaging-page',sessions:30,engagedSessions:24,keyEvents:2});
+      site.current.reports.pages.rows.push({pagePath:'/gallery/views-only',screenPageViews:650,userEngagementDuration:90});
+      site.current.search.rows.push({page:'/gallery/views-only',clicks:60,impressions:700,ctr:60/700,position:4});
+    }
+    await route.fulfill({json:data});
+  });
+  await page.goto(app.base+'/#/marketing?tab=analytics&analyticsSite=metals');
+  await expect(page.getByRole('region',{name:'Compare your websites'})).toContainText('CJM Metals');
+  await page.getByLabel('Website comparison metric').selectOption('clicks');
+  await expect(page.getByRole('region',{name:'Compare your websites'})).toContainText('64');
+  await page.getByRole('button',{name:'Compare pages',exact:true}).click();
+  const highlights=page.getByRole('region',{name:'Page highlights'});
+  await expect(highlights).toContainText('80.0% engaged');
+  await highlights.getByRole('button').filter({hasText:'Strongest engagement'}).click();
+  const detail=page.getByRole('region',{name:'Selected page analysis'});
+  await expect(detail.getByRole('heading',{name:'/services/engaging-page',exact:true})).toBeVisible();
+  await expect(detail).toContainText('A useful page to learn from');
+  await page.getByLabel('Page ranking metric').selectOption('views');
+  await page.getByRole('region',{name:'Page performance explorer'}).getByRole('button',{name:'Inspect /gallery/views-only · CJM Metals',exact:true}).click();
+  await expect(detail.getByRole('heading',{name:'/gallery/views-only',exact:true})).toBeVisible();
+  await expect(detail).toContainText('Comparison unavailable');
+  await expect(detail.getByRole('link',{name:'Open page',exact:true})).toHaveAttribute('href','https://www.cjmmetals.com/gallery/views-only');
+  await page.getByLabel('Page ranking metric').selectOption('sessions');
+  await page.getByLabel('Find a page to compare').fill('custom-gates');
+  await expect(detail.getByRole('heading',{name:'/services/custom-gates',exact:true})).toBeVisible();
+  await expect(detail).toContainText('Visible in search, few clicks');
+  await expect(detail).toContainText('Help arriving visitors take the next step');
+  await expect(detail).toContainText('custom gates el paso');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.screenshot({path:info.outputPath('page-explorer-mobile.png'),fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.getByLabel('Find a page to compare').fill('');
+  await page.screenshot({path:info.outputPath('page-explorer-desktop.png'),fullPage:true});
+  const nav=page.getByRole('navigation',{name:'Analytics reports'});
+  for(const [tab,title] of [['Searches','Searches bringing visitors'],['Traffic sources','Where visits come from'],['Audience','Screens your visitors use'],['Inquiries & sales','From inquiry to recorded results']]){
+    await nav.getByRole('button',{name:tab,exact:true}).click();
+    await expect(page.getByRole('region',{name:title,exact:true})).toBeVisible();
+  }
+  await nav.getByRole('button',{name:'Pages',exact:true}).click();
+  await page.getByLabel('Find a page to compare').fill('page-does-not-exist');
+  await expect(detail).toContainText('No measured values');
+  expect(errors).toEqual([]);
+});
