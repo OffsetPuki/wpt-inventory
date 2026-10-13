@@ -4,7 +4,7 @@ import {businessScope,taskBusiness} from "./business-scope";
 import { validateTaskDates, validateTimeInterval } from "../shared/suite-contracts";
 import { inventoryOnce } from "./inventory-core";
 import { lockedTime, closedPeriod, dateKey, payrollDate, rateOn } from "./payroll";
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -708,6 +708,28 @@ export function registerPmRoutes(app: Express): void {
   // ── Contracts ──────────────────────────────────────────────────────────────
   // Reads are open to everyone signed in; mutations are manager/technician.
 
+  // Keep the editor on the exact revision it saved, including attachment-only
+  // changes. File routes need the same stale-record protection as the editor.
+  const contractVersion = (id: number) => (sqlite.prepare("SELECT version FROM suite_record_versions WHERE entity='pm/contracts' AND id=?").get(id) as { version: number } | undefined)?.version;
+  const currentCopy = (req: Request, res: Response, id: number) => {
+    const current = contractVersion(id);
+    if (current !== undefined && req.headers['if-match'] && req.headers['if-match'] !== `"${current}"`) {
+      res.status(409).json({ code: 'RECORD_VERSION_CONFLICT', message: 'This contract changed on another screen. Reload it before changing its signed copy.' });
+      return false;
+    }
+    return true;
+  };
+  app.use('/api/pm/contracts', (req, res, next) => {
+    if (!['POST', 'PATCH', 'DELETE'].includes(req.method)) return next();
+    requireElevated(req, res, () => {
+      const file = req.path.match(/^\/(\d+)\/file\/?$/);
+      if (file && !currentCopy(req, res, Number(file[1]))) return;
+      const send = res.json.bind(res);
+      res.json = ((body: any) => send(res.statusCode < 300 && Number.isInteger(body?.id) ? { ...body, _version: contractVersion(body.id) } : body)) as typeof res.json;
+      next();
+    });
+  });
+
   app.get("/api/pm/contracts", requireAuth, (req, res) => {
     const conditions: any[] = [isNull(contracts.deletedAt)];
     const kind = qstr(req.query.kind);
@@ -807,8 +829,11 @@ export function registerPmRoutes(app: Express): void {
     },
     (req, res) => {
       const id = pid(req.params.id);
-      const existing = liveContract(id)!;
+      const existing = liveContract(id);
+      if (!existing) return res.status(404).json({ message: "Contract not found" });
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      // Uploading can take time; another screen may have changed the record.
+      if (!currentCopy(req, res, id)) return;
       const updated = db.update(contracts).set({ fileUrl: req.file.filename })
         .where(eq(contracts.id, id)).returning().get();
       audit(req, "pm.contract_file", {
@@ -840,11 +865,11 @@ export function registerPmRoutes(app: Express): void {
     const id = pid(req.params.id);
     const existing = liveContract(id);
     if (!existing) return res.status(404).json({ message: "Contract not found" });
-    db.update(contracts).set({ fileUrl: null }).where(eq(contracts.id, id)).run();
+    const updated = db.update(contracts).set({ fileUrl: null }).where(eq(contracts.id, id)).returning().get();
     audit(req, "pm.contract_file_remove", {
       targetType: "pm_contract", targetId: id, targetName: existing.title,
     });
-    res.json({ ok: true });
+    res.json({ ...updated, ok: true });
   });
 
   registerSoftDelete(app, "/api/pm/contracts/:id", requireElevated, {

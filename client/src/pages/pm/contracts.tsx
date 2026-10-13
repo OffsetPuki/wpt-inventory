@@ -13,6 +13,7 @@ import { Chip, type ChipTone } from "@/components/ui/Chip";
 import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { cn } from "@/lib/utils";
 import { formatMoney, parseMoney, formatDate, ymdToDate, parseJsonObject } from "@/lib/format";
 import {
@@ -28,13 +29,13 @@ import { FileSignature, Loader2, Plus, Pencil, Trash2, Printer, Download, Eye, P
 type ContractRow = Contract & { projectName: string | null };
 
 // Multipart, so not apiRequest — same shape as the compliance-document upload.
-async function uploadSignedCopy(contractId: number, file: File): Promise<Contract> {
+async function uploadSignedCopy(contractId: number, file: File, version?: number): Promise<Contract> {
   const fd = new FormData();
   fd.append("file", file);
   const token = getAuthToken();
   const res = await fetch(`/api/pm/contracts/${contractId}/file`, {
     method: "POST",
-    headers: token ? { "X-Auth": token } : {},
+    headers: { ...(token ? { "X-Auth": token } : {}), ...(version !== undefined ? { 'If-Match': `"${version}"` } : {}) },
     body: fd,
   });
   if (!res.ok) {
@@ -365,10 +366,16 @@ function ContractDialog({
   const [file, setFile] = useState<File | null>(null);
   const [hasFile, setHasFile] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [record, setRecord] = useState<(Contract & { _version?: number }) | null>(contract);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<'delete' | 'file' | null>(null);
   const qc = useQueryClient();
 
   useEffect(() => {
     if (!open) return;
+    setRecord(contract);
+    setUploadError(null);
+    setConfirmation(null);
     setFile(null);
     setHasFile(!!contract?.fileUrl);
     // Prefill only seeds a NEW contract; editing always shows the stored row.
@@ -425,28 +432,35 @@ function ContractDialog({
         body: body.trim() || null,
         notes: notes.trim() || null,
       };
-      return contract
-        ? { method: "PATCH", expectedVersion:(contract as any)?._version, url: `/api/pm/contracts/${contract.id}`, body: payload }
+      return record
+        ? { method: "PATCH", expectedVersion:record._version, url: `/api/pm/contracts/${record.id}`, body: payload }
         : { method: "POST", url: "/api/pm/contracts", body: payload };
     },
     invalidate: [["pm-contracts"]],
-    successTitle: contract ? "Contract updated" : "Contract created",
+    successTitle: record ? "Contract updated" : "Contract created",
     errorTitle: "Could not save",
     onSuccess: async (row) => {
+      setRecord(row);
       let final = row;
       if (file) {
         setUploading(true);
+        setUploadError(null);
         try {
-          final = await uploadSignedCopy(row.id, file);
+          final = await uploadSignedCopy(row.id, file, (row as any)._version);
+          setRecord(final);
+          setHasFile(true);
+          setFile(null);
           toast({ variant: "success", title: "Signed copy attached" });
         } catch (e: any) {
-          // The contract itself is saved — say so, and leave it for a retry
-          // from Edit rather than losing what was typed.
+          // Retain the saved ID and selected file so a retry updates this
+          // contract, instead of creating another or losing the attachment.
+          setUploadError(e?.message || 'Please try uploading the file again.');
           toast({
             variant: "destructive",
             title: "Contract saved, but the file didn't upload",
             description: e?.message,
           });
+          return;
         } finally {
           setUploading(false);
           qc.invalidateQueries({ queryKey: ["pm-contracts"] });
@@ -454,32 +468,35 @@ function ContractDialog({
       }
       onClose();
       // New contract → open it right away so Download / Print is one click.
-      if (!contract) onCreated?.(final);
+      if (!contract) {
+        try { await onCreated?.(final); }
+        catch (e: any) { toast({ variant: 'destructive', title: 'Contract saved', description: 'Could not open its details. Open it from the contract list.' }); }
+      }
     },
   });
 
   const del = useApiMutation({
-    request: () => ({ method: "DELETE", url: `/api/pm/contracts/${contract!.id}` }),
+    request: () => ({ method: "DELETE", url: `/api/pm/contracts/${record!.id}`, expectedVersion: record?._version }),
     invalidate: [["pm-contracts"]],
     successTitle: "Contract deleted",
     errorTitle: "Could not delete",
     onSuccess: onClose,
   });
 
-  // `hasFile` is only ever true for a stored contract, so `contract!` holds.
-  const removeFile = useApiMutation({
-    request: () => ({ method: "DELETE", url: `/api/pm/contracts/${contract!.id}/file` }),
+  const removeFile = useApiMutation<Contract>({
+    request: () => ({ method: "DELETE", url: `/api/pm/contracts/${record!.id}/file`, expectedVersion: record?._version }),
     invalidate: [["pm-contracts"]],
     successTitle: "Signed copy removed",
     errorTitle: "Could not remove the file",
-    onSuccess: () => setHasFile(false),
+    onSuccess: row => { setHasFile(false); setRecord(row); setConfirmation(null); },
   });
 
   return (
     <Modal
       open={open}
+      busy={save.isPending || uploading || del.isPending || removeFile.isPending}
       onClose={onClose}
-      title={contract ? "Edit contract" : "New contract"}
+      title={record ? "Edit contract" : "New contract"}
       maxWidth="max-w-2xl"
     >
       <form
@@ -508,6 +525,7 @@ function ContractDialog({
         }}
         className="flex flex-col gap-4"
       >
+        {uploadError && <div role="alert" className="rounded-xl border border-destructive/40 p-3 text-sm"><p className="font-semibold">Contract saved. The signed copy still needs uploading.</p><p className="mt-1">{uploadError}</p><p className="mt-1">Your file is still selected. Retry below to save your latest edits and attach it.</p></div>}
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Title</span>
           <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -710,7 +728,7 @@ function ContractDialog({
                 </span>
                 <button
                   type="button"
-                  onClick={() => removeFile.mutate()}
+                  onClick={() => { removeFile.reset(); setConfirmation('file'); }}
                   disabled={removeFile.isPending}
                   className="text-sm text-red-600 hover:underline disabled:opacity-60 dark:text-red-400"
                 >
@@ -725,12 +743,10 @@ function ContractDialog({
         </div>
 
         <div className="suite-modal-actions"><div className="mt-1 flex items-center gap-2">
-          {contract && (
+          {record && (
             <button
               type="button"
-              onClick={() => {
-                if (window.confirm("Delete this contract?")) del.mutate();
-              }}
+              onClick={() => { del.reset(); setConfirmation('delete'); }}
               disabled={del.isPending}
               className="flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-red-600 hover:border-red-500 disabled:opacity-60 dark:text-red-400"
             >
@@ -744,10 +760,11 @@ function ContractDialog({
             className="ml-auto flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
           >
             {(save.isPending || uploading) && <Loader2 className="h-4 w-4 animate-spin" />}
-            {uploading ? "Uploading…" : contract ? "Save changes" : "Create contract"}
+            {uploading ? "Uploading…" : uploadError ? "Retry save & upload" : record ? "Save changes" : "Create contract"}
           </button>
         </div></div>
       </form>
+      {confirmation && record && <ConfirmDialog title={confirmation === 'file' ? 'Remove signed copy?' : 'Delete contract?'} confirmLabel={confirmation === 'file' ? 'Remove signed copy' : 'Delete contract'} busy={del.isPending || removeFile.isPending} error={(confirmation === 'file' ? removeFile.error : del.error)?.message} onClose={() => setConfirmation(null)} onConfirm={() => confirmation === 'file' ? removeFile.mutate() : del.mutate()}><p>{confirmation === 'file' ? 'Remove the signed copy from' : 'Delete'} “{record.title}”?</p><p>{confirmation === 'file' ? 'The contract details stay. You will need the original file to attach it again.' : 'The contract leaves your list. The job and its invoices stay in your records.'}</p></ConfirmDialog>}
     </Modal>
   );
 }

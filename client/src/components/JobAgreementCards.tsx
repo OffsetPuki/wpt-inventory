@@ -19,6 +19,8 @@ import { formatMoney, parseMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { inputCls, primaryBtn } from "@/lib/ui-styles";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import { RetryBlock } from "@/components/RetryBlock";
 import {
   Ban,
   Check,
@@ -27,7 +29,7 @@ import {
 } from "lucide-react";
 
 export function ContractsCard({ project }: { project: Project }) {
-  const { data: contracts = [] } = useQuery<
+  const contractQuery = useQuery<
     { id: number; title: string; kind: ContractKind; status: ContractStatus; valueCents: number }[]
   >({
     queryKey: ["pm-contracts", "project", project.id],
@@ -35,12 +37,13 @@ export function ContractsCard({ project }: { project: Project }) {
       (await apiRequest("GET", `/api/pm/contracts?projectId=${project.id}`)).json(),
     retry: false,
   });
-  const { data: quotes = [] } = useQuery<{ number: string; totalCents: number }[]>({
+  const quoteQuery = useQuery<{ number: string; totalCents: number }[]>({
     queryKey: ["quotes", "job", project.id],
     queryFn: async () => (await apiRequest("GET", `/api/quotes?projectId=${project.id}`)).json(),
     retry: false,
   });
-  const quote = quotes[0];
+  const contracts = contractQuery.data ?? [];
+  const quote = quoteQuery.data?.[0];
   const params = new URLSearchParams({ new: "1", projectId: String(project.id) });
   params.set("title", project.name);
   if (project.clientId != null) params.set("clientId", String(project.clientId));
@@ -52,13 +55,13 @@ export function ContractsCard({ project }: { project: Project }) {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <h2 className="mb-3 text-base font-semibold text-foreground">Contracts</h2>
-      {contracts.length === 0 ? (
+      {contractQuery.isError ? <RetryBlock query={contractQuery} /> : contractQuery.isLoading ? <p role="status">Loading contracts…</p> : contracts.length === 0 ? (
         <p className="text-sm text-muted-foreground">No contract on this job yet.</p>
       ) : (
         <ul className="divide-y divide-border">
           {contracts.map((c) => (
-            <li key={c.id} className="flex items-center gap-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium text-foreground">{c.title}</span>
+            <li key={c.id} className="flex flex-wrap items-center gap-3 py-2 text-sm">
+              <Link href={`/pm/contracts?contract=${c.id}`} className="min-w-0 flex-1 break-words font-medium text-primary underline">{c.title}</Link>
               <span className="shrink-0 text-xs text-muted-foreground">
                 {CONTRACT_KIND_LABELS[c.kind]} · {CONTRACT_STATUS_LABELS[c.status]}
               </span>
@@ -67,6 +70,7 @@ export function ContractsCard({ project }: { project: Project }) {
           ))}
         </ul>
       )}
+      {quoteQuery.isError && <div className="mt-3"><p className="mb-2 text-sm">Quote details are unavailable. You can still create a contract manually.</p><RetryBlock query={quoteQuery} /></div>}
       <Link
         href={`/pm/contracts?${params.toString()}`}
         className="mt-3 inline-block text-sm text-muted-foreground underline hover:text-foreground"
@@ -91,13 +95,16 @@ export function ChangeOrdersCard({ projectId }: { projectId: number }) {
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [confirmation, setConfirmation] = useState<{ order: ChangeOrder & { _version?: number }; status: 'approved' | 'void' } | null>(null);
+  const closeAdd = () => { setAddOpen(false); setTitle(''); setAmount(''); setDescription(''); };
 
-  const { data: cos = [] } = useQuery<ChangeOrder[]>({
+  const ordersQuery = useQuery<ChangeOrder[]>({
     queryKey: ["pm-change-orders", projectId],
     queryFn: async () =>
       (await apiRequest("GET", `/api/pm/change-orders?projectId=${projectId}`)).json(),
     retry: false,
   });
+  const cos = ordersQuery.data ?? [];
 
   const invalidate = [["pm-change-orders", projectId], ["project-fin-summary", projectId]];
   const create = useApiMutation({
@@ -114,22 +121,19 @@ export function ChangeOrdersCard({ projectId }: { projectId: number }) {
     invalidate,
     successTitle: "Change order added",
     errorTitle: "Could not add change order",
-    onSuccess: () => {
-      setAddOpen(false);
-      setTitle("");
-      setAmount("");
-      setDescription("");
-    },
+    onSuccess: closeAdd,
   });
-  const setStatus = useApiMutation<unknown, { id: number; status: ChangeOrderStatus }>({
-    request: ({ id, status }) => ({
+  const setStatus = useApiMutation<unknown, { id: number; status: ChangeOrderStatus; version?: number }>({
+    request: ({ id, status, version }) => ({
       method: "PATCH",
       url: `/api/pm/change-orders/${id}`,
       body: { status },
+      expectedVersion: version,
     }),
     invalidate,
     successTitle: (_d, v) => (v.status === "approved" ? "Change order approved" : "Change order voided"),
     errorTitle: "Could not update",
+    onSuccess: () => setConfirmation(null),
   });
 
   return (
@@ -146,17 +150,15 @@ export function ChangeOrdersCard({ projectId }: { projectId: number }) {
           </button>
         )}
       </div>
-      {cos.length === 0 ? (
+      {ordersQuery.isError ? <RetryBlock query={ordersQuery} /> : ordersQuery.isLoading ? <p role="status">Loading change orders…</p> : cos.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No change orders. Scope changed after signing? Paper it here before doing the work.
         </p>
       ) : (
         <ul className="divide-y divide-border">
           {cos.map((co) => (
-            <li key={co.id} className="flex items-center gap-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={co.description ?? undefined}>
-                {co.title}
-              </span>
+            <li key={co.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
+              <div className="min-w-0 flex-1 basis-40"><p className="break-words font-medium text-foreground">{co.title}</p>{co.description && <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{co.description}</p>}</div>
               <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", CO_CHIP[co.status])}>
                 {CHANGE_ORDER_STATUS_LABELS[co.status]}
               </span>
@@ -172,24 +174,20 @@ export function ChangeOrdersCard({ projectId }: { projectId: number }) {
                 <button
                   title="Approve — counts toward the contract total"
                   disabled={setStatus.isPending}
-                  onClick={() => setStatus.mutate({ id: co.id, status: "approved" })}
-                  className="rounded-lg p-1.5 text-emerald-700 hover:bg-accent disabled:opacity-60 dark:text-emerald-400"
+                  onClick={() => { setStatus.reset(); setConfirmation({ order: co, status: 'approved' }); }}
+                  className="flex min-h-11 items-center gap-2 rounded-lg border px-3 text-emerald-700 hover:bg-accent disabled:opacity-60 dark:text-emerald-400"
                 >
-                  <Check className="h-4 w-4" />
+                  <Check className="h-4 w-4" /> Approve
                 </button>
               )}
               {isElevated && co.status === "approved" && (
                 <button
                   title="Void this change order"
                   disabled={setStatus.isPending}
-                  onClick={() => {
-                    if (window.confirm(`Void change order '${co.title}'?`)) {
-                      setStatus.mutate({ id: co.id, status: "void" });
-                    }
-                  }}
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-60"
+                  onClick={() => { setStatus.reset(); setConfirmation({ order: co, status: 'void' }); }}
+                  className="flex min-h-11 items-center gap-2 rounded-lg border px-3 text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-60"
                 >
-                  <Ban className="h-4 w-4" />
+                  <Ban className="h-4 w-4" /> Void
                 </button>
               )}
             </li>
@@ -197,7 +195,8 @@ export function ChangeOrdersCard({ projectId }: { projectId: number }) {
         </ul>
       )}
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="New change order">
+      {confirmation && <ConfirmDialog title={confirmation.status === 'approved' ? 'Approve change order?' : 'Void change order?'} confirmLabel={confirmation.status === 'approved' ? 'Approve change order' : 'Void change order'} busy={setStatus.isPending} error={setStatus.error?.message} onClose={() => setConfirmation(null)} onConfirm={() => setStatus.mutate({ id: confirmation.order.id, status: confirmation.status, version: confirmation.order._version })}><p>“{confirmation.order.title}” · {formatMoney(confirmation.order.amountCents)}</p><p>{confirmation.status === 'approved' ? 'Confirm the customer agreed to this scope and price. This amount will count toward the job total.' : 'This change order will stop counting toward the job total. Its history stays in your records.'}</p></ConfirmDialog>}
+      <Modal open={addOpen} busy={create.isPending} hasUnsavedChanges={!!title || !!amount || !!description} onClose={closeAdd} title="New change order">
         <form
           onSubmit={(e) => {
             e.preventDefault();
