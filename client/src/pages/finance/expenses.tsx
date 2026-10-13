@@ -65,6 +65,39 @@ const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
 
 // ─── Add / edit dialog ────────────────────────────────────────────────────────
 
+function ReceiptPreview({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-muted/30">
+      {failed ? (
+        <div role="status" className="space-y-2 p-4 text-sm text-muted-foreground">
+          <p>Receipt preview could not load.</p>
+          <button
+            type="button"
+            className={secondaryBtn}
+            onClick={() => { setFailed(false); setAttempt(value => value + 1); }}
+          >
+            Retry receipt
+          </button>
+        </div>
+      ) : (
+        <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Open receipt full size">
+          <img
+            key={attempt}
+            src={attempt ? `${url}${url.includes('?') ? '&' : '?'}retry=${attempt}` : url}
+            alt="Expense receipt"
+            className="max-h-80 w-full object-contain"
+            decoding="async"
+            onError={() => setFailed(true)}
+          />
+        </a>
+      )}
+    </div>
+  );
+}
+
 function ExpenseFormModal({
   open,
   onClose,
@@ -272,24 +305,27 @@ function ExpenseFormModal({
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Receipt photo</span>
           {receiptUrl ? (
-            <div className="flex items-center gap-2 text-sm">
-              <a
-                href={receiptUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1.5 text-primary underline-offset-2 hover:underline"
-              >
-                <Paperclip className="h-4 w-4" />
-                View attached receipt
-              </a>
-              <button
-                type="button"
-                aria-label="Remove receipt"
-                onClick={() => setReceiptUrl(null)}
-                className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
+            <div className="space-y-2">
+              <ReceiptPreview key={receiptUrl} url={receiptUrl} />
+              <div className="flex items-center gap-2 text-sm">
+                <a
+                  href={receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-primary underline-offset-2 hover:underline"
+                >
+                  <Paperclip className="h-4 w-4" />
+                  View attached receipt
+                </a>
+                <button
+                  type="button"
+                  aria-label="Remove receipt"
+                  onClick={() => setReceiptUrl(null)}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ) : (
             <button
@@ -310,6 +346,7 @@ function ExpenseFormModal({
             ref={fileRef}
             type="file"
             accept="image/*"
+            aria-label="Upload receipt photo"
             className="hidden"
             onChange={(e) => handleFile(e.target.files?.[0])}
           />
@@ -354,7 +391,7 @@ export default function ExpensesPage() {
   useEffect(()=>{const apply=()=>{if(readContext('projectId')){setCategory('');setFrom('');setTo('');setQ('');}};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
   const [formOpen, setFormOpen] = useState(()=>readContext("new")==="1");
   const [editing, setEditing] = useState<Expense | null>(null);
-  useRecordLink("expense", "/api/suite/expenses", row=>{setEditing(row);setFormOpen(true);});
+  useRecordLink("expense", "/api/finance/expenses", row=>{setEditing(row);setFormOpen(true);});
 
 
 
