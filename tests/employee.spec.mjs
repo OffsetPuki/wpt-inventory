@@ -147,7 +147,8 @@ test('Phone clock, lost-response recovery, jobs, review and payroll',async({page
   await ownerPage.getByRole('button',{name:'Approve hours',exact:true}).click();
   await expect(ownerPage.getByText('All submitted hours have been reviewed.')).toBeVisible();
   const {dayKey}=await import('../server/employee-data.ts');const date=dayKey(Date.now());
-  const payroll=await call(`/api/hr/payroll/summary?from=${date}&to=${date}`);
+  // The simulated hour can start yesterday when this test runs just after midnight.
+  const payroll=await call(`/api/hr/payroll/summary?from=${dayKey(start)}&to=${date}`);
   assert.equal(payroll.find(e=>e.userId===worker.id)?.hours??payroll[0].hours,1);
   await page.goto(app.base+'/#/employee/time');
   await expect(page.getByText('Approved',{exact:true}).first()).toBeVisible();
