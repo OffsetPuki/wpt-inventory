@@ -18,7 +18,8 @@ import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
 import { Chip, type ChipTone } from "@/components/ui/Chip";
 import { LoadingBlock, EmptyState } from "@/components/ui/Feedback";
 import Header from "@/components/Header";
-import Modal from "@/components/Modal";
+import Modal, { ModalClose } from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import InlineNewClient from "@/components/InlineNewClient";
 import { cn } from "@/lib/utils";
 import { formatDate, formatMoney, parseMoney, formatBp, todayYmd, ymdInDays } from "@/lib/format";
@@ -204,17 +205,20 @@ function AttachmentsEditor({
   onChange,
   disabled,
   onOpen,
+  onUploadingChange,
 }: {
   value: InvoiceAttachment[];
   onChange: (next: InvoiceAttachment[]) => void;
   disabled?: boolean;
   /** When set, each name is a button that opens the file (the detail modal). */
   onOpen?: (i: number) => void;
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const [uploading, setUploading] = useState(false);
 
   async function upload(files: FileList) {
     setUploading(true);
+    onUploadingChange?.(true);
     const added: InvoiceAttachment[] = [];
     try {
       for (const file of Array.from(files)) {
@@ -236,6 +240,7 @@ function AttachmentsEditor({
       toast({ variant: "destructive", title: "Upload failed", description: e?.message });
     } finally {
       setUploading(false);
+      onUploadingChange?.(false);
     }
     if (added.length) onChange([...value, ...added]);
   }
@@ -320,6 +325,7 @@ function InvoiceFormModal({
   const [terms, setTerms] = useState("");
   const [paymentOptions, setPaymentOptions] = useState<InvoicePaymentOptions | null>(defaultPaymentOptions);
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
+  const [attachmentsUploading, setAttachmentsUploading] = useState(false);
   // Progress-billing helper inputs (Phase G #2).
   const [progressPct, setProgressPct] = useState("");
   const [progressAmount, setProgressAmount] = useState("");
@@ -574,7 +580,7 @@ function InvoiceFormModal({
   });
 
   return (
-    <Modal preservesDraft busy={save.isPending}
+    <Modal preservesDraft busy={save.isPending || attachmentsUploading}
       open={open}
       onClose={onClose}
       title={invoice ? `Edit ${invoice.number}` : "New invoice"}
@@ -904,7 +910,7 @@ function InvoiceFormModal({
           <p className="text-xs text-muted-foreground">
             A signed contract, a drawing — anything the customer should get with this invoice.
           </p>
-          <AttachmentsEditor value={attachments} onChange={setAttachments} />
+          <AttachmentsEditor value={attachments} onChange={setAttachments} onUploadingChange={setAttachmentsUploading} />
         </div>
 
         <div className="rounded-lg border border-border bg-background p-3 text-sm">
@@ -979,6 +985,8 @@ function RecordPaymentForm({
   const [method, setMethod] = useState<PaymentMethod>("check");
   const [reference, setReference] = useState("");
   const [paidAt, setPaidAt] = useState(todayYmd());
+  const [initial] = useState(() => ({ amount, method, reference, paidAt }));
+  const dirty = amount !== initial.amount || method !== initial.method || reference !== initial.reference || paidAt !== initial.paidAt;
 
   const record = useApiMutation({
     request: () => ({
@@ -998,6 +1006,7 @@ function RecordPaymentForm({
   });
 
   return (
+    <Modal open title="Record payment" busy={record.isPending} hasUnsavedChanges={dirty} onClose={onDone} maxWidth="max-w-lg">
     <form
       onSubmit={(e) => {
         e.preventDefault();
@@ -1009,7 +1018,7 @@ function RecordPaymentForm({
       }}
       className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4"
     >
-      <p className="text-sm font-semibold text-foreground">Record payment</p>
+      <p className="text-sm text-muted-foreground">{invoice.number} · {invoice.clientName} · Balance {formatMoney(invoice.balanceCents)}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Amount $</span>
@@ -1058,11 +1067,12 @@ function RecordPaymentForm({
           {record.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           Record payment
         </button>
-        <button type="button" onClick={onDone} className={secondaryBtn}>
+        <ModalClose className={secondaryBtn}>
           Cancel
-        </button>
+        </ModalClose>
       </div>
     </form>
+    </Modal>
   );
 }
 
@@ -1078,8 +1088,10 @@ function InvoiceDetailModal({
   onEdit: (invoice: Invoice) => void;
 }) {
   const [paying, setPaying] = useState(false);
+  const [attachmentsUploading, setAttachmentsUploading] = useState(false);
   // Set when the form was opened via "Deposit paid" — pre-fills that amount.
   const [payPrefill, setPayPrefill] = useState<number | null>(null);
+  const [confirmation, setConfirmation] = useState<{ kind: 'reverse'; payment: InvoicePayment } | { kind: 'void' | 'delete' } | null>(null);
 
   const { data, isLoading, isFetching: detailRefreshing, isError: detailFailed, error: detailError, refetch: retryDetail } = useQuery<{ invoice: InvoiceRow; payments: InvoicePayment[] }>({
     queryKey: ["finance-invoice", id],
@@ -1106,6 +1118,7 @@ function InvoiceDetailModal({
       return "Invoice marked sent";
     },
     errorTitle: "Could not update",
+    onSuccess: () => setConfirmation(null),
   });
 
   const reversePayment = useApiMutation<unknown, number>({
@@ -1116,6 +1129,7 @@ function InvoiceDetailModal({
     invalidate: INVOICE_KEYS,
     successTitle: "Payment reversed",
     errorTitle: "Could not reverse",
+    onSuccess: () => setConfirmation(null),
   });
 
   const del = useApiMutation({
@@ -1193,6 +1207,8 @@ function InvoiceDetailModal({
   return (
     <Modal
       open
+      busy={setStatus.isPending || reversePayment.isPending || del.isPending || pullUnbilled.isPending || preview.isPending || saveAttachments.isPending || attachmentsUploading}
+      hasUnsavedChanges={false}
       onClose={onClose}
       title={inv ? inv.number : "Invoice"}
       maxWidth="max-w-2xl"
@@ -1241,6 +1257,7 @@ function InvoiceDetailModal({
               {/* One row per file: the name downloads, the × removes. A void
                   invoice is read-only — names only. */}
               <AttachmentsEditor
+                onUploadingChange={setAttachmentsUploading}
                 value={attachments}
                 onChange={(next) => saveAttachments.mutate(next)}
                 disabled={inv.status === "void" || saveAttachments.isPending}
@@ -1375,11 +1392,7 @@ function InvoiceDetailModal({
                         aria-label="Reverse payment"
                         title="Reverse payment"
                         disabled={reversePayment.isPending}
-                        onClick={() => {
-                          if (window.confirm("Reverse this payment?")) {
-                            reversePayment.mutate(p.id);
-                          }
-                        }}
+                        onClick={() => { reversePayment.reset(); setConfirmation({ kind: 'reverse', payment: p }); }}
                         className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
                       >
                         <Undo2 className="h-4 w-4" />
@@ -1444,13 +1457,7 @@ function InvoiceDetailModal({
               </button>
             </div>
           )}
-          {paying && receivable ? (
-            <RecordPaymentForm
-              invoice={inv}
-              initialCents={payPrefill ?? undefined}
-              onDone={() => { setPaying(false); setPayPrefill(null); }}
-            />
-          ) : (
+          {!paying && (
             <div className="flex flex-wrap gap-2">
               {inv.status === "draft" && (
                 <>
@@ -1530,11 +1537,7 @@ function InvoiceDetailModal({
                     ) : null;
                   })()}
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Void invoice ${inv.number}? This cannot be undone.`)) {
-                        setStatus.mutate("void");
-                      }
-                    }}
+                    onClick={() => { setStatus.reset(); setConfirmation({ kind: 'void' }); }}
                     disabled={setStatus.isPending}
                     className={cn(secondaryBtn, "text-red-600 dark:text-red-400")}
                   >
@@ -1552,11 +1555,7 @@ function InvoiceDetailModal({
                   server enforces the same rule; paid history voids instead. */}
               {payments.length === 0 && (
                 <button
-                  onClick={() => {
-                    if (window.confirm(`Delete invoice ${inv.number}? It moves out of the books entirely; any pulled billable work becomes billable again.`)) {
-                      del.mutate();
-                    }
-                  }}
+                  onClick={() => { del.reset(); setConfirmation({ kind: 'delete' }); }}
                   disabled={del.isPending}
                   className={cn(secondaryBtn, "ml-auto text-red-600 dark:text-red-400")}
                 >
@@ -1568,6 +1567,16 @@ function InvoiceDetailModal({
           )}
         </div>
       )}
+      {paying && inv && <RecordPaymentForm invoice={inv} initialCents={payPrefill ?? undefined} onDone={() => { setPaying(false); setPayPrefill(null); }} />}
+      {confirmation && inv && <ConfirmDialog
+        title={confirmation.kind === 'reverse' ? 'Reverse payment?' : confirmation.kind === 'void' ? 'Void invoice?' : 'Delete invoice?'}
+        confirmLabel={confirmation.kind === 'reverse' ? 'Reverse payment' : confirmation.kind === 'void' ? 'Void invoice' : 'Delete invoice'}
+        busy={setStatus.isPending || reversePayment.isPending || del.isPending}
+        error={(confirmation.kind === 'reverse' ? reversePayment.error : confirmation.kind === 'void' ? setStatus.error : del.error)?.message}
+        onClose={() => setConfirmation(null)}
+        onConfirm={() => { if (confirmation.kind === 'reverse') reversePayment.mutate(confirmation.payment.id); else if (confirmation.kind === 'void') setStatus.mutate('void'); else del.mutate(); }}>
+        {confirmation.kind === 'reverse' ? <><p>Remove the {formatMoney(confirmation.payment.amountCents)} payment from {inv.number}?</p><p>The amount will become due again. This updates your records; it does not send a refund.</p></> : confirmation.kind === 'void' ? <><p>Void invoice {inv.number}?</p><p>Its history stays in your records. You cannot undo this from the app.</p></> : <><p>Delete invoice {inv.number}?</p><p>It will leave your books. Work pulled onto this invoice will become available to bill again.</p></>}
+      </ConfirmDialog>}
     </Modal>
   );
 }

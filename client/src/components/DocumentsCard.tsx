@@ -6,6 +6,8 @@ import { toast } from "@/components/ui/toaster";
 import { useApiMutation } from "@/hooks/useApiMutation";
 import { inputCls, primaryBtn } from "@/lib/ui-styles";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import { RetryBlock } from "@/components/RetryBlock";
 import { cn } from "@/lib/utils";
 import { formatDate, todayYmd } from "@/lib/format";
 import {
@@ -41,9 +43,14 @@ export default function DocumentsCard({
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<PmDocument | null>(null);
+  const closeUpload = () => {
+    setUploadOpen(false); setDocTitle(""); setExpiresAt(""); setFile(null);
+    setKind(projectId != null ? "lien_waiver" : "coi");
+  };
 
   const queryKey = ["pm-documents", projectId ?? "company"];
-  const { data: docs = [] } = useQuery<PmDocument[]>({
+  const query = useQuery<PmDocument[]>({
     queryKey,
     queryFn: async () =>
       (await apiRequest(
@@ -52,12 +59,14 @@ export default function DocumentsCard({
       )).json(),
     retry: false,
   });
+  const docs = query.data ?? [];
 
   const del = useApiMutation<unknown, number>({
     request: (id) => ({ method: "DELETE", url: `/api/pm/documents/${id}` }),
     invalidate: [queryKey],
     successTitle: "Document deleted",
     errorTitle: "Could not delete",
+    onSuccess: () => setDeleting(null),
   });
 
   async function upload() {
@@ -84,10 +93,7 @@ export default function DocumentsCard({
       }
       qc.invalidateQueries({ queryKey });
       toast({ variant: "success", title: "Document uploaded" });
-      setUploadOpen(false);
-      setDocTitle("");
-      setExpiresAt("");
-      setFile(null);
+      closeUpload();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Upload failed", description: e?.message });
     } finally {
@@ -135,7 +141,7 @@ export default function DocumentsCard({
         )}
       </div>
       {description && <p className="mb-3 text-sm text-muted-foreground">{description}</p>}
-      {docs.length === 0 ? (
+      {query.isError ? <RetryBlock query={query} /> : query.isLoading ? <p role="status" className="text-sm text-muted-foreground">Loading documents…</p> : docs.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {projectId != null
             ? "No documents on this job yet — COIs, lien waivers, signed contracts."
@@ -144,7 +150,7 @@ export default function DocumentsCard({
       ) : (
         <ul className="divide-y divide-border">
           {docs.map((d) => (
-            <li key={d.id} className="flex items-center gap-3 py-2 text-sm">
+            <li key={d.id} className="flex flex-wrap items-center gap-3 py-2 text-sm">
               <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate font-medium text-foreground">{d.title}</span>
               <span className="shrink-0 text-xs text-muted-foreground">
@@ -165,11 +171,11 @@ export default function DocumentsCard({
                 </span>
               )}
               <button
-                aria-label="Download"
+                aria-label={`Download ${d.title}`}
                 title="Download"
                 disabled={downloadingId === d.id}
                 onClick={() => download(d)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
               >
                 {downloadingId === d.id
                   ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -177,13 +183,11 @@ export default function DocumentsCard({
               </button>
               {isElevated && (
                 <button
-                  aria-label="Delete"
+                  aria-label={`Delete ${d.title}`}
                   title="Delete"
                   disabled={del.isPending}
-                  onClick={() => {
-                    if (window.confirm(`Delete '${d.title}'?`)) del.mutate(d.id);
-                  }}
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-60"
+                  onClick={() => { del.reset(); setDeleting(d); }}
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-60"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -193,7 +197,8 @@ export default function DocumentsCard({
         </ul>
       )}
 
-      <Modal open={uploadOpen} onClose={() => setUploadOpen(false)} title="Upload document">
+      {deleting && <ConfirmDialog title="Delete document?" confirmLabel="Delete document" busy={del.isPending} error={del.error?.message} onClose={() => setDeleting(null)} onConfirm={() => del.mutate(deleting.id)}><p>Remove “{deleting.title}” from {projectId != null ? 'this job' : 'company documents'}?</p><p>You will need the original file to upload it again.</p></ConfirmDialog>}
+      <Modal open={uploadOpen} busy={uploading} hasUnsavedChanges={!!file || !!docTitle || !!expiresAt || kind !== (projectId != null ? 'lien_waiver' : 'coi')} onClose={closeUpload} title="Upload document">
         <form
           onSubmit={(e) => {
             e.preventDefault();
