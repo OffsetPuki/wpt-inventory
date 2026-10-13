@@ -145,7 +145,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="New lead" maxWidth="max-w-lg">
+    <Modal open={open} busy={create.isPending} onClose={onClose} title="New lead" maxWidth="max-w-lg">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -274,7 +274,7 @@ function CloseLeadModal({
   });
 
   return (
-    <Modal open onClose={onClose} title={to === "won" ? `Mark "${lead.name}" won` : `Mark "${lead.name}" lost`}>
+    <Modal open busy={close.isPending || revise.isPending} onClose={onClose} title={to === "won" ? `Mark "${lead.name}" won` : `Mark "${lead.name}" lost`}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -484,7 +484,7 @@ function LeadDetailModal({
   const hasLinkedRecords = !!(extras?.quotes.length || extras?.projects.length || extras?.invoices.length);
 
   return (
-    <Modal open onClose={onClose} title={lead.name} maxWidth="max-w-2xl" focusDialog hasUnsavedChanges={hasUnsavedChanges}
+    <Modal open busy={save.isPending || logActivity.isPending || del.isPending || convert.isPending} onClose={onClose} title={lead.name} maxWidth="max-w-2xl" focusDialog hasUnsavedChanges={hasUnsavedChanges}
       footer={<div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground" role="status">{hasFieldChanges ? 'Unsaved changes' : activityNote.trim() ? 'Activity note not logged' : 'Lead details'}</p>
         <div className="flex gap-2">

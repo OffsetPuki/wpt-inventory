@@ -7,6 +7,7 @@ export interface ToastItem {
   title?: string;
   description?: string;
   variant?: ToastVariant;
+  action?: { label: string; onClick: () => void };
 }
 
 type Listener = (toasts: ToastItem[]) => void;
@@ -26,12 +27,12 @@ export function dismissToast(id: number) {
 }
 
 export function toast(opts: Omit<ToastItem, "id">): number {
-  const repeated = toasts.find(t => t.title === opts.title && t.description === opts.description && t.variant === (opts.variant ?? 'default'));
+  const repeated = toasts.find(t => !t.action && !opts.action && t.title === opts.title && t.description === opts.description && t.variant === (opts.variant ?? 'default'));
   if (repeated) return repeated.id;
   const id = ++counter;
   toasts = [...toasts.slice(-2), { variant: "default", ...opts, id }];
   emit();
-  setTimeout(() => dismissToast(id), opts.variant === 'destructive' ? 10000 : 4500);
+  if (!opts.action) setTimeout(() => dismissToast(id), opts.variant === 'destructive' ? 10000 : 4500);
   return id;
 }
 

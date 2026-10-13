@@ -78,22 +78,18 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("textbox").first().fill("Unsaved UI lead");
-  let asked = false;
-  page.once("dialog", async (d) => {
-    asked = true;
-    await d.dismiss();
-  });
   await page.keyboard.press("Escape");
-  await expect(dialog).toBeVisible();
-  expect(asked).toBe(true);
+  await expect(page.getByRole('dialog',{name:'Discard changes?'})).toBeVisible();
+  await page.getByRole('button',{name:'Keep editing',exact:true}).click();
+  await expect(dialog.getByRole('textbox').first()).toHaveValue('Unsaved UI lead');
   for (let i = 0; i < 20; i++) await page.keyboard.press("Tab");
   expect(
     await page.evaluate(
       () => !!document.activeElement?.closest('[role="dialog"]'),
     ),
   ).toBe(true);
-  page.once("dialog", (d) => d.accept());
   await page.keyboard.press("Escape");
+  await page.getByRole('button',{name:'Discard changes',exact:true}).click();
   await expect(dialog).toHaveCount(0);
   await page.goto(app.base + "/#/crm/quotes");
   await expect(
@@ -144,8 +140,8 @@ test("Owner password setup, dashboard recovery, dialog access, drafts and task n
   expect(JSON.parse(issued.payload).notes).toBe(
     "Latest scope must be saved before issuing.",
   );
-  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Revise", exact: true }).click();
+  await page.getByRole('dialog').getByRole('button',{name:'Create revision',exact:true}).click();
   await expect(
     page.getByRole("button", { name: "Next: price", exact: false }),
   ).toBeVisible();

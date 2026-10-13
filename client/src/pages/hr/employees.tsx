@@ -114,6 +114,7 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
       open
       onClose={onClose}
       title={employee ? "Edit employee" : "New employee"}
+      busy={save.isPending}
       maxWidth="max-w-2xl"
     >
       <form

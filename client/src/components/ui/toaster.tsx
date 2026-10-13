@@ -44,6 +44,7 @@ export function Toaster() {
                   {t.description}
                 </p>
               )}
+              {t.action && <button type="button" className="mt-2 min-h-11 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent" onClick={() => { dismissToast(t.id); t.action?.onClick(); }}>{t.action.label}</button>}
             </div>
             <button
               onClick={() => dismissToast(t.id)}

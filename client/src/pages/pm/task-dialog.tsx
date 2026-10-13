@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { cn } from "@/lib/utils";
 import type { PublicUser } from "@shared/schema";
 import {
@@ -56,6 +57,7 @@ export function TaskDialog({
   const copyKey=useRef(crypto.randomUUID());
   const copy=useApiMutation({request:()=>({method:'POST',url:`/api/pm/tasks/${task!.id}/copy`,body:{projectId:Number(projectId),requestKey:copyKey.current}}),invalidate:[['pm-tasks']],successTitle:'Task copied to the selected job',errorTitle:'Could not copy task',onSuccess:()=>{copyKey.current=crypto.randomUUID();onClose();}});
   const [title, setTitle] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState("");
   const [status, setStatus] = useState<TaskStatus>("todo");
@@ -67,6 +69,7 @@ export function TaskDialog({
 
   useEffect(() => {
     if (!open) return;
+    setConfirmDelete(false);
     setTitle(task?.title ?? "");
     setDescription(task?.description ?? "");
     setProjectId(
@@ -148,10 +151,12 @@ export function TaskDialog({
 
   const del = useMutation({
     mutationFn: async () =>
-      (await apiRequest("DELETE", `/api/pm/tasks/${task!.id}`)).json(),
+      (await apiRequest("DELETE", `/api/pm/tasks/${task!.id}`, undefined, { expectedVersion: recovered.expectedVersion })).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pm-tasks"] });
       toast({ variant: "success", title: "Task deleted" });
+      recovered.clear();
+      setConfirmDelete(false);
       onClose();
     },
     onError: (e: any) =>
@@ -191,6 +196,7 @@ export function TaskDialog({
     <Modal
       preservesDraft
       open={open}
+      busy={save.isPending || del.isPending || copy.isPending || startTimer.isPending}
       onClose={onClose}
       title={task ? "Edit task" : "New task"}
       maxWidth="max-w-lg"
@@ -355,7 +361,7 @@ export function TaskDialog({
               </button>
               <button
                 type="button"
-                onClick={() => del.mutate()}
+                onClick={() => { del.reset(); setConfirmDelete(true); }}
                 disabled={del.isPending}
                 className="flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-red-600 hover:border-red-500 disabled:opacity-60 dark:text-red-400"
               >
@@ -374,6 +380,7 @@ export function TaskDialog({
           </button>
         </div></div>
       </form>
+      {confirmDelete && task && <ConfirmDialog title="Delete task?" confirmLabel="Delete task" busy={del.isPending} error={del.error?.message} onClose={() => setConfirmDelete(false)} onConfirm={() => del.mutate()}><p>Remove “{task.title}” from your tasks?</p><p>Previously recorded time stays in your records.</p></ConfirmDialog>}
     </Modal>
   );
 }

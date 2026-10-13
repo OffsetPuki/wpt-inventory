@@ -109,7 +109,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
   });
 
   return (
-    <Modal preservesDraft open onClose={onClose} title={client ? "Edit customer" : "New customer"} maxWidth="max-w-lg">
+    <Modal preservesDraft open busy={save.isPending} onClose={onClose} title={client ? "Edit customer" : "New customer"} maxWidth="max-w-lg">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -213,7 +213,7 @@ function ClientDetailModal({
   const { isElevated } = useAuth();
   const [note, setNote] = useState("");
 
-  const { data, isLoading } = useQuery<ClientDetail>({
+  const { data, isLoading, isError, error, refetch } = useQuery<ClientDetail>({
     queryKey: ["crm-client-detail", clientId],
     queryFn: async () => (await apiRequest("GET", `/api/crm/clients/${clientId}/detail`)).json(),
   });
@@ -246,8 +246,8 @@ function ClientDetailModal({
   const client = data?.client;
 
   return (
-    <Modal open onClose={onClose} title={client?.name ?? "Client"} maxWidth="max-w-2xl">
-      {isLoading || !data || !client ? (
+    <Modal open busy={logNote.isPending || del.isPending} hasUnsavedChanges={!!note.trim()} onClose={onClose} title={client?.name ?? "Client"} maxWidth="max-w-2xl">
+      {isError ? <RetryBlock query={{ error, refetch }} /> : isLoading || !data || !client ? (
         <div className="flex justify-center py-12 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>

@@ -195,7 +195,7 @@ function ExpenseFormModal({
   };
 
   return (
-    <Modal preservesDraft
+    <Modal preservesDraft busy={save.isPending || remove.isPending || uploading}
       open={open}
       onClose={onClose}
       title={expense ? "Edit expense" : "Add expense"}

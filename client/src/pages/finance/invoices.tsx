@@ -574,7 +574,7 @@ function InvoiceFormModal({
   });
 
   return (
-    <Modal preservesDraft
+    <Modal preservesDraft busy={save.isPending}
       open={open}
       onClose={onClose}
       title={invoice ? `Edit ${invoice.number}` : "New invoice"}

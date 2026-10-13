@@ -6,7 +6,7 @@ export default function ConfirmDialog({ title, children, confirmLabel, busy = fa
   title: string; children: ReactNode; confirmLabel: string; busy?: boolean;
   error?: string; onConfirm: () => void; onClose: () => void;
 }) {
-  return <Modal open title={title} onClose={() => { if (!busy) onClose(); }} focusDialog hasUnsavedChanges={false}
+  return <Modal open busy={busy} title={title} onClose={() => { if (!busy) onClose(); }} focusDialog hasUnsavedChanges={false}
     footer={<div className="flex justify-end gap-2"><button type="button" className={secondaryBtn} disabled={busy} onClick={onClose}>Cancel</button><button type="button" className={primaryBtn} disabled={busy} onClick={onConfirm}>{busy ? 'Please wait…' : confirmLabel}</button></div>}>
     <div className="space-y-3 text-sm leading-relaxed">{children}{error && <p role="alert" className="text-destructive">{error}</p>}</div>
   </Modal>;

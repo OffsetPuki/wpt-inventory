@@ -21,6 +21,7 @@ interface ModalProps {
   footer?: ReactNode;
   focusDialog?: boolean;
   hasUnsavedChanges?: boolean;
+  busy?: boolean;
 }
 
 export default function Modal({
@@ -33,6 +34,7 @@ export default function Modal({
   footer,
   focusDialog = true,
   hasUnsavedChanges,
+  busy = false,
 }: ModalProps) {
   const titleId = useId();
   const card = useRef<HTMLDivElement>(null);
@@ -47,7 +49,10 @@ export default function Modal({
   draftPreserved.current = preservesDraft;
   const close = useRef(onClose);
   close.current = onClose;
+  const working = useRef(busy);
+  working.current = busy;
   const dismiss = () => {
+    if (working.current) return;
     if (confirming.current) { setConfirmDiscard(false); return; }
     if (draftPreserved.current || !(unsaved.current ?? dirty.current)) close.current();
     else setConfirmDiscard(true);
@@ -64,7 +69,7 @@ export default function Modal({
         card.current?.querySelectorAll<HTMLElement>(
           'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
         ) ?? [],
-      ).filter((el) => el.getClientRects().length > 0);
+      ).filter((el) => !el.matches(':disabled') && el.getClientRects().length > 0);
     (
       (!focusDialog && card.current?.querySelector<HTMLElement>(
         "input:not([type=hidden]), select, textarea",
@@ -128,7 +133,10 @@ export default function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={busy || undefined}
         tabIndex={-1}
+        onClickCapture={event => { if (busy) { event.preventDefault(); event.stopPropagation(); } }}
+        onSubmitCapture={event => { if (busy) { event.preventDefault(); event.stopPropagation(); } }}
         onChangeCapture={() => {
           dirty.current = true;
         }}
@@ -140,6 +148,7 @@ export default function Modal({
           </h2>
           <button
             type="button"
+            disabled={busy}
             onClick={dismiss}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Close"
@@ -147,8 +156,8 @@ export default function Modal({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div hidden={confirmDiscard} className="suite-form min-h-0 overflow-y-auto overscroll-contain p-5">{children}</div>
-        {footer && <div hidden={confirmDiscard} className="shrink-0 border-t border-border px-5 py-3">{footer}</div>}
+        <div hidden={confirmDiscard} className="suite-form min-h-0 overflow-y-auto overscroll-contain p-5"><fieldset disabled={busy} className="min-w-0 border-0 p-0 m-0">{children}</fieldset></div>
+        {footer && <div hidden={confirmDiscard} className="shrink-0 border-t border-border px-5 py-3"><fieldset disabled={busy} className="min-w-0 border-0 p-0 m-0">{footer}</fieldset></div>}
         {confirmDiscard && <div className="p-5"><p className="mb-5 text-sm text-muted-foreground">Your latest edits have not been saved.</p><div className="flex flex-wrap justify-end gap-2"><button ref={keepEditing} type="button" className="min-h-11 rounded-xl bg-primary px-4 font-medium text-primary-foreground" onClick={() => setConfirmDiscard(false)}>Keep editing</button><button type="button" className="min-h-11 rounded-xl border border-border px-4 font-medium text-destructive" onClick={() => close.current()}>Discard changes</button></div></div>}
       </div>
     </div></DismissContext.Provider>, document.body

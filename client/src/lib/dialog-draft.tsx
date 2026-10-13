@@ -18,31 +18,36 @@ export function useDialogDraft(
     active = useRef(false),
     savedVersion = useRef(version);
   const [recovered, setRecovered] = useState(false),
-    [ready, setReady] = useState(false);
+    [session, setSession] = useState<{ key: string; version?: number } | null>(null);
+  const initialized = useRef<typeof session>(null);
   useEffect(() => {
     active.current = false;
-    setReady(false);
-    if (!open) return;
-    {
-      baseline.current = JSON.stringify(latest.current.values);
-      savedVersion.current = version;
-      try {
-        const saved = JSON.parse(sessionStorage.getItem(key) || "null");
-        if (saved?.values && typeof saved.values === "object") {
-          latest.current.restore(saved.values);
-          savedVersion.current = saved.version;
-          setRecovered(true);
-        } else setRecovered(false);
-      } catch {}
-      active.current = true;
-      setReady(true);
-    }
+    // Wait for the form's opening effect to populate its fields before taking
+    // a baseline. Otherwise an untouched saved record becomes a false draft.
+    setSession(open ? { key, version } : null);
+    setRecovered(false);
     return () => {
       active.current = false;
     };
   }, [key, open]);
   useLayoutEffect(() => {
-    if (!ready || !open || !active.current) return;
+    if (!open || !session || session.key !== key) return;
+    if (initialized.current !== session) {
+      initialized.current = session;
+      baseline.current = JSON.stringify(latest.current.values);
+      savedVersion.current = session.version;
+      active.current = true;
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+        if (saved?.values && typeof saved.values === 'object') {
+          latest.current.restore(saved.values);
+          savedVersion.current = saved.version;
+          setRecovered(true);
+          return;
+        }
+      } catch {}
+    }
+    if (!active.current) return;
     try {
       const value = JSON.stringify(values);
       if (value === baseline.current) sessionStorage.removeItem(key);
@@ -52,7 +57,7 @@ export function useDialogDraft(
           JSON.stringify({ values, version: savedVersion.current }),
         );
     } catch {}
-  }, [key, open, ready, values]);
+  }, [key, open, session, values]);
   const clear = () => {
     active.current = false;
     try {
@@ -68,7 +73,7 @@ export function useDialogDraft(
       setRecovered(false);
       active.current = true;
     },
-    expectedVersion: ready ? savedVersion.current : version,
+    expectedVersion: session?.key === key && initialized.current === session ? savedVersion.current : version,
     notice: recovered ? (
       <p role="status" className="rounded border p-3 text-sm">
         Recovered your unfinished draft.{" "}
