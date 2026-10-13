@@ -600,7 +600,7 @@ function InvoiceFormModal({
           }
           save.mutate();
         }}
-        className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
+        className="flex flex-col gap-4"
       >
         {/* Fill from the quote — the fast path. Everything below is still
             editable afterwards; this only saves the retyping, and it is what
@@ -954,10 +954,10 @@ function InvoiceFormModal({
           )}
         </div>
 
-        <button type="submit" disabled={save.isPending} className={primaryBtn}>
+        <div className="suite-modal-actions"><button type="submit" disabled={save.isPending} className={primaryBtn}>
           {save.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           {invoice ? "Save changes" : "Create invoice"}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );
@@ -1202,7 +1202,7 @@ function InvoiceDetailModal({
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
       ) : (
-        <div className="flex max-h-[72vh] flex-col gap-4 overflow-y-auto pr-1">
+        <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <StatusChip status={inv.status} />
             <span className="font-medium text-foreground">

@@ -197,10 +197,10 @@ function ReviewDialog({ open, onClose,item }: { open: boolean; onClose: () => vo
           <span className="text-sm font-medium text-foreground">Review text (optional)</span>
           <textarea className={textareaCls} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
-        <button type="submit" disabled={create.isPending} className={cn(primaryBtn, "mt-1")}>
+        <div className="suite-modal-actions"><button type="submit" disabled={create.isPending} className={cn(primaryBtn, "mt-1")}>
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           {item?"Save changes":"Log review"}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );

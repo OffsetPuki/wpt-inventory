@@ -156,7 +156,7 @@ function FloorDialog({
           </span>
         </label>
 
-        <div className="mt-1 flex items-center justify-between gap-3">
+        <div className="suite-modal-actions"><div className="mt-1 flex items-center justify-between gap-3">
           {editing ? (
             <button
               type="button"
@@ -180,7 +180,7 @@ function FloorDialog({
             {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {editing ? "Save" : "Add floor"}
           </button>
-        </div>
+        </div></div>
       </form>
     </Modal>
   );

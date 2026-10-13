@@ -125,7 +125,7 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
           }
           save.mutate();
         }}
-        className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
+        className="flex flex-col gap-4"
       >
         {employee && <details className="rounded-xl border border-border p-3 text-sm"><summary>Pay rate history</summary>{payHistory.map((r) => <p className="mt-2" key={r.effective_date}>{r.effective_date === '0001-01-01' ? 'Initial known rate' : r.effective_date}: {formatMoney(r.rate_cents)} / {r.pay_type === 'hourly' ? 'hour' : 'year'}</p>)}</details>}
         {employee && (parseMoney(payRate) !== employee.payRateCents || payType !== employee.payType) && <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">New rate effective date</span><input required type="date" max={todayYmd()} className={inputCls} value={payEffectiveDate} onChange={(e) => setPayEffectiveDate(e.target.value)} /><span className="text-xs text-muted-foreground">Earlier hours keep their dated rate. Closed payroll stays unchanged.</span></label>}
@@ -237,14 +237,14 @@ function EmployeeDialog({ employee, onClose }: { employee: Employee | null; onCl
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </label>
         </div>
-        <button
+        <div className="suite-modal-actions"><button
           type="submit"
           disabled={save.isPending}
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {save.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           {employee ? "Save changes" : "Add employee"}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );
@@ -310,7 +310,7 @@ function DetailModal({
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
       ) : (
-        <div className="max-h-[70vh] overflow-y-auto pr-1">
+        <div className="space-y-4">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <Chip tone={STATUS_CHIP[emp.status]}>
               {EMPLOYEE_STATUS_LABELS[emp.status]}

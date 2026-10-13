@@ -140,6 +140,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
             <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
           </label>
         </div>
+        <details className="rounded-xl border border-border p-4"><summary className="text-sm font-medium">Address, language & notes</summary><div className="mt-4 space-y-4">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Customer language</span>
           <select className={inputCls} value={preferredLanguage} onChange={e=>setPreferredLanguage(e.target.value as "en"|"es")}><option value="en">English</option><option value="es">Español</option></select>
@@ -166,14 +167,15 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
           <span className="text-sm font-medium text-foreground">Notes</span>
           <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
-        <button
+        </div></details>
+        <div className="suite-modal-actions"><button
           type="submit"
           disabled={save.isPending}
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {save.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           {client ? "Save changes" : "Create customer"}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );
@@ -250,7 +252,7 @@ function ClientDetailModal({
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
       ) : (
-        <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto pr-1">
+        <div className="flex flex-col gap-6">
           <div className="rounded-xl border border-border bg-background p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="grid flex-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">

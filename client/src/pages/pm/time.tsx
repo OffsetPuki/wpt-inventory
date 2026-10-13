@@ -278,14 +278,14 @@ function EntryDialog({
           />
           <span className="text-sm font-medium text-foreground">Billable</span>
         </label>
-        <button
+        <div className="suite-modal-actions"><button
           type="submit"
           disabled={save.isPending}
           className="mt-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {entry ? "Save changes" : "Add entry"}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );
@@ -305,7 +305,7 @@ function CorrectionDialog({ entry, onClose }: { entry: TimeRow; onClose: () => v
     <label className="block text-sm">Apply in payroll on<input required type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} /></label>
     <label className="block text-sm">Reason<textarea required minLength={3} maxLength={1000} className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
     {history.map((h,i) => <p className="text-xs" key={i}>{h.effective_date}: {h.minutes_delta > 0 ? '+' : ''}{h.minutes_delta} minutes — {h.reason}</p>)}
-    <button disabled={save.isPending} className="rounded-xl bg-primary px-4 py-3 text-primary-foreground">Record correction</button>
+    <div className="suite-modal-actions"><button disabled={save.isPending} className="rounded-xl bg-primary px-4 py-3 text-primary-foreground">Record correction</button></div>
   </form></Modal>;
 }
 

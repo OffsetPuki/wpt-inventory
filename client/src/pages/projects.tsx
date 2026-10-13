@@ -111,14 +111,14 @@ function NewProjectModal({ open, onClose }: { open: boolean; onClose: () => void
           <span className="text-sm font-medium text-foreground">Notes (optional)</span>
           <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
-        <button
+        <div className="suite-modal-actions"><button
           type="submit"
           disabled={create.isPending}
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
           Create job
-        </button>
+        </button></div>
       </form>
     </Modal>
   );

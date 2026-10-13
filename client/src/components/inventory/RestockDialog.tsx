@@ -162,9 +162,9 @@ export default function RestockDialog({
               {save.error.message}
             </p>
           )}
-          <button className={primaryBtn} disabled={save.isPending}>
+          <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending}>
             Create purchase order
-          </button>
+          </button></div>
         </form>
       )}
     </Modal>

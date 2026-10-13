@@ -214,7 +214,7 @@ function ExpenseFormModal({
           }
           save.mutate();
         }}
-        className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
+        className="flex flex-col gap-4"
       >
         {recovered.notice}
         {!!expense?.invoiceId && <ExpenseCorrection expense={expense} onDone={onClose}/>}
@@ -352,7 +352,7 @@ function ExpenseFormModal({
           />
         </div>
 
-        <div className="flex gap-2">
+        <div className="suite-modal-actions"><div className="flex gap-2">
           <button
             type="submit"
             disabled={save.isPending || uploading}
@@ -374,7 +374,7 @@ function ExpenseFormModal({
               Delete
             </button>
           )}
-        </div>
+        </div></div>
       </form>
     </Modal>
   );

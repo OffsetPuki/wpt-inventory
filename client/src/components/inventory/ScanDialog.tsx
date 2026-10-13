@@ -149,7 +149,7 @@ export default function ScanDialog({ onClose }: { onClose: () => void }) {
               placeholder="Example: 123"
             />
           </label>
-          <button className={secondaryBtn}>Open item</button>
+          <div className="suite-modal-actions"><button className={secondaryBtn}>Open item</button></div>
         </form>
         {error && (
           <p role="alert" className="text-sm text-destructive">

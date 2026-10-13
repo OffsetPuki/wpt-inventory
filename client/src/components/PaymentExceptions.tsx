@@ -103,12 +103,12 @@ export default function PaymentExceptions() {
                 onChange={(e) => setNote(e.target.value)}
               />
             </label>
-            <button
+            <div className="suite-modal-actions"><button
               disabled={resolve.isPending}
               className="rounded-xl bg-primary px-4 py-3 text-primary-foreground"
             >
               Record review and close
-            </button>
+            </button></div>
           </form>
         </Modal>
       )}

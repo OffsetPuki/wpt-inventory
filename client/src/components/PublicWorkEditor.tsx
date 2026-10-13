@@ -51,7 +51,7 @@ export default function PublicWorkEditor({item,project,onClose}: {item?:Portfoli
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/>I have approval to publish this photo and all the public details shown above.</label>
       {project && project.status!=='done' && <p className="text-sm">This job can be saved as a draft. Finish the job before publishing its completed work.</p>}
       {error && <p role="alert" className="text-destructive">{error}</p>}
-      <div className="flex flex-wrap gap-3"><button type="submit" className={secondaryBtn} disabled={!data.title.trim()||save.isPending||uploading}>{item?.published?'Save as private draft':'Save draft'}</button><button type="button" className={primaryBtn} disabled={!manager||!approved||!data.title.trim()||!data.photoUrl||save.isPending||uploading||(data.projectPage&&missing.length>0)||(!!project&&project.status!=='done')} onClick={()=>save.mutate(true)}>{item?.published?"Update published page":"Publish approved work"}</button></div>
+      <div className="suite-modal-actions"><div className="flex flex-wrap gap-3"><button type="submit" className={secondaryBtn} disabled={!data.title.trim()||save.isPending||uploading}>{item?.published?'Save as private draft':'Save draft'}</button><button type="button" className={primaryBtn} disabled={!manager||!approved||!data.title.trim()||!data.photoUrl||save.isPending||uploading||(data.projectPage&&missing.length>0)||(!!project&&project.status!=='done')} onClick={()=>save.mutate(true)}>{item?.published?"Update published page":"Publish approved work"}</button></div></div>
     </form>
   </Modal>;
 }

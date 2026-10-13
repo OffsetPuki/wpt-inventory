@@ -291,12 +291,12 @@ export default function ReceiveDelivery({
               {save.error.message}
             </p>
           )}
-          <button
+          <div className="suite-modal-actions"><button
             className={primaryBtn}
             disabled={save.isPending || !Object.keys(drafts).length}
           >
             Record delivery
-          </button>
+          </button></div>
         </form>
       )}
     </Modal>

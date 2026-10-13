@@ -196,12 +196,12 @@ export default function SuiteHealth() {
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
-            <button
+            <div className="suite-modal-actions"><button
               className="rounded border px-4 py-2"
               disabled={resolve.isPending}
             >
               Record review
-            </button>
+            </button></div>
           </form>
         </Modal>
       )}

@@ -8,6 +8,8 @@ import { typeLabel } from '../data/configurators.js';
 import { fmtMoney } from '../lib/format.js';
 import ShareQuote from './ShareQuote.jsx';
 import { WIN_LOSS_REASON_LABELS } from '@shared/crm-schema';
+import { useAuth } from '@/lib/auth';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 function fmtDate(iso) {
   const d = new Date(iso);
@@ -127,6 +129,10 @@ function BuyList({ ids, onClose }) {
  */
 export default function SavedQuotes({ onOpen, onDuplicate }) {
   const business=useBusiness();
+  const { isElevated } = useAuth();
+  const [trash, setTrash] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+  const [revising, setRevising] = useState(null);
   const qc = useQueryClient();
   // Which row has its send-to-customer panel open (one at a time).
   const [shareId, setShareId] = useState(null);
@@ -138,8 +144,8 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
   const [filters, setFilters] = useState({q:'',trade:'',status:'',page:1});
   useEffect(() => { const timer = setTimeout(() => setFilters(f => ({...f,q:search.trim(),page:1})), 300); return () => clearTimeout(timer); }, [search]);
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['quotes', filters,business],
-    queryFn: async () => (await apiRequest('GET', '/api/quotes?' + new URLSearchParams({...filters,site:business,pageSize:20}))).json(),
+    queryKey: ['quotes', filters,business,trash],
+    queryFn: async () => (await apiRequest('GET', '/api/quotes?' + new URLSearchParams({...filters,site:business,pageSize:20,deleted:trash?'1':'0'}))).json(),
   });
   useEffect(()=>{setFilters(f=>({...f,page:1}));setChecked(new Set());},[business]);
   const rows = data?.rows || [];
@@ -180,7 +186,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
   });
   const reviseQuote = useMutation({
     mutationFn: async (id) => (await apiRequest('POST', `/api/quotes/${id}/revision`)).json(),
-    onSuccess: (row) => { qc.invalidateQueries({ queryKey: ['quotes'] }); openQuote.mutate({ id: row.id }); },
+    onSuccess: (row) => { setRevising(null); qc.invalidateQueries({ queryKey: ['quotes'] }); openQuote.mutate({ id: row.id }); },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not create revision', description: e?.message }),
   });
   const deleteQuote = useMutation({
@@ -188,9 +194,18 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
     onSuccess: (_result, id) => {
       setChecked(prev => { const next = new Set(prev); next.delete(id); return next; });
       qc.invalidateQueries({ queryKey: ['quotes'] });
-      toast({ variant: 'success', title: 'Quote deleted' });
+      qc.invalidateQueries({ queryKey: ['crm-lead-detail'] });
+      setDeleting(null);
+      setShareId(null);
+      setShowBuyList(false);
+      toast({ variant: 'success', title: 'Moved to Trash', description: 'You can restore this quote from Trash.' });
     },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not delete quote', description: e?.message }),
+  });
+  const restoreQuote = useMutation({
+    mutationFn: async id => apiRequest('POST', `/api/quotes/${id}/restore`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['quotes'] }); qc.invalidateQueries({ queryKey: ['crm-lead-detail'] }); toast({ variant: 'success', title: 'Quote restored' }); },
+    onError: e => toast({ variant: 'destructive', title: 'Could not restore quote', description: e?.message }),
   });
 
   return (
@@ -198,7 +213,9 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
       <div className="container">
         <div className="page-head">
           <h1 className="display">Saved quotes</h1>
+          {isElevated && <div className="flex gap-2" role="group" aria-label="Quote list"><button className="btn ghost sq-btn" aria-pressed={!trash} onClick={() => { setTrash(false); setFilter('page',1); }}>Active quotes</button><button className="btn ghost sq-btn" aria-pressed={trash} onClick={() => { setTrash(true); setFilter('page',1); setChecked(new Set()); setShowBuyList(false); }}>Trash</button></div>}
         </div>
+        {trash && <p className="hint">Restore a quote to put it back in Saved quotes. Its original status, prices, and expiration date stay the same.</p>}
         <div className="quote-filters">
           <label className="field"><span>Search quotes</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Customer, company, quote or design code" /></label>
           <label className="field"><span>Trade</span><select aria-label="Trade" value={filters.trade} onChange={e => setFilter('trade', e.target.value)}><option value="">All trades</option><option value="metals">Metals</option><option value="concrete">Concrete</option><option value="insulation">Insulation</option></select></label>
@@ -210,7 +227,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
 
         {!isLoading && !error && rows.length === 0 && (
           <p className="hint">
-            No quotes match. Clear the filters or start a new quote; drafts save automatically.
+            {trash ? 'No deleted quotes match these filters.' : 'No quotes match. Clear the filters or start a new quote; drafts save automatically.'}
           </p>
         )}
 
@@ -227,7 +244,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
               {rows.map((q) => (
                 <div className="line" key={q.id}>
                   <div className="line-name">
-                    <input
+                    {!trash && <input
                       type="checkbox"
                       checked={checked.has(q.id)}
                       onChange={() => toggleChecked(q.id)}
@@ -235,7 +252,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                       disabled={!checked.has(q.id) && checked.size >= 50}
                       title="Add to the combined buy list"
                       style={{ marginRight: 8 }}
-                    />
+                    />}
                     <span className="sq-number">{q.number}</span>
                     <span className={`sq-status ${q.status || 'draft'}`}>{STATUS_LABEL[q.status] || 'Draft'}</span>
                     {/* Did they open the link? Stamped by the website's quote page. */}
@@ -267,11 +284,12 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                   </div>
                   <div className="line-cost">${fmtMoney((q.totalCents || 0) / 100)}</div>
                   <div className="line-controls">
+                    {trash ? <><span className="sq-meta">Deleted {fmtDate(q.deletedAt)}</span><button className="btn ghost sq-btn" disabled={restoreQuote.isPending} onClick={() => restoreQuote.mutate(q.id)}>Restore</button></> : <>
                     <DocumentActivityButton kind="quote" id={q.id} className="btn ghost sq-btn"/>
                     <button className="btn ghost sq-btn" onClick={() => q.status === 'draft' ? openQuote.mutate({ id: q.id }) : viewQuote.mutate(q.id)} disabled={openQuote.isPending || viewQuote.isPending}>
                       {q.status === 'draft' ? 'Edit draft' : 'View issued quote'}
                     </button>
-                    {['sent', 'declined'].includes(q.status) && <button className="btn ghost sq-btn" disabled={reviseQuote.isPending} onClick={() => { if (window.confirm('Create a revised draft? The old offer will close and its issued copy will stay unchanged.')) reviseQuote.mutate(q.id); }}>Revise</button>}
+                    {['sent', 'declined'].includes(q.status) && <button className="btn ghost sq-btn" disabled={reviseQuote.isPending} onClick={() => { reviseQuote.reset(); setRevising(q); }}>Revise</button>}
                     {q.leadId && <a className="btn ghost sq-btn" href={`/#/crm/leads?lead=${q.leadId}`}>Open job</a>}
                     {onDuplicate && (
                       <button
@@ -286,13 +304,14 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                     <button className="btn ghost sq-btn" onClick={() => setShareId(shareId === q.id ? null : q.id)}>
                       {shareId === q.id ? 'Close' : 'Send'}
                     </button>
-                    {q.status === 'draft' && <button
+                    {isElevated && <button
                       className="btn ghost sq-btn"
-                      onClick={() => { if (window.confirm(`Delete quote ${q.number}?`)) deleteQuote.mutate(q.id); }}
+                      onClick={() => { deleteQuote.reset(); setDeleting(q); }}
                       disabled={deleteQuote.isPending}
                     >
                       Delete
                     </button>}
+                    </>}
                   </div>
                   {shareId === q.id && <ShareQuote quoteId={q.id} />}
                 </div>
@@ -301,6 +320,8 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
           </div>
         )}
         {data && data.total > 0 && <nav className="quote-pagination" aria-label="Quote pages"><button className="btn ghost sq-btn" disabled={data.page <= 1} onClick={() => setFilters(f => ({...f,page:data.page-1}))}>Previous</button><span>Page {data.page} of {Math.max(1,Math.ceil(data.total/data.pageSize))}</span><button className="btn ghost sq-btn" disabled={data.page * data.pageSize >= data.total} onClick={() => setFilters(f => ({...f,page:data.page+1}))}>Next</button></nav>}
+        {deleting && <ConfirmDialog title={`Delete ${deleting.number}?`} confirmLabel="Move to Trash" busy={deleteQuote.isPending} error={deleteQuote.error?.message} onClose={() => setDeleting(null)} onConfirm={() => deleteQuote.mutate(deleting.id)}><p>You can restore this quote from Trash. Its customer link will stop working until you restore it.</p><p>Linked jobs, invoices, and payments will stay in your records.</p></ConfirmDialog>}
+        {revising && <ConfirmDialog title={`Revise ${revising.number}?`} confirmLabel="Create revision" busy={reviseQuote.isPending} error={reviseQuote.error?.message} onClose={() => setRevising(null)} onConfirm={() => reviseQuote.mutate(revising.id)}><p>The old offer will close. A new draft will open for you to review before sending.</p></ConfirmDialog>}
       </div>
     </div>
   );

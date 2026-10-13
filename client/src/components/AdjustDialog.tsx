@@ -136,9 +136,9 @@ export default function AdjustDialog({
             </button>
           </div>
         )}
-        <button className={primaryBtn} disabled={save.isPending}>
+        <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending}>
           Record count
-        </button>
+        </button></div>
       </form>
     </Modal>
   );

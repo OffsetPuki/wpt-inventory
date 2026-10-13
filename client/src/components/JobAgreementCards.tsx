@@ -239,10 +239,10 @@ export function ChangeOrdersCard({ projectId }: { projectId: number }) {
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <button type="submit" disabled={create.isPending} className={primaryBtn}>
+          <div className="suite-modal-actions"><button type="submit" disabled={create.isPending} className={primaryBtn}>
             {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
             Add change order
-          </button>
+          </button></div>
         </form>
       </Modal>
     </div>

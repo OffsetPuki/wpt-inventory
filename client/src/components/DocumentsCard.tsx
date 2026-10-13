@@ -243,10 +243,10 @@ export default function DocumentsCard({
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
           </label>
-          <button type="submit" disabled={uploading} className={primaryBtn}>
+          <div className="suite-modal-actions"><button type="submit" disabled={uploading} className={primaryBtn}>
             {uploading && <Loader2 className="h-5 w-5 animate-spin" />}
             Upload
-          </button>
+          </button></div>
         </form>
       </Modal>
     </div>

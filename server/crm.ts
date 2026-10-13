@@ -2,6 +2,7 @@ import {crmStats,crmReports} from './crm-reporting';
 import { recordHumanContact } from './lead-experience';
 import { listWindow } from './pagination';
 import { acceptQuote } from "./quote-lifecycle";
+import { isQuoteExpired } from './quote-policy';
 import type { Express } from "express";
 import {
   eq, and, or, desc, isNull, sql, like, gte, lte, type SQL,
@@ -715,7 +716,8 @@ export function registerCrmRoutes(app: Express): void {
         ORDER BY created_at DESC, id DESC LIMIT 1
       `).get(id) ?? null;
     } catch { /* website module absent */ }
-    const quotes = sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents FROM quotes WHERE lead_id = ? OR design_ref IN (SELECT ref FROM web_designs WHERE lead_id = ?) ORDER BY id DESC`).all(id, id);
+    const quotes = (sqlite.prepare(`SELECT id, number, status, payload, total_cents AS totalCents FROM quotes WHERE deleted_at IS NULL AND (lead_id = ? OR design_ref IN (SELECT ref FROM web_designs WHERE lead_id = ?)) ORDER BY id DESC`).all(id, id) as any[])
+      .map(({ payload, ...quote }) => ({ ...quote, expired: isQuoteExpired({ ...quote, payload }) }));
     const jobs = sqlite.prepare(`SELECT DISTINCT p.id, p.name FROM projects p JOIN fin_invoices i ON i.project_id = p.id WHERE i.lead_id = ? AND p.deleted_at IS NULL`).all(id);
     const invoices = isElevated(req) ? sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents, paid_cents AS paidCents FROM fin_invoices WHERE lead_id = ? AND deleted_at IS NULL ORDER BY id DESC`).all(id) : [];
     res.json({ photos: lead.photos, design, quotes, projects: jobs, invoices });

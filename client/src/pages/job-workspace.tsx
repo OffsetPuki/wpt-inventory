@@ -557,9 +557,9 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
             </button>
           </p>
         )}
-        <button className={primaryBtn} disabled={save.isPending || stale}>
+        <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending || stale}>
           Save job settings
-        </button>
+        </button></div>
       </form>
     </Modal>
   );
@@ -756,12 +756,12 @@ function JobOrder({ data, close }: { data: any; close: () => void }) {
           </div>
         ))}
         {!form.lines.length && <p>No linked shortages to order.</p>}
-        <button
+        <div className="suite-modal-actions"><button
           className={primaryBtn}
           disabled={save.isPending || !form.lines.length}
         >
           Create purchase order
-        </button>
+        </button></div>
       </form>
     </Modal>
   );

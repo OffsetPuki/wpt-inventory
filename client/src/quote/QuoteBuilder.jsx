@@ -633,7 +633,7 @@ export default function QuoteBuilder({ initialSettings }) {
           <button type="button" className="btn ghost" aria-pressed={view==='costing'} onClick={()=>setView('costing')}>Costing</button>
           <button type="button" className="btn ghost" aria-pressed={view==='pricebook'} onClick={()=>setView('pricebook')}>Price book</button>
         </nav>
-        {session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
+        {activeView !== 'saved' && session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
           <div className="container draft-recovery no-print" data-draft-recovery role="alert">
             <strong>{draft.error?.status === 404 ? 'This saved quote is no longer available' : 'This quote has changed elsewhere'}</strong>
             <p>{draft.error?.status === 404 ? 'To start fresh, choose a quote type below. Or keep the old draft’s details with the button here.' : 'Your edits are still here. Save them as a new quote to continue, keeping your customer details, design and pricing. The original quote stays unchanged.'}</p>

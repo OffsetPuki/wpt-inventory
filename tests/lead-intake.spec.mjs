@@ -31,8 +31,11 @@ test('Website request opens from Today beyond the list page; contact and qualifi
   const second=gallery.getByRole('img',{name:'Request photo 2',exact:true});await second.scrollIntoViewIfNeeded();await expect.poll(()=>second.evaluate(img=>img.complete&&img.naturalWidth>0)).toBe(true);
   await expect(dialog.getByText('Weekdays after 3 pm',{exact:true})).toBeVisible();await expect(dialog.getByText('Synthetic facility',{exact:true})).toBeVisible();
   fs.mkdirSync('test-results',{recursive:true});await page.screenshot({animations:'disabled',path:'test-results/lead-context-mobile.png'});
+  await dialog.getByRole('tab',{name:'Details',exact:true}).click();
+  await dialog.getByText('Site visit & request details',{exact:true}).click();
   await dialog.getByLabel('Qualified project',{exact:true}).check();
   await expect.poll(()=>app.sqlite.prepare('SELECT qualified_at FROM crm_lead_intake WHERE lead_id=?').get(input.data.id)?.qualified_at).toBeTruthy();
+  await dialog.getByRole('tab',{name:'Activity',exact:true}).click();
   await dialog.getByRole('button',{name:'Log email',exact:true}).click();
   await expect.poll(()=>app.sqlite.prepare('SELECT first_contact_at FROM crm_lead_intake WHERE lead_id=?').get(input.data.id)?.first_contact_at).toBeTruthy();
   fs.mkdirSync('test-results',{recursive:true});await page.screenshot({animations:'disabled',path:'test-results/lead-request-mobile.png'});

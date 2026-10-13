@@ -221,14 +221,14 @@ export default function CheckDialog({
             Could not check reservations and returns. Close and try again.
           </p>
         )}
-        <button
+        <div className="suite-modal-actions"><button
           className={`${primaryBtn} w-full`}
           disabled={
             save.isPending || availability.isLoading || availability.isError
           }
         >
           {save.isPending ? "Saving…" : title}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );

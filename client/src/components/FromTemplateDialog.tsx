@@ -183,14 +183,14 @@ export default function FromTemplateDialog({ open, onClose, onCreated }: Props) 
             />
           </label>
 
-          <button
+          <div className="suite-modal-actions"><button
             type="submit"
             disabled={create.isPending}
             className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
             Create project & build checklist
-          </button>
+          </button></div>
         </form>
       )}
     </Modal>

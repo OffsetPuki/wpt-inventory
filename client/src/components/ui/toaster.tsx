@@ -47,7 +47,7 @@ export function Toaster() {
             </div>
             <button
               onClick={() => dismissToast(t.id)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               aria-label="Dismiss"
             >
               <X className="h-4 w-4" />

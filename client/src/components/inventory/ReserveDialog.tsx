@@ -137,9 +137,9 @@ export default function ReserveDialog({
             {save.error?.message || "Could not load jobs. Try again."}
           </p>
         )}
-        <button className={primaryBtn} disabled={save.isPending}>
+        <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending}>
           {legacy ? "Save reviewed reservation" : "Reserve stock"}
-        </button>
+        </button></div>
       </form>
     </Modal>
   );

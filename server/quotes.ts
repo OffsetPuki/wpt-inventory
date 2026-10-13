@@ -14,7 +14,7 @@ import { jobStockCost } from './stock-cost';
 import { communicationContext, localizedLink } from "./communication";
 import type { Express } from "express";
 import crypto from "crypto";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
 import { requireAuth, requireElevated } from "./auth";
@@ -512,7 +512,9 @@ export function registerQuoteRoutes(app: Express): void {
     const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
     const status = typeof req.query.status === 'string' ? req.query.status : '';
     const trade = typeof req.query.trade === 'string' ? req.query.trade : '';
-    const conditions = [isNull(quotes.deletedAt)];
+    const trash = req.query.deleted === '1';
+    if (trash && !['owner', 'manager'].includes(req.user?.role || '')) return res.status(403).json({ message: 'Only owners and managers can view quote trash.' });
+    const conditions = [trash ? isNotNull(quotes.deletedAt) : isNull(quotes.deletedAt)];
     const site=String(req.query.site||'all');
     if(['metals','concrete','insulation','trades'].includes(site))conditions.push(sql`CASE WHEN json_valid(${quotes.payload}) THEN coalesce(json_extract(${quotes.payload}, '$.business'),CASE ${quotes.type} WHEN 'concrete' THEN 'concrete' WHEN 'insulation' THEN 'insulation' ELSE 'metals' END) ELSE 'metals' END = ${site}`);
     if (req.query.projectId) conditions.push(sql`${quotes.id} IN (SELECT quote_id FROM projects WHERE id=${Number(req.query.projectId)} AND deleted_at IS NULL)`);
@@ -553,6 +555,7 @@ export function registerQuoteRoutes(app: Express): void {
         fu2SentAt: quotes.fu2SentAt,
         createdAt: quotes.createdAt,
         updatedAt: quotes.updatedAt,
+        deletedAt: quotes.deletedAt,
       }).from(quotes)
         .where(where)
         .orderBy(desc(quotes.createdAt), desc(quotes.id))
@@ -675,18 +678,28 @@ export function registerQuoteRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/quotes/:id", requireAuth, (req, res) => {
+  app.delete("/api/quotes/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = db.select().from(quotes)
       .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
       .get();
     if (!target) return res.status(404).json({ message: "Quote not found" });
-    if (target.status !== "draft") return res.status(409).json({ message: "Issued quotes are preserved. Create a revision or record a decline instead." });
     db.update(quotes).set({ deletedAt: Date.now() }).where(eq(quotes.id, id)).run();
     audit(req, "quote.delete", {
       targetType: "quote", targetId: id, targetName: target.number,
     });
     res.status(204).end();
+  });
+
+  app.post("/api/quotes/:id/restore", requireElevated, (req, res) => {
+    const id = pid(req.params.id);
+    const target = db.select().from(quotes).where(eq(quotes.id, id)).get();
+    if (!target) return res.status(404).json({ message: 'Quote not found' });
+    if (target.deletedAt != null) {
+      db.update(quotes).set({ deletedAt: null }).where(eq(quotes.id, id)).run();
+      audit(req, 'quote.restore', { targetType: 'quote', targetId: id, targetName: target.number });
+    }
+    res.json({ id, number: target.number });
   });
 
   // ─── Share (customer-facing link) ─────────────────────────────────────────

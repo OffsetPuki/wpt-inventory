@@ -88,8 +88,12 @@ try {
   );
   assert.equal(
     (await api(`/api/quotes/${qa.id}`, "DELETE", undefined, owner)).status,
-    409,
+    204,
   );
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM fin_invoices WHERE quote_id=?').get(qa.id).n, 1);
+  const conflicting = await quote(a.id);
+  assert.equal((await api(`/api/quotes/${conflicting.id}/accept`, 'POST', {}, owner)).status, 409, 'Trashing an accepted quote must not allow duplicate booking');
+  assert.equal((await api(`/api/quotes/${qa.id}/restore`, 'POST', {}, owner)).status, 200);
   const c = await lead("Alternatives");
   const qc = await quote(c.id),
     qd = await quote(c.id, 15000);

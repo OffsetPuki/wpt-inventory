@@ -4,7 +4,7 @@ import {apiRequest} from '@/lib/queryClient';
 import {Link} from 'wouter';
 import {RetryBlock} from './RetryBlock';
 type Intake={context:{requestedTrades?:string[];fulfillmentTeam?:string;contact?:string;bestTime?:string;page?:string;consent?:string;qualification?:Record<string,string>};first_contact_at?:number;qualified_at?:number;survey_at?:number};
-export function LeadIntake({id}:{id:number}){
+export function LeadIntake({id,mode='summary'}:{id:number;mode?:'summary'|'manage'}){
  const query=useQuery<Intake>({queryKey:['crm-lead-intake',id],queryFn:async()=>(await apiRequest('GET',`/api/crm/leads/${id}/intake`)).json()});
  const client=useQueryClient();const [error,setError]=useState(''),[pending,setPending]=useState(false),[pendingQualified,setPendingQualified]=useState<boolean|undefined>();
  const save=async(body:object)=>{setPending(true);setError('');try{await apiRequest('PATCH',`/api/crm/leads/${id}/intake`,body);await client.invalidateQueries({queryKey:['crm-lead-intake',id]});await client.invalidateQueries({queryKey:['crm-lead-funnel']});}catch(e){setError((e as Error).message);}finally{setPending(false);}};
@@ -12,11 +12,17 @@ export function LeadIntake({id}:{id:number}){
  if(!query.data)return <p role="status">Loading request details…</p>;
  const {context,qualified_at,survey_at}=query.data;
  const labels:Record<string,string>={projectKind:'Work type',removal:'Concrete removal',dimensions:'Approximate size',budget:'Budget',facilityCompany:'Company / facility',deadline:'Project deadline'};
- return <section className="rounded-xl border p-4 space-y-3"><h3 className="font-semibold">Customer request</h3>
-  <dl className="grid grid-cols-2 gap-2 text-sm">{Object.entries({'Requested trades':context.requestedTrades?.join(', '),'Fulfillment team':context.fulfillmentTeam,Contact:context.contact,'Requested time':context.bestTime,'Entry page':context.page,'Call/text consent':context.consent==='yes'?'Agreed':'Not provided',...Object.fromEntries(Object.entries(context.qualification||{}).filter(([,v])=>v).map(([k,v])=>[labels[k]||k,v]))}).filter(([,v])=>v).map(([k,v])=><div key={k} className="min-w-0"><dt className="text-muted-foreground">{k}</dt><dd className="break-words">{v}</dd></div>)}</dl>
-  <p className="text-xs text-muted-foreground">Requested times need confirmation. Use the activity log below after speaking with the customer.</p>
+ const fields=mode==='summary'?{'Preferred contact':context.contact,'Requested time':context.bestTime,...Object.fromEntries(Object.entries(context.qualification||{}).filter(([,v])=>v).map(([k,v])=>[labels[k]||k,v]))}:{'Requested trades':context.requestedTrades?.join(', '),'Fulfillment team':context.fulfillmentTeam,'Entry page':context.page,'Call/text consent':context.consent==='yes'?'Agreed':'Not provided'};
+ const entries=Object.entries(fields).filter(([,value])=>value);
+ if(mode==='summary'&&!entries.length)return null;
+ return <section aria-label={mode==='summary'?'Request information':'Site visit and qualification'} className="space-y-3">
+  <dl className="grid gap-3 text-sm sm:grid-cols-2">{entries.map(([label,value])=><div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="break-words">{value}</dd></div>)}</dl>
+  {mode==='summary'&&context.bestTime&&<p className="text-xs text-muted-foreground">Confirm the requested time with the customer.</p>}
+  {mode==='manage'&&<>
   <label className="flex items-center gap-2"><input type="checkbox" checked={pendingQualified ?? !!qualified_at} disabled={pending} onChange={e=>{const qualified=e.target.checked;setPendingQualified(qualified);void save({qualified}).finally(()=>setPendingQualified(undefined));}}/> Qualified project</label>
   <label className="block text-sm">Confirmed site visit<input key={survey_at||'none'} type="datetime-local" className="block border rounded p-2 mt-1 bg-background" disabled={pending} defaultValue={survey_at?new Date(survey_at-new Date(survey_at).getTimezoneOffset()*60000).toISOString().slice(0,16):''} onBlur={e=>{const value=e.target.value?new Date(e.target.value).getTime():null;if(value!==(survey_at||null))void save({surveyAt:value});}}/></label>
+  <p className="text-xs text-muted-foreground">Qualification and site visit changes save automatically.</p>
+  </>}
   {error&&<p role="alert" className="text-destructive">{error}</p>}
  </section>;
 }

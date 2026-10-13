@@ -506,7 +506,7 @@ function ContractDialog({
           }
           save.mutate();
         }}
-        className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1"
+        className="flex flex-col gap-4"
       >
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">Title</span>
@@ -724,7 +724,7 @@ function ContractDialog({
           </span>
         </div>
 
-        <div className="mt-1 flex items-center gap-2">
+        <div className="suite-modal-actions"><div className="mt-1 flex items-center gap-2">
           {contract && (
             <button
               type="button"
@@ -746,7 +746,7 @@ function ContractDialog({
             {(save.isPending || uploading) && <Loader2 className="h-4 w-4 animate-spin" />}
             {uploading ? "Uploading…" : contract ? "Save changes" : "Create contract"}
           </button>
-        </div>
+        </div></div>
       </form>
     </Modal>
   );
@@ -824,7 +824,7 @@ function ContractViewModal({
       maxWidth="max-w-2xl"
     >
       {contract && (
-        <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
+        <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Chip tone={KIND_TONE[contract.kind] ?? "zinc"}>{CONTRACT_KIND_LABELS[contract.kind]}</Chip>
             <Chip tone={STATUS_TONE[contract.status]}>{CONTRACT_STATUS_LABELS[contract.status]}</Chip>

@@ -101,9 +101,10 @@ export function acceptQuote(
       leadId = lead.id;
     }
     if (!alreadyAccepted) {
+      // Trash hides a quote; its accepted job and invoice still exist.
       const other = sqlite
         .prepare(
-          "SELECT number FROM quotes WHERE lead_id=? AND status='accepted' AND id!=? AND deleted_at IS NULL",
+          "SELECT number FROM quotes WHERE lead_id=? AND status='accepted' AND id!=?",
         )
         .get(leadId, id) as any;
       if (other)

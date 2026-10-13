@@ -185,9 +185,9 @@ export function ExtraBilling({
               Deductive extras must go on an existing draft. Check tax and
               billing terms before issuing the invoice.
             </p>
-            <button className={primaryBtn} disabled={save.isPending}>
+            <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending}>
               Add approved extra
-            </button>
+            </button></div>
           </form>
         </Modal>
       )}
@@ -313,9 +313,9 @@ export function CostReviews() {
               Confirm units before saving; a price per foot may differ from a
               price per piece.
             </p>
-            <button className={primaryBtn} disabled={save.isPending || !field}>
+            <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending || !field}>
               Approve price update
-            </button>
+            </button></div>
           </form>
         </Modal>
       )}

@@ -337,7 +337,7 @@ export function TaskDialog({
           </label>
         </div>
 
-        <div className="mt-1 flex flex-wrap items-center gap-2">
+        <div className="suite-modal-actions"><div className="mt-1 flex flex-wrap items-center gap-2">
           {task && (
             <>
               <button
@@ -372,7 +372,7 @@ export function TaskDialog({
             {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {task ? "Save changes" : "Create task"}
           </button>
-        </div>
+        </div></div>
       </form>
     </Modal>
   );

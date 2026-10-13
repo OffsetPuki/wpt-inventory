@@ -79,7 +79,7 @@ export default function UsersPage() {
         <form className="space-y-4" onSubmit={async e=>{e.preventDefault();try{await apiRequest("POST",`/api/users/${resetUser.id}/reset-credential`,{credential});setResetUser(null);setCredential("");toast({title:"Credential reset. Existing sessions signed out."});if(resetUser.id===me?.id)location.reload();}catch(error:any){toast({variant:"destructive",title:"Could not reset",description:error.message});}}}>
           <p className="text-sm">This signs out existing sessions and preserves their work history.</p>
           <label className="block">{resetUser.role==="worker"?"New PIN (4–12 digits)":"New password (12+ characters)"}<input required className={inputCls} type="password" autoComplete="new-password" value={credential} onChange={e=>setCredential(e.target.value)}/></label>
-          <button className="h-11 rounded-lg bg-primary px-4 text-primary-foreground">Reset and sign out sessions</button>
+          <div className="suite-modal-actions"><button className="h-11 rounded-lg bg-primary px-4 text-primary-foreground">Reset and sign out sessions</button></div>
         </form>
       </Modal>}
 
