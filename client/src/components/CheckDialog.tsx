@@ -13,6 +13,8 @@ import { toast } from "@/components/ui/toaster";
 import type { Item, Project } from "@shared/schema";
 import type { InventoryLoan, InventoryReservation } from "@shared/inventory";
 import Modal from "./Modal";
+import { RetryBlock } from "./RetryBlock";
+type Availability = { loans: InventoryLoan[]; reservations: InventoryReservation[] };
 export default function CheckDialog({
   item,
   mode,
@@ -26,8 +28,11 @@ export default function CheckDialog({
 }) {
   const qc = useQueryClient(),
     key = useRef(crypto.randomUUID());
+  const [reviewedItem, setReviewedItem] = useState(item);
+  const [reviewedAvailability, setReviewedAvailability] = useState<Availability | null>(null);
+  const [selectedJob, setSelectedJob] = useState<Project | null>(null);
+  const projectId = selectedJob ? String(selectedJob.id) : '';
   const [quantity, setQuantity] = useState("1"),
-    [projectId, setProjectId] = useState(""),
     [loanId, setLoanId] = useState(""),
     [notes, setNotes] = useState(""),
     [search, setSearch] = useState(""),
@@ -46,7 +51,11 @@ export default function CheckDialog({
   useEffect(() => {
     if (open) {
       setQuantity("1");
-      setProjectId("");
+      setSelectedJob(null);
+      setSearch("");
+      setJobSearch("");
+      setReviewedItem(item);
+      setReviewedAvailability(null);
       setLoanId("");
       setNotes("");
       key.current = crypto.randomUUID();
@@ -69,19 +78,26 @@ export default function CheckDialog({
         )
       ).json(),
   });
-  const availability = useQuery<{
-    loans: InventoryLoan[];
-    reservations: InventoryReservation[];
-  }>({
+  const availability = useQuery<Availability>({
     queryKey: ["inventory", "availability", item.id],
     enabled: open,
+    refetchOnMount: 'always',
     queryFn: async () =>
       (await apiRequest("GET", `/api/items/${item.id}/availability`)).json(),
   });
-  const own = (availability.data?.reservations || [])
+  // Keep the reviewed limits until this operation is confirmed. A response can
+  // be lost after the stock has changed; its original request key still retries safely.
+  useEffect(() => {
+    if (open && !reviewedAvailability && availability.isSuccess && !availability.isFetching)
+      setReviewedAvailability(availability.data);
+  }, [open, reviewedAvailability, availability.data, availability.isSuccess, availability.isFetching]);
+  const jobOptions = selectedJob
+    ? [selectedJob, ...(jobs.data || []).filter(job => job.id !== selectedJob.id)]
+    : jobs.data || [];
+  const own = (reviewedAvailability?.reservations || [])
     .filter((r) => r.projectId === Number(projectId))
     .reduce((sum, r) => sum + r.quantity, 0);
-  const max = Math.min(item.quantity, availableStock(item) + own);
+  const max = Math.min(reviewedItem.quantity, availableStock(reviewedItem) + own);
   const save = useMutation({
     mutationFn: async () => {
       await apiRequest(
@@ -109,7 +125,8 @@ export default function CheckDialog({
   return (
     <Modal
       open={open}
-      onClose={save.isPending ? () => {} : onClose}
+      onClose={onClose}
+      busy={save.isPending}
       title={title}
     >
       <form
@@ -120,7 +137,7 @@ export default function CheckDialog({
         }}
       >
         <p className="text-sm">
-          {item.name} · {stockLabel(item.quantity, item.unit)} on hand
+          {item.name} · {stockLabel(reviewedItem.quantity, item.unit)} on hand when opened
         </p>
         {tool && mode === "check_in" && (
           <label className="block text-sm">
@@ -133,14 +150,14 @@ export default function CheckDialog({
               onChange={(e) => setLoanId(e.target.value)}
             >
               <option value="">Choose checkout</option>
-              {availability.data?.loans.map((l) => (
+              {reviewedAvailability?.loans.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.borrowerName} · {l.remaining} out
                   {l.jobNumber ? ` · ${l.jobNumber}` : ""}
                 </option>
               ))}
             </select>
-            {availability.data?.loans.length === 0 && (
+            {reviewedAvailability?.loans.length === 0 && (
               <p className="mt-2 text-muted-foreground">
                 No tracked checkouts. Use Count stock to reconcile older tool
                 records, or Receive stock for new purchases.
@@ -165,10 +182,10 @@ export default function CheckDialog({
                 aria-label="Job"
                 className={inputCls}
                 value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
+                onChange={(e) => setSelectedJob(jobOptions.find(job => job.id === Number(e.target.value)) || null)}
               >
                 <option value="">Shop use (no job)</option>
-                {jobs.data?.map((p) => (
+                {jobOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.jobNumber} — {p.name}
                   </option>
@@ -179,7 +196,8 @@ export default function CheckDialog({
               {stockLabel(max, item.unit)} available for this selection
               {own > 0 ? ` (${own} reserved for this job)` : ""}.
             </p>
-            {jobs.error && <p role="alert">Could not load jobs. Try again.</p>}
+            {jobs.isLoading && <p className="text-sm text-muted-foreground">Loading jobs…</p>}
+            {jobs.error && <RetryBlock query={jobs} />}
           </div>
         )}
         <label className="block text-sm">
@@ -194,7 +212,7 @@ export default function CheckDialog({
               out
                 ? max
                 : tool && mode === "check_in"
-                  ? availability.data?.loans.find(
+                  ? reviewedAvailability?.loans.find(
                       (l) => l.id === Number(loanId),
                     )?.remaining
                   : undefined
@@ -216,15 +234,11 @@ export default function CheckDialog({
             {save.error.message}
           </p>
         )}
-        {availability.error && (
-          <p role="alert">
-            Could not check reservations and returns. Close and try again.
-          </p>
-        )}
+        {!reviewedAvailability && availability.error && <RetryBlock query={availability} />}
         <div className="suite-modal-actions"><button
           className={`${primaryBtn} w-full`}
           disabled={
-            save.isPending || availability.isLoading || availability.isError
+            save.isPending || !reviewedAvailability
           }
         >
           {save.isPending ? "Saving…" : title}

@@ -7,6 +7,7 @@ import { locationString } from "@/lib/format";
 import { inputCls, primaryBtn } from "@/lib/ui-styles";
 import type { Item } from "@shared/schema";
 import Modal from "../Modal";
+import { RetryBlock } from "../RetryBlock";
 type ReceiptDraft = {
   quantity: string;
   destination: string;
@@ -165,9 +166,7 @@ function DeliveryLine({
               Adds {draft.quantity} {unit} to {locationString(draft.item)}.
             </p>
           )}
-          {matches.error && (
-            <p role="alert">Could not find inventory items. Try again.</p>
-          )}
+          {matches.error && <RetryBlock query={matches} />}
         </>
       )}
     </div>
@@ -181,11 +180,12 @@ export default function ReceiveDelivery({
   onClose: () => void;
 }) {
   const qc = useQueryClient(),
-    key = useRef(crypto.randomUUID()),
-    initialized = useRef(false);
+    key = useRef(crypto.randomUUID());
+  const [order, setOrder] = useState<any>(null);
   const [drafts, setDrafts] = useState<Record<number, ReceiptDraft>>({});
   const detail = useQuery<any>({
     queryKey: ["inventory", "receiving", poId],
+    refetchOnMount: 'always',
     queryFn: async () =>
       (
         await apiRequest(
@@ -195,8 +195,10 @@ export default function ReceiveDelivery({
       ).json(),
   });
   useEffect(() => {
-    if (!detail.data || initialized.current) return;
-    initialized.current = true;
+    if (!detail.isSuccess || detail.isFetching || order) return;
+    // A lost receipt response can refresh the order before retry. Retain the
+    // reviewed lines and limits so that retry sends the same idempotent request.
+    setOrder(detail.data);
     setDrafts(
       Object.fromEntries(
         detail.data.lines.map((line: any) => {
@@ -217,7 +219,7 @@ export default function ReceiveDelivery({
         }),
       ),
     );
-  }, [detail.data]);
+  }, [detail.data, detail.isSuccess, detail.isFetching, order]);
   const save = useMutation({
     mutationFn: async () => {
       const lines = Object.entries(drafts)
@@ -248,17 +250,18 @@ export default function ReceiveDelivery({
   return (
     <Modal
       open
-      onClose={save.isPending ? () => {} : onClose}
-      title={`Receive delivery${detail.data?.number ? ` · ${detail.data.number}` : ""}`}
+      onClose={onClose}
+      busy={save.isPending}
+      title={`Receive delivery${order?.number ? ` · ${order.number}` : ""}`}
       maxWidth="max-w-2xl"
     >
       <p className="mb-4 text-sm text-muted-foreground">
         Enter only what arrived today. Leave other lines at zero. The order
         stays open until everything is received.
       </p>
-      {detail.error ? (
-        <p role="alert">Could not load order. {detail.error.message}</p>
-      ) : detail.isLoading ? (
+      {!order && detail.error ? (
+        <RetryBlock query={detail} />
+      ) : !order ? (
         <p>Loading order…</p>
       ) : (
         <form
@@ -268,7 +271,7 @@ export default function ReceiveDelivery({
             save.mutate();
           }}
         >
-          {detail.data?.lines
+          {order.lines
             .filter((l: any) => l.remaining > 0)
             .map(
               (line: any) =>

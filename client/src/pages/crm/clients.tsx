@@ -79,7 +79,7 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
   const [tags, setTags] = useState(parseTags(client?.tags ?? null).join(", "));
   const [notes, setNotes] = useState(client?.notes ?? "");
 
-  const recovered=useDialogDraft(`ClientFormModal:${client?.id||"new"}`,true,{name,preferredLanguage,company,email,phone,address,city,zip,tags,notes},v=>{if(Object.hasOwn(v,"name"))setName(v.name);if(Object.hasOwn(v,"preferredLanguage"))setPreferredLanguage(v.preferredLanguage);if(Object.hasOwn(v,"company"))setCompany(v.company);if(Object.hasOwn(v,"email"))setEmail(v.email);if(Object.hasOwn(v,"phone"))setPhone(v.phone);if(Object.hasOwn(v,"address"))setAddress(v.address);if(Object.hasOwn(v,"city"))setCity(v.city);if(Object.hasOwn(v,"zip"))setZip(v.zip);if(Object.hasOwn(v,"tags"))setTags(v.tags);if(Object.hasOwn(v,"notes"))setNotes(v.notes);},(client as any)?._version);
+  const recovered=useDialogDraft(`ClientFormModal:${client?.id||"new"}`,true,{name,preferredLanguage,company,email,phone,address,city,zip,tags,notes},v=>{if(Object.hasOwn(v,"name"))setName(v.name);if(Object.hasOwn(v,"preferredLanguage"))setPreferredLanguage(v.preferredLanguage);if(Object.hasOwn(v,"company"))setCompany(v.company);if(Object.hasOwn(v,"email"))setEmail(v.email);if(Object.hasOwn(v,"phone"))setPhone(v.phone);if(Object.hasOwn(v,"address"))setAddress(v.address);if(Object.hasOwn(v,"city"))setCity(v.city);if(Object.hasOwn(v,"zip"))setZip(v.zip);if(Object.hasOwn(v,"tags"))setTags(v.tags);if(Object.hasOwn(v,"notes"))setNotes(v.notes);},(client as any)?._version,{fieldsInitialized:true});
   const save = useApiMutation({
     request: () => {
       const tagList = tags

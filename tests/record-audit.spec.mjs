@@ -83,3 +83,18 @@ test('Opening a record creates no false draft; real edits recover and discard to
  expect(await page.evaluate(key=>sessionStorage.getItem(key),key)).toBeNull();
  expect((await app.api(`/api/finance/expenses/${row.id}`,'GET',undefined,app.owner)).data.notes).toBe('Reviewed current notes');
 });
+
+test('Immediate customer edits survive refresh and never become the untouched baseline',async({page})=>{
+ await page.goto(app.base+'/#/crm/clients');
+ const modal=page.getByRole('dialog',{name:'New customer',exact:true});
+ for(let i=0;i<6;i++){
+  await page.getByRole('button',{name:'New customer',exact:true}).click();
+  await modal.getByLabel('Name',{exact:true}).fill(`Immediate unfinished customer ${i}`);
+  await page.reload();
+  await page.getByRole('button',{name:'New customer',exact:true}).click();
+  await expect(modal.getByLabel('Name',{exact:true})).toHaveValue(`Immediate unfinished customer ${i}`);
+  await modal.getByRole('button',{name:'Discard recovered edits',exact:true}).click();
+  await expect(modal.getByLabel('Name',{exact:true})).toHaveValue('');
+  await modal.getByRole('button',{name:'Close',exact:true}).click();
+ }
+});

@@ -9,6 +9,7 @@ export function useDialogDraft(
   values: any,
   restore: (v: any) => void,
   version?: number,
+  options?: { fieldsInitialized?: boolean },
 ) {
   const { user } = useAuth(),
     key = `suite-dialog:${user?.id}:${name}`;
@@ -20,16 +21,25 @@ export function useDialogDraft(
   const [recovered, setRecovered] = useState(false),
     [session, setSession] = useState<{ key: string; version?: number } | null>(null);
   const initialized = useRef<typeof session>(null);
-  useEffect(() => {
+  const fieldsInitialized = options?.fieldsInitialized === true;
+  const startSession = () => {
     active.current = false;
-    // Wait for the form's opening effect to populate its fields before taking
-    // a baseline. Otherwise an untouched saved record becomes a false draft.
     setSession(open ? { key, version } : null);
     setRecovered(false);
     return () => {
       active.current = false;
     };
-  }, [key, open]);
+  };
+  // State-initialized forms can capture a baseline before the first paint, so
+  // immediate typing cannot accidentally become the untouched baseline.
+  useLayoutEffect(() => {
+    if (fieldsInitialized) return startSession();
+  }, [key, open, fieldsInitialized]);
+  // Other forms populate their fields in an opening effect. Wait for that
+  // update so an untouched saved record does not become a false draft.
+  useEffect(() => {
+    if (!fieldsInitialized) return startSession();
+  }, [key, open, fieldsInitialized]);
   useLayoutEffect(() => {
     if (!open || !session || session.key !== key) return;
     if (initialized.current !== session) {

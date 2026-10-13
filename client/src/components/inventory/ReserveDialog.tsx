@@ -9,19 +9,23 @@ import {
 } from "@/lib/inventory";
 import { inputCls, primaryBtn } from "@/lib/ui-styles";
 import Modal from "../Modal";
+import { RetryBlock } from "../RetryBlock";
 export default function ReserveDialog({
   item,
   onClose,
-  legacy,
+  legacy: initialLegacy,
 }: {
   item: Item;
   onClose: () => void;
   legacy?: number;
 }) {
   const qc = useQueryClient(),
-    key = useRef(crypto.randomUUID());
-  const [projectId, setProjectId] = useState(""),
-    [quantity, setQuantity] = useState(String(legacy || 1)),
+    key = useRef(crypto.randomUUID()),
+    baseline = useRef({ available: availableStock(item), version: item.stockVersion, legacy: initialLegacy });
+  const legacy = baseline.current.legacy;
+  const [selectedJob, setSelectedJob] = useState<Project | null>(null);
+  const projectId = selectedJob ? String(selectedJob.id) : '';
+  const [quantity, setQuantity] = useState(String(legacy || 1)),
     [q, setQ] = useState(""),
     [search, setSearch] = useState("");
   useEffect(() => {
@@ -41,6 +45,9 @@ export default function ReserveDialog({
         )
       ).json(),
   });
+  const jobOptions = selectedJob
+    ? [selectedJob, ...(jobs.data || []).filter(job => job.id !== selectedJob.id)]
+    : jobs.data || [];
   const save = useMutation({
     mutationFn: async () =>
       apiRequest(
@@ -50,7 +57,7 @@ export default function ReserveDialog({
           projectId: projectId ? Number(projectId) : undefined,
           quantity: Number(quantity),
           requestKey: key.current,
-          ...(legacy ? { action, expectedVersion: item.stockVersion } : {}),
+          ...(legacy ? { action, expectedVersion: baseline.current.version } : {}),
         },
       ),
     onSuccess: () => {
@@ -61,7 +68,8 @@ export default function ReserveDialog({
   return (
     <Modal
       open
-      onClose={save.isPending ? () => {} : onClose}
+      onClose={onClose}
+      busy={save.isPending}
       title={legacy ? "Review older reservation" : "Reserve for a job"}
     >
       <form
@@ -74,7 +82,7 @@ export default function ReserveDialog({
         <p>
           {legacy
             ? `${legacy} ${item.unit} reserved without a confirmed job`
-            : `${availableStock(item)} ${item.unit} available`}
+            : `${baseline.current.available} ${item.unit} available when opened`}
         </p>
         {!!legacy && (
           <label className="block text-sm">
@@ -107,16 +115,18 @@ export default function ReserveDialog({
                 required
                 className={inputCls}
                 value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
+                onChange={(e) => setSelectedJob(jobOptions.find(job => job.id === Number(e.target.value)) || null)}
               >
                 <option value="">Choose job</option>
-                {jobs.data?.map((p) => (
+                {jobOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.jobNumber} — {p.name}
                   </option>
                 ))}
               </select>
             </label>
+            {jobs.isLoading && <p className="text-sm text-muted-foreground">Loading jobs…</p>}
+            {jobs.error && <RetryBlock query={jobs} />}
           </>
         )}
         <label className="block text-sm">
@@ -126,15 +136,15 @@ export default function ReserveDialog({
             type="number"
             min={fractionalUnit(item.unit) ? 0.0001 : 1}
             step={fractionalUnit(item.unit) ? 0.0001 : 1}
-            max={legacy || availableStock(item)}
+            max={legacy || baseline.current.available}
             className={inputCls}
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
           />
         </label>
-        {(save.error || jobs.error) && (
+        {save.error && (
           <p role="alert" className="text-sm text-destructive">
-            {save.error?.message || "Could not load jobs. Try again."}
+            {save.error.message}
           </p>
         )}
         <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending}>

@@ -66,6 +66,8 @@ export default function RestockDialog({
     <Modal
       open
       onClose={onClose}
+      busy={save.isPending}
+      hasUnsavedChanges={created ? false : undefined}
       title="Restock inventory"
       maxWidth="max-w-2xl"
     >
@@ -75,8 +77,8 @@ export default function RestockDialog({
             {created.number} created for {created.vendor}. Record each delivery
             when it arrives.
           </p>
-          <Link className={primaryBtn} href="/finance/purchase-orders?category=supplier">
-            Open purchase orders
+          <Link className={primaryBtn} href={`/finance/purchase-orders?category=supplier&po=${created.id}`}>
+            Open purchase order
           </Link>
         </div>
       ) : (

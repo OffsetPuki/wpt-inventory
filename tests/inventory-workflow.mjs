@@ -223,8 +223,7 @@ export async function inventoryWorkflow(page, app, expect) {
       "SELECT * FROM fin_purchase_orders WHERE vendor='UI Supplier' ORDER BY id DESC",
     )
     .get();
-  await page.getByRole("link", { name: "Open purchase orders" }).click();
-  await page.getByRole("button", { name: po.number, exact: true }).click();
+  await page.getByRole("link", { name: "Open purchase order", exact: true }).click();
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page
     .getByRole("button", { name: "Receive delivery", exact: true })

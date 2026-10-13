@@ -22,6 +22,7 @@ import AdjustDialog from "@/components/AdjustDialog";
 import QRDialog from "@/components/QRDialog";
 import Modal from "@/components/Modal";
 import StockHistory from "@/components/inventory/StockHistory";
+import { RetryBlock } from "@/components/RetryBlock";
 import ReserveDialog from "@/components/inventory/ReserveDialog";
 const ItemLocationMap = lazy(() => import("@/components/ItemLocationMap"));
 const RestockDialog = lazy(
@@ -74,7 +75,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
         Loading item…
       </p>
     );
-  if (detail.error || !detail.data)
+  if (!detail.data)
     return (
       <div role="alert" className="py-12">
         <p>{detail.error?.message || "Item not found."}</p>
@@ -95,6 +96,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
   );
   return (
     <div className="mx-auto max-w-4xl space-y-5 pb-6">
+      {detail.error && <RetryBlock query={detail} />}
       <Link className="text-sm text-primary" href={inventoryReturnPath()}>
         ← Back to inventory
       </Link>

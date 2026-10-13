@@ -59,7 +59,8 @@ export default function AdjustDialog({
   return (
     <Modal
       open={open}
-      onClose={save.isPending ? () => {} : onClose}
+      onClose={onClose}
+      busy={save.isPending}
       title="Count stock"
     >
       <form
