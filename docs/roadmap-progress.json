@@ -1,8 +1,8 @@
 {
-  "updated": "2026-10-14T17:08:24.603Z",
+  "updated": "2026-10-14T17:13:11.603Z",
   "base": "791960d51f92ec1745d41822bbb44df9df5d022a",
   "branch": "codex/business-suite-roadmap-2026-10-13",
-  "deployment": "ON HOLD until all 64 items are ready and verified",
+  "deployment": "Implementation and acceptance evidence complete; final committed release checks must pass before deployment.",
   "testedCommit": null,
   "verified": [
     "All 123 browser tests passed, including complete navigation at 360/390/430 pixels, landscape, enlarged text, file retry, language switching and connected lifecycle workflows.",
@@ -11,12 +11,13 @@
     "Synthetic full backup restored linked records, private files and new roadmap tables with integrity checks.",
     "All six cold-cache throttled phone performance budgets passed; usable content was 2.64–3.97 seconds, measured input/upload-help interaction 88–186 ms.",
     "7,501 connected records returned through five queries and at most 2,660 response bytes; median 12 ms, maximum 16 ms.",
-    "The actual private LAN preview passed owner sign-in, upload/download and a sample job settings save. This does not substitute for physical phone results."
+    "The actual private LAN preview passed owner sign-in, upload/download and a sample job settings save. This does not substitute for physical phone results.",
+    "User confirmed all requested physical iPhone and Android journeys passed.",
+    "Approved complete production backup restored successfully; two isolated migration passes preserved all original financial fields and introduced no foreign-key violations. Temporary copies removed."
   ],
   "next": [
-    "Refresh Railway authorization for the approved backup recovery check.",
-    "Verify isolated production restore, migrations and rollback metadata.",
-    "Run final committed release checks and publish only when the release gate passes."
+    "Run every required release check on the final clean commit.",
+    "Pass the release gate, publish the tested change and perform read-only production verification."
   ],
   "items": [
     {
@@ -1528,7 +1529,7 @@
       "id": "R58",
       "title": "Practice recovery as well as downloading backups",
       "acceptance": "A restored sample reproduces linked records and files; failed integrity checks prevent deployment or destructive cleanup.",
-      "status": "verification-pending",
+      "status": "complete",
       "evidence": [
         {
           "kind": "implementation",
@@ -1536,7 +1537,7 @@
             "scripts/restore-backup.mjs",
             "docs/ROADMAP-RELEASE.md"
           ],
-          "detail": "Checksummed isolated restores cover links, files and new tables. Production backup verification remains approval-dependent."
+          "detail": "Checksum-verified isolated restores cover the full production database, uploaded files and frozen mail attachments; the recovered database passed the update twice with all existing financial fields preserved."
         },
         {
           "kind": "regression",
@@ -1545,10 +1546,15 @@
             "scripts/check-release.mjs"
           ],
           "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        },
+        {
+          "kind": "recovery",
+          "detail": "Latest complete offsite snapshot verified; 259 attachments passed size/checksum checks. SQLite integrity and two migration passes succeeded with zero foreign-key violations. No external requests or server workers were started. Temporary private copies removed after verification.",
+          "verifiedAt": "2026-10-14T17:12:14.409Z",
+          "temporaryCopiesRemoved": true
         }
       ],
       "implementation": "implemented",
-      "remaining": "Approved complete production backup recovery check is awaiting refreshed hosting authorization.",
       "backupPermission": {
         "authority": "user",
         "date": "2026-10-14",
@@ -1689,7 +1695,7 @@
       "id": "R64",
       "title": "Use staged rollouts with visible release status",
       "acceptance": "Each release has recorded validation, backup status and rollback instructions; an app refresh cannot strand an unsaved draft.",
-      "status": "verification-pending",
+      "status": "complete",
       "evidence": [
         {
           "kind": "implementation",
@@ -1707,10 +1713,15 @@
             "scripts/check-release.mjs"
           ],
           "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        },
+        {
+          "kind": "rollback",
+          "detail": "Current successful production deployment verified; application rollback/redeploy is available. Hosting waits for main-branch checks. Exact final-commit evidence remains an independent mandatory gate before deployment.",
+          "commit": "791960d51f92ec1745d41822bbb44df9df5d022a",
+          "deploymentId": "700aa6b6-a1f5-4f31-b415-f8e1ffef5b81"
         }
       ],
-      "implementation": "implemented",
-      "remaining": "Physical phone results; explicit complete-backup permission and verified isolated recovery; renewed hosting authentication and rollback metadata; exact final-commit release checks. No production deployment has occurred."
+      "implementation": "implemented"
     }
   ],
   "releaseChecks": {},
@@ -1819,7 +1830,7 @@
       }
     ],
     "productionDataMutated": false,
-    "productionBackupVerified": false,
+    "productionBackupVerified": true,
     "productionDeployed": false,
     "exactReleaseCommitChecks": "pending"
   }
