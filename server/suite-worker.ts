@@ -79,7 +79,7 @@ export async function runSuiteFollowups() {
           if (row.kind === "quote-accepted-owner")
             ok = await sendOwnerMail({
               subject: `[CJM Trades] Quote accepted — ${quote.number}`,
-              text: `${customer.name || quote.customer_name || "Customer"} accepted ${quote.number}. The linked job and draft invoice are ready.`,
+              text: `${data.recordedBy ? `${data.recordedBy} manually marked ${quote.number} accepted` : `${customer.name || quote.customer_name || "Customer"} accepted ${quote.number}`}. The linked job and draft invoice are ready.`,
               deliveryKey: row.event_key,
             });
           else if (!customer.email) ok = true;

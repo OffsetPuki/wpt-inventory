@@ -56,7 +56,8 @@ function report(kind:Kind,row:any){
   const devices=sqlite.prepare(`SELECT device,browser,coalesce(json_extract(snapshot,'$.deviceName'),device) deviceName,count(*) visits FROM customer_document_visits WHERE kind=? AND document_id=? GROUP BY device,browser,deviceName ORDER BY visits DESC`).all(kind,row.id);
   const visits=sqlite.prepare('SELECT visit_id id,revision,started_at startedAt,last_at lastAt,active_ms activeMs,device,browser,snapshot FROM customer_document_visits WHERE kind=? AND document_id=? ORDER BY started_at DESC LIMIT 100').all(kind,row.id).map((r:any)=>{const {snapshot,...rest}=r;return {...rest,...JSON.parse(snapshot)};});
   const confirmed=kind==='quote'?{status:row.status,sentAt:row.sent_at,acceptedAt:row.accepted_at,declinedAt:row.declined_at,acceptNote:row.accept_note,declineNote:row.decline_note,declineReason:row.decline_reason,legacyOpens:row.view_count||0}:{status:row.status,sentAt:row.sent_at,paidCents:row.paid_cents,payments:sqlite.prepare('SELECT id,amount_cents amountCents,method,paid_at paidAt,created_at createdAt FROM fin_invoice_payments WHERE invoice_id=? ORDER BY created_at DESC LIMIT 50').all(row.id)};
-  return {kind,number:row.number,revision:documentActivityRevision(kind,row),summary,actions,devices,visits,confirmed};
+  const acceptance = kind === 'quote' && row.accepted_at ? sqlite.prepare("SELECT user_name recordedBy,json_extract(details,'$.method') method FROM audit_log WHERE action='quote.accepted' AND target_type='quote' AND target_id=? ORDER BY id ASC LIMIT 1").get(row.id) : null;
+  return {kind,number:row.number,revision:documentActivityRevision(kind,row),summary,actions,devices,visits,confirmed:{...confirmed,acceptance}};
 }
 export function registerDocumentActivity(app:Express){
   app.post('/api/public/document-activity/:kind/:token',async(req,res)=>{

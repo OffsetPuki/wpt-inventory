@@ -543,10 +543,8 @@ export function registerRoutes(app: Express): void {
   app.delete("/api/projects/:id", requireElevated, (req, res) => {
     const id = pid(req.params.id);
     const target = storage.getProjectById(id);
-    // #19d: release before the soft delete — a trashed job holds no stock.
-    try { storage.releaseProjectReservations(id); } catch (e) {
-      console.error("[projects] reservation release failed", e);
-    }
+    if (!target) return res.status(404).json({message:'Job not found. It may already be in Trash.'});
+    // Storage releases reservations and moves the job to Trash atomically.
     storage.deleteProject(id);
     audit(req, "project.delete", {
       targetType: "project", targetId: id, targetName: target?.name ?? null,

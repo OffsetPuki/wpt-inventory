@@ -12,9 +12,11 @@ import Modal from "@/components/Modal";
 export function MergeReview({
   ids,
   close,
+  onMerged,
 }: {
   ids: string;
   close: () => void;
+  onMerged?: () => void;
 }) {
   const list = ids.split(",").map(Number),
     [source, setSource] = useState(list[1]),
@@ -33,11 +35,12 @@ export function MergeReview({
       body: { source, target, reason, version: q.data.version, requestKey },
     }),
     successTitle: "Customer records connected",
+    invalidate:[['crm-clients'],['crm-client-detail'],['crm-leads'],['quotes'],['projects'],['finance-invoices']],
     errorTitle: "Could not merge customers",
-    onSuccess: close,
+    onSuccess: onMerged || close,
   });
   return (
-    <Modal open onClose={close} title="Review duplicate customers">
+    <Modal open busy={save.isPending} onClose={close} title="Combine customer records">
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -62,7 +65,7 @@ export function MergeReview({
             >
               {list.map((id) => (
                 <option key={id} value={id}>
-                  Customer #{id}
+                  {[q.data?.source,q.data?.target].find(c=>c?.id===id)?.name || 'Loading customer…'}
                 </option>
               ))}
             </select>
@@ -77,9 +80,7 @@ export function MergeReview({
                 <strong>{q.data.source.name}</strong> →{" "}
                 <strong>{q.data.target.name}</strong>
               </p>
-              <p>
-                {q.data.source.email} → {q.data.target.email}
-              </p>
+              <p className="break-words text-sm">{[q.data.source.email,q.data.source.phone].filter(Boolean).join(' · ')} → { [q.data.target.email,q.data.target.phone].filter(Boolean).join(' · ')}</p>
               <ul>
                 {q.data.references
                   .filter((r: any) => r.count)
@@ -105,13 +106,14 @@ export function MergeReview({
               </label>
               <button
                 className={primaryBtn}
-                disabled={save.isPending || source === target}
+                disabled={save.isPending || q.isFetching || source === target}
               >
                 Approve this merge
               </button>
             </>
           )
         )}
+        {save.isError&&<p role="alert">{save.error.message}</p>}
       </form>
     </Modal>
   );

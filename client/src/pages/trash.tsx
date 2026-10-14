@@ -1,4 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {useState} from 'react';
+import {useApiMutation} from '@/hooks/useApiMutation';
+import {inputCls,secondaryBtn} from '@/lib/ui-styles';
+import {RetryBlock} from '@/components/RetryBlock';
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/components/ui/toaster";
@@ -8,6 +12,15 @@ import { Loader2, RotateCcw, Trash2, FolderKanban, Package } from "lucide-react"
 import type { Item, Project } from "@shared/schema";
 
 const RETENTION_DAYS = 30;
+function DeletedCustomers({resource,label}:{resource:'clients'|'leads';label:string}){
+  const [search,setSearch]=useState('');
+  const query=useQuery<{id:number;name:string;email:string|null;phone:string|null;deletedAt:number}[]>({queryKey:['trash',resource,search],staleTime:0,queryFn:async()=>(await apiRequest('GET',`/api/crm/${resource}/deleted?q=${encodeURIComponent(search)}`)).json()});
+  const restore=useApiMutation<unknown,number>({request:id=>({method:'POST',url:`/api/crm/${resource}/${id}/restore`}),invalidate:[['trash',resource],['crm-clients'],['crm-leads'],['crm-client-detail']],successTitle:`${resource==='clients'?'Customer':'Lead'} restored`,errorTitle:'Could not restore'});
+  return <section className="mb-8" aria-label={`Deleted ${label.toLowerCase()}`}><h2 className="mb-3 text-lg font-semibold">{label}</h2>
+    <input className={`${inputCls} mb-3`} aria-label={`Search deleted ${label.toLowerCase()}`} placeholder="Search by name" value={search} onChange={e=>setSearch(e.target.value)}/>
+    {query.isError?<RetryBlock query={query}/>:query.isLoading?<p>Loading…</p>:!query.data?.length?<p className="text-sm text-muted-foreground">No matching deleted {label.toLowerCase()}.</p>:<ul className="space-y-2">{query.data.map(row=><li className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4" key={row.id}><div className="min-w-0"><p className="break-words font-medium">{row.name}</p><p className="break-words text-sm text-muted-foreground">{[row.email,row.phone].filter(Boolean).join(' · ')}</p><p className="text-xs text-muted-foreground">Deleted {formatDateTime(row.deletedAt)}</p></div><button className={secondaryBtn} disabled={restore.isPending} onClick={()=>restore.mutate(row.id)}>Restore</button></li>)}</ul>}
+  </section>;
+}
 
 interface DeletedItem extends Item { deletedAt: number }
 interface DeletedProject extends Project { deletedAt: number }
@@ -49,7 +62,7 @@ export default function TrashPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["trash"] });
       qc.invalidateQueries({ queryKey: ["projects"] });
-      toast({ variant: "success", title: "Project restored" });
+      toast({ variant: "success", title: "Job restored", description: "Review material reservations before continuing work." });
     },
     onError: (e: any) => toast({ variant: "destructive", title: "Restore failed", description: e?.message }),
   });
@@ -58,8 +71,9 @@ export default function TrashPage() {
     <div className="mx-auto max-w-4xl">
       <Header
         title="Trash"
-        description={`Deleted items and projects, recoverable for ${RETENTION_DAYS} days. After that they're purged for good.`}
+        description={`Restore deleted records here. Items and jobs remain recoverable for ${RETENTION_DAYS} days.`}
       />
+      {isElevated&&<><DeletedCustomers resource="clients" label="Customers"/><DeletedCustomers resource="leads" label="Leads"/></>}
 
       {isElevated && (
         <section className="mb-8">
@@ -102,7 +116,7 @@ export default function TrashPage() {
       {isElevated && (
         <section>
           <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-foreground">
-            <FolderKanban className="h-5 w-5" /> Projects
+            <FolderKanban className="h-5 w-5" /> Jobs
           </h2>
           {projects.isLoading ? (
             <div className="flex justify-center py-8 text-muted-foreground">
@@ -110,7 +124,7 @@ export default function TrashPage() {
             </div>
           ) : (projects.data ?? []).length === 0 ? (
             <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-              No deleted projects right now.
+              No deleted jobs right now.
             </p>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -140,7 +154,7 @@ export default function TrashPage() {
       {!isElevated && (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-12 text-muted-foreground">
           <Trash2 className="h-10 w-10" />
-          <p className="text-base">Only the owner can view the trash.</p>
+          <p className="text-base">Only owners and managers can view Trash.</p>
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import {jobReadinessMany} from "./suite-data";
+import {registerJobFileRoutes} from './job-files';
 import {businessScope} from "./business-scope";
 import {registerCustomerProjectPage} from './customer-project-page';
 import {registerBusinessReport} from './business-report';
@@ -30,6 +31,10 @@ import { insertNumbered } from "./numbering";
 import { audit } from "./audit";
 
 const idSchema = z.coerce.number().int().positive();
+// Older saved forms used zero for an empty optional quote selector.
+const optionalQuoteId = z.preprocess(value => value === 0 || value === '' ? null : value,
+  z.number().int().positive('Choose an accepted quote from the list.').nullable().optional());
+const quoteCustomerSql = "coalesce(l.client_id,CASE WHEN json_valid(q.payload) THEN json_extract(q.payload,'$.customer.clientId') END)";
 const date = z
   .string()
   .refine((value) => {
@@ -59,6 +64,7 @@ function localUpload(value: string) {
 }
 export function registerSuiteRoutes(app: Express) {
   initializeSuite();
+  registerJobFileRoutes(app);
   registerSuiteControls(app);
   registerBusinessReport(app);
   registerCustomerProjectPage(app);
@@ -76,7 +82,10 @@ export function registerSuiteRoutes(app: Express) {
         try {
           res.json(await fn(req));
         } catch (e: any) {
-          res.status(e.status || 400).json({ message: e.message });
+          const message = e instanceof z.ZodError
+            ? e.issues.map(issue => `${({quoteId:'Accepted quote',clientId:'Customer',startDate:'Start date',dueDate:'Finish date'} as Record<string,string>)[String(issue.path[0])] || 'Job settings'}: ${issue.message}`).join('\n')
+            : e.message;
+          res.status(e.status || 400).json({ message });
         }
       },
     );
@@ -138,7 +147,20 @@ export function registerSuiteRoutes(app: Express) {
         ({ last_cost_cents, ...m }) => m,
       );
     }
-    return { job, customer, quote, readiness, actions };
+    const revision = sqlite.prepare("SELECT version FROM suite_record_versions WHERE entity='projects' AND id=?").get(id) as {version:number}|undefined;
+    return { job:{...job,_version:revision?.version}, customer, quote, readiness, actions };
+  });
+  endpoint('get', '/api/suite/jobs/:id/accepted-quotes', true, req => {
+    const job = jobRecord(idSchema.parse(req.params.id));
+    const clientId = idSchema.parse(req.query.clientId);
+    const search = String(req.query.q || '').trim().slice(0,100);
+    const pattern = '%' + search.replace(/[\\%_]/g,'\\$&') + '%';
+    return sqlite.prepare(`SELECT q.id,q.number,q.customer_name customerName,q.total_cents totalCents
+      FROM quotes q LEFT JOIN crm_leads l ON l.id=q.lead_id
+      WHERE q.status='accepted' AND q.deleted_at IS NULL AND ${quoteCustomerSql}=?
+      AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.quote_id=q.id AND p.id!=?)
+      AND (q.number||coalesce(q.customer_name,'')) LIKE ? ESCAPE '\\'
+      ORDER BY q.id DESC LIMIT 30`).all(clientId,job.id,pattern);
   });
   endpoint("patch", "/api/suite/jobs/:id", true, (req) => {
     const id = idSchema.parse(req.params.id),
@@ -147,7 +169,7 @@ export function registerSuiteRoutes(app: Express) {
       .object({
         version: z.number().int(),
         clientId: z.number().int().positive().nullable(),
-        quoteId: z.number().int().positive().nullable().optional(),
+        quoteId: optionalQuoteId,
         site: z.enum(["metals", "concrete", "insulation", "trades"]),
         siteAddress: z.string().max(400),
         preferredLanguage: z.enum(["en", "es"]),
@@ -183,20 +205,20 @@ export function registerSuiteRoutes(app: Express) {
       if (body.quoteId && body.quoteId !== before.quote_id) {
         const q: any = sqlite
           .prepare(
-            "SELECT id,payload FROM quotes WHERE id=? AND status='accepted' AND deleted_at IS NULL",
+            `SELECT q.id,${quoteCustomerSql} client_id FROM quotes q LEFT JOIN crm_leads l ON l.id=q.lead_id WHERE q.id=? AND q.status='accepted' AND q.deleted_at IS NULL`,
           )
           .get(body.quoteId);
         if (!q) throw new Error("Choose an accepted quote.");
         if (
           sqlite
             .prepare(
-              "SELECT 1 FROM projects WHERE quote_id=? AND id!=? AND deleted_at IS NULL",
+              "SELECT 1 FROM projects WHERE quote_id=? AND id!=?",
             )
             .get(body.quoteId, id)
         )
           throw new Error("That quote already belongs to another job.");
-        const cid = parse(q.payload, {}).customer?.clientId;
-        if (cid && cid !== body.clientId)
+        const cid = q.client_id;
+        if (!cid || Number(cid) !== body.clientId)
           throw new Error(
             "The quote and job must share the selected customer.",
           );
@@ -249,7 +271,7 @@ export function registerSuiteRoutes(app: Express) {
       if (body.scheduleState === "confirmed" && !ready.ready) {
         if (!body.overrideReason?.trim())
           throw new Error(
-            "Review readiness warnings or explain why this date can be confirmed.",
+            `Before confirming the schedule:\n${ready.blockers.map(b=>`• ${b.label}`).join('\n')}\nSave as tentative, or enter a reason to confirm despite these items.`,
           );
         sqlite
           .prepare(
