@@ -133,6 +133,8 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
   const [trash, setTrash] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [revising, setRevising] = useState(null);
+  const [accepting, setAccepting] = useState(null);
+  const [acceptNote, setAcceptNote] = useState('');
   const qc = useQueryClient();
   // Which row has its send-to-customer panel open (one at a time).
   const [shareId, setShareId] = useState(null);
@@ -188,6 +190,14 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
     mutationFn: async (id) => (await apiRequest('POST', `/api/quotes/${id}/revision`)).json(),
     onSuccess: (row) => { setRevising(null); qc.invalidateQueries({ queryKey: ['quotes'] }); openQuote.mutate({ id: row.id }); },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not create revision', description: e?.message }),
+  });
+  const acceptQuote = useMutation({
+    mutationFn: async ({ quote, note }) => (await apiRequest('POST', `/api/quotes/${quote.id}/accept`, { version: quote.version, note })).json(),
+    onSuccess: () => {
+      setAccepting(null); setAcceptNote(''); setShareId(null);
+      for (const key of ['quotes', 'crm-lead-detail', 'projects', 'finance-invoices', 'document-activity']) qc.invalidateQueries({ queryKey: [key] });
+      toast({ variant: 'success', title: 'Quote marked accepted', description: 'The linked job and draft invoice are ready.' });
+    },
   });
   const deleteQuote = useMutation({
     mutationFn: async (id) => apiRequest('DELETE', `/api/quotes/${id}`),
@@ -289,6 +299,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                     <button className="btn ghost sq-btn" onClick={() => q.status === 'draft' ? openQuote.mutate({ id: q.id }) : viewQuote.mutate(q.id)} disabled={openQuote.isPending || viewQuote.isPending}>
                       {q.status === 'draft' ? 'Edit draft' : 'View issued quote'}
                     </button>
+                    {isElevated && ['draft', 'sent'].includes(q.status) && <button className="btn ghost sq-btn" onClick={() => { acceptQuote.reset(); setAcceptNote(''); setAccepting(q); }}>Mark accepted</button>}
                     {['sent', 'declined'].includes(q.status) && <button className="btn ghost sq-btn" disabled={reviseQuote.isPending} onClick={() => { reviseQuote.reset(); setRevising(q); }}>Revise</button>}
                     {q.leadId && <a className="btn ghost sq-btn" href={`/#/crm/leads?lead=${q.leadId}`}>Open job</a>}
                     {onDuplicate && (
@@ -322,6 +333,12 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
         {data && data.total > 0 && <nav className="quote-pagination" aria-label="Quote pages"><button className="btn ghost sq-btn" disabled={data.page <= 1} onClick={() => setFilters(f => ({...f,page:data.page-1}))}>Previous</button><span>Page {data.page} of {Math.max(1,Math.ceil(data.total/data.pageSize))}</span><button className="btn ghost sq-btn" disabled={data.page * data.pageSize >= data.total} onClick={() => setFilters(f => ({...f,page:data.page+1}))}>Next</button></nav>}
         {deleting && <ConfirmDialog title={`Delete ${deleting.number}?`} confirmLabel="Move to Trash" busy={deleteQuote.isPending} error={deleteQuote.error?.message} onClose={() => setDeleting(null)} onConfirm={() => deleteQuote.mutate(deleting.id)}><p>You can restore this quote from Trash. Its customer link will stop working until you restore it.</p><p>Linked jobs, invoices, and payments will stay in your records.</p></ConfirmDialog>}
         {revising && <ConfirmDialog title={`Revise ${revising.number}?`} confirmLabel="Create revision" busy={reviseQuote.isPending} error={reviseQuote.error?.message} onClose={() => setRevising(null)} onConfirm={() => reviseQuote.mutate(revising.id)}><p>The old offer will close. A new draft will open for you to review before sending.</p></ConfirmDialog>}
+        {accepting && <ConfirmDialog title={`Mark ${accepting.number} accepted?`} confirmLabel="Mark accepted" busy={acceptQuote.isPending} error={acceptQuote.error?.message} onClose={() => setAccepting(null)} onConfirm={() => acceptQuote.mutate({ quote: accepting, note: acceptNote })}>
+          <p><strong>{accepting.customerName || 'Customer'}</strong> · ${fmtMoney((accepting.totalCents || 0) / 100)}</p>
+          <p>This records your manual acceptance, marks the lead won, and prepares the linked job and draft invoice. The customer does not need to use the quote link.</p>
+          <p className="text-muted-foreground">No customer email is sent by this action.</p>
+          <label className="block space-y-1"><span>Acceptance note (optional)</span><textarea className="w-full rounded-lg border border-input bg-background p-3 text-base" rows={3} maxLength={1000} value={acceptNote} disabled={acceptQuote.isPending} onChange={e => setAcceptNote(e.target.value)} placeholder="For example: approved by phone today." /></label>
+        </ConfirmDialog>}
       </div>
     </div>
   );

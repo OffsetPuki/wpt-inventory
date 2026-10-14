@@ -1,4 +1,5 @@
 import {crmStats,crmReports} from './crm-reporting';
+import {registerCrmRecovery} from './crm-recovery';
 import { recordHumanContact } from './lead-experience';
 import { listWindow } from './pagination';
 import { acceptQuote } from "./quote-lifecycle";
@@ -583,6 +584,7 @@ export function closeQuotesForLead(
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerCrmRoutes(app: Express): void {
+  registerCrmRecovery(app);
   // `pid`/`qstr` (req.params/req.query narrowing) live in ./http-util.
 
   // ─── Stats (literal path — registered before any /:id routes) ────────────
@@ -888,6 +890,16 @@ export function registerCrmRoutes(app: Express): void {
     res.json({
       client,
       invoices: invoiceRows,
+      quotes: isElev ? sqlite.prepare(`SELECT q.id,q.number,q.status,q.total_cents totalCents FROM quotes q
+        LEFT JOIN crm_leads l ON l.id=q.lead_id WHERE q.deleted_at IS NULL AND
+        (l.client_id=@id OR (CASE WHEN json_valid(q.payload) THEN json_extract(q.payload,'$.customer.clientId') END)=@id
+         OR EXISTS(SELECT 1 FROM projects p WHERE p.quote_id=q.id AND p.client_id=@id)
+         OR EXISTS(SELECT 1 FROM fin_invoices i WHERE i.quote_id=q.id AND i.client_id=@id))
+        ORDER BY q.created_at DESC,q.id DESC`).all({id}) : [],
+      relatedCustomers: isElev ? sqlite.prepare(`SELECT id,name,company,email,phone FROM crm_clients WHERE id!=@id AND deleted_at IS NULL AND
+        ((@company!='' AND (lower(trim(name))=@company OR lower(trim(company))=@company))
+         OR (coalesce(company,'')!='' AND lower(trim(company))=@name)
+         OR (@email!='' AND lower(trim(email))=@email)) ORDER BY name LIMIT 10`).all({id,company:(client.company||'').trim().toLowerCase(),name:client.name.trim().toLowerCase(),email:(client.email||'').trim().toLowerCase()}) : [],
       reviewCount,
       leads: db.select().from(leads)
         .where(and(eq(leads.clientId, id), isNull(leads.deletedAt)))

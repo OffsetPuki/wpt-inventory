@@ -1,4 +1,6 @@
 import {ActiveFilters} from '@/components/ActiveFilters';
+import {MergeReview} from '@/pages/suite-reviews';
+import {Link} from 'wouter';
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { useDialogDraft } from '@/lib/dialog-draft';
 import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
@@ -198,6 +200,8 @@ interface ClientDetail {
   activities: CrmActivity[];
   projects: Project[];
   invoices: ClientInvoice[]; // empty for non-elevated roles
+  quotes:{id:number;number:string;status:string;totalCents:number}[];
+  relatedCustomers:{id:number;name:string;company:string|null;email:string|null;phone:string|null}[];
   reviewCount: number;
 }
 
@@ -212,6 +216,7 @@ function ClientDetailModal({
 }) {
   const { isElevated } = useAuth();
   const [note, setNote] = useState("");
+  const [mergeId,setMergeId]=useState<number|null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery<ClientDetail>({
     queryKey: ["crm-client-detail", clientId],
@@ -244,6 +249,7 @@ function ClientDetailModal({
   });
 
   const client = data?.client;
+  if(mergeId!==null)return <MergeReview ids={`${clientId},${mergeId}`} close={()=>setMergeId(null)} onMerged={onClose}/>;
 
   return (
     <Modal open busy={logNote.isPending || del.isPending} hasUnsavedChanges={!!note.trim()} onClose={onClose} title={client?.name ?? "Client"} maxWidth="max-w-2xl">
@@ -320,6 +326,8 @@ function ClientDetailModal({
           </div>
 
           {isElevated && <RelatedPreviews clientId={client.id}/>}
+          {isElevated&&!!data.relatedCustomers?.length&&<section className="rounded-xl border border-amber-300 bg-amber-50/30 p-4"><h3 className="font-semibold">Related customer records</h3><p className="mt-1 text-sm text-muted-foreground">These records share a company or email. If they belong to the same customer, combine them to keep quotes, jobs, and invoices in one history.</p>{data.relatedCustomers.map(other=><div key={other.id} className="mt-3 space-y-2"><p className="text-sm"><strong>{other.name}</strong>{other.company&&` · ${other.company}`}<br/>{[other.email,other.phone].filter(Boolean).join(' · ')}</p><button type="button" className="min-h-11 rounded-lg border px-3 text-sm" onClick={()=>setMergeId(other.id)}>Review combining with {other.name}</button></div>)}</section>}
+          {isElevated&&<section><h3 className="mb-2 text-sm font-medium text-muted-foreground">Quotes</h3>{!data.quotes?.length?<p className="text-sm text-muted-foreground">No quotes linked to this customer.</p>:<ul className="divide-y">{data.quotes.map(q=><li key={q.id}><Link href={`/crm/quotes?quote=${q.id}`} onClick={onClose} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"><span className="font-medium underline">{q.number}</span><span className="capitalize">{q.status} · {formatMoney(q.totalCents)}</span></Link></li>)}</ul>}</section>}
           {isElevated && (
             <div>
               <h3 className="mb-2 text-sm font-medium text-muted-foreground">Invoices</h3>
@@ -341,7 +349,7 @@ function ClientDetailModal({
                     {data.invoices.map((inv) => (
                       <li key={inv.id} className="flex items-center justify-between gap-3 py-2.5">
                         <span className="min-w-0 truncate text-sm text-foreground">
-                          <span className="font-mono text-xs text-muted-foreground">{inv.number}</span>
+                          <Link href={`/finance/invoices?invoice=${inv.id}`} onClick={onClose} className="font-mono text-xs underline">{inv.number}</Link>
                           {inv.dueDate && (
                             <span className="ml-2 text-xs text-muted-foreground">due {formatDate(inv.dueDate)}</span>
                           )}
@@ -458,6 +466,7 @@ function ClientDetailModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ClientsPage() {
+  const {isElevated}=useAuth();
   const [q, setQ] = useRememberedState("client/src/pages/crm/clients.tsx:q","");
   const [status, setStatus] = useRememberedState("client/src/pages/crm/clients.tsx:status","active");
   const [formOpen, setFormOpen] = useState(false);
@@ -492,6 +501,7 @@ export default function ClientsPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <Header title="Customers" description="Customer records, history, and contact info">
+        {isElevated&&<Link href="/trash" className="flex min-h-11 items-center rounded-xl border px-4 text-sm">View Trash</Link>}
         <button
           onClick={() => {
             setEditing(null);

@@ -1,5 +1,5 @@
 import {validateQuoteAmount} from './quote-validation';
-import { isQuoteExpired } from './quote-policy';
+import { isQuoteExpired, issuedPayload } from './quote-policy';
 import { enqueueFollowup } from "./outbox";
 import { reserveStock } from "./inventory-core";
 import { normalizeStockUnit, fractionalUnit, stockRound } from "../shared/inventory";
@@ -34,10 +34,13 @@ export function acceptQuote(
   note = "",
   ip: string | null = null,
   source = "Customer",
+  options: { manual?: boolean; actorId?: number; expectedVersion?: number } = {},
 ) {
   const result = sqlite.transaction(() => {
     const quote = db.select().from(quotes).where(eq(quotes.id, id)).get();
     if (!quote || quote.deletedAt != null) throw new Error("Quote not found");
+    if (quote.status !== 'accepted' && options.expectedVersion !== undefined && quote.version !== options.expectedVersion)
+      throw new Error('This quote changed. Close this window and refresh the quote list before accepting.');
     if(quote.status!=='accepted')validateQuoteAmount(quote);
     const optionSet=sqlite.prepare('SELECT s.* FROM quote_option_sets s JOIN quote_option_members m ON m.set_id=s.id WHERE m.quote_id=?').get(id) as any;
     if(optionSet?.accepted_quote_id&&optionSet.accepted_quote_id!==id)throw new Error('Another option has already been accepted for this job.');
@@ -122,6 +125,7 @@ export function acceptQuote(
       .set({
         leadId,
         status: "accepted",
+        ...(options.manual && quote.status === 'draft' ? { payload: issuedPayload(quote, now), sentAt: null } : {}),
         acceptedAt: quote.acceptedAt ?? now,
         acceptNote: quote.acceptNote ?? (note.trim().slice(0, 1000) || null),
         acceptIp: quote.acceptIp ?? ip,
@@ -160,6 +164,8 @@ export function acceptQuote(
         })
         .returning()
         .get();
+    else if (project.deletedAt != null && alreadyAccepted)
+      throw new Error('This job is in Trash. Restore the job before continuing.');
     else if (project.deletedAt != null)
       db.update(projects)
         .set({ deletedAt: null })
@@ -319,10 +325,11 @@ export function acceptQuote(
           entityType: "lead",
           entityId: leadId,
           kind: "note",
-          notes: `Accepted quote ${quote.number} — ${source}`,
+          notes: `${options.manual ? 'Manually accepted' : 'Accepted'} quote ${quote.number} — ${source}${note.trim() ? `\n${note.trim().slice(0,1000)}` : ''}`,
         })
         .run();
       storage.appendAudit({
+        userId: options.actorId,
         userName: source,
         action: "quote.accepted",
         targetType: "quote",
@@ -334,12 +341,13 @@ export function acceptQuote(
           projectId,
           invoiceId: invoice!.id,
           totalCents: quote.totalCents,
+          method: options.manual ? 'manual' : source === 'Customer' ? 'customer' : 'team',
         },
       });
     }
     if (!alreadyAccepted) {
-      enqueueFollowup(`accept-owner:${id}`,'quote-accepted-owner',{quoteId:id});
-      enqueueFollowup(`accept-customer:${id}`,'quote-accepted-customer',{quoteId:id});
+      enqueueFollowup(`accept-owner:${id}`,'quote-accepted-owner',{quoteId:id,...(options.manual ? {recordedBy:source} : {})});
+      if (!options.manual) enqueueFollowup(`accept-customer:${id}`,'quote-accepted-customer',{quoteId:id});
     }
     return {
       quote,

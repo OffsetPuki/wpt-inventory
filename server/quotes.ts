@@ -14,6 +14,7 @@ import { jobStockCost } from './stock-cost';
 import { communicationContext, localizedLink } from "./communication";
 import type { Express } from "express";
 import crypto from "crypto";
+import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
@@ -648,8 +649,10 @@ export function registerQuoteRoutes(app: Express): void {
     res.status(201).json(row);
   });
 
-  app.post("/api/quotes/:id/accept", requireAuth, (req, res) => {
-    try { res.json(acceptQuote(pid(req.params.id), String(req.body?.note ?? ""), req.ip ?? null, req.user!.name)); }
+  app.post("/api/quotes/:id/accept", requireElevated, (req, res) => {
+    const body = z.object({note:z.string().trim().max(1000).optional(),version:z.number().int().nonnegative().optional()}).safeParse(req.body ?? {});
+    if (!body.success) return res.status(400).json({message:'Use a note of 1,000 characters or fewer and a valid quote version.'});
+    try { res.json(acceptQuote(pid(req.params.id), body.data.note ?? "", req.ip ?? null, req.user!.name, {manual:true,actorId:req.user!.userId,expectedVersion:body.data.version})); }
     catch (error: any) { res.status(409).json({ message: error.message }); }
   });
 

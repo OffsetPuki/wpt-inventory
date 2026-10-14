@@ -1,4 +1,5 @@
 import Insights from '@/components/Insights';
+import DeleteJobButton from '@/components/DeleteJobButton';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {useListPage,PageButtons} from "@/lib/list-page";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
@@ -146,6 +147,7 @@ export default function ProjectsPage() {
       <Header title="Jobs" description="Jobs, builds, and service dispatches">
         {isManager && (
           <>
+            <Link href="/trash" className="flex h-11 items-center rounded-xl border border-border px-5 font-medium">View Trash</Link>
             <button
               onClick={() => setTemplateOpen(true)}
               className="flex h-11 items-center gap-2 rounded-xl border border-border px-5 font-medium text-foreground transition-colors hover:border-primary"
@@ -188,10 +190,10 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((p) => (
+            <article key={p.id} className="flex flex-col rounded-xl border border-border bg-card transition-all hover:border-primary/50 hover:shadow-lg">
             <Link
-              key={p.id}
               href={`/project/${p.id}`}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-lg"
+              className="flex flex-1 flex-col gap-2 rounded-xl p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
             >
               <div className="flex items-start justify-between gap-2">
                 <span className="font-mono text-xs text-muted-foreground">{p.jobNumber}</span>
@@ -207,6 +209,8 @@ export default function ProjectsPage() {
               <h3 className="font-semibold text-foreground">{p.name}</h3>
               {p.customer && <p className="text-sm text-muted-foreground">{p.customer}</p>}
             </Link>
+            {isManager&&<div className="border-t border-border px-4 py-2"><DeleteJobButton job={p}/></div>}
+            </article>
           ))}
         </div>
       )}

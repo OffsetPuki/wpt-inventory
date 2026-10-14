@@ -1,4 +1,5 @@
 import JobMoneyGraphs from '@/components/JobMoneyGraphs';
+import DeleteJobButton from '@/components/DeleteJobButton';
 import {JOB_STATUS_LABELS} from "@shared/suite-contracts";
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { ExtraBilling } from "./suite-reviews";
@@ -11,6 +12,9 @@ import { useFormDraft } from "@/lib/form-draft";
 import { useApiMutation } from "@/hooks/useApiMutation";
 import { inputCls, primaryBtn, secondaryBtn } from "@/lib/ui-styles";
 import { shrinkAndUpload as uploadPhoto } from "@/lib/uploadPhoto";
+import {apiRequest,getAuthToken} from '@/lib/queryClient';
+import {JOB_FILE_ACCEPT,JOB_FILE_MAX_BYTES,isJobImage} from '@shared/job-files';
+import {FileText,Download} from 'lucide-react';
 import { formatMoney } from "@/lib/format";
 import { RetryBlock } from "@/components/RetryBlock";
 import Modal from "@/components/Modal";
@@ -36,7 +40,7 @@ const Card = ({ title, children }: { title: string; children: any }) => (
 
 export default function JobWorkspace({ id }: { id: string }) {
   const { isElevated } = useAuth();
-  const [] = useLocation();
+  const [, setLocation] = useLocation();
   const current = useDeepLink("tab");
   const tab = [
     "overview",
@@ -121,6 +125,7 @@ export default function JobWorkspace({ id }: { id: string }) {
               <option value="on_hold">On hold</option>
               <option value="done">Completed</option>
             </select>
+            <DeleteJobButton job={{id:j.id,name:j.name,jobNumber:j.job_number,_version:j._version}} onDeleted={()=>setLocation('/projects')}/>
           </>
         )}
       </div>
@@ -316,7 +321,7 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
   const [form, set, clear] = useFormDraft(`job-plan:${j.id}`, {
     version: j.version,
     clientId: j.client_id,
-    quoteId: j.quote_id,
+    quoteId: j.quote_id || null,
     site: j.site,
     siteAddress: j.site_address || "",
     preferredLanguage: j.preferred_language,
@@ -332,20 +337,27 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
   const stale = form.version !== j.version;
   const [search, setSearch] = useState("");
   const clients = useSuiteQuery<any[]>(
-    ["crm-client-picker", search],
-    `/api/crm/clients?q=${encodeURIComponent(search)}&limit=12`,
-    search.length > 1,
+    ["crm-client-picker", search, form.clientId],
+    `/api/suite/pickers/clients?q=${encodeURIComponent(search)}&id=${form.clientId||''}`,
+    !j.quote_id,
   );
+  const [quoteSearch,setQuoteSearch]=useState('');
+  const acceptedQuotes=useSuiteQuery<any[]>(['job-accepted-quotes',j.id,form.clientId,quoteSearch],
+    `/api/suite/jobs/${j.id}/accepted-quotes?clientId=${form.clientId||''}&q=${encodeURIComponent(quoteSearch)}`,
+    !j.quote_id && !!form.clientId);
+  const customerName=clients.data?.find(c=>c.id===form.clientId)?.name || (data.customer?.id===form.clientId?data.customer.name:null);
   const tools = useSuiteQuery<any>(
     ["inventory", "tool-picker"],
     "/api/inventory/items?limit=100&category=tools",
   );
   const save = useApiMutation({
-    request: () => ({
+    request: (scheduleState?: 'tentative') => ({
       method: "PATCH",
       url: `/api/suite/jobs/${j.id}`,
       body: {
         ...form,
+        quoteId: form.quoteId || null,
+        scheduleState: scheduleState || form.scheduleState,
         startDate: form.startDate || null,
         dueDate: form.dueDate || null,
       },
@@ -364,7 +376,7 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          save.mutate();
+          save.mutate(undefined);
         }}
       >
         {!j.quote_id && (
@@ -376,13 +388,13 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Name, phone or email"
             />
-            {clients.data?.map((c) => (
+            {search.length>1&&clients.data?.map((c) => (
               <button
                 type="button"
                 className="block py-2 underline"
                 key={c.id}
                 onClick={() => {
-                  field("clientId", c.id);
+                  set({...form,clientId:c.id,quoteId:null});
                   setSearch("");
                 }}
               >
@@ -391,28 +403,27 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
             ))}
             <span className="text-sm">
               {form.clientId
-                ? `Customer #${form.clientId}`
+                ? customerName || 'Loading customer…'
                 : "No customer selected"}
             </span>
           </label>
         )}
         {!j.quote_id && (
-          <label className="block">
-            Accepted quote ID (optional)
-            <input
-              className={inputCls}
-              type="number"
-              min="1"
-              value={form.quoteId || ""}
-              onChange={(e) =>
-                field("quoteId", e.target.value ? Number(e.target.value) : null)
-              }
-            />
-            <span className="text-sm">
-              Use this only after reviewing the accepted quote and customer.
-            </span>
-          </label>
+          <div className="space-y-2">
+            <label className="block">Find an accepted quote (optional)
+              <input className={inputCls} value={quoteSearch} onChange={e=>setQuoteSearch(e.target.value)} placeholder="Quote number or customer name" disabled={!form.clientId}/>
+            </label>
+            <label className="block">Link accepted quote
+              <select className={inputCls} value={form.quoteId||''} disabled={!form.clientId||acceptedQuotes.isLoading} onChange={e=>field('quoteId',e.target.value?Number(e.target.value):null)}>
+                <option value="">No linked quote</option>
+                {form.quoteId&&!acceptedQuotes.data?.some(q=>q.id===form.quoteId)&&<option value={form.quoteId}>Previous selection — search to review</option>}
+                {acceptedQuotes.data?.map(q=><option key={q.id} value={q.id}>{q.number} · {q.customerName||customerName} · {formatMoney(q.totalCents)}</option>)}
+              </select>
+            </label>
+            {acceptedQuotes.isError?<p role="alert">Could not load quotes. <button type="button" className="underline" onClick={()=>acceptedQuotes.refetch()}>Try again</button></p>:<p className="text-sm text-muted-foreground">{!form.clientId?'Choose a customer to see their accepted quotes.':acceptedQuotes.data?.length?'Only this customer’s accepted quotes without another linked job are shown.':'No matching quotes available. Accepting a quote normally creates its job automatically. You can save this job without a quote.'}</p>}
+          </div>
         )}
+        {j.quote_id&&<p className="text-sm">Linked quote: <strong>{data.quote?.number||'Previously accepted quote'}</strong>{data.customer?.name&&` · ${data.customer.name}`}</p>}
         <label className="block">
           Trade
           <select
@@ -534,7 +545,7 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
         </details>
         {form.scheduleState === "confirmed" && (
           <label className="block">
-            Exception reason, if confirming despite warnings
+            Reason to confirm despite missing requirements (optional)
             <textarea
               className={inputCls}
               value={form.overrideReason}
@@ -557,7 +568,9 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
             </button>
           </p>
         )}
-        <div className="suite-modal-actions"><button className={primaryBtn} disabled={save.isPending || stale}>
+        {save.isError&&<p role="alert" className="whitespace-pre-line rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">{save.error.message}</p>}
+        {form.scheduleState==='confirmed'&&<p className="text-sm text-muted-foreground">Confirming checks dates, crew, deposits, materials, and required paperwork. Save as tentative if you are still arranging these.</p>}
+        <div className="suite-modal-actions">{form.scheduleState==='confirmed'&&<button type="button" className={secondaryBtn} disabled={save.isPending||stale} onClick={()=>save.mutate('tentative')}>Save as tentative</button>}<button className={primaryBtn} disabled={save.isPending || stale}>
           Save job settings
         </button></div>
       </form>
@@ -1074,6 +1087,18 @@ function JobActivity({ id }: { id: number }) {
   );
 }
 function JobFiles({ id }: { id: number }) {
+  const [downloading,setDownloading]=useState<number|null>(null);
+  async function downloadFile(file:{id:number;title:string;url:string}) {
+    setDownloading(file.id);setError('');
+    try {
+      const response=await apiRequest('GET',`/api/suite/jobs/${id}/files/${file.id}/download`);
+      const blob=await response.blob(),objectUrl=URL.createObjectURL(blob);
+      const link=document.createElement('a');link.href=objectUrl;
+      const ext=file.url.split('.').at(-1)||'';
+      link.download=file.title.toLowerCase().endsWith('.'+ext)?file.title:file.title+'.'+ext;
+      link.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),30000);
+    }catch(e:any){setError(e.message);}finally{setDownloading(null);}
+  }
   const sources=useSuiteQuery<any[]>(['suite-files','sources',id],`/api/suite/jobs/${id}/source-files`);
   const [kind, setKind] = useState("photo");
   const q = useSuiteQuery<any[]>(
@@ -1142,15 +1167,27 @@ function JobFiles({ id }: { id: number }) {
           </select>
         </label>
         <input
-          aria-label="Upload job image"
+          aria-label="Upload job file"
           type="file"
-          accept="image/*"
+          accept={JOB_FILE_ACCEPT}
+          disabled={uploading||add.isPending}
           onChange={async (e) => {
             const f = e.target.files?.[0];
             if (!f) return;
+            setError('');setUrl('');
+            if(f.size>JOB_FILE_MAX_BYTES){setError('Choose a file smaller than 25 MB.');return;}
             setUploading(true);
             try {
-              setUrl(await uploadPhoto(f));
+              if(isJobImage(f.name))setUrl(await uploadPhoto(f));
+              else {
+                const body=new FormData();body.append('file',f);
+                const token=getAuthToken();
+                const response=await fetch(`/api/suite/jobs/${id}/file-upload`,{method:'POST',headers:token?{'X-Auth':token}:{},body});
+                const result=await response.json();
+                if(!response.ok)throw new Error(result.message||'Upload failed. Try again.');
+                setUrl(result.url);
+                if(kind==='photo')setKind('other');
+              }
               if (!title) setTitle(f.name);
             } catch (e: any) {
               setError(e.message);
@@ -1159,12 +1196,14 @@ function JobFiles({ id }: { id: number }) {
             }
           }}
         />
+        <p className="text-xs text-muted-foreground">Photos, PDF, Word, Excel, CSV, text, CAD drawings, and ZIP · up to 25 MB. Documents keep their original quality.</p>
+        {uploading&&<p role="status">Uploading file…</p>}
         <details>
           <summary className="cursor-pointer">
-            Reuse a suite photo or replace a revision
+            Reuse a file or replace a revision
           </summary>
           <input
-            aria-label="Existing suite photo"
+            aria-label="Existing suite file"
             className={inputCls}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -1197,21 +1236,22 @@ function JobFiles({ id }: { id: number }) {
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {q.data?.map((f) => (
-            <a href={f.url} target="_blank" rel="noreferrer" key={f.id}>
-              <img
+            <div className="min-w-0 rounded-xl border p-3" key={f.id}>
+              {isJobImage(f.url)?<a href={f.url} target="_blank" rel="noreferrer"><img
                 className="aspect-square w-full rounded object-cover"
                 src={f.thumbnail_url || f.url}
                 loading="lazy"
                 alt={f.title}
-              />
-              <p>{f.title}</p>
+              /></a>:<div className="flex aspect-video items-center justify-center rounded bg-muted"><FileText className="h-10 w-10 text-muted-foreground" aria-hidden="true"/><span className="ml-2 text-sm font-medium uppercase">{f.url.split('.').at(-1)}</span></div>}
+              <p className="mt-2 break-words font-medium">{f.title}</p>
               <p className="text-xs text-muted-foreground">
                 {q.data.some((n) => n.replaces_id === f.id)
                   ? "Older revision"
                   : "Current"}{" "}
                 · Team only · {f.user_name}
               </p>
-            </a>
+              <button type="button" className={`${secondaryBtn} mt-3`} aria-label={`Download ${f.title}`} disabled={downloading===f.id} onClick={()=>downloadFile(f)}><Download className="h-4 w-4" aria-hidden="true"/>{downloading===f.id?'Downloading…':'Download'}</button>
+            </div>
           ))}
         </div>
       )}

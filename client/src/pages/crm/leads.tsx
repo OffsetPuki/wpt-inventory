@@ -610,7 +610,7 @@ export default function LeadsPage() {
   const business=useBusiness();
   const { isElevated } = useAuth();
 
-  const [view, setView] = useState<"board" | "list">("board");
+  const [view, setView] = useRememberedState<"board" | "list">("leads-layout","list");
   const [q, setQ] = useRememberedState("client/src/pages/crm/leads.tsx:q","");
   const [source, setSource] = useRememberedState("client/src/pages/crm/leads.tsx:source","");
   const site=business==='all'?'':business;
@@ -640,7 +640,7 @@ export default function LeadsPage() {
   const leadsUrl = `/api/crm/leads${params.toString() ? `?${params.toString()}` : ""}`;
 
   const { data: leads = [], isLoading,isError,error,refetch } = useQuery<Lead[]>({
-    queryKey: ["crm-leads", q.trim(), source, site, assignee, from, to,page],
+    queryKey: ["crm-leads", q.trim(), source, site, assignee, from, to,stage,page],
     queryFn: async () => (await apiRequest("GET", leadsUrl)).json(),
   });
 
@@ -696,8 +696,9 @@ export default function LeadsPage() {
     );
 
   return (
-    <div className="mx-auto max-w-full">
-      <Header title="Leads" description="Your sales pipeline, from first contact to closed">
+    <div className="mx-auto w-full min-w-0 max-w-6xl">
+      <Header title="Leads" description="Find a customer request, follow up, and track the next step.">
+        {isElevated&&<Link href="/trash" className="flex min-h-11 items-center rounded-xl border px-3 text-sm">View Trash</Link>}
         <div className="flex items-center gap-1 rounded-xl border border-border p-1">
           <button className={toggleBtn(view === "board")} onClick={() => setView("board")}>
             <LayoutGrid className="h-4 w-4" /> Board
@@ -715,58 +716,26 @@ export default function LeadsPage() {
         </button>
       </Header>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-52 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search leads…"
-            className="h-11 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring"
-          />
+      <div className="mb-5 space-y-3">
+        <div className="flex flex-wrap gap-3">
+          <label className="relative min-w-48 flex-1"><span className="sr-only">Search leads</span><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground"/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Name, phone, email, or request" className={`${inputCls} pl-9`}/></label>
+          <label><span className="sr-only">Lead stage</span><select aria-label="Lead stage" className={selectCls} value={stage} onChange={e=>setStage(e.target.value)}><option value="">All stages</option>{LEAD_STAGES.map(s=><option key={s} value={s}>{LEAD_STAGE_LABELS[s]}</option>)}</select></label>
         </div>
-        <select className={selectCls} value={source} onChange={(e) => setSource(e.target.value)}>
-          <option value="">All sources</option>
-          {LEAD_SOURCES.map((s) => (
-            <option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>
-          ))}
-        </select>
-        <select className={selectCls} value={site} onChange={(e) => setSite(e.target.value)}>
-          <option value="">All sites</option>
-          {LEAD_SITES.map((s) => (
-            <option key={s} value={s}>{leadSiteLabel[s]}</option>
-          ))}
-        </select>
-        {view === "list" && (
-          <select className={selectCls} value={stage} onChange={(e) => setStage(e.target.value)}>
-            <option value="">All stages</option>
-            {LEAD_STAGES.map((s) => (
-              <option key={s} value={s}>{LEAD_STAGE_LABELS[s]}</option>
-            ))}
-          </select>
-        )}
-        {view === "list" && isElevated && (
-          <select className={selectCls} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">All assignees</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-        )}
-        {view === "list" && (
-          <div className="flex items-center gap-1.5">
-            <input type="date" className={selectCls} value={from} onChange={(e) => setFrom(e.target.value)} />
-            <span className="text-sm text-muted-foreground">–</span>
-            <input type="date" className={selectCls} value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-        )}
+        <details className="rounded-xl border p-3"><summary className="cursor-pointer text-sm font-medium">More filters{(source||site||assignee||from||to)?' · active':''}</summary><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <label className="flex flex-col gap-1 text-sm">Source<select className={selectCls} value={source} onChange={e=>setSource(e.target.value)}><option value="">All sources</option>{LEAD_SOURCES.map(s=><option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>)}</select></label>
+          <label className="flex flex-col gap-1 text-sm">Business<select className={selectCls} value={site} onChange={e=>setSite(e.target.value)}><option value="">All businesses</option>{LEAD_SITES.map(s=><option key={s} value={s}>{leadSiteLabel[s]}</option>)}</select></label>
+          {isElevated&&<label className="flex flex-col gap-1 text-sm">Assigned to<select className={selectCls} value={assignee} onChange={e=>setAssignee(e.target.value)}><option value="">Anyone</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
+          <label className="flex flex-col gap-1 text-sm">Received from<input type="date" className={selectCls} value={from} onChange={e=>setFrom(e.target.value)}/></label>
+          <label className="flex flex-col gap-1 text-sm">Received through<input type="date" className={selectCls} value={to} min={from||undefined} onChange={e=>setTo(e.target.value)}/></label>
+        </div></details>
+        {(q||stage||source||assignee||from||to)&&<button type="button" className="min-h-11 text-sm underline" onClick={()=>{setQ('');setStage('');setSource('');setAssignee('');setFrom('');setTo('');}}>Clear filters</button>}
       </div>
 
-      <PageButtons page={page} setPage={setPage} count={leads.length}/>
+      {(page>0||leads.length>=50)&&<PageButtons page={page} setPage={setPage} count={leads.length}/>}
       {isError ? <RetryBlock query={{error,refetch}}/> : isLoading ? (
         <LoadingBlock />
       ) : leads.length === 0 ? (
-        <EmptyState icon={Users} message="No leads yet">
+        <EmptyState icon={Users} message={q||source||stage||assignee||from||to?'No leads match these filters':'No leads yet'}>
           <button
             onClick={() => setNewOpen(true)}
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
@@ -776,9 +745,10 @@ export default function LeadsPage() {
           </button>
         </EmptyState>
       ) : view === "board" ? (
-        <div className="overflow-x-auto pb-4">
-          <div className="flex items-start gap-3">
-            {LEAD_STAGES.map((s) => {
+        <div role="region" aria-label="Lead board">
+          <p className="mb-3 text-sm text-muted-foreground">Open a card to update its stage. Counts show requests on this page.</p>
+          <div className="grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {LEAD_STAGES.filter(s=>!stage||s===stage).map((s) => {
               const column = leads.filter((l) => l.stage === s);
               return (
                 <div
@@ -795,7 +765,7 @@ export default function LeadsPage() {
                     if (id) handleDrop(id, s);
                   }}
                   className={cn(
-                    "w-72 shrink-0 rounded-xl border bg-card/50 p-2",
+                    "min-w-0 rounded-xl border bg-card/50 p-3",
                     dragOverStage === s ? "border-primary" : "border-border"
                   )}
                 >
@@ -803,32 +773,32 @@ export default function LeadsPage() {
                     <span className="text-sm font-medium text-foreground">{LEAD_STAGE_LABELS[s]}</span>
                     <Chip className="bg-muted text-muted-foreground">{column.length}</Chip>
                   </div>
-                  <div className="flex flex-col gap-2">
+                  <div className="flex max-h-[36rem] flex-col gap-2 overflow-y-auto">
                     {column.map((lead) => {
                       const days = daysSince(lead.lastContactAt ?? lead.createdAt);
                       return (
-                        <div
+                        <button type="button"
                           key={lead.id}
                           draggable
                           onDragStart={(e) => e.dataTransfer.setData("text/plain", String(lead.id))}
                           onClick={() => setDetailId(lead.id)}
-                          className="cursor-grab rounded-lg border border-border bg-card p-3 transition-shadow hover:border-primary/50 hover:shadow-md"
+                          className="cursor-grab rounded-lg border border-border bg-card p-3 text-left transition-shadow hover:border-primary/50 hover:shadow-md"
                         >
                           <p className="font-medium text-foreground">{lead.name}</p>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             <SiteChip site={lead.site} />
                             <Chip tone="blue">{LEAD_SOURCE_LABELS[lead.source]}</Chip>
-                            {lead.stale && <Chip tone="amber">Stale</Chip>}
+                            {lead.stale&&!['won','lost'].includes(lead.stage) && <Chip tone="amber">Follow-up due</Chip>}
                           </div>
                           <div className="mt-2 flex items-center justify-between text-sm">
                             <span className="tabular-nums text-foreground">
-                              {formatMoney(lead.estimatedValueCents)}
+                              {(lead.stage==='won'?lead.revenueClosedCents:lead.estimatedValueCents)?formatMoney(lead.stage==='won'?lead.revenueClosedCents:lead.estimatedValueCents):'Value not set'}
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {days == null ? "no contact" : days === 0 ? "today" : `${days}d ago`}
                             </span>
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                     {column.length === 0 && (
@@ -841,64 +811,20 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase text-muted-foreground">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Stage</th>
-                <th className="px-4 py-3 font-medium">Source</th>
-                <th className="px-4 py-3 text-right font-medium">Est. value</th>
-                <th className="px-4 py-3 font-medium">Last contact</th>
-                {isElevated && <th className="px-4 py-3 font-medium">Assignee</th>}
-                <th className="px-4 py-3 font-medium">Service area</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {listLeads.length === 0 ? (
-                <tr>
-                  <td colSpan={isElevated ? 7 : 6} className="px-4 py-10 text-center text-muted-foreground">
-                    No leads match these filters
-                  </td>
-                </tr>
-              ) : (
-                listLeads.map((lead) => {
-                  const days = daysSince(lead.lastContactAt ?? lead.createdAt);
-                  return (
-                    <tr
-                      key={lead.id}
-                      onClick={() => setDetailId(lead.id)}
-                      className="cursor-pointer hover:bg-accent/50"
-                    >
-                      <td className="px-4 py-3 font-medium text-foreground">
-                        {lead.name}
-                        <SiteChip site={lead.site} className="ml-2" />
-                        {lead.stale && (
-                          <Chip tone="amber" className="ml-2">Stale</Chip>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Chip tone={STAGE_TONE[lead.stage]}>
-                          {LEAD_STAGE_LABELS[lead.stage]}
-                        </Chip>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{LEAD_SOURCE_LABELS[lead.source]}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                        {formatMoney(lead.estimatedValueCents)}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {days == null ? "—" : days === 0 ? "Today" : `${days}d ago`}
-                      </td>
-                      {isElevated && (
-                        <td className="px-4 py-3 text-muted-foreground">{userName(lead.assignedTo)}</td>
-                      )}
-                      <td className="px-4 py-3 text-muted-foreground">{lead.serviceArea ?? "—"}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-3" aria-label="Lead list">
+          <p className="text-sm text-muted-foreground">{listLeads.length} requests on this page · Open a request to see its quotes, notes, and next step.</p>
+          {listLeads.map(lead=>{
+            const days=daysSince(lead.lastContactAt??lead.createdAt);
+            const value=lead.stage==='won'?lead.revenueClosedCents:lead.estimatedValueCents;
+            return <button type="button" key={lead.id} onClick={()=>setDetailId(lead.id)} className="grid w-full gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-words">{lead.name}</strong><Chip tone={STAGE_TONE[lead.stage]}>{LEAD_STAGE_LABELS[lead.stage]}</Chip>{lead.stale&&!['won','lost'].includes(lead.stage)&&<Chip tone="amber">Follow-up due</Chip>}</div>
+                <p className="mt-1 break-words text-sm text-muted-foreground">{lead.serviceRequested||lead.serviceArea||'Open request details'}</p>
+                <p className="mt-1 break-words text-sm text-muted-foreground">{[lead.phone,lead.email].filter(Boolean).join(' · ')||'Contact details not added'}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><SiteChip site={lead.site}/><span>{LEAD_SOURCE_LABELS[lead.source]}</span>{lead.assignedTo&&<span>Assigned to {userName(lead.assignedTo)}</span>}</div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm sm:flex-col sm:items-end"><strong>{value?formatMoney(value):'Value not set'}</strong><span className="text-muted-foreground">{days===null?'No contact yet':lead.lastContactAt?(days===0?'Contacted today':`Last contact ${days} days ago`):(days===0?'Received today':`Received ${days} days ago`)}</span><span className="font-medium text-primary">Open request</span></div>
+            </button>;
+          })}
         </div>
       )}
 
