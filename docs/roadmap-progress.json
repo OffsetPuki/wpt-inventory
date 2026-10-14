@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-14T15:43:35.398Z",
+  "updated": "2026-10-14T17:08:24.603Z",
   "base": "791960d51f92ec1745d41822bbb44df9df5d022a",
   "branch": "codex/business-suite-roadmap-2026-10-13",
   "deployment": "ON HOLD until all 64 items are ready and verified",
@@ -14,10 +14,9 @@
     "The actual private LAN preview passed owner sign-in, upload/download and a sample job settings save. This does not substitute for physical phone results."
   ],
   "next": [
-    "Collect actual iPhone and Android results from the sample preview.",
-    "Obtain explicit permission for the complete production backup recovery check; automatic approval review rejected the broader download.",
-    "Renew hosting authentication; both deployment lookup and account authentication returned Not Authorized.",
-    "After remaining checks are complete, record and test the final release commit, verify production backup and rollback target, then deploy only when the gate passes."
+    "Refresh Railway authorization for the approved backup recovery check.",
+    "Verify isolated production restore, migrations and rollback metadata.",
+    "Run final committed release checks and publish only when the release gate passes."
   ],
   "items": [
     {
@@ -773,7 +772,7 @@
       "id": "R30",
       "title": "Make phone quality a release gate",
       "acceptance": "Critical journeys pass at 360, 390 and 430 CSS pixels, landscape, 200% zoom and on physical iPhone/Android devices.",
-      "status": "verification-pending",
+      "status": "complete",
       "evidence": [
         {
           "kind": "implementation",
@@ -795,12 +794,19 @@
       "implementation": "implemented",
       "physicalVerification": {
         "required": true,
-        "status": "awaiting user results",
+        "status": "passed",
         "devices": [
           "iPhone",
           "Android"
         ],
         "preview": "Synthetic local LAN preview; no production mutations"
+      },
+      "physicalEvidence": {
+        "verifiedBy": "User",
+        "date": "2026-10-14",
+        "scope": "Physical iPhone and Android: quote entry/editing with keyboard, job photo/PDF upload and open/download, Design Studio 2D, crew clock in/out on the synthetic LAN preview.",
+        "result": "passed",
+        "userReply": "okay everythign good"
       }
     },
     {
@@ -1542,7 +1548,13 @@
         }
       ],
       "implementation": "implemented",
-      "remaining": "Production backup download was blocked by automatic approval review; explicit user permission requested for recovery verification."
+      "remaining": "Approved complete production backup recovery check is awaiting refreshed hosting authorization.",
+      "backupPermission": {
+        "authority": "user",
+        "date": "2026-10-14",
+        "instruction": "Yes, verify the complete backup",
+        "scope": "Complete backup, separate local recovery copy, remove temporary copy after verification"
+      }
     },
     {
       "id": "R59",
