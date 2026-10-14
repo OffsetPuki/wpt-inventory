@@ -792,7 +792,7 @@ export default function LeadsPage() {
                           </div>
                           <div className="mt-2 flex items-center justify-between text-sm">
                             <span className="tabular-nums text-foreground">
-                              {lead.estimatedValueCents?formatMoney(lead.estimatedValueCents):'Value not set'}
+                              {(lead.stage==='won'?lead.revenueClosedCents:lead.estimatedValueCents)?formatMoney(lead.stage==='won'?lead.revenueClosedCents:lead.estimatedValueCents):'Value not set'}
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {days == null ? "no contact" : days === 0 ? "today" : `${days}d ago`}
