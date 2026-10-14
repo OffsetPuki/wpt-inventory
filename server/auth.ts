@@ -38,24 +38,13 @@ export function destroySession(token: string): void {
   storage.deleteSession(token);
 }
 
-// Hard-purge soft-deleted items / projects after this long. 30 days gives
-// enough runway for "oops, I deleted the wrong thing yesterday" without
-// letting the trash grow forever.
-const SOFT_DELETE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-
-// Run hourly to drop expired rows (sessions, stale lockout entries) and
-// hard-purge soft-deleted items/projects past retention.
+// Expire authentication records only. Business Trash is recoverable until a
+// separately reviewed retention action; cascades must not erase job history.
 export function startSessionReaper(): void {
   const tick = () => {
     const now = Date.now();
     storage.purgeExpiredSessions(now);
     storage.purgeStaleLoginAttempts(now);
-    const cutoff = now - SOFT_DELETE_RETENTION_MS;
-    const purgedItems = storage.purgeOldDeletedItems(cutoff);
-    const purgedProjects = storage.purgeOldDeletedProjects(cutoff);
-    if (purgedItems || purgedProjects) {
-      console.log(`[reaper] Hard-purged ${purgedItems} item(s), ${purgedProjects} project(s) past 30-day retention`);
-    }
   };
   tick();
   setInterval(tick, 60 * 60 * 1000).unref();

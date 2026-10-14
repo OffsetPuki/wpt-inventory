@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {format,modelDimensions} from './walnut-dimensions';
 
-export default function WalnutModel({parts,selected,isolate,showTop,hiddenParts,onSelect,variant,unit,dimensions,dimensionMode}){
+export default function WalnutModel({parts,selected,isolate,showTop,hiddenParts,onSelect,variant,unit,dimensions,dimensionMode,lowDetail=false}){
   const host=useRef(null),control=useRef(null),latest=useRef({selected,isolate,showTop,hiddenParts,onSelect,variant,unit,dimensions,dimensionMode});
   latest.current={selected,isolate,showTop,hiddenParts,onSelect,variant,unit,dimensions,dimensionMode};
   const [error,setError]=useState(''),[overlay,setOverlay]=useState({width:1,height:1,items:[]});
@@ -12,7 +12,7 @@ export default function WalnutModel({parts,selected,isolate,showTop,hiddenParts,
       const [T,{OrbitControls}]=await Promise.all([import('three'),import('three/addons/controls/OrbitControls.js')]);
       if(stopped)return;
       const scene=new T.Scene();scene.background=new T.Color('#eef1ed');
-      const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+      const renderer=new T.WebGLRenderer({antialias:!lowDetail,powerPreference:lowDetail?'low-power':'default'});renderer.setPixelRatio(Math.min(devicePixelRatio,lowDetail?1:1.5));
       renderer.domElement.tabIndex=0;renderer.domElement.setAttribute('aria-label','Walnut frame: drag to rotate, scroll to zoom, click a part');
       host.current.appendChild(renderer.domElement);
       const camera=new T.OrthographicCamera(-80,80,60,-60,.01,3000);
@@ -93,7 +93,7 @@ export default function WalnutModel({parts,selected,isolate,showTop,hiddenParts,
         scene.traverse(o=>{o.geometry?.dispose();if(o.material)o.material.dispose();});renderer.dispose();renderer.domElement.remove();control.current=null;};
     })().catch(()=>{if(!stopped)setError('3D graphics could not start. The parts list and drawings still work.');});
     return()=>{stopped=true;cleanup?.();};
-  },[parts]);
+  },[parts,lowDetail]);
   return <div className="wt-viewer"><div className="wt-view-buttons">{[['3d','3D'],['end','End'],['side','Side'],['top','Top']].map(([id,label])=><button key={id} onClick={()=>control.current?.fit(id)}>{label}</button>)}<button onClick={()=>control.current?.fit()}>Fit view</button></div>
     <div className="wt-stage"><div ref={host} className="wt-canvas" aria-label="Walnut parts 3D view"/>
       {dimensions&&<svg className="wt-dimension-overlay" viewBox={`0 0 ${overlay.width} ${overlay.height}`} aria-label="Dimensions on model" role="img">

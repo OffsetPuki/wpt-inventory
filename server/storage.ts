@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { businessDay } from './business-clock';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { eq, and, or, sql, desc, asc } from "drizzle-orm";
 import path from "path";
@@ -37,6 +38,8 @@ if (!fs.existsSync(uploadsDir)) {
 // marketing.ts) can run their own DDL and drizzle queries against the same
 // connection instead of threading everything through this file.
 export const sqlite: Database.Database = new Database(path.join(dataDir, "inventory.db"));
+sqlite.function('business_day',{deterministic:true},(ms:number)=>ms==null?null:businessDay(Number(ms)));
+sqlite.function('business_today',()=>businessDay());
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 // Standard SQLite perf tuning. NORMAL is the recommended companion to WAL —
@@ -126,7 +129,7 @@ sqlite.exec(`
     equipment_type TEXT,
     custom_attrs TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    -- Soft delete: NULL = active. Reaper hard-purges after 30 days.
+    -- Soft delete: NULL = active. Business history is retained for reviewed recovery.
     deleted_at INTEGER
   );
 
@@ -162,7 +165,7 @@ sqlite.exec(`
     status TEXT NOT NULL DEFAULT 'active',
     notes TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    -- Soft delete: NULL = active. Reaper hard-purges after 30 days.
+    -- Soft delete: NULL = active. Business history is retained for reviewed recovery.
     deleted_at INTEGER
   );
 
@@ -676,13 +679,6 @@ export const storage = {
     sqlite.prepare("UPDATE items SET deleted_at = NULL WHERE id = ?").run(id);
   },
 
-  // Hard-delete rows that have been soft-deleted longer than the retention
-  // window. Cascading foreign keys clean up adjustments + transactions.
-  purgeOldDeletedItems(cutoff: number): number {
-    const info = sqlite.prepare("DELETE FROM items WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(cutoff);
-    return Number(info.changes ?? 0);
-  },
-
   // ── Adjustments ──────────────────────────────────────────────────────────
   createAdjustment(itemId: number, userId: number, data: { delta?: number; countedQuantity?: number; expectedVersion?: number; reason: string; notes?: string; projectId?: number | null; requestKey?: string }): Adjustment {
     const id = adjustStock(sqlite, itemId, userId, data);
@@ -846,11 +842,6 @@ export const storage = {
 
   restoreProject(id: number): void {
     sqlite.prepare("UPDATE projects SET deleted_at = NULL WHERE id = ?").run(id);
-  },
-
-  purgeOldDeletedProjects(cutoff: number): number {
-    const info = sqlite.prepare("DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(cutoff);
-    return Number(info.changes ?? 0);
   },
 
   getProjectUsage(projectId: number) {

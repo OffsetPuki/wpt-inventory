@@ -1,13 +1,15 @@
 import Insights from '@/components/Insights';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {useScopedQuery} from '@/hooks/useScopedQuery';
-import {useListPage,PageButtons} from '@/lib/list-page';
+import {PageButtons} from '@/lib/list-page';
+import {usePageFilters} from '@/hooks/usePageFilters';
+import {RecordSelect} from '@/components/RecordSelect';
 import { useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest, getAuthToken } from '@/lib/queryClient';
 import { useApiMutation } from '@/hooks/useApiMutation';
 import { useDialogDraft } from '@/lib/dialog-draft';
-import { readContext, useRecordLink } from '@/lib/record-link';
+import { useRecordLink } from '@/lib/record-link';
 import { inputCls, primaryBtn, secondaryBtn } from '@/lib/ui-styles';
 import { formatMoney, formatDate } from '@/lib/format';
 import { toast } from '@/components/ui/toaster';
@@ -135,14 +137,17 @@ function Editor({po,type,onClose}:{po:Po|null;type:OrderType;onClose:()=>void}) 
 }
 
 export default function PurchaseOrdersPage(){
-  const [type,setType]=useState<OrderType>(()=>readContext('category')==='supplier'?'supplier':'customer'),[status,setStatus]=useState(''),[search,setSearch]=useState(''),[editing,setEditing]=useState<Po|null>(null),[open,setOpen]=useState(false);
+  const [filters,setFilters]=usePageFilters({category:'customer',status:'',q:'',projectId:'',page:'0'});
+  const type:OrderType=filters.category==='supplier'?'supplier':'customer',status=filters.status,search=filters.q,projectId=filters.projectId,page=Math.max(0,Number(filters.page)||0);
+  const setType=(category:OrderType)=>setFilters({category}),setStatus=(status:string)=>setFilters({status}),setSearch=(q:string)=>setFilters({q}),setPage=(page:number)=>setFilters({page:String(page)});
+  const [editing,setEditing]=useState<Po|null>(null),[open,setOpen]=useState(false);
   useRecordLink('po','/api/finance/purchase-orders',row=>{setType(row.orderType||'supplier');setEditing(row);setOpen(true);});
-  const {page,setPage}=useListPage('purchase-orders',[type,status,search]);
-  const list=useScopedQuery<Po[]>({queryKey:['finance-pos',type,status,search,page],queryFn:async()=> (await apiRequest('GET',`/api/finance/purchase-orders?page=${page}&limit=50&orderType=${type}&status=${status}&q=${encodeURIComponent(search)}`)).json()});
+  const list=useScopedQuery<Po[]>({queryKey:['finance-pos',type,status,search,projectId,page],queryFn:async()=> (await apiRequest('GET',`/api/finance/purchase-orders?page=${page}&limit=50&orderType=${type}&status=${status}&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(search)}`)).json()});
   async function edit(row:Po){try{const fresh=await (await apiRequest('GET',`/api/finance/purchase-orders/${row.id}/detail`)).json();setEditing(fresh);setOpen(true);}catch(e:any){toast({variant:'destructive',title:'Could not open order',description:e.message});}}
   return <div className="mx-auto max-w-6xl">
     <Header title="Purchase orders" description="Customer orders received and supplier purchases issued"><button className={primaryBtn} onClick={()=>{setEditing(null);setOpen(true);}}><Plus className="h-5 w-5"/>New {type==='customer'?'customer':'supplier'} PO</button></Header>
       <Insights area="purchasing"/>
+      <label className="mb-4 grid gap-1 text-sm">Job<RecordSelect type="jobs" value={projectId} onChange={e=>setFilters({projectId:e.target.value})}/></label>
 
     <nav aria-label="PO categories" className="mb-5 flex flex-wrap gap-2">{(['customer','supplier'] as const).map(v=><button className={v===type?primaryBtn:secondaryBtn} key={v} onClick={()=>{setType(v);setStatus('');}}>{v==='customer'?'Customer POs received':'Supplier POs issued'}</button>)}</nav>
     <div className="mb-5 grid gap-3 sm:grid-cols-[1fr_220px]"><Field label="Search orders"><div className="relative"><Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground"/><input className={inputCls+' pl-10'} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, PO number or customer project"/></div></Field><Field label="Status"><select className={inputCls} value={status} onChange={e=>setStatus(e.target.value)}><option value="">All statuses</option>{ORDER_STATUSES.map(s=><option key={s} value={s}>{ORDER_LABELS[s]}</option>)}</select></Field></div>

@@ -1,3 +1,4 @@
+import {L,useLanguage} from '@/lib/language';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -5,6 +6,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { toast } from '@/components/ui/toaster';
 
 export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIssued, onShared, onBusy, actionsId, disabled = false }) {
+  const {t}=useLanguage();
   const [actionsTarget, setActionsTarget] = useState(null);
   useEffect(() => { setActionsTarget(actionsId ? document.getElementById(actionsId) : null); }, [actionsId]);
   const actions = node => actionsTarget ? createPortal(node, actionsTarget) : node;
@@ -47,16 +49,16 @@ export default function ShareQuote({ quoteId, customerEmail, onBeforeShare, onIs
   });
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
   if (result) return <div className="share-panel" role="status">
-    <p>{result.wantedEmail ? result.emailed ? `Email sent to ${email}.` : 'Quote issued, but email was not delivered. Use the link below.' : copied ? 'Quote issued. Link copied.' : 'Quote issued. Select and copy the link below.'}</p>
-    {result.projectUrl&&<p><a href={result.projectUrl} target="_blank" rel="noopener noreferrer">Open customer project page</a><button className="btn ghost" onClick={()=>copy(result.projectUrl)}>Copy project page</button></p>}
-    <div className="share-row"><input aria-label="Quote share link" readOnly className="share-url" value={result.url} onFocus={e => e.target.select()} /><button className="btn ghost sq-btn" onClick={() => copy(result.url)}>Copy link</button></div>
-    {onIssued && actions(<button className="btn" onClick={() => onIssued(result)}>Done</button>)}
+    <p>{result.wantedEmail ? result.emailed ? `${t("Email sent to")} ${email}.` : t("Quote issued, but email was not delivered. Use the link below.") : copied ? t("Quote issued. Link copied.") : t("Quote issued. Select and copy the link below.")}</p>
+    {result.projectUrl&&<p><a href={result.projectUrl} target="_blank" rel="noopener noreferrer"><L>{"Open customer project page"}</L></a><button className="btn ghost" onClick={()=>copy(result.projectUrl)}><L>{"Copy project page"}</L></button></p>}
+    <div className="share-row"><input aria-label="Quote share link" readOnly className="share-url" value={result.url} onFocus={e => e.target.select()} /><button className="btn ghost sq-btn" onClick={() => copy(result.url)}><L>{"Copy link"}</L></button></div>
+    {onIssued && actions(<button className="btn" onClick={() => onIssued(result)}><L>{"Done"}</L></button>)}
   </div>;
-  return <div className="share-panel"><details><summary>Customize customer link</summary><label className="field"><span>Link name (optional)</span><input maxLength={60} value={linkName} placeholder="e.g. jose-shop" onChange={e=>setLinkName(e.target.value)}/></label><p className="hint">Your project name plus a private random code. Existing links keep working.</p></details>
-    <p className="hint">{validEmail ? `Send to ${email}` : 'Add a valid customer email to send by email, or copy a link.'}</p>
+  return <div className="share-panel"><details><summary><L>{"Customize customer link"}</L></summary><label className="field"><span><L>{"Link name (optional)"}</L></span><input maxLength={60} value={linkName} placeholder="e.g. jose-shop" onChange={e=>setLinkName(e.target.value)}/></label><p className="hint"><L>{"Your project name plus a private random code. Existing links keep working."}</L></p></details>
+    <p className="hint">{validEmail ? `${t("Send to")} ${email}` : t("Add a valid customer email to send by email, or copy a link.")}</p>
     {actions(<div className="btn-row">
-      <button className="btn" disabled={disabled || !validEmail || share.isPending || isFetching} onClick={() => share.mutate('email')}>{share.isPending && share.variables === 'email' ? 'Sending…' : 'Send email'}</button>
-      <button className="btn ghost" disabled={disabled || !quoteId || share.isPending || isFetching} onClick={() => share.mutate('copy')}>{share.isPending && share.variables === 'copy' ? 'Creating link…' : 'Copy link'}</button>
+      <button className="btn" disabled={disabled || !validEmail || share.isPending || isFetching} onClick={() => share.mutate('email')}>{share.isPending && share.variables === 'email' ? t("Sending…") : t("Send email")}</button>
+      <button className="btn ghost" disabled={disabled || !quoteId || share.isPending || isFetching} onClick={() => share.mutate('copy')}>{share.isPending && share.variables === 'copy' ? t("Creating link…") : t("Copy link")}</button>
     </div>)}
   </div>;
 }

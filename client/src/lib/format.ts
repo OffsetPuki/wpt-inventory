@@ -1,4 +1,10 @@
 import type { Item, Category, Area, ItemType, AdjustmentReason } from "@shared/schema";
+import { businessDate,businessInstant, DEFAULT_BUSINESS_TIME_ZONE } from '@shared/business-time';
+let businessZone=DEFAULT_BUSINESS_TIME_ZONE;
+export function setBusinessTimeZone(zone:string){businessDate(Date.now(),zone);businessZone=zone;}
+export function getBusinessTimeZone(){return businessZone;}
+export function businessFollowUp(date:string){return businessInstant(date,'09:00',businessZone);}
+export function businessDateInput(value:number|Date|null|undefined){return value==null?'':businessDate(+value,businessZone);}
 
 // ─── Label maps ───────────────────────────────────────────────────────────────
 
@@ -108,7 +114,7 @@ export function formatDate(value: string | number | Date | null | undefined): st
   if (!value) return "";
   const d = toLocalDate(value);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric",...(typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?{}:{timeZone:businessZone}) });
 }
 
 export function formatDateTime(value: string | number | Date | null | undefined): string {
@@ -116,6 +122,7 @@ export function formatDateTime(value: string | number | Date | null | undefined)
   const d = toLocalDate(value); // same YMD guard; instants pass through
   if (isNaN(d.getTime())) return "";
   return d.toLocaleString("en-US", {
+    timeZone:businessZone,timeZoneName:'short',year:'numeric',
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -165,10 +172,7 @@ export function formatHours(minutes: number | null | undefined): string {
 
 /** Local "YYYY-MM-DD" for today — used to seed <input type="date"> fields. */
 export function todayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+  return businessDate(Date.now(),businessZone);
 }
 
 /**
@@ -179,11 +183,7 @@ export function todayYmd(): string {
  * so the customer is never told when to pay either.
  */
 export function ymdInDays(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+  return new Date(Date.parse(todayYmd()+'T12:00:00Z')+days*86400000).toISOString().slice(0,10);
 }
 
 /** Parse a bare "YYYY-MM-DD" as a LOCAL date (reuses the toLocalDate guard). */

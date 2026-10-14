@@ -1,11 +1,9 @@
-import {useDeepLink} from '@/lib/deep-link';
+import {usePageFilters} from '@/hooks/usePageFilters';
+import {useBusinessDay} from '@/hooks/useBusinessReport';
 import {Link} from 'wouter';
-import {useEffect} from 'react';
-import {readContext} from '@/lib/record-link';
 import Insights from '@/components/Insights';
 import LaborPolicy from "@/components/LaborPolicy";
 import { RetryBlock } from "@/components/RetryBlock";
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useApiMutation } from "@/hooks/useApiMutation";
@@ -34,12 +32,6 @@ interface SummaryRow {
   overtimeCents?:number; overtimeHours?:number;
 }
 
-function ymdLocal(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
 function rateLabel(r: SummaryRow): string {
   if (r.multipleRates) return "Dated rates";
   return `${formatMoney(r.payRateCents)}${r.payType === "salary" ? "/yr" : "/hr"}`;
@@ -48,11 +40,9 @@ function rateLabel(r: SummaryRow): string {
 export default function HrPayrollPage() {
   const { isElevated } = useAuth();
   // Default period: the last 14 days, inclusive.
-  const [from, setFrom] = useState(() => readContext("from")||ymdLocal(new Date(Date.now() - 13 * 86_400_000)));
-  const [to, setTo] = useState(() => readContext("to")||ymdLocal(new Date()));
-
-  const linkedFrom=useDeepLink('from'),linkedTo=useDeepLink('to');
-  useEffect(()=>{if(linkedFrom)setFrom(linkedFrom);if(linkedTo)setTo(linkedTo);},[linkedFrom,linkedTo]);
+  const today=useBusinessDay();
+  const [filters,setFilters]=usePageFilters({from:new Date(Date.parse(today+'T12:00:00Z')-13*86400000).toISOString().slice(0,10),to:today});
+  const from=filters.from,setFrom=(from:string)=>setFilters({from}),to=filters.to,setTo=(to:string)=>setFilters({to});
   const rangeValid = !!from && !!to && from <= to;
   const checks = useQuery<{issues:{userId:number;name:string;message:string;kind:string}[]}>({queryKey:['employee','payroll-check',from,to],queryFn:async()=>(await apiRequest('GET',`/api/employee/payroll-check?from=${from}&to=${to}`)).json(),enabled:isElevated&&rangeValid,staleTime:0,refetchInterval:15000});
 

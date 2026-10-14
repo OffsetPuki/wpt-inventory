@@ -1,4 +1,6 @@
+import {L} from '@/lib/language';
 import Insights from '@/components/Insights';
+import {usePageFilters} from '@/hooks/usePageFilters';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { useSuiteQuery } from '@/lib/suite-query';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -58,7 +60,9 @@ type LeaveRow = {
 
 export default function PmSchedulePage() {
   const { isElevated } = useAuth();
-  const [weekStart, setWeekStart] = useState(() => mondayOf(todayYmd()));
+  const [filters,setFilters]=usePageFilters({week:mondayOf(todayYmd()),view:'agenda'});
+  const weekStart=/^\d{4}-\d{2}-\d{2}$/.test(filters.week)&&Number.isFinite(Date.parse(filters.week))?filters.week:mondayOf(todayYmd());
+  const setWeekStart=(week:string)=>setFilters({week,view:'agenda'});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TaskRow | null>(null);
 
@@ -144,12 +148,12 @@ export default function PmSchedulePage() {
   };
 
   const navBtn =
-    "flex h-9 items-center justify-center rounded-lg border border-border text-foreground hover:border-primary";
+    "flex min-h-11 items-center justify-center rounded-lg border border-border text-foreground hover:border-primary";
 
   return (
     <div className="mx-auto max-w-full">
       <Header title="Schedule" description="Who is doing what, day by day, this week" />
-      <Insights area="schedule"/>
+      <div className="mb-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-xl border px-4 text-sm" aria-pressed={filters.view!=='crew'} onClick={()=>setFilters({view:'agenda'})}>Week agenda</button><button type="button" className="min-h-11 rounded-xl border px-4 text-sm" aria-pressed={filters.view==='crew'} onClick={()=>setFilters({view:'crew'})}>Crew grid</button></div>
 
 
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -157,7 +161,7 @@ export default function PmSchedulePage() {
           <button
             onClick={() => setWeekStart(addDaysYmd(weekStart, -7))}
             aria-label="Previous week"
-            className={cn(navBtn, "w-9")}
+            className={cn(navBtn, "w-11")}
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -165,12 +169,12 @@ export default function PmSchedulePage() {
             onClick={() => setWeekStart(mondayOf(todayYmd()))}
             className={cn(navBtn, "px-3 text-sm font-medium")}
           >
-            Today
+            <L>{"Today"}</L>
           </button>
           <button
             onClick={() => setWeekStart(addDaysYmd(weekStart, 7))}
             aria-label="Next week"
-            className={cn(navBtn, "w-9")}
+            className={cn(navBtn, "w-11")}
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -199,6 +203,8 @@ export default function PmSchedulePage() {
             and they will show up here.
           </p>
         </EmptyState>
+      ) : filters.view!=='crew' ? (
+        <div className="space-y-4">{days.map(day=>{const tasks=weekTasks.filter(t=>{const span=spanOf(t)!;return span[0]<=day&&span[1]>=day;});const absent=crew.filter(person=>leaveOn(person.id,day));return <section key={day} className={cn('rounded-xl border bg-card p-4',day===today&&'border-primary')}><h2 className="font-semibold">{day===today?'Today · ':''}{formatDate(day)}</h2>{absent.map(person=><p key={person.id} className="mt-2 text-sm text-amber-700 dark:text-amber-300">{person.name} · On leave</p>)}{!tasks.length&&<p className="mt-3 text-sm text-muted-foreground">No tasks scheduled.</p>}{tasks.map(task=>{const onLeave=leaveOn(task.assigneeId,day);const other=task.assigneeId?tasks.filter(t=>t.id!==task.id&&t.assigneeId===task.assigneeId&&t.status!=='done').length:0;return <button key={task.id} type="button" className="mt-3 block min-h-16 w-full rounded-lg border p-3 text-left hover:bg-muted" onClick={()=>openEdit(task)}><strong className="block break-words text-sm">{task.title}</strong><span className="mt-1 block text-xs text-muted-foreground">{task.projectName||'No job linked'} · {task.assigneeName||'Unassigned'} · {TASK_STATUS_LABELS[task.status]}</span>{onLeave&&<span className="mt-1 block text-sm text-amber-700 dark:text-amber-300">Assigned employee is on leave. Review before confirming.</span>}{other>0&&<span className="mt-1 block text-xs">{other} other assignment{other>1?'s':''} for this person today.</span>}</button>;})}</section>;})}</div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           {/* Header: Mon–Sun with dates, today highlighted */}
@@ -274,7 +280,7 @@ export default function PmSchedulePage() {
                           onClick={() => openEdit(t)}
                           title={`${t.title}${t.projectName ? ` · ${t.projectName}` : ""} · ${TASK_STATUS_LABELS[t.status]}${t.dueDate ? ` · due ${t.dueDate}` : ""}`}
                           className={cn(
-                            "block w-full truncate rounded-md px-2 py-1 text-left text-xs font-medium transition-opacity hover:opacity-80",
+                            "block min-h-11 w-full truncate rounded-md px-2 py-1 text-left text-xs font-medium transition-opacity hover:opacity-80",
                             CHIP_STYLE[t.status],
                             overdue && "text-red-600 dark:text-red-400"
                           )}
@@ -297,6 +303,7 @@ export default function PmSchedulePage() {
           ))}
         </div>
       )}
+      <Insights area="schedule"/>
 
       <TaskDialog
         open={dialogOpen}

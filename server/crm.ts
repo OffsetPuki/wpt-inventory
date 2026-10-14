@@ -1,4 +1,5 @@
 import {crmStats,crmReports} from './crm-reporting';
+import {customerAccountIds} from './customer-accounts';
 import {registerCrmRecovery} from './crm-recovery';
 import { recordHumanContact } from './lead-experience';
 import { listWindow } from './pagination';
@@ -6,7 +7,7 @@ import { acceptQuote } from "./quote-lifecycle";
 import { isQuoteExpired } from './quote-policy';
 import type { Express } from "express";
 import {
-  eq, and, or, desc, isNull, sql, like, gte, lte, type SQL,
+  eq, and, or, desc, isNull, sql, like, gte, lte, inArray, type SQL,
 } from "drizzle-orm";
 import { sqlite, db } from "./storage";
 import { audit } from "./audit";
@@ -821,6 +822,7 @@ export function registerCrmRoutes(app: Express): void {
         like(clients.company, p),
         like(clients.email, p),
         like(clients.phone, p),
+        sql`EXISTS (SELECT 1 FROM crm_clients related LEFT JOIN crm_account_contacts theirs ON theirs.contact_id=related.id LEFT JOIN crm_account_contacts ours ON ours.contact_id=${clients.id} WHERE related.deleted_at IS NULL AND coalesce(theirs.account_id,related.id)=coalesce(ours.account_id,${clients.id}) AND (related.name LIKE ${p} OR related.company LIKE ${p} OR related.email LIKE ${p} OR related.phone LIKE ${p}))`,
       ));
     }
     const status = qstr(req.query.status);
@@ -842,6 +844,7 @@ export function registerCrmRoutes(app: Express): void {
   // before-param convention for anything that could collide.
   app.get("/api/crm/clients/:id/detail", requireAuth, (req, res) => {
     const id = pid(req.params.id);
+    const accountIds=customerAccountIds(id),accountJson=JSON.stringify(accountIds);
     const client = db.select().from(clients)
       .where(and(eq(clients.id, id), isNull(clients.deletedAt)))
       .get();
@@ -862,15 +865,15 @@ export function registerCrmRoutes(app: Express): void {
       try {
         const today = todayLocal();
         invoiceRows = (sqlite.prepare(`
-          SELECT id, number, status, due_date AS dueDate,
+          SELECT id, number, status, project_id AS projectId, created_at AS createdAt, due_date AS dueDate,
                  total_cents AS totalCents,
                  -- Phase G #3: held retainage isn't due yet (finance's
                  -- presentInvoice does the same subtraction).
                  total_cents - COALESCE(retainage_cents, 0) - paid_cents AS balanceCents
           FROM fin_invoices
-          WHERE deleted_at IS NULL AND client_id = ?
+          WHERE deleted_at IS NULL AND client_id IN (SELECT value FROM json_each(?))
           ORDER BY created_at DESC, id DESC
-        `).all(id) as any[]).map((r) => ({
+        `).all(accountJson) as any[]).map((r) => ({
           ...r,
           status: (r.status === "sent" || r.status === "partial")
             && r.dueDate && r.dueDate < today ? "overdue" : r.status,
@@ -889,30 +892,31 @@ export function registerCrmRoutes(app: Express): void {
 
     res.json({
       client,
+      accountIds,
       invoices: invoiceRows,
-      quotes: isElev ? sqlite.prepare(`SELECT q.id,q.number,q.status,q.total_cents totalCents FROM quotes q
+      quotes: isElev ? sqlite.prepare(`SELECT q.id,q.number,q.status,q.total_cents totalCents,q.created_at createdAt FROM quotes q
         LEFT JOIN crm_leads l ON l.id=q.lead_id WHERE q.deleted_at IS NULL AND
-        (l.client_id=@id OR (CASE WHEN json_valid(q.payload) THEN json_extract(q.payload,'$.customer.clientId') END)=@id
-         OR EXISTS(SELECT 1 FROM projects p WHERE p.quote_id=q.id AND p.client_id=@id)
-         OR EXISTS(SELECT 1 FROM fin_invoices i WHERE i.quote_id=q.id AND i.client_id=@id))
-        ORDER BY q.created_at DESC,q.id DESC`).all({id}) : [],
+        (l.client_id IN (SELECT value FROM json_each(@ids)) OR (CASE WHEN json_valid(q.payload) THEN json_extract(q.payload,'$.customer.clientId') END) IN (SELECT value FROM json_each(@ids))
+         OR EXISTS(SELECT 1 FROM projects p WHERE p.quote_id=q.id AND p.client_id IN (SELECT value FROM json_each(@ids)))
+         OR EXISTS(SELECT 1 FROM fin_invoices i WHERE i.quote_id=q.id AND i.client_id IN (SELECT value FROM json_each(@ids))))
+        ORDER BY q.created_at DESC,q.id DESC`).all({ids:accountJson}) : [],
       relatedCustomers: isElev ? sqlite.prepare(`SELECT id,name,company,email,phone FROM crm_clients WHERE id!=@id AND deleted_at IS NULL AND
         ((@company!='' AND (lower(trim(name))=@company OR lower(trim(company))=@company))
          OR (coalesce(company,'')!='' AND lower(trim(company))=@name)
          OR (@email!='' AND lower(trim(email))=@email)) ORDER BY name LIMIT 10`).all({id,company:(client.company||'').trim().toLowerCase(),name:client.name.trim().toLowerCase(),email:(client.email||'').trim().toLowerCase()}) : [],
       reviewCount,
       leads: db.select().from(leads)
-        .where(and(eq(leads.clientId, id), isNull(leads.deletedAt)))
+        .where(and(inArray(leads.clientId, accountIds), isNull(leads.deletedAt)))
         .orderBy(desc(leads.createdAt))
         .all(),
       activities: db.select().from(crmActivities)
-        .where(and(eq(crmActivities.entityType, "client"), eq(crmActivities.entityId, id)))
+        .where(and(eq(crmActivities.entityType, "client"), inArray(crmActivities.entityId, accountIds)))
         .orderBy(desc(crmActivities.createdAt))
         .all(),
       // Fix 2: the client's jobs — projects.clientId is a soft ref set by the
       // project form, the accept-quote hook, or the backfill script.
       projects: db.select().from(projects)
-        .where(and(eq(projects.clientId, id), isNull(projects.deletedAt)))
+        .where(and(inArray(projects.clientId, accountIds), isNull(projects.deletedAt)))
         .orderBy(desc(projects.createdAt))
         .all(),
     });

@@ -17,6 +17,9 @@ export function registerCreateOnce(app: Express) {
     "/api/finance/expenses",
     "/api/finance/purchase-orders",
     "/api/projects",
+    "/api/projects/from-template",
+    "/api/marketing/opportunities",
+    "/api/design-studio/registry",
     "/api/hr/employees",
   ]);
   app.use((req, res, next) => {
@@ -25,6 +28,9 @@ export function registerCreateOnce(app: Express) {
       req.method !== "POST" ||
       !(
         routes.has(req.path) ||
+        /^\/api\/design-studio\/registry\/\d+\/measurements$/.test(req.path) ||
+        /^\/api\/finance\/projects\/\d+\/forecast$/.test(req.path) ||
+        /^\/api\/marketing\/opportunities\/\d+\/change$/.test(req.path) ||
         /^\/api\/finance\/invoices\/\d+\/payments$/.test(req.path)
       ) ||
       typeof key !== "string"

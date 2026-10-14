@@ -1,4 +1,7 @@
+import {L} from '@/lib/language';
 import {useSaveStatus} from "@/lib/save-status";
+import SaveRecovery from './SaveRecovery';
+import {LanguagePicker} from '@/lib/language';
 import {useEffect,useState} from "react";
 import {useLocation} from "wouter";
 import {BUSINESSES} from "@shared/business.js";
@@ -31,10 +34,11 @@ export default function SuiteBar() {
   });
   return (
     <div className="suite-statusbar flex min-h-12 flex-wrap items-center gap-3 border-b border-border bg-card/50 px-4 py-2 text-sm">
-      <label className="flex items-center gap-2 text-xs"><span className="sr-only">Business</span><select aria-label="Business" value={business} onChange={e=>setBusiness(e.target.value)} className="min-h-11 max-w-40 rounded-lg border border-border bg-background px-2"><option value="all">All businesses</option>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
-      {shared&&<span className="text-xs text-muted-foreground">Shared across all businesses</span>}
+      <LanguagePicker/>
+      <label className="flex items-center gap-2 text-xs"><span className="sr-only"><L>{"Business"}</L></span><select aria-label="Business" value={business} onChange={e=>setBusiness(e.target.value)} className="min-h-11 max-w-40 rounded-lg border border-border bg-background px-2"><option value="all"><L>{"All businesses"}</L></option>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
+      {shared&&<span className="text-xs text-muted-foreground"><L>{"Shared across all businesses"}</L></span>}
       <Link className="rounded-lg px-2 py-1.5 font-medium hover:bg-accent" href="/today?inbox=1">
-        Inbox
+        <L>{"Inbox"}</L>
         {inbox.data?.some((n) => !n.read_at)
           ? ` (${inbox.data.filter((n) => !n.read_at).length})`
           : ""}
@@ -59,13 +63,13 @@ export default function SuiteBar() {
             onClick={() => stop.mutate()}
             disabled={stop.isPending}
           >
-            Stop work
+            <L>{"Stop work"}</L>
           </button>
         </>
       )}
-      <span className="ml-auto text-xs text-muted-foreground" role="status">
-        <span className={connected?"suite-sync-dot":"suite-sync-dot disconnected"} aria-hidden="true" />{!online?'Offline · drafts stay on this device':saveStatus==='Saving…'?'Saving…':saveStatus==='Retry needed'?'Retry needed · reopen the form to retry':connected?'Saved · live updates':'Reconnecting · checking for updates'}
-      </span>
+      <div className="ml-auto flex flex-wrap items-center gap-2"><SaveRecovery/><span className="text-xs text-muted-foreground" role="status">
+        <span className={connected&&online?"suite-sync-dot":"suite-sync-dot disconnected"} aria-hidden="true" />{!online?'Offline · reconnect to save':saveStatus==='Saving…'?'Saving…':saveStatus==='Retry needed'?(connected?'Connected · review unsaved work':'Reconnecting · review unsaved work'):connected?'Saved · live updates':'Reconnecting · checking for updates'}
+      </span></div>
     </div>
   );
 }

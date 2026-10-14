@@ -1,4 +1,6 @@
+import {L} from '@/lib/language';
 import Insights from '@/components/Insights';
+import {useBusinessDay} from '@/hooks/useBusinessReport';
 import { EmployeeReviewSummary } from './employee-approvals';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import BusinessReportSummary from "@/components/BusinessReportSummary";
@@ -13,6 +15,7 @@ import { useApiMutation } from "@/hooks/useApiMutation";
 import Header from "@/components/Header";
 import { RetryBlock } from "@/components/RetryBlock";
 export default function TodayPage() {
+  const businessDay=useBusinessDay();
   const { isElevated } = useAuth();
   const data = useQuery<any>({
     queryKey: ["suite-today"],
@@ -33,7 +36,7 @@ export default function TodayPage() {
   });
   return (
     <div className="suite-today space-y-6">
-      <p className="suite-date">{new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</p>
+      <p className="suite-date">{new Date(businessDay+'T12:00:00Z').toLocaleDateString(undefined,{timeZone:'UTC',weekday:'long',month:'long',day:'numeric'})}</p>
       <Header
         title="Today"
         description={
@@ -42,7 +45,6 @@ export default function TodayPage() {
             : "Your work, materials and messages."
         }
       />
-      <Insights area="today"/>
 
       <div className="flex flex-wrap gap-2"><Link className="min-h-11 rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground" href="/projects">Open a job</Link><Link className="min-h-11 rounded-xl border px-4 py-3 text-sm" href="/pm/time">Track my time</Link>{isElevated&&<Link className="min-h-11 rounded-xl border px-4 py-3 text-sm" href="/finance/invoices?status=overdue">Money to collect</Link>}</div>
       {data.isError ? (
@@ -50,7 +52,7 @@ export default function TodayPage() {
       ) : data.isPending ? (
         <p role="status">Loading your day…</p>
       ) : (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <><section aria-label="Your next five actions" className="rounded-2xl border bg-card p-5"><h2 className="text-lg font-semibold">Start here</h2><p className="mt-1 text-sm text-muted-foreground">Overdue tasks first, then jobs needing preparation.</p>{!data.data.nextActions?.length?<p className="mt-4">No urgent work to review.</p>:<ol className="mt-3 divide-y">{data.data.nextActions.map((item:any)=><li key={item.key}><Link className="flex min-h-20 items-center justify-between gap-3 py-3" href={item.href}><span className="min-w-0 break-words"><strong className="block">{item.title}</strong><span className="mt-1 block text-sm text-muted-foreground">{item.reason} · {item.owner}</span></span><span className="shrink-0 text-sm text-primary">{item.action} →</span></Link></li>)}</ol>}</section><details className="rounded-2xl border bg-card p-5"><summary className="min-h-11 cursor-pointer font-semibold">All work & upcoming jobs</summary><div className="mt-4 grid gap-5 lg:grid-cols-2">
           <section className="rounded-xl border bg-card p-5">
             <h2 className="mb-3 font-semibold">Jobs to prepare</h2>
             {!data.data.jobs.length && <p>No active jobs.</p>}
@@ -67,9 +69,10 @@ export default function TodayPage() {
                 </p>
               </Link>
             ))}
+            <Link className="inline-flex min-h-11 items-center text-sm underline" href="/projects">View all jobs</Link>
           </section>
           <section className="rounded-xl border bg-card p-5">
-            <h2 className="mb-3 font-semibold">Next tasks</h2>
+            <h2 className="mb-3 font-semibold">Next tasks · {data.data.totals?.tasks??data.data.tasks.length} open</h2>
             {!data.data.tasks.length && <p>Nothing open.</p>}
             {data.data.tasks.map((t: any) => (
               <Link
@@ -83,6 +86,7 @@ export default function TodayPage() {
                 </p>
               </Link>
             ))}
+            <Link className="inline-flex min-h-11 items-center text-sm underline" href="/pm/board">View all tasks</Link>
           </section>
           {!!data.data.loans.length && (
             <section className="rounded-xl border bg-card p-5">
@@ -98,8 +102,9 @@ export default function TodayPage() {
               ))}
             </section>
           )}
-        </div>
+        </div></details></>
       )}
+      <Insights area="today"/>
       {isElevated && <BusinessReportSummary />}
       {isElevated && <EmployeeReviewSummary />}
       <details className="rounded-2xl border bg-card p-5"><summary className="cursor-pointer font-semibold">More workspaces & follow-ups</summary><div className="mt-5 space-y-5">
@@ -112,20 +117,20 @@ export default function TodayPage() {
         ].map(item=><Link key={item.href} href={item.href} className="suite-shortcut group rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary"><div className="suite-shortcut-icon"><item.icon size={21} strokeWidth={1.7}/><ArrowUpRight size={16} className="suite-shortcut-arrow" aria-hidden="true"/></div><span className="flex items-center justify-between gap-3 font-semibold">{item.label}</span><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.detail}</p></Link>)}
       </section>
       <div className="flex flex-wrap gap-2">
-        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/home">Inventory</Link>
+        <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/home"><L>{"Inventory"}</L></Link>
         <Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/crm/leads">Customers & leads</Link>
-        {isElevated&&<><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/finance/invoices?status=overdue">Money to collect</Link><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/suite-health">Owner controls</Link></>}
+        {isElevated&&<><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/finance/invoices?status=overdue">Money to collect</Link><Link className="inline-flex min-h-11 items-center rounded-xl border px-4 text-sm hover:bg-accent" href="/suite-health"><L>{"Owner controls"}</L></Link></>}
       </div>
       {isElevated && <LeadQueue />}
 <TimeReview /></div></details>
       <section id="inbox" className="rounded-xl border bg-card p-5">
-        <h2 className="mb-3 font-semibold">Inbox</h2>
+        <h2 className="mb-3 font-semibold"><L>{"Inbox"}</L></h2>
         {inbox.isError ? (
           <RetryBlock query={inbox} />
         ) : inbox.isPending ? (
-          <p>Loading messages…</p>
+          <p><L>{"Loading messages…"}</L></p>
         ) : !inbox.data?.length ? (
-          <p>You’re caught up.</p>
+          <p><L>{"You’re caught up."}</L></p>
         ) : (
           inbox.data.map((n) => (
             <div
@@ -141,16 +146,16 @@ export default function TodayPage() {
               </Link>
               <div className="ml-auto flex gap-3">
                 <button
-                  className="underline"
+                  className="min-h-11 rounded-lg border px-3"
                   onClick={() => action.mutate({ id: n.id, action: "snooze" })}
                 >
                   Later
                 </button>
                 <button
-                  className="underline"
+                  className="min-h-11 rounded-lg border px-3"
                   onClick={() => action.mutate({ id: n.id, action: "resolve" })}
                 >
-                  Done
+                  <L>{"Done"}</L>
                 </button>
               </div>
             </div>

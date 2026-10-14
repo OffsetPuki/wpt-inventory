@@ -1,4 +1,5 @@
 import { normalizeStockUnit } from "../shared/inventory";
+import { depositReadiness } from "../shared/deposit-readiness";
 import { sqlite } from "./storage";
 
 export function initializeSuite() {
@@ -32,6 +33,7 @@ export function initializeSuite() {
       UPDATE suite_notifications SET resolved_at=unixepoch()*1000 WHERE event_key LIKE 'task:'||NEW.id||':%'; END;
   `);
   const topics: Record<string, string[]> = {
+    designs: ['suite_designs','suite_design_history','suite_design_measurements'],
     previews: ["customer_previews", "customer_preview_models", "customer_preview_feedback"],
     inventory: [
       "items",
@@ -49,6 +51,8 @@ export function initializeSuite() {
       "pm_change_orders",
       "pm_documents",
       "suite_job_rules",
+      "suite_job_completion",
+      "suite_job_forecasts",
       "suite_files",
       "suite_change_bills",
     ],
@@ -61,13 +65,14 @@ export function initializeSuite() {
     ],
     crm: [
       "crm_clients",
+      "crm_account_contacts",
       "crm_leads",
       "crm_activities",
       "crm_lead_intake",
       "quotes",
       "quote_settings",
     ],
-    marketing: ["mk_portfolio", "mk_reviews", "mk_settings", "mk_spend_entries", "mk_preferences", "mk_campaign_links"],
+    marketing: ["mk_page_improvements", "mk_portfolio", "mk_reviews", "mk_settings", "mk_spend_entries", "mk_preferences", "mk_campaign_links"],
     team: [
       "users",
       "hr_employees",
@@ -124,8 +129,8 @@ function loadReadiness(ids:number[]){
  const materials=all(`SELECT c.*,i.name AS item_name,i.unit AS stock_unit,i.quantity,i.quantity_reserved,i.last_cost_cents,i.supplier,i.material_key,coalesce((SELECT sum(r.quantity) FROM inventory_reservations r WHERE r.checklist_id=c.id),0) reserved FROM project_checklist c LEFT JOIN items i ON i.id=c.item_id AND i.deleted_at IS NULL WHERE c.project_id IN (SELECT value FROM json_each(?)) ORDER BY c.id`,json);
  const orders=all("SELECT id,project_id,number,items,expected_date FROM fin_purchase_orders WHERE project_id IN (SELECT value FROM json_each(?)) AND order_type='supplier' AND status IN ('open','sent') AND deleted_at IS NULL",json);
  const receipts=all('SELECT po_id,line_index,sum(quantity) n FROM inventory_receipts WHERE po_id IN (SELECT value FROM json_each(?)) GROUP BY po_id,line_index',JSON.stringify(orders.map(o=>o.id)));
- const invoices=all("SELECT project_id,deposit_cents,paid_cents FROM fin_invoices WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND status!='void'",json);
- const docs=all("SELECT project_id,kind FROM pm_documents WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>=date('now','localtime'))",json);
+ const invoices=all("SELECT project_id,status,kind,total_cents,deposit_cents,paid_cents,restated_from FROM fin_invoices WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND status!='void'",json);
+ const docs=all("SELECT project_id,kind FROM pm_documents WHERE project_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>=business_today())",json);
  const accepted=all("SELECT id FROM quotes WHERE id IN (SELECT value FROM json_each(?)) AND status='accepted' AND deleted_at IS NULL",JSON.stringify(jobs.map(j=>j.quote_id).filter(Boolean)));
  const toolIds=JSON.stringify([...new Set(rules.flatMap(r=>JSON.parse(r.tools)))]);
  const tools=all('SELECT id,name,quantity,quantity_reserved FROM items WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL',toolIds);
@@ -216,13 +221,10 @@ export function jobReadiness(id: number, batch?: ReadinessBatch) {
       "SELECT * FROM fin_invoices WHERE project_id=? AND deleted_at IS NULL AND status!='void'",
     )
     .all(id) as any[];
-  const depositDue = invoices.reduce(
-    (sum, i) => sum + Math.max(0, (i.deposit_cents || 0) - i.paid_cents),
-    0,
-  );
+  const deposit = depositReadiness(invoices), depositDue = deposit.dueCents;
   const docs = batch ? batch.docs.get(id)||[] : sqlite
     .prepare(
-      "SELECT kind FROM pm_documents WHERE project_id=? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>=date('now','localtime'))",
+      "SELECT kind FROM pm_documents WHERE project_id=? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>=business_today())",
     )
     .all(id) as any[];
   const required: string[] = JSON.parse(rules.documents_required),
@@ -249,11 +251,11 @@ export function jobReadiness(id: number, batch?: ReadinessBatch) {
     });
   if (
     rules.deposit_required &&
-    (!invoices.some((i) => i.deposit_cents > 0) || depositDue > 0)
+    !deposit.satisfied
   )
     blockers.push({
       kind: "deposit",
-      label: "Confirm the required deposit",
+      label: deposit.configured ? "Collect the remaining deposit" : "Set up the required deposit invoice",
       tab: "money",
     });
   if (materials.some((m) => m.needed > 0 && (!m.item_id || m.shortage > 0)))
@@ -340,6 +342,7 @@ export function jobReadiness(id: number, batch?: ReadinessBatch) {
     conflicts,
     ready: !blockers.length,
     depositDue,
+    deposit,
     override: rules.override_reason
       ? { reason: rules.override_reason, at: rules.override_at }
       : null,

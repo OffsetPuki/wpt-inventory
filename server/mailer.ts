@@ -1,5 +1,6 @@
 import { storedMail, readMail, markMailAccepted } from "./mail-queue";
 import { sqlite, storage } from "./storage";
+import { mailAddressError } from './mail-validation';
 
 // ─── Outbound mail ───────────────────────────────────────────────────────────
 // One tiny facade the whole suite sends through. ONE transport: the Resend
@@ -78,6 +79,8 @@ export function optOutEmail(email: string): boolean {
 }
 
 export interface MailMessage {
+  /** Internal frozen record identity; never inferred from recipient or subject. */
+  context?: {customerId?:number|null;jobId?:number|null;quoteId?:number|null;invoiceId?:number|null;version?:string|number|null};
   deliveryKey?: string;
   condition?: {
     kind: "invoice-overdue" | "quote-pending" | "review-open";
@@ -221,9 +224,9 @@ async function sendViaResend(
     }),
   });
   if (!res.ok) {
-    throw new Error(
+    throw Object.assign(new Error(
       `Resend responded ${res.status}: ${(await res.text()).slice(0, 300)}`,
-    );
+    ), { permanent: res.status >= 400 && res.status < 500 && ![408,425,429].includes(res.status) });
   }
   const data = typeof res.json === "function" ? await res.json() : {};
   return data.id || null;
@@ -251,13 +254,19 @@ export async function sendMail(
     if (["stopped", "review"].includes(state?.status)) return false;
     const saved = readMail(deliveryKey!);
     msg = saved.msg;
+    const validationError = mailAddressError(msg, saved.bcc);
+    if(validationError) {
+      sqlite.prepare("UPDATE suite_outbox SET status='review',last_error=? WHERE event_key=?").run(validationError,`delivery:${deliveryKey}`);
+      recordSend(msg,{ok:false,via,bcc,error:validationError});
+      return false;
+    }
     if (msg.condition) {
       const c = msg.condition;
       const current =
         c.kind === "invoice-overdue"
           ? sqlite
               .prepare(
-                "SELECT 1 FROM fin_invoices WHERE id=? AND deleted_at IS NULL AND status IN ('sent','partial','overdue') AND total_cents-coalesce(retainage_cents,0)-paid_cents>0 AND due_date<date('now','localtime')",
+                "SELECT 1 FROM fin_invoices WHERE id=? AND deleted_at IS NULL AND status IN ('sent','partial','overdue') AND total_cents-coalesce(retainage_cents,0)-paid_cents>0 AND due_date<business_today()",
               )
               .get(c.id)
           : c.kind === "quote-pending"
@@ -323,9 +332,10 @@ export async function sendMail(
     if (deliveryKey)
       sqlite
         .prepare(
-          "UPDATE suite_outbox SET status='failed',last_error=?,available_at=? WHERE event_key=? AND status NOT IN ('review','stopped')",
+          "UPDATE suite_outbox SET status=?,last_error=?,available_at=? WHERE event_key=? AND status NOT IN ('review','stopped')",
         )
         .run(
+          (err as {permanent?:boolean})?.permanent ? 'review' : 'failed',
           error.slice(0, 300),
           Date.now() + 60000,
           `delivery:${deliveryKey}`,

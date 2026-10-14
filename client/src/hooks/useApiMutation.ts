@@ -58,8 +58,7 @@ export function useApiMutation<TData = any, TVars = void>(
       const { method, url, body,expectedVersion } = opts.request(vars);
       const request=JSON.stringify({method,url,body});
       if(retryIdentity.current?.request!==request){
-        const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(getAuthToken()+request));
-        const storageKey='suite-request:'+Array.from(new Uint8Array(bytes)).map(b=>b.toString(16).padStart(2,'0')).join('');
+        const storageKey='suite-request:'+await requestDigest(getAuthToken()+request);
         let key:string=crypto.randomUUID();try{key=sessionStorage.getItem(storageKey)||key;sessionStorage.setItem(storageKey,key);}catch{}
         retryIdentity.current={request,key,storageKey};
       }
@@ -80,3 +79,4 @@ export function useApiMutation<TData = any, TVars = void>(
       toast({ variant: "destructive", title: opts.errorTitle, description: e?.message }),
   });
 }
+import {requestDigest} from '@/lib/request-identity';

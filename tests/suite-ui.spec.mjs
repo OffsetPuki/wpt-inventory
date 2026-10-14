@@ -29,7 +29,7 @@ test('Navigation search, mobile keyboard access, and shared pages',async({page})
  await expect(menu.getByText('No matching pages. Try another name.')).toBeVisible();
  await page.keyboard.press('Escape');
  await expect(page.getByRole('button',{name:'Open menu'})).toBeFocused();
- for(const [route,title] of [['/crm/leads','Leads'],['/crm/clients','Customers'],['/crm/quotes','New quote'],['/projects','Jobs'],['/pm/board','Task board'],['/pm/schedule','Schedule'],['/finance/invoices','Invoices'],['/finance/expenses','Expenses'],['/finance/purchase-orders','Purchase orders'],['/home','Inventory'],['/hr/employees','Employees'],['/hr/leave','Time off'],['/settings','Settings']]){
+ for(const [route,title] of [['/crm/leads','Leads'],['/crm/clients','Customers'],['/crm/quotes','New quote'],['/projects','Jobs'],['/pm/board','Tasks'],['/pm/schedule','Schedule'],['/finance/invoices','Invoices'],['/finance/expenses','Expenses'],['/finance/purchase-orders','Purchase orders'],['/home','Inventory'],['/hr/employees','Employees'],['/hr/leave','Time off'],['/settings','Settings']]){
   await page.goto(app.base+'/#'+route);
   await expect(page.locator('#suite-main').getByRole('heading',{name:title,exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),route+' fits mobile').toBe(true);

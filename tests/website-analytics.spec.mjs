@@ -11,6 +11,26 @@ test.beforeAll(async()=>{
 });
 test.afterAll(async()=>app.close());
 test.beforeEach(async({page})=>{await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);});
+test('Phone page improvements record a baseline and an actual change without claiming causation',async({page})=>{
+ await page.goto(app.base+'/#/marketing?tab=analytics&analyticsSite=metals&analysis=pages');
+ await page.getByLabel('Page ranking metric').selectOption('qualifiedLeads');
+ await expect(page.getByRole('region',{name:'Selected page analysis'})).toContainText('Qualified inquiries');
+ await page.getByText('Plan and measure an improvement',{exact:true}).click();
+ await page.getByLabel('What will you change, and why?').fill('Synthetic test: make the contact action clearer.');
+ await page.getByLabel('Lead campaign (optional)').fill('fall');
+ await page.getByRole('button',{name:'Add improvement task'}).click();
+ const task=page.locator('details').filter({has:page.getByRole('table',{name:'Website improvement results',includeHidden:true})}).last();
+ await task.locator('summary').click();
+ await expect(task).toContainText('Record when the website change actually went live.');
+ await task.getByRole('button',{name:'Record website change'}).click();
+ await task.getByLabel('Date the website change went live').fill('2026-10-01');
+ await task.getByLabel('What changed?',{exact:true}).fill('Synthetic contact button update.');
+ await task.getByRole('button',{name:'Save change details'}).click();
+ await expect(task).toContainText('Changed 2026-10-01: Synthetic contact button update.');
+ await expect(task).toContainText('The baseline overlaps the change');
+ expect(app.sqlite.prepare('SELECT campaign FROM mk_page_improvements ORDER BY task_id DESC LIMIT 1').get().campaign).toBe('fall');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+});
 
 test('All websites analytics: detailed reports, comparisons, filtering, export and mobile layout',async({page},info)=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

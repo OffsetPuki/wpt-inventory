@@ -13,6 +13,7 @@ export type BingReport = {
   errors:{kind:string;message:string;attemptedAt:number}[];
 };
 export type SearchConnections = {
+  setup?:{analyticsProperty:string;reportingAccount:string|null;website:string};
   googleConfigured:boolean;
   bingConfigured:boolean;
   googleStatus:{kind:string;attemptedAt:number;succeededAt:number|null;error:string|null}[];

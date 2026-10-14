@@ -1,5 +1,6 @@
 import {RecordSelect} from "@/components/RecordSelect";
-import {useListPage,PageButtons} from "@/lib/list-page";
+import {PageButtons} from "@/lib/list-page";
+import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from "@/components/RetryBlock";
 import { useRecordLink } from "@/lib/record-link";
 import { useEffect, useState } from "react";
@@ -1024,8 +1025,9 @@ function readPrefillFromUrl(): ContractPrefill | null {
 
 export default function PmContractsPage() {
   const { isElevated } = useAuth();
-  const [kindTab, setKindTab] = useState<"" | ContractKind>("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [filters,setFilters]=usePageFilters({kind:'',status:'',page:'0'});
+  const kindTab=filters.kind as ''|ContractKind,setKindTab=(kind:''|ContractKind)=>setFilters({kind});
+  const statusFilter=filters.status,setStatusFilter=(status:string)=>setFilters({status});
   // Deep link from a job hub → open the create dialog prefilled (Phase D #21).
   const [prefill] = useState<ContractPrefill | null>(readPrefillFromUrl);
   const [dialogOpen, setDialogOpen] = useState(() => !!prefill);
@@ -1035,7 +1037,7 @@ export default function PmContractsPage() {
 
 
 
-  const {page,setPage}=useListPage("contracts",[kindTab,statusFilter]);
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   const params = new URLSearchParams({page:String(page),limit:"50"});
   if (kindTab) params.set("kind", kindTab);
   if (statusFilter) params.set("status", statusFilter);

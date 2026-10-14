@@ -21,6 +21,7 @@ import CheckDialog from "@/components/CheckDialog";
 import AdjustDialog from "@/components/AdjustDialog";
 import QRDialog from "@/components/QRDialog";
 import Modal from "@/components/Modal";
+import DeletionReview,{useDeletionReview} from '@/components/DeletionReview';
 import StockHistory from "@/components/inventory/StockHistory";
 import { RetryBlock } from "@/components/RetryBlock";
 import ReserveDialog from "@/components/inventory/ReserveDialog";
@@ -69,6 +70,7 @@ export default function ItemDetailPage({ id }: { id: string }) {
       navigate(inventoryReturnPath());
     },
   });
+  const deletionReview=useDeletionReview('item',itemId,remove);
   if (detail.isLoading)
     return (
       <p role="status" className="py-12 text-center">
@@ -332,16 +334,19 @@ export default function ItemDetailPage({ id }: { id: string }) {
       </Suspense>
       <Modal
         open={remove}
+        busy={del.isPending}
+        hasUnsavedChanges={false}
         onClose={() => setRemove(false)}
         title="Delete item?"
       >
         <p className="text-sm">
-          {item.name} will move to the trash. It can be restored for 30 days.
+          {item.name} will move to Trash and remain available for recovery. Restoring does not restart canceled actions.
         </p>
+        <DeletionReview query={deletionReview}/>
         {del.error && <p role="alert">{del.error.message}</p>}
         <button
           className={`${primaryBtn} mt-4`}
-          disabled={del.isPending}
+          disabled={del.isPending||!deletionReview.data||deletionReview.isError}
           onClick={() => del.mutate()}
         >
           Delete item

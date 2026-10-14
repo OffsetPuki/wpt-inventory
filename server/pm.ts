@@ -209,7 +209,7 @@ try {
              auto_created,
              CASE WHEN notes LIKE 'auto:%' THEN notes END,
              CASE WHEN due_at IS NOT NULL
-                  THEN strftime('%Y-%m-%d', due_at / 1000, 'unixepoch', 'localtime') END,
+                  THEN business_day(due_at) END,
              completed_at, created_at
       FROM mk_tasks
     `);
@@ -362,7 +362,8 @@ export function registerPmRoutes(app: Express): void {
     const assigneeId = qstr(req.query.assigneeId);
     const q = qstr(req.query.q);
     if (projectId) conditions.push(eq(pmTasks.projectId, parseInt(projectId, 10)));
-    if (status) conditions.push(eq(pmTasks.status, status as any));
+    if(status==='open')conditions.push(sql`${pmTasks.status} != 'done'`);
+    else if (status) conditions.push(eq(pmTasks.status, status as any));
     if (assigneeId) conditions.push(eq(pmTasks.assigneeId, parseInt(assigneeId, 10)));
     if (q) {
       const pat = `%${q}%`;
@@ -372,6 +373,7 @@ export function registerPmRoutes(app: Express): void {
       ...getTableColumns(pmTasks),
       projectName: projects.name,
       assigneeName: users.name,
+      _version: sql<number>`coalesce((SELECT version FROM suite_record_versions WHERE entity='pm/tasks' AND id=${pmTasks.id}),1)`,
       // Phase D #24b: actual time logged against the task — the client shows
       // "Logged Xh / est Yh" so estimates finally meet reality.
       loggedMin: sql<number>`coalesce((
@@ -383,8 +385,10 @@ export function registerPmRoutes(app: Express): void {
       .leftJoin(users, eq(pmTasks.assigneeId, users.id))
       .where(and(...conditions))
       .orderBy(asc(pmTasks.status), asc(pmTasks.orderIndex), asc(pmTasks.id))
-      .all();
-    res.json(rows);
+      .$dynamic();
+    if(req.query.limit!==undefined||req.query.page!==undefined){const window=listWindow(req);rows.limit(window.limit).offset(window.offset);}
+    res.setHeader('X-Total-Count',String(db.select({n:sql<number>`count(*)`}).from(pmTasks).where(and(...conditions)).get()?.n||0));
+    res.json(rows.all());
   });
 
   app.post("/api/pm/tasks", requireAuth, (req, res) => {

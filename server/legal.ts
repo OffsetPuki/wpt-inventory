@@ -154,7 +154,7 @@ function privacyBody(): string {
 
   <h2 id="retention">6. Data retention</h2>
   <ul>
-    <li><strong>Inventory &amp; project records:</strong> retained while your organization uses the Service. Deleted items and projects are soft-deleted and recoverable from Trash for 30 days before being permanently purged.</li>
+    <li><strong>Inventory &amp; project records:</strong> retained while your organization uses the Service. Deleted items and projects are soft-deleted and remain recoverable from Trash. Permanent cleanup requires a separate review; these records are not automatically purged after 30 days.</li>
     <li><strong>Audit logs:</strong> retained for up to 24 months to support security and accountability, then purged, unless a longer period is required to investigate an incident or comply with law.</li>
     <li><strong>Photos sent for AI identification:</strong> not retained by us beyond producing the suggestion; the photo you choose to save remains attached to the item until you remove it.</li>
   </ul>

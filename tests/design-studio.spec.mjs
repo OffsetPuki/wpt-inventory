@@ -5,6 +5,7 @@ test.beforeAll(async()=>{app=await testApp({serve:true});app.sqlite.prepare("UPD
 test.afterAll(async()=>app.close());
 test('Engineering studio opens the current model and selectable hardware and dimensioned parts',async({page})=>{
  test.setTimeout(180000);
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&m.text().includes('Page failed to render'))errors.push(m.text());});
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
  await page.goto(app.base+'/#/design-studio');
  await expect(page.getByRole('heading',{name:'CJM Design Studio',exact:true})).toBeVisible();
@@ -48,6 +49,7 @@ test('Engineering studio opens the current model and selectable hardware and dim
  await page.getByRole('button',{name:'Pause animation',exact:true}).click();
  await page.getByLabel('Animation speed',{exact:true}).selectOption('2');
  await page.getByRole('button',{name:'Cut list',exact:true}).click();
+ await expect(page.getByRole('searchbox',{name:'Search cut list'})).toBeVisible({timeout:10000});
  await page.getByRole('searchbox',{name:'Search cut list'}).fill('Feed arm mounting plate');
  await page.getByRole('button',{name:new RegExp('Feed arm mounting plate '+plate.id)}).click();
  await expect(page.getByLabel('Select parts in the 3D model')).toHaveAttribute('data-selected-part',plate.id);
@@ -63,4 +65,5 @@ test('Engineering studio opens the current model and selectable hardware and dim
  expect((await download).suggestedFilename()).toContain(catalog.revision);
  await expect(page.getByRole('status').filter({hasText:'Field book downloaded'})).toBeVisible();
  expect(app.sqlite.prepare('SELECT count(*) AS n FROM customer_previews').get().n).toBe(before);
+ expect(errors).toEqual([]);
 });

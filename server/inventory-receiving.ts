@@ -208,7 +208,7 @@ export function receivePo(id: number, userId: number, raw: unknown) {
       else if (expenseCents > 0) {
         const insertedExpense = sqlite
           .prepare(
-            "INSERT INTO fin_expenses(date,vendor,category,amount_cents,payment_method,project_id,billable,notes) VALUES(date('now','localtime'),?,'materials',?,'other',?,0,?)",
+            "INSERT INTO fin_expenses(date,vendor,category,amount_cents,payment_method,project_id,billable,notes) VALUES(business_today(),?,'materials',?,'other',?,0,?)",
           )
           .run(
             po.vendor,

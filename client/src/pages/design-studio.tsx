@@ -2,6 +2,7 @@ import {lazy,Suspense} from 'react';
 import {Link,Redirect} from 'wouter';
 import {ArrowLeft,ArrowUpRight,Layers3,Table2,Box,PencilRuler} from 'lucide-react';
 import Header from '@/components/Header';
+import {DesignRegistry,DesignContext} from '@/components/design-studio/DesignRegistry';
 import '@/components/design-studio/project-gallery.css';
 
 const FilmTableWorkspace=lazy(()=>import('@/components/design-studio/FilmTableWorkspace'));
@@ -18,7 +19,7 @@ export default function DesignStudioPage({project}:{project?:string}){
   if(project&&!active)return <div className="ds-page"><Header title="Project not found" description="Choose an available model from your Design Studio."/><Link className="ds-back" href="/design-studio"><ArrowLeft size={16}/>Projects</Link></div>;
   return <div className="ds-page">
     {active?.id!=='dallas-table'&&<Header title="CJM Design Studio" description="Your workspace for inspecting 3D models, parts and dimensions."/>}
-    {active?<><nav aria-label="Design Studio project" className="ds-breadcrumb"><Link className="ds-back" href="/design-studio"><ArrowLeft size={16}/>Projects</Link><span aria-current="page">{active.title}</span></nav><Suspense fallback={<p role="status">Opening {active.title}…</p>}>{active.id==='film-table'?<FilmTableWorkspace/>:<WalnutTableWorkspace/>}</Suspense></>:
-      <section aria-label="Design Studio projects"><div className="ds-project-heading"><h2>Your projects</h2><span>2 projects</span></div><div className="ds-grid">{projects.map(({id,title,description,detail,Icon})=><Link key={id} href={'/design-studio/'+id} className="ds-project" aria-label={'Open '+title}><div className="ds-project-art"><Icon size={66} strokeWidth={1}/><span>3D PROJECT</span><ArrowUpRight className="ds-open-icon" size={24}/></div><div className="ds-project-copy"><h3>{title}</h3><p>{description}</p><div className="ds-project-tools"><span><Box size={15}/>3D model</span><span><PencilRuler size={15}/>Parts &amp; dimensions</span></div><p className="ds-detail">{detail}</p><strong>Open project <ArrowUpRight size={16}/></strong></div></Link>)}</div></section>}
+    {active?<><nav aria-label="Design Studio project" className="ds-breadcrumb"><Link className="ds-back" href="/design-studio"><ArrowLeft size={16}/>Projects</Link><span aria-current="page">{active.title}</span></nav><Suspense fallback={<p role="status">Opening {active.title}…</p>}><DesignContext workspace={active.id}>{row=>active.id==='film-table'?<FilmTableWorkspace key={row?.id||'library'} fixedLayout={row?row.model_key==='film-earlier'?'earlier':'plant':undefined}/>:<WalnutTableWorkspace/>}</DesignContext></Suspense></>:
+      <section aria-label="Design Studio projects"><DesignRegistry/><div className="ds-project-heading"><h2>Model library</h2><span>2 workspaces</span></div><div className="ds-grid">{projects.map(({id,title,description,detail,Icon})=><Link key={id} href={'/design-studio/'+id} className="ds-project" aria-label={'Open '+title}><div className="ds-project-art"><Icon size={66} strokeWidth={1}/><span>3D PROJECT</span><ArrowUpRight className="ds-open-icon" size={24}/></div><div className="ds-project-copy"><h3>{title}</h3><p>{description}</p><div className="ds-project-tools"><span><Box size={15}/>3D model</span><span><PencilRuler size={15}/>Parts &amp; dimensions</span></div><p className="ds-detail">{detail}</p><strong>Open project <ArrowUpRight size={16}/></strong></div></Link>)}</div></section>}
   </div>;
 }

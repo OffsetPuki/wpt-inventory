@@ -2,7 +2,7 @@ import {BoxGeometry,Vector3} from 'three';
 
 // Omit subpixel hardware only for the current render. Restore source visibility
 // immediately so picking, isolation, drawings, and animation keep exact geometry.
-export function createDetailRender(renderer,modelRoot){
+export function createDetailRender(renderer,modelRoot,{pixelThreshold=.8,profileThreshold=4}={}){
  const pieces=[];modelRoot.traverse(o=>{if(o.isMesh&&o.userData.shopPartId){if(!o.geometry.boundingSphere)o.geometry.computeBoundingSphere();pieces.push(o);}});
  const center=new Vector3(),eye=new Vector3(),size=new Vector3(),boxes=new Map();
  const draw=(scene,camera)=>{
@@ -11,7 +11,7 @@ export function createDetailRender(renderer,modelRoot){
   if(modelRoot.visible)for(const mesh of pieces){
    if(!mesh.visible)continue;const sphere=mesh.geometry.boundingSphere;if(!sphere)continue;
    center.copy(sphere.center).applyMatrix4(mesh.matrixWorld);const radius=sphere.radius*mesh.matrixWorld.getMaxScaleOnAxis(),distance=Math.max(camera.near,center.distanceTo(eye)-radius);
-   if(radius*scale/distance<.8){hidden.push(mesh);mesh.visible=false;continue;}
+   if(radius*scale/distance<pixelThreshold){hidden.push(mesh);mesh.visible=false;continue;}
    const geometry=mesh.geometry;
    if((geometry.index?.count||geometry.attributes.position.count)>768){
     if(!geometry.boundingBox)geometry.computeBoundingBox();
@@ -20,7 +20,7 @@ export function createDetailRender(renderer,modelRoot){
     // holes and curves even if its thickness is tiny. At close range all
     // geometry is restored. Isolated parts always use the exact source mesh.
     const crossSection=size.toArray().sort((a,b)=>a-b)[1];
-    if(crossSection*mesh.matrixWorld.getMaxScaleOnAxis()*scale/distance<4){
+    if(crossSection*mesh.matrixWorld.getMaxScaleOnAxis()*scale/distance<profileThreshold){
      let box=boxes.get(geometry);
      if(!box){geometry.boundingBox.getCenter(center);box=new BoxGeometry(size.x,size.y,size.z);box.translate(center.x,center.y,center.z);boxes.set(geometry,box);}
      replaced.push([mesh,geometry]);mesh.geometry=box;

@@ -1,6 +1,7 @@
 import { applySuiteAccent } from "@/lib/theme-accent";
 import { useTheme } from "@/components/ThemeProvider";
 import { useEffect, useRef, useState } from "react";
+import SettingsDirectory from '@/components/SettingsDirectory';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
@@ -255,16 +256,17 @@ function BackupCard() {
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl">
-      <Header title="Settings" description="Branding & backup" />
+      <Header title="Settings" description="Find company, team and website controls in one place." />
+      <SettingsDirectory />
       <div className="flex flex-col gap-5">
-        <BrandingTab />
+        <div id="company-branding" className="scroll-mt-24"><BrandingTab /></div>
         {/* Phase G #4: the owner's own COI/W-9 — GCs ask for these on every
             commercial bid, so they live here ready to download and send. */}
         <DocumentsCard
           title="Company documents"
           description="Your COI, W-9 and other paperwork GCs ask for — with expiry reminders."
         />
-        <BackupCard />
+        <div id="business-backup" className="scroll-mt-24"><BackupCard /></div>
       </div>
     </div>
   );

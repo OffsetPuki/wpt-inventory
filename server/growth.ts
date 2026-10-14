@@ -1,4 +1,5 @@
 import { analyticsPeriod } from './website-analytics';
+import { businessTimeZone, businessDay } from './business-clock';
 import {marketingManager} from './marketing-core';
 import type { Express } from "express";
 import { z } from "zod";
@@ -37,7 +38,7 @@ export function businessMidnight(date: string) {
   for (let n = 0; n < 3; n++) {
     const p = Object.fromEntries(
       new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Chicago",
+        timeZone: businessTimeZone,
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -56,12 +57,7 @@ export function businessMidnight(date: string) {
   return guess;
 }
 export function periods(endInput: unknown,startInput?:unknown) {
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+  const today = businessDay();
   const yesterday = new Date(Date.parse(today) - DAY)
     .toISOString()
     .slice(0, 10);

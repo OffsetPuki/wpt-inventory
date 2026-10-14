@@ -5,7 +5,7 @@ test.beforeAll(async()=>{app=await testApp({serve:true});app.sqlite.prepare("UPD
 test.afterAll(async()=>app.close());
 test('Design Studio is a project chooser and opens only the selected workspace',async({page})=>{
   const modelRequests=[];
-  page.on('request',request=>{if(request.url().includes('/api/design-studio/'))modelRequests.push(request.url());});
+  page.on('request',request=>{if(request.url().includes('/api/design-studio/')&&!request.url().includes('/api/design-studio/registry'))modelRequests.push(request.url());});
   await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
   await page.goto(app.base+'/#/design-studio');
   const gallery=page.getByRole('region',{name:'Design Studio projects'});

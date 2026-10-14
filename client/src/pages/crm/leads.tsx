@@ -1,7 +1,12 @@
+import DeleteRecordReview from '@/components/DeleteRecordReview';
+import {L} from '@/lib/language';
+import {businessFollowUp,businessDateInput} from '@/lib/format';
+import ConnectedRecords from '@/components/ConnectedRecords';
 import {useBusiness,setBusiness} from '@/hooks/useBusiness';
 import { LeadIntake } from '@/components/LeadIntake';
 import LeadPhotos, { leadPhotos } from '@/components/LeadPhotos';
-import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import {PageButtons} from '@/lib/list-page';
+import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
 import { useEffect, useState } from "react";
@@ -48,7 +53,6 @@ import {
   StickyNote,
   UserPlus,
   PencilRuler,
-  Trash2,
 } from "lucide-react";
 
 // Per-trade brand hues for the site badge. Arbitrary Tailwind values must stay
@@ -99,11 +103,6 @@ function daysSince(v: string | number | Date | null | undefined): number | null 
 }
 
 // unix ms → local "YYYY-MM-DD" for <input type="date">.
-function toDateInput(ms: number | null | undefined): string {
-  if (ms == null) return "";
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 // ─── New lead dialog ──────────────────────────────────────────────────────────
 
@@ -158,22 +157,22 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
         className="flex flex-col gap-4"
       >
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Name</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Name"}</L></span>
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Phone</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Phone"}</L></span>
             <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Email</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Email"}</L></span>
             <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </label>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Source</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Source"}</L></span>
             <select className={inputCls} value={source} onChange={(e) => setSource(e.target.value as LeadSource)}>
               {LEAD_SOURCES.map((s) => (
                 <option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>
@@ -185,7 +184,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
               landed in the metals column — and the per-brand tile counted web
               forms only. The server already accepts it here. */}
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Shop</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Shop"}</L></span>
             <select className={inputCls} value={site} onChange={(e) => setSite(e.target.value as LeadSite)}>
               {LEAD_SITES.map((s) => (
                 <option key={s} value={s}>{leadSiteLabel[s]}</option>
@@ -195,20 +194,20 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Service requested</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Service requested"}</L></span>
             <input className={inputCls} placeholder="e.g. 120 ft horizontal slat fence" value={serviceRequested} onChange={(e) => setServiceRequested(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Service area</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Service area"}</L></span>
             <input className={inputCls} placeholder="ZIP or city (e.g. 76010, Mansfield)" value={serviceArea} onChange={(e) => setServiceArea(e.target.value)} />
           </label>
         </div>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Estimated value ($)</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Estimated value ($)"}</L></span>
           <input className={inputCls} inputMode="decimal" placeholder="0.00" value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Notes</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Notes"}</L></span>
           <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
         <div className="suite-modal-actions"><button
@@ -217,8 +216,7 @@ function NewLeadModal({ open, onClose }: { open: boolean; onClose: () => void })
           className="mt-1 flex h-12 items-center justify-center gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
           {create.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Create lead
-        </button></div>
+          <L>{"Create lead"}</L>{" "}</button></div>
       </form>
     </Modal>
   );
@@ -287,20 +285,20 @@ function CloseLeadModal({
         className="flex flex-col gap-4"
       >
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Reason</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Reason"}</L></span>
           <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value as WinLossReason)}>
-            <option value="">Select a reason…</option>
+            <option value=""><L>{"Select a reason…"}</L></option>
             {WIN_LOSS_REASONS.map((r) => (
               <option key={r} value={r}>{WIN_LOSS_REASON_LABELS[r]}</option>
             ))}
           </select>
         </label>
-        {to === "won" && offers.length > 0 && <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Quote to accept</span><select className={inputCls} required value={quoteId || (offers.length === 1 ? String(offers[0].id) : '')} onChange={(e) => setQuoteId(e.target.value)}><option value="">Choose the agreed quote</option>{offers.map((q) => <option key={q.id} value={q.id}>{q.number} · {formatMoney(q.totalCents)} · {q.status}</option>)}</select><span className="text-xs text-muted-foreground">Accepting creates the linked job and invoice. Other offers remain separate.</span></label>}
-        {jobFailed && <p role="alert">Could not load linked quotes. Close and reopen this dialog to retry.</p>}
-        {to === 'won' && expiredOffers.length > 0 && <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"><p>{needsRevision ? 'The linked quote has expired. Review a new revision before marking this lead won.' : 'Expired offers cannot be accepted. Choose a current quote or review a revision.'}</p>{expiredOffers.map(q => <button type="button" key={q.id} disabled={revise.isPending} className="mt-2 block min-h-11 underline" onClick={() => revise.mutate(q.id)}>Create revision of {q.number}</button>)}<p className="mt-2 text-xs">Opens a new draft for review. Nothing is sent or accepted.</p></div>}
+        {to === "won" && offers.length > 0 && <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Quote to accept"}</L></span><select className={inputCls} required value={quoteId || (offers.length === 1 ? String(offers[0].id) : '')} onChange={(e) => setQuoteId(e.target.value)}><option value=""><L>{"Choose the agreed quote"}</L></option>{offers.map((q) => <option key={q.id} value={q.id}>{q.number} · {formatMoney(q.totalCents)} · {q.status}</option>)}</select><span className="text-xs text-muted-foreground"><L>{"Accepting creates the linked job and invoice. Other offers remain separate."}</L></span></label>}
+        {jobFailed && <p role="alert"><L>{"Could not load linked quotes. Close and reopen this dialog to retry."}</L></p>}
+        {to === 'won' && expiredOffers.length > 0 && <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"><p>{needsRevision ? 'The linked quote has expired. Review a new revision before marking this lead won.' : 'Expired offers cannot be accepted. Choose a current quote or review a revision.'}</p>{expiredOffers.map(q => <button type="button" key={q.id} disabled={revise.isPending} className="mt-2 block min-h-11 underline" onClick={() => revise.mutate(q.id)}><L>{"Create revision of"}</L>{" "}{q.number}</button>)}<p className="mt-2 text-xs"><L>{"Opens a new draft for review. Nothing is sent or accepted."}</L></p></div>}
         {to === "won" && offers.length === 0 && !needsRevision && (
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Revenue closed ($)</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Revenue closed ($)"}</L></span>
             <input className={inputCls} inputMode="decimal" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
           </label>
         )}
@@ -351,7 +349,7 @@ function LeadDetailModal({
   const [assignedTo, setAssignedTo] = useState(lead.assignedTo != null ? String(lead.assignedTo) : "");
   const [notes, setNotes] = useState(lead.notes ?? "");
   // Phase B #10: feeds the automations sweep (nextFollowUpAt → auto task).
-  const [followUp, setFollowUp] = useState(toDateInput(lead.nextFollowUpAt));
+  const [followUp, setFollowUp] = useState(businessDateInput(lead.nextFollowUpAt));
   const [activityNote, setActivityNote] = useState("");
 
   const { data: activities = [], isLoading: activitiesLoading, isError: activitiesFailed, error: activitiesError, refetch: retryActivities } = useQuery<CrmActivity[]>({
@@ -404,9 +402,9 @@ function LeadDetailModal({
           serviceRequested: serviceRequested.trim() || null,
           serviceArea: serviceArea.trim() || null,
           estimatedValueCents: parseMoney(estimatedValue),
-          // 9am local so the follow-up task lands in that morning's sweep;
+          // 9am in the configured business timezone, even on a travelling phone.
           // clearing the field PATCHes null.
-          nextFollowUpAt: followUp ? new Date(`${followUp}T09:00:00`).getTime() : null,
+          nextFollowUpAt: followUp ? businessFollowUp(followUp) : null,
           ...(clearsClose && lead.stage === "won" ? { revenueClosedCents: 0 } : {}),
           ...(isElevated ? { assignedTo: assignedTo ? parseInt(assignedTo, 10) : null } : {}),
           notes: notes.trim() || null,
@@ -475,7 +473,7 @@ function LeadDetailModal({
   };
 
   const quickBtn = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border px-3 text-sm font-medium hover:bg-accent disabled:opacity-60";
-  const hasFieldChanges = name !== original.name || phone !== (original.phone ?? '') || email !== (original.email ?? '') || source !== original.source || site !== original.site || stage !== original.stage || language !== (original.preferredLanguage ?? 'en') || winLossReason !== (original.winLossReason ?? '') || serviceRequested !== (original.serviceRequested ?? '') || serviceArea !== (original.serviceArea ?? '') || parseMoney(estimatedValue) !== original.estimatedValueCents || assignedTo !== (original.assignedTo != null ? String(original.assignedTo) : '') || notes !== (original.notes ?? '') || followUp !== toDateInput(original.nextFollowUpAt);
+  const hasFieldChanges = name !== original.name || phone !== (original.phone ?? '') || email !== (original.email ?? '') || source !== original.source || site !== original.site || stage !== original.stage || language !== (original.preferredLanguage ?? 'en') || winLossReason !== (original.winLossReason ?? '') || serviceRequested !== (original.serviceRequested ?? '') || serviceArea !== (original.serviceArea ?? '') || parseMoney(estimatedValue) !== original.estimatedValueCents || assignedTo !== (original.assignedTo != null ? String(original.assignedTo) : '') || notes !== (original.notes ?? '') || followUp !== businessDateInput(original.nextFollowUpAt);
   const hasUnsavedChanges = hasFieldChanges || !!activityNote.trim();
   const photos = leadPhotos(extras ? extras.photos : lead.photos);
   const phoneLink = phone.replace(/[^+\d]/g, '');
@@ -490,11 +488,11 @@ function LeadDetailModal({
         <div className="flex gap-2">
           <ModalClose className={quickBtn}>{hasUnsavedChanges ? 'Cancel' : 'Done'}</ModalClose>
           {hasFieldChanges && <button type="submit" form={formId} disabled={save.isPending} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-60">
-            {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Save changes
-          </button>}
+            {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}<L>{"Save changes"}</L>{" "}</button>}
         </div>
       </div>}>
       <div className="space-y-5">
+        <ConnectedRecords kind="lead" id={lead.id}/>
         <section aria-label="Customer contact" className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Chip tone={STAGE_TONE[stage]}>{LEAD_STAGE_LABELS[stage]}</Chip>
@@ -504,12 +502,12 @@ function LeadDetailModal({
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
             {phone && <span>{phone}</span>}
             {email && <span className="break-all">{email}</span>}
-            {!phone && !email && <button type="button" className="text-primary underline" onClick={() => setTab('Details')}>Add contact details</button>}
+            {!phone && !email && <button type="button" className="text-primary underline" onClick={() => setTab('Details')}><L>{"Add contact details"}</L></button>}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={quoteThisLead} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"><PencilRuler className="h-4 w-4" />Create quote</button>
-            {phoneLink && <><a className={quickBtn} href={`tel:${phoneLink}`}><Phone className="h-4 w-4" />Call</a><a className={quickBtn} href={`sms:${phoneLink}`}>Text</a></>}
-            {email && <a className={quickBtn} href={`mailto:${email.trim()}`}><Mail className="h-4 w-4" />Email</a>}
+            <button type="button" onClick={quoteThisLead} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"><PencilRuler className="h-4 w-4" /><L>{"Create quote"}</L></button>
+            {phoneLink && <><a className={quickBtn} href={`tel:${phoneLink}`}><Phone className="h-4 w-4" /><L>{"Call"}</L></a><a className={quickBtn} href={`sms:${phoneLink}`}><L>{"Text"}</L></a></>}
+            {email && <a className={quickBtn} href={`mailto:${email.trim()}`}><Mail className="h-4 w-4" /><L>{"Email"}</L></a>}
           </div>
         </section>
 
@@ -534,68 +532,68 @@ function LeadDetailModal({
               <div><h3 className="text-base font-semibold">{serviceRequested || 'Project request'}</h3>
                 {notes && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{showFullRequest || notes.length <= 400 ? notes : notes.slice(0, 400) + '…'}</p>}
                 {notes.length > 400 && <button type="button" aria-expanded={showFullRequest} className="mt-1 min-h-10 text-sm text-primary underline" onClick={() => setShowFullRequest(value => !value)}>{showFullRequest ? 'Show less' : 'Read full request'}</button>}
-                {!notes && !serviceRequested && <p className="mt-1 text-sm text-muted-foreground">Add the project request in Details.</p>}
+                {!notes && !serviceRequested && <p className="mt-1 text-sm text-muted-foreground"><L>{"Add the project request in Details."}</L></p>}
               </div>
               {isElevated && <LeadIntake id={lead.id} />}
             </section>
 
             <section aria-label="Next step" className="rounded-xl border border-border bg-muted/20 p-4">
-              <h3 className="mb-3 font-semibold">Next step</h3>
+              <h3 className="mb-3 font-semibold"><L>{"Next step"}</L></h3>
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Stage</span><select aria-label="Stage" className={inputCls} value={stage} onChange={event => {
+                <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Stage"}</L></span><select aria-label="Stage" className={inputCls} value={stage} onChange={event => {
                   const next = event.target.value as LeadStage;
                   if ((next === 'won' || next === 'lost') && next !== original.stage) {
                     if (hasUnsavedChanges) { toast({ title: 'Save your edits before closing this lead' }); return; }
                     onOutcome(next);
                   } else setStage(next);
                 }}>{LEAD_STAGES.map(value => <option key={value} value={value}>{(value === 'won' || value === 'lost') && value !== original.stage ? `Mark ${value}…` : LEAD_STAGE_LABELS[value]}</option>)}</select></label>
-                <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Next follow-up</span><input type="date" className={inputCls} value={followUp} onChange={event => setFollowUp(event.target.value)} /></label>
-                {(stage === 'won' || stage === 'lost') && <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium">Win/loss reason</span><select aria-label="Win/loss reason" className={inputCls} value={winLossReason} onChange={event => setWinLossReason(event.target.value as WinLossReason)}><option value="">Choose a reason</option>{WIN_LOSS_REASONS.map(reason => <option key={reason} value={reason}>{WIN_LOSS_REASON_LABELS[reason]}</option>)}</select></label>}
+                <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Next follow-up"}</L></span><input type="date" className={inputCls} value={followUp} onChange={event => setFollowUp(event.target.value)} /></label>
+                {(stage === 'won' || stage === 'lost') && <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium"><L>{"Win/loss reason"}</L></span><select aria-label="Win/loss reason" className={inputCls} value={winLossReason} onChange={event => setWinLossReason(event.target.value as WinLossReason)}><option value=""><L>{"Choose a reason"}</L></option>{WIN_LOSS_REASONS.map(reason => <option key={reason} value={reason}>{WIN_LOSS_REASON_LABELS[reason]}</option>)}</select></label>}
               </div>
-              {followUp && <p className="mt-2 text-xs text-muted-foreground">Saving this date schedules a follow-up task.</p>}
+              {followUp && <p className="mt-2 text-xs text-muted-foreground"><L>{"Saving this date schedules a follow-up task."}</L></p>}
             </section>
 
             {photos.length > 0 && <LeadPhotos leadId={lead.id} photos={photos} />}
-            {detailFailed && <p role="alert" className="text-sm">Photos and linked records could not refresh. <button type="button" className="underline" onClick={() => retryDetail()}>Retry</button></p>}
-            {hasLinkedRecords && <section aria-label="Quotes and jobs" className="space-y-3 border-t border-border pt-4"><h3 className="font-semibold">Quotes & jobs</h3>
-              {extras?.quotes.map(quote => <div key={quote.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{quote.number} · {quote.status} · {formatMoney(quote.totalCents)}</span><button type="button" className={quickBtn} onClick={async () => { try { const row = await (await apiRequest('POST', `/api/quotes/${quote.id}/share`, { preview: true })).json(); window.open(row.url, '_blank', 'noopener'); } catch (error: any) { toast({ variant: 'destructive', title: 'Could not open quote', description: error.message }); } }}>View quote</button></div>)}
-              {extras?.projects.map(project => <a className="block min-h-10 text-sm text-primary underline" key={project.id} href={`/#/project/${project.id}`} onClick={event => { if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes?')) event.preventDefault(); }}>{project.name} — job</a>)}
-              {extras?.invoices.map(invoice => <a className="block min-h-10 text-sm text-primary underline" key={invoice.id} href={`/#/finance/invoices?invoice=${invoice.id}`} onClick={event => { if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes?')) event.preventDefault(); }}>{invoice.number} · {invoice.status} · {formatMoney(invoice.totalCents - invoice.paidCents)} balance</a>)}
+            {detailFailed && <p role="alert" className="text-sm"><L>{"Photos and linked records could not refresh."}</L>{" "}<button type="button" className="underline" onClick={() => retryDetail()}><L>{"Retry"}</L></button></p>}
+            {hasLinkedRecords && <section aria-label="Quotes and jobs" className="space-y-3 border-t border-border pt-4"><h3 className="font-semibold"><L>{"Quotes & jobs"}</L></h3>
+              {extras?.quotes.map(quote => <div key={quote.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{quote.number} · {quote.status} · {formatMoney(quote.totalCents)}</span><button type="button" className={quickBtn} onClick={async () => { try { const row = await (await apiRequest('POST', `/api/quotes/${quote.id}/share`, { preview: true })).json(); window.open(row.url, '_blank', 'noopener'); } catch (error: any) { toast({ variant: 'destructive', title: 'Could not open quote', description: error.message }); } }}><L>{"View quote"}</L></button></div>)}
+              {extras?.projects.map(project => <a className="block min-h-10 text-sm text-primary underline" key={project.id} href={`/#/project/${project.id}`} onClick={event => { if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes?')) event.preventDefault(); }}>{project.name} {" "}<L>{"— job"}</L></a>)}
+              {extras?.invoices.map(invoice => <a className="block min-h-10 text-sm text-primary underline" key={invoice.id} href={`/#/finance/invoices?invoice=${invoice.id}`} onClick={event => { if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes?')) event.preventDefault(); }}>{invoice.number} · {invoice.status} · {formatMoney(invoice.totalCents - invoice.paidCents)} {" "}<L>{"balance"}</L></a>)}
             </section>}
           </div>}
 
           {tab === 'Activity' && <section role="tabpanel" id={`${formId}-Activity`} aria-labelledby={`${formId}-Activity-tab`} className="space-y-4">
-            <label className="flex flex-col gap-2"><span className="font-semibold">Add an update</span><textarea aria-label="Activity note" rows={3} className={inputCls} placeholder="What did you discuss? What happens next?" value={activityNote} onChange={event => setActivityNote(event.target.value)} /></label>
+            <label className="flex flex-col gap-2"><span className="font-semibold"><L>{"Add an update"}</L></span><textarea aria-label="Activity note" rows={3} className={inputCls} placeholder="What did you discuss? What happens next?" value={activityNote} onChange={event => setActivityNote(event.target.value)} /></label>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className={quickBtn} disabled={logActivity.isPending || !activityNote.trim()} onClick={() => logActivity.mutate('note')}><StickyNote className="h-4 w-4" />Log note</button>
-              <button type="button" className={quickBtn} disabled={logActivity.isPending} onClick={() => logActivity.mutate('call')}><Phone className="h-4 w-4" />Log call</button>
-              <button type="button" className={quickBtn} disabled={logActivity.isPending} onClick={() => logActivity.mutate('email')}><Mail className="h-4 w-4" />Log email</button>
+              <button type="button" className={quickBtn} disabled={logActivity.isPending || !activityNote.trim()} onClick={() => logActivity.mutate('note')}><StickyNote className="h-4 w-4" /><L>{"Log note"}</L></button>
+              <button type="button" className={quickBtn} disabled={logActivity.isPending} onClick={() => logActivity.mutate('call')}><Phone className="h-4 w-4" /><L>{"Log call"}</L></button>
+              <button type="button" className={quickBtn} disabled={logActivity.isPending} onClick={() => logActivity.mutate('email')}><Mail className="h-4 w-4" /><L>{"Log email"}</L></button>
             </div>
-            <p className="text-xs text-muted-foreground">Record completed contact here. These buttons do not place a call or send an email.</p>
-            {activitiesFailed ? <RetryBlock query={{ error: activitiesError, refetch: retryActivities }} /> : activitiesLoading ? <LoadingBlock /> : activities.length === 0 ? <p className="py-4 text-sm text-muted-foreground">No updates yet.</p> : <ul className="divide-y divide-border">{activities.map(activity => <li key={activity.id} className="space-y-1 py-3"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">{ACTIVITY_KIND_LABELS[activity.kind]}</span><time>{formatDateTime(activity.createdAt as any)}</time></div>{activity.notes && <p className="whitespace-pre-wrap break-words text-sm">{activity.notes}</p>}</li>)}</ul>}
+            <p className="text-xs text-muted-foreground"><L>{"Record completed contact here. These buttons do not place a call or send an email."}</L></p>
+            {activitiesFailed ? <RetryBlock query={{ error: activitiesError, refetch: retryActivities }} /> : activitiesLoading ? <LoadingBlock /> : activities.length === 0 ? <p className="py-4 text-sm text-muted-foreground"><L>{"No updates yet."}</L></p> : <ul className="divide-y divide-border">{activities.map(activity => <li key={activity.id} className="space-y-1 py-3"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">{ACTIVITY_KIND_LABELS[activity.kind]}</span><time>{formatDateTime(activity.createdAt as any)}</time></div>{activity.notes && <p className="whitespace-pre-wrap break-words text-sm">{activity.notes}</p>}</li>)}</ul>}
           </section>}
 
           {tab === 'Details' && <div role="tabpanel" id={`${formId}-Details`} aria-labelledby={`${formId}-Details-tab`} className="space-y-5">
             <section className="grid gap-3 sm:grid-cols-2" aria-label="Edit customer details">
-              <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium">Name</span><input className={inputCls} value={name} onChange={event => setName(event.target.value)} /></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Phone</span><input type="tel" className={inputCls} value={phone} onChange={event => setPhone(event.target.value)} /></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Email</span><input type="email" className={inputCls} value={email} onChange={event => setEmail(event.target.value)} /></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Service requested</span><input className={inputCls} value={serviceRequested} onChange={event => setServiceRequested(event.target.value)} /></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Service area</span><input className={inputCls} value={serviceArea} onChange={event => setServiceArea(event.target.value)} /></label>
-              <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium">Request / notes</span><textarea rows={4} className={inputCls} value={notes} onChange={event => setNotes(event.target.value)} /></label>
+              <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium"><L>{"Name"}</L></span><input className={inputCls} value={name} onChange={event => setName(event.target.value)} /></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Phone"}</L></span><input type="tel" className={inputCls} value={phone} onChange={event => setPhone(event.target.value)} /></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Email"}</L></span><input type="email" className={inputCls} value={email} onChange={event => setEmail(event.target.value)} /></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Service requested"}</L></span><input className={inputCls} value={serviceRequested} onChange={event => setServiceRequested(event.target.value)} /></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Service area"}</L></span><input className={inputCls} value={serviceArea} onChange={event => setServiceArea(event.target.value)} /></label>
+              <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium"><L>{"Request / notes"}</L></span><textarea rows={4} className={inputCls} value={notes} onChange={event => setNotes(event.target.value)} /></label>
             </section>
-            <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">More lead details</summary><div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Shop</span><select aria-label="Shop" className={inputCls} value={site} onChange={event => setSite(event.target.value as LeadSite)}>{LEAD_SITES.map(value => <option key={value} value={value}>{leadSiteLabel[value]}</option>)}</select></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Source</span><select aria-label="Source" className={inputCls} value={source} onChange={event => setSource(event.target.value as LeadSource)}>{LEAD_SOURCES.map(value => <option key={value} value={value}>{LEAD_SOURCE_LABELS[value]}</option>)}</select></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Customer language</span><select aria-label="Customer language" className={inputCls} value={language} onChange={event => setLanguage(event.target.value as 'en' | 'es')}><option value="en">English</option><option value="es">Español</option></select></label>
-              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium">Estimated value ($)</span><input className={inputCls} inputMode="decimal" value={estimatedValue} onChange={event => setEstimatedValue(event.target.value)} /></label>
-              {isElevated && <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium">Assigned to</span><select aria-label="Assigned to" className={inputCls} value={assignedTo} onChange={event => setAssignedTo(event.target.value)}><option value="">Unassigned</option>{users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>}
+            <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium"><L>{"More lead details"}</L></summary><div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Shop"}</L></span><select aria-label="Shop" className={inputCls} value={site} onChange={event => setSite(event.target.value as LeadSite)}>{LEAD_SITES.map(value => <option key={value} value={value}>{leadSiteLabel[value]}</option>)}</select></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Source"}</L></span><select aria-label="Source" className={inputCls} value={source} onChange={event => setSource(event.target.value as LeadSource)}>{LEAD_SOURCES.map(value => <option key={value} value={value}>{LEAD_SOURCE_LABELS[value]}</option>)}</select></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Customer language"}</L></span><select aria-label="Customer language" className={inputCls} value={language} onChange={event => setLanguage(event.target.value as 'en' | 'es')}><option value="en"><L>{"English"}</L></option><option value="es">Español</option></select></label>
+              <label className="flex flex-col gap-1.5"><span className="text-sm font-medium"><L>{"Estimated value ($)"}</L></span><input className={inputCls} inputMode="decimal" value={estimatedValue} onChange={event => setEstimatedValue(event.target.value)} /></label>
+              {isElevated && <label className="flex flex-col gap-1.5 sm:col-span-2"><span className="text-sm font-medium"><L>{"Assigned to"}</L></span><select aria-label="Assigned to" className={inputCls} value={assignedTo} onChange={event => setAssignedTo(event.target.value)}><option value=""><L>{"Unassigned"}</L></option>{users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>}
             </div></details>
-            {isElevated && <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Site visit & request details</summary><div className="mt-4"><LeadIntake id={lead.id} mode="manage" /></div></details>}
-            {extras?.design && <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Website design</summary><div className="mt-3 space-y-2 text-sm"><p>Design ref: {extras.design.ref}</p>{extras.design.service && <p>{extras.design.service}</p>}{extras.design.location && <p>{extras.design.location}</p>}{extras.design.bestTime && <p>Requested time: {extras.design.bestTime}</p>}{extras.design.sourceTool && <p>From: {extras.design.sourceTool}</p>}{extras.design.designSpec && <p className="whitespace-pre-wrap break-words">{extras.design.designSpec}</p>}</div></details>}
-            <details className="border-t border-border pt-4"><summary className="cursor-pointer text-sm text-muted-foreground">More actions</summary><div className="mt-3 flex flex-wrap gap-2">
-              {lead.clientId != null ? <Link className={quickBtn} href={`/crm/clients?client=${lead.clientId}`} onClick={event => { if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes?')) event.preventDefault(); }}>View client</Link> : <button type="button" className={quickBtn} disabled={convert.isPending} onClick={() => convert.mutate()}><UserPlus className="h-4 w-4" />Convert to client</button>}
-              {isElevated && <button type="button" disabled={del.isPending} className={cn(quickBtn, 'text-destructive')} onClick={() => { if (window.confirm(`Delete lead "${lead.name}"? This can't be undone from the app.`)) del.mutate(); }}><Trash2 className="h-4 w-4" />Delete lead</button>}
+            {isElevated && <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium"><L>{"Site visit & request details"}</L></summary><div className="mt-4"><LeadIntake id={lead.id} mode="manage" /></div></details>}
+            {extras?.design && <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium"><L>{"Website design"}</L></summary><div className="mt-3 space-y-2 text-sm"><p><L>{"Design ref:"}</L>{" "}{extras.design.ref}</p>{extras.design.service && <p>{extras.design.service}</p>}{extras.design.location && <p>{extras.design.location}</p>}{extras.design.bestTime && <p><L>{"Requested time:"}</L>{" "}{extras.design.bestTime}</p>}{extras.design.sourceTool && <p><L>{"From:"}</L>{" "}{extras.design.sourceTool}</p>}{extras.design.designSpec && <p className="whitespace-pre-wrap break-words">{extras.design.designSpec}</p>}</div></details>}
+            <details className="border-t border-border pt-4"><summary className="cursor-pointer text-sm text-muted-foreground"><L>{"More actions"}</L></summary><div className="mt-3 flex flex-wrap gap-2">
+              {lead.clientId != null ? <Link className={quickBtn} href={`/crm/clients?client=${lead.clientId}`} onClick={event => { if (hasUnsavedChanges && !window.confirm('Discard your unsaved changes?')) event.preventDefault(); }}><L>{"View client"}</L></Link> : <button type="button" className={quickBtn} disabled={convert.isPending} onClick={() => convert.mutate()}><UserPlus className="h-4 w-4" /><L>{"Convert to client"}</L></button>}
+              {isElevated && <DeleteRecordReview kind="lead" id={lead.id} name={lead.name} busy={del.isPending} error={del.error?.message} unsaved={hasUnsavedChanges} onConfirm={()=>del.mutate()}/>}
             </div></details>
           </div>}
         </form>
@@ -610,15 +608,16 @@ export default function LeadsPage() {
   const business=useBusiness();
   const { isElevated } = useAuth();
 
-  const [view, setView] = useRememberedState<"board" | "list">("leads-layout","list");
-  const [q, setQ] = useRememberedState("client/src/pages/crm/leads.tsx:q","");
-  const [source, setSource] = useRememberedState("client/src/pages/crm/leads.tsx:source","");
+  const [filters,setFilters]=usePageFilters({view:"list",q:"",source:"",stage:"",assignee:"",from:"",to:"",page:"0"});
+  const view=filters.view==="board"?"board":"list",setView=(view:"board"|"list")=>setFilters({view});
+  const q=filters.q,setQ=(q:string)=>setFilters({q});
+  const source=filters.source,setSource=(source:string)=>setFilters({source});
   const site=business==='all'?'':business;
   const setSite=(value:string)=>setBusiness(value||'all');
-  const [stage, setStage] = useRememberedState("client/src/pages/crm/leads.tsx:stage","");
-  const [assignee, setAssignee] = useRememberedState("client/src/pages/crm/leads.tsx:assignee","");
-  const [from, setFrom] = useRememberedState("client/src/pages/crm/leads.tsx:from","");
-  const [to, setTo] = useRememberedState("client/src/pages/crm/leads.tsx:to","");
+  const stage=filters.stage,setStage=(stage:string)=>setFilters({stage});
+  const assignee=filters.assignee,setAssignee=(assignee:string)=>setFilters({assignee});
+  const from=filters.from,setFrom=(from:string)=>setFilters({from});
+  const to=filters.to,setTo=(to:string)=>setFilters({to});
 
   const [newOpen, setNewOpen] = useState(false);
   const leadLink = useDeepLink("lead");
@@ -627,7 +626,7 @@ export default function LeadsPage() {
   const [closing, setClosing] = useState<{ lead: Lead; to: "won" | "lost" } | null>(null);
   const [dragOverStage, setDragOverStage] = useState<LeadStage | null>(null);
 
-  const {page,setPage}=useListPage('leads:client/src/pages/crm/leads.tsx',[q.trim(),source,site,assignee,from,to,stage]);
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   const params = new URLSearchParams();
     params.set('page',String(page));params.set('limit','50');
   if (q.trim()) params.set("q", q.trim());
@@ -698,37 +697,35 @@ export default function LeadsPage() {
   return (
     <div className="mx-auto w-full min-w-0 max-w-6xl">
       <Header title="Leads" description="Find a customer request, follow up, and track the next step.">
-        {isElevated&&<Link href="/trash" className="flex min-h-11 items-center rounded-xl border px-3 text-sm">View Trash</Link>}
+        {isElevated&&<Link href="/trash" className="flex min-h-11 items-center rounded-xl border px-3 text-sm"><L>{"View Trash"}</L></Link>}
         <div className="flex items-center gap-1 rounded-xl border border-border p-1">
           <button className={toggleBtn(view === "board")} onClick={() => setView("board")}>
-            <LayoutGrid className="h-4 w-4" /> Board
-          </button>
+            <LayoutGrid className="h-4 w-4" /> {" "}<L>{"Board"}</L>{" "}</button>
           <button className={toggleBtn(view === "list")} onClick={() => setView("list")}>
-            <List className="h-4 w-4" /> List
-          </button>
+            <List className="h-4 w-4" /> {" "}<L>{"List"}</L>{" "}</button>
         </div>
         <button
           onClick={() => setNewOpen(true)}
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
         >
           <Plus className="h-5 w-5" />
-          New lead
+          <L>{"New lead"}</L>
         </button>
       </Header>
 
       <div className="mb-5 space-y-3">
         <div className="flex flex-wrap gap-3">
-          <label className="relative min-w-48 flex-1"><span className="sr-only">Search leads</span><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground"/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Name, phone, email, or request" className={`${inputCls} pl-9`}/></label>
-          <label><span className="sr-only">Lead stage</span><select aria-label="Lead stage" className={selectCls} value={stage} onChange={e=>setStage(e.target.value)}><option value="">All stages</option>{LEAD_STAGES.map(s=><option key={s} value={s}>{LEAD_STAGE_LABELS[s]}</option>)}</select></label>
+          <label className="relative min-w-48 flex-1"><span className="sr-only"><L>{"Search leads"}</L></span><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground"/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Name, phone, email, or request" className={`${inputCls} pl-9`}/></label>
+          <label><span className="sr-only"><L>{"Lead stage"}</L></span><select aria-label="Lead stage" className={selectCls} value={stage} onChange={e=>setStage(e.target.value)}><option value=""><L>{"All stages"}</L></option>{LEAD_STAGES.map(s=><option key={s} value={s}>{LEAD_STAGE_LABELS[s]}</option>)}</select></label>
         </div>
-        <details className="rounded-xl border p-3"><summary className="cursor-pointer text-sm font-medium">More filters{(source||site||assignee||from||to)?' · active':''}</summary><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <label className="flex flex-col gap-1 text-sm">Source<select className={selectCls} value={source} onChange={e=>setSource(e.target.value)}><option value="">All sources</option>{LEAD_SOURCES.map(s=><option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>)}</select></label>
-          <label className="flex flex-col gap-1 text-sm">Business<select className={selectCls} value={site} onChange={e=>setSite(e.target.value)}><option value="">All businesses</option>{LEAD_SITES.map(s=><option key={s} value={s}>{leadSiteLabel[s]}</option>)}</select></label>
-          {isElevated&&<label className="flex flex-col gap-1 text-sm">Assigned to<select className={selectCls} value={assignee} onChange={e=>setAssignee(e.target.value)}><option value="">Anyone</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
-          <label className="flex flex-col gap-1 text-sm">Received from<input type="date" className={selectCls} value={from} onChange={e=>setFrom(e.target.value)}/></label>
-          <label className="flex flex-col gap-1 text-sm">Received through<input type="date" className={selectCls} value={to} min={from||undefined} onChange={e=>setTo(e.target.value)}/></label>
+        <details className="rounded-xl border p-3"><summary className="cursor-pointer text-sm font-medium"><L>{"More filters"}</L>{(source||site||assignee||from||to)?' · active':''}</summary><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <label className="flex flex-col gap-1 text-sm"><L>{"Source"}</L><select className={selectCls} value={source} onChange={e=>setSource(e.target.value)}><option value=""><L>{"All sources"}</L></option>{LEAD_SOURCES.map(s=><option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>)}</select></label>
+          <label className="flex flex-col gap-1 text-sm"><L>{"Business"}</L><select className={selectCls} value={site} onChange={e=>setSite(e.target.value)}><option value=""><L>{"All businesses"}</L></option>{LEAD_SITES.map(s=><option key={s} value={s}>{leadSiteLabel[s]}</option>)}</select></label>
+          {isElevated&&<label className="flex flex-col gap-1 text-sm"><L>{"Assigned to"}</L><select className={selectCls} value={assignee} onChange={e=>setAssignee(e.target.value)}><option value=""><L>{"Anyone"}</L></option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
+          <label className="flex flex-col gap-1 text-sm"><L>{"Received from"}</L><input type="date" className={selectCls} value={from} onChange={e=>setFrom(e.target.value)}/></label>
+          <label className="flex flex-col gap-1 text-sm"><L>{"Received through"}</L><input type="date" className={selectCls} value={to} min={from||undefined} onChange={e=>setTo(e.target.value)}/></label>
         </div></details>
-        {(q||stage||source||assignee||from||to)&&<button type="button" className="min-h-11 text-sm underline" onClick={()=>{setQ('');setStage('');setSource('');setAssignee('');setFrom('');setTo('');}}>Clear filters</button>}
+        {(q||stage||source||assignee||from||to)&&<button type="button" className="min-h-11 text-sm underline" onClick={()=>{setQ('');setStage('');setSource('');setAssignee('');setFrom('');setTo('');}}><L>{"Clear filters"}</L></button>}
       </div>
 
       {(page>0||leads.length>=50)&&<PageButtons page={page} setPage={setPage} count={leads.length}/>}
@@ -741,12 +738,11 @@ export default function LeadsPage() {
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
           >
             <Plus className="h-5 w-5" />
-            Add your first lead
-          </button>
+            <L>{"Add your first lead"}</L>{" "}</button>
         </EmptyState>
       ) : view === "board" ? (
         <div role="region" aria-label="Lead board">
-          <p className="mb-3 text-sm text-muted-foreground">Open a card to update its stage. Counts show requests on this page.</p>
+          <p className="mb-3 text-sm text-muted-foreground"><L>{"Open a card to update its stage. Counts show requests on this page."}</L></p>
           <div className="grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
             {LEAD_STAGES.filter(s=>!stage||s===stage).map((s) => {
               const column = leads.filter((l) => l.stage === s);
@@ -788,7 +784,7 @@ export default function LeadsPage() {
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             <SiteChip site={lead.site} />
                             <Chip tone="blue">{LEAD_SOURCE_LABELS[lead.source]}</Chip>
-                            {lead.stale&&!['won','lost'].includes(lead.stage) && <Chip tone="amber">Follow-up due</Chip>}
+                            {lead.stale&&!['won','lost'].includes(lead.stage) && <Chip tone="amber"><L>{"Follow-up due"}</L></Chip>}
                           </div>
                           <div className="mt-2 flex items-center justify-between text-sm">
                             <span className="tabular-nums text-foreground">
@@ -802,7 +798,7 @@ export default function LeadsPage() {
                       );
                     })}
                     {column.length === 0 && (
-                      <p className="px-2 py-6 text-center text-xs text-muted-foreground">No leads</p>
+                      <p className="px-2 py-6 text-center text-xs text-muted-foreground"><L>{"No leads"}</L></p>
                     )}
                   </div>
                 </div>
@@ -812,17 +808,17 @@ export default function LeadsPage() {
         </div>
       ) : (
         <div className="space-y-3" aria-label="Lead list">
-          <p className="text-sm text-muted-foreground">{listLeads.length} requests on this page · Open a request to see its quotes, notes, and next step.</p>
+          <p className="text-sm text-muted-foreground">{listLeads.length} {" "}<L>{"requests on this page · Open a request to see its quotes, notes, and next step."}</L></p>
           {listLeads.map(lead=>{
             const days=daysSince(lead.lastContactAt??lead.createdAt);
             const value=lead.stage==='won'?lead.revenueClosedCents:lead.estimatedValueCents;
             return <button type="button" key={lead.id} onClick={()=>setDetailId(lead.id)} className="grid w-full gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-words">{lead.name}</strong><Chip tone={STAGE_TONE[lead.stage]}>{LEAD_STAGE_LABELS[lead.stage]}</Chip>{lead.stale&&!['won','lost'].includes(lead.stage)&&<Chip tone="amber">Follow-up due</Chip>}</div>
+              <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="break-words">{lead.name}</strong><Chip tone={STAGE_TONE[lead.stage]}>{LEAD_STAGE_LABELS[lead.stage]}</Chip>{lead.stale&&!['won','lost'].includes(lead.stage)&&<Chip tone="amber"><L>{"Follow-up due"}</L></Chip>}</div>
                 <p className="mt-1 break-words text-sm text-muted-foreground">{lead.serviceRequested||lead.serviceArea||'Open request details'}</p>
                 <p className="mt-1 break-words text-sm text-muted-foreground">{[lead.phone,lead.email].filter(Boolean).join(' · ')||'Contact details not added'}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><SiteChip site={lead.site}/><span>{LEAD_SOURCE_LABELS[lead.source]}</span>{lead.assignedTo&&<span>Assigned to {userName(lead.assignedTo)}</span>}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><SiteChip site={lead.site}/><span>{LEAD_SOURCE_LABELS[lead.source]}</span>{lead.assignedTo&&<span><L>{"Assigned to"}</L>{" "}{userName(lead.assignedTo)}</span>}</div>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm sm:flex-col sm:items-end"><strong>{value?formatMoney(value):'Value not set'}</strong><span className="text-muted-foreground">{days===null?'No contact yet':lead.lastContactAt?(days===0?'Contacted today':`Last contact ${days} days ago`):(days===0?'Received today':`Received ${days} days ago`)}</span><span className="font-medium text-primary">Open request</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm sm:flex-col sm:items-end"><strong>{value?formatMoney(value):'Value not set'}</strong><span className="text-muted-foreground">{days===null?'No contact yet':lead.lastContactAt?(days===0?'Contacted today':`Last contact ${days} days ago`):(days===0?'Received today':`Received ${days} days ago`)}</span><span className="font-medium text-primary"><L>{"Open request"}</L></span></div>
             </button>;
           })}
         </div>

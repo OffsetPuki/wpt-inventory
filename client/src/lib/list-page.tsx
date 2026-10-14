@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {useBusiness} from "@/hooks/useBusiness";
 import { useAuth } from "./auth";
+import {useLanguage} from './language';
 export function useRememberedState<T>(name: string, initial: T, urlParam?: string) {
   const { user } = useAuth();
   const key = `suite-view:${user?.id}:${name}`;
@@ -45,6 +46,7 @@ export function PageButtons({
   total?: number;
   limit?: number;
 }) {
+  const {t}=useLanguage();
   return (
     <nav
       aria-label="List pages"
@@ -55,10 +57,10 @@ export function PageButtons({
         disabled={!page}
         onClick={() => setPage(page - 1)}
       >
-        Previous
+        {t('Previous')}
       </button>
       <span className="text-sm">
-        Page {page + 1}
+        {t('Page')} {page + 1}
         {total !== undefined && ` · ${total} records`}
       </span>
       <button
@@ -66,7 +68,7 @@ export function PageButtons({
         disabled={total !== undefined ? (page + 1) * limit >= total : count < limit}
         onClick={() => setPage(page + 1)}
       >
-        Next
+        {t('Next')}
       </button>
     </nav>
   );

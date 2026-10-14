@@ -1,7 +1,11 @@
+import {L} from '@/lib/language';
 import {RecordSelect} from "@/components/RecordSelect";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import { RetryBlock } from "@/components/RetryBlock";
-import { useMemo, useState } from "react";
+import { useEffect,useMemo, useState } from "react";
+import {usePageFilters} from '@/hooks/usePageFilters';
+import {useApiMutation} from '@/hooks/useApiMutation';
+import TaskReschedule from '@/components/TaskReschedule';
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useRecordLink } from '@/lib/record-link';
@@ -43,11 +47,14 @@ function initials(name: string): string {
 // ─── Board page ──────────────────────────────────────────────────────────────
 
 export default function PmBoardPage() {
-  const { isElevated } = useAuth();
+  const { isElevated,user } = useAuth();
   const qc = useQueryClient();
-  const [projectFilter, setProjectFilter] = useState("");
-  const [assigneeFilter, setAssigneeFilter] = useState("");
-  const [q, setQ] = useState("");
+  const [filters,setFilters]=usePageFilters({projectId:'',assigneeId:'',q:'',view:'list',status:'open',page:'0'});
+  const {projectId:projectFilter,assigneeId:assigneeFilter,q,view}=filters;
+  const page=Math.max(0,Math.floor(Number(filters.page)||0));
+  const setProjectFilter=(projectId:string)=>setFilters({projectId}),setAssigneeFilter=(assigneeId:string)=>setFilters({assigneeId}),setQ=(q:string)=>setFilters({q});
+  const [selected,setSelected]=useState<number[]>([]),[rescheduling,setRescheduling]=useState(false);
+  useEffect(()=>setSelected([]),[projectFilter,assigneeFilter,q,page,filters.status]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TaskRow | null>(null);
   const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
@@ -63,12 +70,16 @@ export default function PmBoardPage() {
   if (projectFilter) params.set("projectId", projectFilter);
   if (assigneeFilter) params.set("assigneeId", assigneeFilter);
   if (q.trim()) params.set("q", q.trim());
+  if(filters.status)params.set('status',filters.status);
+  params.set('limit','100');params.set('page',String(page));
   const qs = params.toString();
 
-  const { data: tasks = [], isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<TaskRow[]>({
-    queryKey: ["pm-tasks", projectFilter, assigneeFilter, q],
-    queryFn: async () => (await apiRequest("GET", `/api/pm/tasks${qs ? `?${qs}` : ""}`)).json(),
+  const { data: result, isLoading, isError: loadFailed, error: loadError, refetch: retryLoad } = useQuery<{rows:TaskRow[];total:number}>({
+    queryKey: ["pm-tasks", projectFilter, assigneeFilter, q,filters.status,page],
+    queryFn: async () => {const r=await apiRequest("GET", `/api/pm/tasks?${qs}`);return {rows:await r.json(),total:Number(r.headers.get('X-Total-Count')||0)};},
   });
+  const tasks=result?.rows||[];
+  const updateStatus=useApiMutation<any,{task:TaskRow;status:TaskStatus}>({request:({task,status})=>({method:'PATCH',url:`/api/pm/tasks/${task.id}`,body:{status},expectedVersion:task._version}),errorTitle:'Could not update task',successTitle:'Task updated',invalidate:[['pm-tasks']]});
 
   useRecordLink('task','/api/pm/tasks',task=>{setEditing(task);setDialogOpen(true);});
 
@@ -108,7 +119,7 @@ export default function PmBoardPage() {
 
   return (
     <div className="mx-auto max-w-full">
-      <Header title="Task board" description="Drag tasks between columns to update their status">
+      <Header title="Tasks" description="Choose your next action. Switch to the board when you want to see stages.">
         <button
           onClick={() => {
             setEditing(null);
@@ -120,6 +131,8 @@ export default function PmBoardPage() {
           New task
         </button>
       </Header>
+      <div className="mb-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-xl border px-4 text-sm" aria-pressed={view!=='board'} onClick={()=>setFilters({view:'list'})}>List by job</button><button type="button" className="min-h-11 rounded-xl border px-4 text-sm" aria-pressed={view==='board'} onClick={()=>setFilters({view:'board'})}>Board</button><button type="button" className="min-h-11 rounded-xl border px-4 text-sm" aria-pressed={assigneeFilter===String(user?.id)} onClick={()=>setAssigneeFilter(assigneeFilter===String(user?.id)?'':String(user?.id))}>My tasks</button><label className="sr-only" htmlFor="task-stage">Task stage</label><select id="task-stage" className="min-h-11 rounded-xl border bg-background px-3 text-sm" value={filters.status} onChange={e=>setFilters({status:e.target.value})}><option value="open">Open tasks</option><option value="">All stages</option>{TASK_STATUSES.map(s=><option key={s} value={s}>{TASK_STATUS_LABELS[s]}</option>)}</select></div>
+      {!!selected.length&&<div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border p-3"><span>{selected.length} selected</span><button type="button" className="min-h-11 rounded-lg border px-3 text-sm" onClick={()=>setRescheduling(true)}>Review new due dates</button><button type="button" className="min-h-11 px-3 text-sm underline" onClick={()=>setSelected([])}>Clear selection</button></div>}
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[220px] flex-1">
@@ -171,6 +184,8 @@ export default function PmBoardPage() {
             Create the first task
           </button>
         </div>
+      ) : view!=='board' ? (
+        <div className="space-y-5">{[...new Set(tasks.map(t=>t.projectId))].map(projectId=><section key={projectId||'none'} className="rounded-xl border bg-card p-4"><h2 className="mb-3 font-semibold">{tasks.find(t=>t.projectId===projectId)?.projectName||'Unassigned to a job'}</h2><div className="divide-y">{tasks.filter(t=>t.projectId===projectId).map(t=><article key={t.id} className="flex flex-wrap items-center gap-3 py-3">{isElevated&&t.status!=='done'&&<label className="flex h-11 w-11 shrink-0 items-center justify-center"><input type="checkbox" aria-label={`Select ${t.title}`} className="h-5 w-5" checked={selected.includes(t.id)} disabled={!selected.includes(t.id)&&selected.length>=50} onChange={e=>setSelected(ids=>e.target.checked?[...ids,t.id]:ids.filter(id=>id!==t.id))}/></label>}<button type="button" className="min-h-11 min-w-0 flex-1 text-left" onClick={()=>openEdit(t)}><strong className="block break-words text-sm">{t.title}</strong><span className="text-xs text-muted-foreground">{t.assigneeName||'Unassigned'} · {t.dueDate?`Due ${formatDate(t.dueDate)}`:'No due date'}</span></button><select aria-label={`Status of ${t.title}`} className="min-h-11 max-w-full rounded-lg border bg-background px-3 text-sm" value={t.status} disabled={updateStatus.isPending} onChange={e=>updateStatus.mutate({task:t,status:e.target.value as TaskStatus})}>{TASK_STATUSES.map(s=><option key={s} value={s}>{TASK_STATUS_LABELS[s]}</option>)}</select></article>)}</div></section>)}{!tasks.length&&<p>No tasks match these filters.</p>}</div>
       ) : (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {TASK_STATUSES.map((s) => (
@@ -203,6 +218,9 @@ export default function PmBoardPage() {
                 return (
                   <div
                     key={t.id}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openEdit(t);}}}
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData("text/plain", String(t.id))}
                     onClick={() => openEdit(t)}
@@ -272,6 +290,8 @@ export default function PmBoardPage() {
           ))}
         </div>
       )}
+      {!!result?.total&&<nav className="my-4 flex flex-wrap items-center justify-between gap-3" aria-label="Task pages"><button className="min-h-11 rounded-lg border px-3" disabled={!page} onClick={()=>setFilters({page:String(page-1)})}><L>{"Previous"}</L></button><span className="text-sm">{page*100+1}–{Math.min((page+1)*100,result.total)} of {result.total} <L>{"tasks"}</L></span><button className="min-h-11 rounded-lg border px-3" disabled={(page+1)*100>=result.total} onClick={()=>setFilters({page:String(page+1)})}><L>{"Next"}</L></button></nav>}
+      {rescheduling&&<TaskReschedule ids={selected} close={()=>{setRescheduling(false);setSelected([]);}}/>}
 
       <TaskDialog
         open={dialogOpen}

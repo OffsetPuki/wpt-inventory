@@ -1,4 +1,6 @@
-import {beginSave,endSave} from "./save-status";
+import {beginSave,endSave,resetSaveStatus} from "./save-status";
+import {getBusiness} from '@/hooks/useBusiness';
+import {readableValidation} from '@shared/validation-message';
 import { QueryClient } from "@tanstack/react-query";
 
 // ─── Persisted auth token ───────────────────────────────────────────────────
@@ -13,6 +15,8 @@ let authToken: string | null =
 let sessionReplacement: Promise<void> | null = null;
 
 export function setAuthToken(token: string | null) {
+  if (authToken !== token) resetSaveStatus();
+  if (authToken !== token && typeof window !== 'undefined') window.dispatchEvent(new Event('suite-auth-changed'));
   authToken = token;
   recordVersions.clear();
   if (typeof window === "undefined") return;
@@ -35,7 +39,7 @@ export async function apiRequest(
   if(method==='GET' && typeof window!=='undefined') {
     const u=new URL(url,window.location.origin);
     if(/^\/api\/(crm\/(stats|reports)|suite\/(today|schedule)|pm\/(tasks|time)|finance\/(stats|reports|invoices|expenses|purchase-orders)|projects)$/.test(u.pathname)&&!u.searchParams.has('site')&&!u.searchParams.has('projectId')){
-      u.searchParams.set('site',localStorage.getItem('suite-business')||'all');url=u.pathname+u.search;
+      u.searchParams.set('site',getBusiness());url=u.pathname+u.search;
     }
   }
   const requestToken = authToken;
@@ -44,7 +48,8 @@ export async function apiRequest(
     if (sessionReplacement) throw new Error("A password change is already in progress.");
     sessionReplacement = new Promise(resolve => { finishReplacement = resolve; });
   }
-  const saving=!['GET','HEAD','OPTIONS'].includes(method);let saved=false;if(saving)beginSave();
+  const saving=!['GET','HEAD','OPTIONS'].includes(method);let saved=false;let failure:unknown;
+  const saveContext=saving?beginSave(url,method):undefined;
   try {
   const headers: Record<string, string> = {};
 
@@ -81,14 +86,20 @@ export async function apiRequest(
     }
     let message = res.statusText;
     let code: string | undefined;
+    let fields:string[]=[];
+    const supportReference=res.headers.get('X-Support-Reference')||undefined;
     try {
       const errorBody = await res.json();
       message = errorBody.message || errorBody.error || message;
       code = typeof errorBody.code === "string" ? errorBody.code : undefined;
+      const validation=readableValidation(message);
+      if(validation)message=validation.message;
+      fields=Array.isArray(errorBody.fields)?errorBody.fields.filter((v:unknown)=>typeof v==='string'):validation?.fields||[];
     } catch {
       // response wasn't JSON, keep statusText
     }
-    throw Object.assign(new Error(message), { status: res.status, code });
+    if(saving&&fields.length)window.dispatchEvent(new CustomEvent('suite-validation',{detail:{fields}}));
+    throw Object.assign(new Error(message), { status: res.status, code,fields,supportReference });
   }
 
   if (options?.replacesSession) {
@@ -108,8 +119,10 @@ export async function apiRequest(
   if (method !== "GET" && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("suite-mutation", { detail: {url,revisions:JSON.parse(res.headers.get('X-Suite-Revisions')||'[]')} }));
   saved=true;
   return res;
+  } catch(error) {
+    failure=error;throw error;
   } finally {
-    if(saving)endSave(url,saved);
+    if(saving && requestToken===authToken)endSave(url,saved,saveContext,failure);
     if (finishReplacement) {
       sessionReplacement = null;
       finishReplacement();

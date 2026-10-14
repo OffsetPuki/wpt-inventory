@@ -1,6 +1,7 @@
 import type { Express, Request, RequestHandler } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "./storage";
+import { businessDay } from './business-clock';
 
 // ─── Shared HTTP / route helpers ─────────────────────────────────────────────
 // One home for the tiny request/formatting helpers that used to be copy-pasted
@@ -19,8 +20,7 @@ export const qstr = (v: unknown): string | undefined =>
 // the shop's wall-clock timezone, so comparing against UTC would flip the
 // answer near midnight.
 export function ymdLocal(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return businessDay(ms);
 }
 
 /** Today as a local "YYYY-MM-DD". */

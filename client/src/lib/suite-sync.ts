@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { getAuthToken, queryClient } from "./queryClient";
 
 export const TOPIC_KEYS: Record<string, string[]> = {
+  designs: ["design-registry"],
   previews: ["customer-previews"],
   inventory: [
+    "job-forecast",
     "project-unbilled",
     "quote-costing",
     "suite-timeline",
@@ -21,6 +23,13 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "project-fin-summary",
   ],
   jobs: [
+    "record-connections",
+    "job-forecast",
+    "design-registry",
+    "relationship-review",
+    "deletion-review",
+    "marketing-page-work",
+    "job-completion",
     "business-report",
     "suite-files",
     "suite-timeline",
@@ -38,6 +47,10 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "attention",
   ],
   finance: [
+    "record-connections",
+    "job-forecast",
+    "relationship-review",
+    "deletion-review",
     "business-report",
     "quote-costing",
     "suite-timeline",
@@ -64,7 +77,7 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "suite-today",
   ],
   marketing: ["marketing"],
-  crm: ["business-report", "marketing", "crm-", "quote", "quotes", "suite-job", "suite-today"],
+  crm: ["record-connections", "design-registry", "job-forecast", "relationship-review", "deletion-review", "customer-account", "business-report", "marketing", "crm-", "quote", "quotes", "suite-job", "suite-today"],
   team: [
     "suite-people",
     "pm-tasks",
@@ -78,6 +91,7 @@ export const TOPIC_KEYS: Record<string, string[]> = {
     "suite-today",
   ],
   communication: [
+    "record-communication",
     "customer-previews",
     "suite-timeline",
     "suite-notifications",
@@ -95,7 +109,7 @@ const pendingPrefixes=new Set<string>();
 let extraKeys:readonly (readonly unknown[])[]=[];
 function scheduleRefresh(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{const prefixes=[...pendingPrefixes],keys=extraKeys;pendingPrefixes.clear();extraKeys=[];void queryClient.invalidateQueries({predicate:q=>prefixes.some(p=>String(q.queryKey[0]).startsWith(p))||keys.some(k=>k.every((v,i)=>JSON.stringify(q.queryKey[i])===JSON.stringify(v)))});},120);}
 export function queueRefreshKeys(keys:readonly (readonly unknown[])[]){extraKeys=[...extraKeys,...keys];scheduleRefresh();}
-export function refreshTopics(topics:string[]){if(!topics.length)return;pendingPrefixes.add("insights");for(const t of topics)for(const p of TOPIC_KEYS[t]||[])pendingPrefixes.add(p);scheduleRefresh();}
+export function refreshTopics(topics:string[]){if(!topics.length)return;if(topics.some(t=>['inventory','jobs','finance','time','marketing','crm','team'].includes(t)))pendingPrefixes.add("insights");if(topics.some(t=>["crm","jobs","finance"].includes(t)))pendingPrefixes.add("record-connections");for(const t of topics)for(const p of TOPIC_KEYS[t]||[])pendingPrefixes.add(p);scheduleRefresh();}
 export function useSuiteSync() {
   const [connected, setConnected] = useState(false);
   useEffect(() => {
@@ -165,7 +179,9 @@ export function useSuiteSync() {
       const changed:string[]=[];
       if(typeof detail!=='string')for(const row of detail.revisions||[]){if(versions.has(row.topic)&&versions.get(row.topic)!==row.version)changed.push(row.topic);versions.set(row.topic,Math.max(versions.get(row.topic)||0,row.version));}
       const topics =
-        url.includes("/customer-previews")
+        url.includes("/design-studio/registry")
+          ? ["designs"]
+          : url.includes("/customer-previews")
           ? ["previews"]
           : url.includes("/inventory") || url.includes("/items")
           ? ["inventory", "jobs"]

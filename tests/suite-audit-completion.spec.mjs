@@ -27,13 +27,14 @@ test('Explicit overdue link wins over remembered status, search and page',async(
 test('Business filter, live changes across two sessions and mobile workspace',async({page,browser})=>{
  await signIn(page);await page.goto(app.base+'/#/today');
  await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('concrete');
- await expect(page.getByText('Concrete workflow',{exact:true})).toBeVisible();await expect(page.getByText('Metals workflow',{exact:true})).toHaveCount(0);
+ await expect(page.getByText('Concrete workflow',{exact:true}).filter({visible:true})).toBeVisible();await expect(page.getByText('Metals workflow',{exact:true})).toHaveCount(0);
  const peer=await browser.newPage();try { await signIn(peer);await peer.goto(app.base+'/#/today');await expect(peer.getByRole('heading',{name:'Today',exact:true})).toBeVisible();
  await peer.evaluate(async token=>{const r=await fetch('/api/pm/tasks',{method:'POST',headers:{'Content-Type':'application/json','X-Auth':token},body:JSON.stringify({title:'New task from another session'})});if(!r.ok)throw Error('Create failed');},app.owner);
  // Unassigned tasks belong to All businesses, so they must not leak into Concrete.
  await expect(page.getByText('New task from another session',{exact:true})).toHaveCount(0);
- await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('all');await expect(page.getByText('New task from another session',{exact:true})).toBeVisible({timeout:12000});
+ await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('all');await expect(page.getByText('New task from another session',{exact:true}).filter({visible:true})).toBeVisible({timeout:12000});
  await peer.evaluate(async({token,projectId})=>{const r=await fetch('/api/pm/tasks',{method:'POST',headers:{'Content-Type':'application/json','X-Auth':token},body:JSON.stringify({title:'Live linked job task',projectId})});if(!r.ok)throw Error('Create failed');},{token:app.owner,projectId:concrete.id});
+ await page.getByText('All work & upcoming jobs',{exact:true}).click();
  await expect(page.getByRole('link',{name:'Live linked job task Concrete workflow',exact:true})).toBeVisible({timeout:12000});
  await page.goto(app.base+'/#/project/'+concrete.id+'?tab=files');await expect(page.getByRole('heading',{name:'Photos, drawings & measurements'})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);await page.screenshot({path:'test-results/suite-audit-job-files-mobile.png',fullPage:true});

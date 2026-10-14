@@ -28,9 +28,9 @@ test('Saved expense opens from its record link with receipt and editable details
   await dialog.getByLabel('Amount $', { exact: true }).fill('124.50');
   await dialog.getByRole('combobox', { name: /^Method/ }).selectOption('cash');
   await dialog.getByRole('combobox', { name: 'Select jobs', exact: true }).selectOption(String(job.data.id));
-  await dialog.getByLabel('Billable to client / project').check();
+  await dialog.getByLabel('Charge this expense to the customer').check();
   await dialog.getByLabel('Notes (optional)').fill('Welding supplies and consumables');
-  await dialog.locator('input[type=file]').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: receipt });
+  await dialog.getByLabel('Upload receipt photo',{exact:true}).setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: receipt });
   await expect(dialog.getByRole('link', { name: 'View attached receipt', exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Add expense', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -51,7 +51,7 @@ test('Saved expense opens from its record link with receipt and editable details
   await expect(edit.getByRole('combobox', { name: /^Method/ })).toHaveValue('cash');
   await expect(edit.getByRole('combobox', { name: /^Category/ })).toHaveValue('materials');
   await expect(edit.getByRole('combobox', { name: 'Select jobs', exact: true })).toHaveValue(String(job.data.id));
-  await expect(edit.getByLabel('Billable to client / project')).toBeChecked();
+  await expect(edit.getByLabel('Charge this expense to the customer')).toBeChecked();
   await expect(edit.getByLabel('Notes (optional)')).toHaveValue('Welding supplies and consumables');
   const image = edit.getByRole('img', { name: 'Expense receipt' });
   await expect(image).toHaveAttribute('src', saved.receiptUrl);

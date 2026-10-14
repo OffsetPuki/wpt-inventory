@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ArrowUpRight, BarChart3, CheckCircle2, Globe2, RefreshCw, ShieldCheck, TrendingUp } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
+import { todayYmd } from '@/lib/format';
 import { inputCls, secondaryBtn } from '@/lib/ui-styles';
 import { useMarketingPlace } from '@/hooks/useMarketingPlace';
 import { aiReferralProvider } from '@shared/ai-referrals';
@@ -22,7 +23,7 @@ const moneyColumn=(key:string,label:string):AnalyticsColumn=>({key,label,numeric
 const siteColumn=textColumn('website','Website');
 const sections=[['overview','Summary'],['search','Searches'],['traffic','Traffic sources'],['pages','Pages'],['audience','Audience'],['outcomes','Inquiries & sales'],['health','Data & connections']] as const;
 type Section=typeof sections[number][0];
-const yesterday=()=>{const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());return new Date(Date.parse(today)-86400000).toISOString().slice(0,10);};
+const yesterday=()=>new Date(Date.parse(todayYmd())-86400000).toISOString().slice(0,10);
 const summaryValue=(period:AnalyticsPeriod,key:string)=>metric(period.reports.summary?.rows[0],key);
 const reportPartial=(period:AnalyticsPeriod)=>!!period.reports.summary?.partial;
 const labelReport=(name:string)=>name.replace(/^analytics:/,'').replace(/([A-Z])/g,' $1').replace(/^./,c=>c.toUpperCase());

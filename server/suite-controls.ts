@@ -1,4 +1,6 @@
 import {businessScope} from "./business-scope";
+import {accountVersion,mergeAccountContacts} from './customer-accounts';
+import {designRecord} from './design-registry';
 import { CUSTOMER_REFERENCE_TABLES } from "../shared/suite-contracts";
 import { DEFAULT_PRICE_BOOK } from "../client/src/quote/data/priceBook.js";
 import { deepMerge } from "../client/src/quote/lib/store.js";
@@ -29,7 +31,7 @@ function customerMerge(source: number, target: number) {
   const references: {table:string;rows:unknown[]}[] = customerTables.map((table) => ({
     table,
     rows: sqlite
-      .prepare(`SELECT id FROM ${table} WHERE client_id=? ORDER BY id`)
+      .prepare(`SELECT id${table==='suite_designs'?',updated_at':''} FROM ${table} WHERE client_id=? ORDER BY id`)
       .all(source),
   }));
   references.push({
@@ -45,7 +47,7 @@ function customerMerge(source: number, target: number) {
       "SELECT id,version FROM quotes WHERE json_extract(payload,'$.customer.clientId')=? ORDER BY id",
     )
     .all(source);
-  const snapshot = JSON.stringify({ clients, references, quotes });
+  const snapshot = JSON.stringify({ clients, references, quotes, accounts:accountVersion() });
   return {
     source: clients.find((c) => c.id === source),
     target: clients.find((c) => c.id === target),
@@ -145,10 +147,13 @@ export function registerSuiteControls(app: Express) {
           new Error("Customer records changed. Review a new preview."),
           { status: 409 },
         );
+      const designs=(sqlite.prepare('SELECT id FROM suite_designs WHERE client_id=?').all(b.source) as {id:number}[]).map(d=>designRecord(d.id));
+      mergeAccountContacts(b.source,b.target);
       for (const table of customerTables)
         sqlite
-          .prepare(`UPDATE ${table} SET client_id=?${table==='customer_previews'?',version=version+1,updated_at=unixepoch()*1000':''} WHERE client_id=?`)
+          .prepare(`UPDATE ${table} SET client_id=?${table==='customer_previews'?',version=version+1,updated_at=unixepoch()*1000':table==='suite_designs'?',approved_at=NULL,approved_by=NULL,updated_at=max(updated_at+1,unixepoch()*1000)':''} WHERE client_id=?`)
           .run(b.target, b.source);
+      for(const before of designs)sqlite.prepare('INSERT INTO suite_design_history(design_id,snapshot_json,created_at,created_by) VALUES(?,?,?,?)').run(before.id,JSON.stringify({action:'customer_merge',before,after:designRecord(before.id)}),Date.now(),req.user.userId);
       sqlite
         .prepare(
           "UPDATE crm_activities SET entity_id=? WHERE entity_type='client' AND entity_id=?",

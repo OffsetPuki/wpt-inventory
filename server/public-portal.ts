@@ -1,3 +1,4 @@
+import {quoteBilling} from './quote-billing';
 import {quoteBusiness} from '../shared/business.js';
 import {resolveReviewSite,syncReviewTask,marketingPreference} from './marketing-core';
 import {documentActivityRevision} from './document-activity';
@@ -20,7 +21,7 @@ import {
 import { reviews, marketingSettings } from "../shared/marketing-schema";
 import { todayLocal, pid, usd } from "./http-util";
 import { requireElevated } from "./auth";
-import { clients, WIN_LOSS_REASON_LABELS } from "../shared/crm-schema";
+import { WIN_LOSS_REASON_LABELS } from "../shared/crm-schema";
 import { onQuoteEvent } from "./crm";
 // The quote builder's own pricing engine — plain JS, pure functions + data
 // (no React, no DOM), imported straight from client/src/quote so the server
@@ -409,61 +410,44 @@ export function registerPublicPortalRoutes(app: Express): void {
     const depositPct = doc?.totals.depositPct ?? 0;
     const depositCents = doc?.totals.depositCents ?? 0;
 
-    // An existing CRM client, looked up but never created — creating one as a
-    // side effect of opening a form would litter the CRM with every quote the
-    // owner merely previewed.
-    const cust = doc?.customer ?? { name: quote.customerName, email: "", phone: "" };
-    const client = (cust.email || cust.phone)
-      ? db.select({ id: clients.id, name: clients.name }).from(clients)
-          .where(and(
-            isNull(clients.deletedAt),
-            cust.email
-              ? eq(sql`lower(${clients.email})`, cust.email.trim().toLowerCase())
-              : eq(clients.phone, cust.phone),
-          ))
-          .get()
-      : undefined;
-
-    // The job in Projects, if the accept hook already made one.
-    const project = sqlite.prepare(
-      "SELECT id FROM projects WHERE job_number = ? AND deleted_at IS NULL",
-    ).get(quote.number) as { id: number } | undefined;
-
+    let billing:ReturnType<typeof quoteBilling>;
+    try{billing=quoteBilling(quote.id);}catch(e:any){return res.status(409).json({message:e.message});}
+    const depositToBill=Math.min(billing.remainingCents,Math.max(0,depositCents-billing.billedCents));
     res.json({
       quoteId: quote.id,
       quoteNumber: quote.number,
       designRef: quote.designRef,
-      clientId: client?.id ?? null,
-      clientName: client?.name ?? quote.customerName,
-      projectId: project?.id ?? null,
+      clientId: billing.clientId,
+      clientName: billing.clientName,
+      projectId: billing.projectId,
       project: {
         label: doc?.project.label ?? QUOTE_TYPE_LABELS[quote.type],
         summary: doc?.project.summary ?? "",
         specs: doc?.specs ?? [],
       },
-      contractCents: quote.totalCents,
-      full: { items: fullItems, taxPct: fullTaxPct },
-      deposit: depositCents > 0
+      contractCents: billing.contractCents,
+      billing,
+      full: billing.billedCents===0 ? (billing.contractCents===quote.totalCents ? { items: fullItems, taxPct: fullTaxPct } : {items:[{description:`Current contract and approved changes — quote ${quote.number}`,qty:1,unitPriceCents:billing.contractCents}],taxPct:0}) : null,
+      deposit: depositToBill > 0
         ? {
             pct: depositPct,
             items: [{
               description: `Deposit — ${depositPct}% of contract price`,
               qty: 1,
-              unitPriceCents: depositCents,
+              unitPriceCents: depositToBill,
             }],
             taxPct: 0,
-            balanceCents: quote.totalCents - depositCents,
+            balanceCents: billing.remainingCents - depositToBill,
           }
         : null,
-      // The other half of a deposit bill: the contract price less what the
-      // deposit invoice asked for. Tax is already inside quote.totalCents,
-      // exactly like the deposit line, so this invoice adds none of its own.
-      balance: depositCents > 0
+      // Final billing deducts every issued deposit/progress invoice, not payments
+      // or drafts. The current contract includes approved scope changes.
+      balance: billing.remainingCents > 0
         ? {
             items: [{
-              description: `Balance of contract — less ${depositPct}% deposit of ${usd(depositCents)}`,
+              description: `Remaining contract — after ${usd(billing.billedCents)} already billed`,
               qty: 1,
-              unitPriceCents: quote.totalCents - depositCents,
+              unitPriceCents: billing.remainingCents,
             }],
             taxPct: 0,
           }

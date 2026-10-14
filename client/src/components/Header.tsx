@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import {useLanguage} from '@/lib/language';
 
 interface HeaderProps {
   title: string;
@@ -7,14 +8,15 @@ interface HeaderProps {
 }
 
 export default function Header({ title, description, children }: HeaderProps) {
+  const {t}=useLanguage();
   return (
     <div className="suite-page-header mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">
-          {title}
+          {t(title)}
         </h1>
         {description && (
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">{description}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">{t(description)}</p>
         )}
       </div>
       {children && (

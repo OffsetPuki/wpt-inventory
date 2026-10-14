@@ -309,6 +309,7 @@ export const fromTemplateSchema = z.object({
   jobNumber: z.string().min(1),
   name: z.string().min(1),
   customer: z.string().optional(),
+  clientId: z.number().int().positive().nullable().optional(),
   notes: z.string().optional(),
 });
 

@@ -1,0 +1,1814 @@
+{
+  "updated": "2026-10-14T15:43:35.398Z",
+  "base": "791960d51f92ec1745d41822bbb44df9df5d022a",
+  "branch": "codex/business-suite-roadmap-2026-10-13",
+  "deployment": "ON HOLD until all 64 items are ready and verified",
+  "testedCommit": null,
+  "verified": [
+    "All 123 browser tests passed, including complete navigation at 360/390/430 pixels, landscape, enlarged text, file retry, language switching and connected lifecycle workflows.",
+    "Full API regression passed; subsequent validation and browser compatibility changes passed focused API checks, native-hash comparisons and the complete browser suite.",
+    "Type check, production build and dependency security checks passed.",
+    "Synthetic full backup restored linked records, private files and new roadmap tables with integrity checks.",
+    "All six cold-cache throttled phone performance budgets passed; usable content was 2.64–3.97 seconds, measured input/upload-help interaction 88–186 ms.",
+    "7,501 connected records returned through five queries and at most 2,660 response bytes; median 12 ms, maximum 16 ms.",
+    "The actual private LAN preview passed owner sign-in, upload/download and a sample job settings save. This does not substitute for physical phone results."
+  ],
+  "next": [
+    "Collect actual iPhone and Android results from the sample preview.",
+    "Obtain explicit permission for the complete production backup recovery check; automatic approval review rejected the broader download.",
+    "Renew hosting authentication; both deployment lookup and account authentication returned Not Authorized.",
+    "After remaining checks are complete, record and test the final release commit, verify production backup and rollback target, then deploy only when the gate passes."
+  ],
+  "items": [
+    {
+      "id": "R01",
+      "title": "Recognize paid deposits correctly",
+      "acceptance": "Paid, partial, refunded, voided and overpaid examples produce the same readiness in Today, Jobs and Schedule.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/deposit-readiness.ts",
+            "server/suite.ts",
+            "server/pm.ts"
+          ],
+          "detail": "One deposit calculation covers separate deposits, partial payments, refunds and voids across readiness views."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R02",
+      "title": "Make every record link go to the right place",
+      "acceptance": "Each label matches its destination; Back restores the original search, filters and position.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/lib/record-link.ts",
+            "client/src/components/ConnectedRecords.tsx",
+            "client/src/lib/route-scroll.ts"
+          ],
+          "detail": "Readable record links and URL-backed context preserve navigation and return position."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs",
+            "tests/suite-workflow.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R03",
+      "title": "Open issued quotes without draft conflicts",
+      "acceptance": "With a stale local draft, opening another quote shows the requested quote without overwriting either version.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/quote/components/IssuedQuoteDialog.tsx",
+            "client/src/quote/QuoteBuilder.jsx"
+          ],
+          "detail": "Issued snapshots open independently of draft editing and local draft recovery."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/suite-audit-completion.spec.mjs",
+            "scripts/check-draft-saves.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R04",
+      "title": "Replace the vague retry banner",
+      "acceptance": "A failed save remains recoverable; successful retry or an explicit discard clears only that record’s warning.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/lib/save-status.ts",
+            "client/src/components/SaveRecovery.tsx",
+            "client/src/lib/queryClient.ts"
+          ],
+          "detail": "Failure notices identify the operation, preserve forms and clear only the matching successful save."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/suite-ui.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R05",
+      "title": "Make failed emails recoverable",
+      "acceptance": "Invalid addresses fail before send; uncertain delivery is held for review; retry cannot duplicate an already accepted message.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/mail-validation.ts",
+            "server/mail-queue.ts",
+            "server/mailer.ts"
+          ],
+          "detail": "Recipient validation, immutable mail and separate permanent, transient and uncertain states prevent blind resends."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/mailer-archive-check.mjs",
+            "scripts/check-suite-recovery.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R06",
+      "title": "Show all unresolved problems accurately",
+      "acceptance": "A deliberately old unresolved item is still visible; ten attempts are not presented as ten unresolved messages.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/suite-health-data.ts",
+            "client/src/pages/suite-health.tsx"
+          ],
+          "detail": "Unresolved filtering precedes pagination; delivery attempts are grouped under one message."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R07",
+      "title": "Use one explicit business timezone",
+      "acceptance": "Midnight, daylight-saving changes, month ends and overnight payroll agree across server and browser.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/business-time.ts",
+            "server/business-clock.ts",
+            "client/src/lib/format.ts"
+          ],
+          "detail": "Configured business dates, DST validation and payroll periods use shared timezone rules."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-legacy-payroll.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R08",
+      "title": "Resolve flagged job relationships",
+      "acceptance": "Reviewed jobs have explicit relationships and billing rules; no quote is silently accepted or financial history rewritten.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/RelationshipReview.tsx",
+            "server/suite.ts"
+          ],
+          "detail": "Versioned customer, quote and billing review leaves issued history and quote approval intact."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-manual-quotes-jobs.mjs",
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R09",
+      "title": "Reduce obsolete and duplicate-looking reminders",
+      "acceptance": "One actionable reminder per source obligation; legitimate separate jobs and quote revisions remain separate.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/suite-worker.ts"
+          ],
+          "detail": "Stable source keys reconcile obsolete automation without combining unrelated work."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-suite-connections.mjs",
+            "scripts/check-suite-recovery.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R10",
+      "title": "Repair analytics coverage",
+      "acceptance": "All four sites have an explicit connected / partial / unavailable state; comparisons use matching available periods.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/search-connections.ts",
+            "client/src/components/SearchConnections.tsx",
+            "shared/search-reporting.ts"
+          ],
+          "detail": "Each site/provider exposes coverage, property, permissions, lag and recovery; unconfigured sources stay unavailable."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-website-analytics.mjs",
+            "scripts/check-bing-reporting.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R11",
+      "title": "Finish employee setup from the warning",
+      "acceptance": "Approvers can identify missing setup; payroll still refuses incomplete or unapproved hours.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/employee-approvals.tsx",
+            "client/src/pages/hr/payroll.tsx",
+            "server/employee.ts"
+          ],
+          "detail": "Missing employee/rate setup links to the responsible setup page; unapproved hours remain ineligible."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-employee-refinements.mjs",
+            "tests/employee.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R12",
+      "title": "Keep filters and pagination in sync",
+      "acceptance": "Changing dates on page three shows the first matching page; refresh and Back retain the same report.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/hooks/usePageFilters.ts",
+            "client/src/pages/pm/time.tsx",
+            "client/src/pages/hr/payroll.tsx",
+            "client/src/pages/pm/contracts.tsx"
+          ],
+          "detail": "List and period filters persist in URLs; changed filters reset the page."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs",
+            "tests/insights.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R13",
+      "title": "Unify companies and their contacts",
+      "acceptance": "Search by person or company finds the same connected account; merging preserves references and audit history.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/customer-accounts.ts",
+            "server/crm.ts",
+            "client/src/components/CustomerAccount.tsx"
+          ],
+          "detail": "Explicit company membership and billing contact, combined search/history and audited merge references include designs."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-suite-connections.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R14",
+      "title": "Make each business event update all dependents once",
+      "acceptance": "Retries and concurrent tabs create no duplicate job, invoice, reminder or cost; all affected screens refresh.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "docs/ROADMAP-RELEASE.md",
+            "server/suite-create-once.ts",
+            "client/src/lib/suite-sync.ts"
+          ],
+          "detail": "Documented event ownership, retry identities and targeted refresh cover the connected lifecycle."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-suite-connections.mjs",
+            "scripts/check-manual-quotes-jobs.mjs",
+            "scripts/check-purchase-orders.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R15",
+      "title": "Expand the relationship review center",
+      "acceptance": "Every repair is permission-checked, audited and reversible where appropriate; names alone never trigger an automatic merge.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/relationship-review.ts",
+            "client/src/components/RelationshipReview.tsx"
+          ],
+          "detail": "Evidence-based relationship review uses authorized versioned repair paths; names never auto-merge accounts."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-manual-quotes-jobs.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R16",
+      "title": "Add a consistent connected-record summary",
+      "acceptance": "The linked journey is reachable in one tap per step on desktop and phone; missing links explain the next action.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/record-connections.ts",
+            "client/src/components/ConnectedRecords.tsx"
+          ],
+          "detail": "A bounded shared summary connects customer, quote, job and invoices with job file/activity links and missing-link guidance."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-scale.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R17",
+      "title": "Use one connected file library per job",
+      "acceptance": "A request photo, contract or drawing is discoverable from its customer and job; sharing always names the exact revision and audience.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/job-files.ts",
+            "client/src/components/JobFileUploader.tsx",
+            "client/src/pages/job-workspace.tsx"
+          ],
+          "detail": "Atomic private attachment references make request, document and design files discoverable without changing their audience."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-intake-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R18",
+      "title": "Make deletion and restoration predictable",
+      "acceptance": "Restoring a customer or lead recovers valid links without reviving canceled financial actions or exposing private files.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/deletion-review.ts",
+            "client/src/components/DeleteRecordReview.tsx",
+            "client/src/pages/trash.tsx",
+            "server/auth.ts"
+          ],
+          "detail": "Dependency review, recoverable Trash and restored links replace silent age-based business-data purging."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R19",
+      "title": "Standardize validation and recovery",
+      "acceptance": "Blank optional values remain blank; server errors focus the relevant field; slow saves cannot create duplicates.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/validation-message.ts",
+            "server/http-util.ts",
+            "client/src/components/Modal.tsx"
+          ],
+          "detail": "Readable validation, optional blank values, record versions and preserved modal input support safe retries."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-manual-quotes-jobs.mjs",
+            "scripts/check-invoice-versions.mjs",
+            "tests/suite-ui.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "detail": "Real job-address validation returns field metadata, preserves the draft and focuses the invalid field; hidden details expand before focus."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R20",
+      "title": "Create one settings index",
+      "acceptance": "A user finds a setting by name without losing its role restrictions or creating a second source of truth.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/SettingsDirectory.tsx",
+            "client/src/pages/settings.tsx"
+          ],
+          "detail": "Searchable categorized links reuse existing role-protected settings."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R21",
+      "title": "Organize around daily work",
+      "acceptance": "Every existing destination remains accessible; the employee workspace stays focused and permission-restricted.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/AppShell.tsx",
+            "client/src/pages/employee.tsx"
+          ],
+          "detail": "Primary work groups, searchable navigation and per-user favorites retain every destination and the separate crew workspace."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs",
+            "tests/employee.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R22",
+      "title": "Lead with the five most useful actions",
+      "acceptance": "An owner can identify today’s first action without scrolling; all remaining work stays accessible through clear counts.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/suite.ts",
+            "client/src/pages/today.tsx"
+          ],
+          "detail": "Ranked top-five next actions lead the page; full counts and optional charts retain backlog access."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-suite-audit-completion.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R23",
+      "title": "Use a clear next-action sales list",
+      "acceptance": "A user can call, assign, schedule a follow-up or open the current quote from one compact card without accidental stage changes.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/crm/leads.tsx"
+          ],
+          "detail": "Default sales list shows next steps, contact and quote access with explicit stage actions and optional board."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-lead-experience.mjs",
+            "tests/suite-ui.spec.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R24",
+      "title": "Make history readable and actionable",
+      "acceptance": "Every history row opens the correct record; people and company contacts do not hide each other’s work.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/CustomerHistory.tsx",
+            "server/crm.ts"
+          ],
+          "detail": "Job-grouped and chronological history includes company contacts and precise record links."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/suite-workflow.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R25",
+      "title": "Guide quote creation and revision",
+      "acceptance": "A saved quote can be reviewed without entering edit mode; manual acceptance retains staff attribution; revisions do not overwrite approvals.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/quote/QuoteBuilder.jsx",
+            "client/src/quote/components/IssuedQuoteDialog.tsx",
+            "server/quotes.ts"
+          ],
+          "detail": "Customer, Scope, Price and Review guide creation while issued versions, expiry and staff acceptance remain explicit."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-quote-policy.mjs",
+            "scripts/check-manual-quotes-jobs.mjs",
+            "tests/concrete-guide.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R26",
+      "title": "Make job setup a short guided flow",
+      "acceptance": "Saving harmless settings does not require unexplained exceptions; confirmation shows exact unmet requirements and an explicit override reason if permitted.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/job-workspace.tsx",
+            "server/suite.ts"
+          ],
+          "detail": "Customer/quote choices replace raw IDs; readiness and confirmation are separate from harmless setting changes."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-manual-quotes-jobs.mjs",
+            "tests/manual-quotes-jobs.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R27",
+      "title": "Make the task board easy without dragging",
+      "acceptance": "All task actions work with touch and keyboard; bulk actions show selected records and preserve individual due dates unless changed deliberately.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/pm/board.tsx",
+            "client/src/components/TaskReschedule.tsx",
+            "server/task-reschedule.ts"
+          ],
+          "detail": "Touch/keyboard status actions, URL-backed task lists and reviewed versioned bulk dates avoid drag dependence."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R28",
+      "title": "Use a phone agenda and readiness cues",
+      "acceptance": "Conflicts, leave and unready jobs are visible before confirmation; the same date/status appears on the job and employee view.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/pm/schedule.tsx",
+            "server/pm.ts"
+          ],
+          "detail": "Agenda-first scheduling keeps readiness, crew and conflict information connected to jobs."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-suite-audit-completion.mjs",
+            "scripts/check-suite-connections.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R29",
+      "title": "Preview what a template will create",
+      "acceptance": "Changing a template never silently alters an existing job; generated items are traceable to the template version.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/FromTemplateDialog.tsx",
+            "server/routes.ts"
+          ],
+          "detail": "A versioned preview and immutable template-run snapshot make generated work traceable without rewriting existing jobs."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R30",
+      "title": "Make phone quality a release gate",
+      "acceptance": "Critical journeys pass at 360, 390 and 430 CSS pixels, landscape, 200% zoom and on physical iPhone/Android devices.",
+      "status": "verification-pending",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs",
+            "docs/ROADMAP-RELEASE.md",
+            "scripts/preview-roadmap.mjs"
+          ],
+          "detail": "Automated widths, landscape and enlarged-text checks complement a synthetic preview for required physical iPhone/Android checks."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented",
+      "physicalVerification": {
+        "required": true,
+        "status": "awaiting user results",
+        "devices": [
+          "iPhone",
+          "Android"
+        ],
+        "preview": "Synthetic local LAN preview; no production mutations"
+      }
+    },
+    {
+      "id": "R31",
+      "title": "Shorten forms and keep actions reachable",
+      "acceptance": "The focused field and validation stay visible above the keyboard; no sticky bar covers content or the final field.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/Modal.tsx",
+            "client/src/pages/job-workspace.tsx"
+          ],
+          "detail": "Visual viewport sizing, reachable footer actions, progressive disclosure and focus trapping support phone forms."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/suite-ui.spec.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R32",
+      "title": "Add an explicit offline job pack",
+      "acceptance": "Offline data clearly names its revision; reconnect cannot silently approve, bill, accept a quote or duplicate uploads.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/job-pack.ts",
+            "client/src/components/OfflineJobPack.tsx"
+          ],
+          "detail": "A private versioned offline pack names freshness and exclusions; it contains no offline approval, payment or acceptance actions."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R33",
+      "title": "Make file uploads clear and resilient",
+      "acceptance": "A failed attachment can be retried without duplicate records; uploaded files remain readable and correctly linked after reload.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/job-files.ts",
+            "client/src/components/JobFileUploader.tsx"
+          ],
+          "detail": "Camera/library, bounded multi-file progress, stable retry IDs and original HEIC fallback preserve files after reload."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs",
+            "tests/roadmap-performance.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-request-identity.mjs",
+            "client/src/lib/request-identity.ts",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "detail": "Local Wi-Fi request digests match native SHA-256; secure random UUID fallback and lost-response upload retry passed without native secure-context APIs."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R34",
+      "title": "Optimize the crew’s daily flow",
+      "acceptance": "A worker sees only permitted assignments; one timer survives reconnect; corrections update approved hours through the required review.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/employee/jobs.tsx",
+            "client/src/components/employee/clock.tsx",
+            "server/employee.ts"
+          ],
+          "detail": "Assigned job files, timer, directions and tasks remain restricted; time corrections follow approval."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-employee.mjs",
+            "scripts/check-employee-refinements.mjs",
+            "tests/employee.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R35",
+      "title": "Link design projects to real jobs",
+      "acceptance": "A design can be opened from its job; archived designs remain traceable without crowding the active list.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/design-registry.ts",
+            "client/src/components/design-studio/DesignRegistry.tsx"
+          ],
+          "detail": "Design source revisions, job/customer/quote links, layout review and archive history are explicit."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R36",
+      "title": "Create verified manufacturing packs",
+      "acceptance": "Every manufacturing dimension has a verified source/tolerance; unmeasured parts are marked incomplete; offline pack and model agree.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/design-measurements.ts",
+            "client/src/components/design-studio/DesignMeasurements.tsx",
+            "client/src/components/design-studio/PlantPlan.tsx"
+          ],
+          "detail": "Measurement source, units, datum, tolerance and verifier are versioned; unmeasured parts remain reference-only under the user's measurement waiver."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-film-shop.mjs",
+            "scripts/check-plant-film.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "physicalVerification": {
+        "required": false,
+        "reason": "User explicitly removed waiting for plant measurements; unverified manufacturing data stays unreleased."
+      },
+      "implementation": "implemented"
+    },
+    {
+      "id": "R37",
+      "title": "Keep design viewing fast and usable",
+      "acceptance": "A lower-powered phone can open a useful 2D view when 3D is unavailable; fullscreen controls and selection remain accessible.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/design-studio/detail-render.js",
+            "client/src/components/design-studio/FilmModel.jsx",
+            "client/src/components/design-studio/PlantPlan.tsx"
+          ],
+          "detail": "Lazy models, low detail and useful WebGL-free drawings retain fullscreen and selection; renderer cleanup regression is covered."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/design-studio.spec.mjs",
+            "tests/roadmap-phone.spec.mjs",
+            "tests/roadmap-performance.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R38",
+      "title": "Use readable, consistent language and controls",
+      "acceptance": "Main workflows work by keyboard and screen reader; dates, money and units remain unambiguous in either language.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/suite-language.ts",
+            "shared/suite-language-work.ts",
+            "shared/suite-language-quotes.ts",
+            "client/src/lib/language.tsx"
+          ],
+          "detail": "Main owner/crew controls support EN/ES, accessible names and visible focus while customer text and financial data stay unchanged."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs",
+            "tests/employee.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R39",
+      "title": "Explain the contract-to-cash picture",
+      "acceptance": "Drafts, retainage, tax and overlapping figures are distinguished; totals reconcile to their source records.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/finance.ts",
+            "client/src/pages/job-workspace.tsx"
+          ],
+          "detail": "Contract, issued billing, collection and remaining billing have definitions; drafts, tax and retainage are distinguished."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-suite-connections.mjs",
+            "tests/suite-workflow.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R40",
+      "title": "Guide deposits, progress and final billing",
+      "acceptance": "Deposits reduce the proper obligation; final billing does not double-charge prior invoices; previews reflect sent/paid state.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/quote-billing.ts",
+            "server/finance.ts",
+            "client/src/pages/finance/invoices.tsx"
+          ],
+          "detail": "Remaining contract billing subtracts issued obligations; stale final issues are rejected and paid links remain view-only."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-invoice-payment-options.mjs",
+            "scripts/check-invoice-versions.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R41",
+      "title": "Keep change orders, credits and reversals traceable",
+      "acceptance": "Partial refunds, voids and approved scope changes update all dependent balances exactly once with an audit trail.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/finance.ts",
+            "server/pm.ts"
+          ],
+          "detail": "Source-based scope changes, reversals and payment corrections retain audit history and once-only effects."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-suite-connections.mjs",
+            "scripts/check-invoice-payment-options.mjs",
+            "scripts/check-release.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R42",
+      "title": "Make receipt capture the fastest path",
+      "acceptance": "A user captures a receipt and links it to a job with minimal fields; missing-receipt reminders resolve when the file is attached.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/finance/expenses.tsx",
+            "server/finance.ts"
+          ],
+          "detail": "Receipt/camera capture leads the expense flow; job cost and customer-rebill choices are explicit."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/expenses.spec.mjs",
+            "scripts/check-business-audit-fixes.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R43",
+      "title": "Simplify ordering and partial receiving",
+      "acceptance": "Repeated receipt submission adds stock once; partial quantities, returns and supplier files remain traceable.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/finance/purchase-orders.tsx",
+            "server/purchase-orders.ts",
+            "server/inventory-receiving.ts"
+          ],
+          "detail": "Ordered, received and remaining quantities, landed costs, job filters and receipt replay use the stock ledger."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-purchase-orders.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R44",
+      "title": "Make field stock and job costs agree",
+      "acceptance": "A return restores stock/cost correctly; a tool checkout never becomes consumed material; no duplicate PO/expense/job cost.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/inventory-receiving.ts",
+            "client/src/pages/item-detail.tsx"
+          ],
+          "detail": "Reservation, consumption, return and tool checkout preserve distinct stock and job-cost effects."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-inventory.mjs",
+            "scripts/check-suite-connections.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R45",
+      "title": "Explain payroll readiness and corrections",
+      "acceptance": "Only approved eligible hours enter a closed period; dated rates and later corrections reconcile; do not imply tax filing or payroll remittance.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/pages/hr/payroll.tsx",
+            "client/src/pages/employee-approvals.tsx",
+            "server/employee.ts"
+          ],
+          "detail": "Readiness, dated rates, approved hours and corrections remain traceable; gross pay is separate from remittance/tax filing."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-legacy-payroll.mjs",
+            "scripts/check-employee-refinements.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R46",
+      "title": "Show useful profit with data confidence",
+      "acceptance": "Unknown costs are labeled unknown; received stock, expenses and labor are not counted twice.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/job-forecast.ts",
+            "client/src/components/JobForecast.tsx",
+            "client/src/pages/business-report.tsx"
+          ],
+          "detail": "Versioned expected costs, actual costs and remaining purchase commitments label unknowns and avoid double counting."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R47",
+      "title": "Turn page performance into a short action list",
+      "acceptance": "Every recommendation links to its evidence and an improvement task; unavailable data never appears as a real zero.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/page-performance.ts",
+            "client/src/components/WebsiteAnalyticsVisuals.tsx",
+            "client/src/components/PageImprovement.tsx"
+          ],
+          "detail": "Page ranking exposes sample sizes and coverage and creates evidence-linked improvement work."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-page-performance.mjs",
+            "tests/website-analytics.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R48",
+      "title": "Verify requests and attachments end to end",
+      "acceptance": "Each site accepts supported files; the team can open them from the lead/job; email attachment or secure-link behavior matches its documented policy.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/job-files.ts",
+            "server/mailer.ts"
+          ],
+          "detail": "All four intake paths are tested through stable submissions, private files and documented mail attachment/link behavior."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-intake-reliability.mjs",
+            "scripts/check-lead-experience.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R49",
+      "title": "Make approval and payment journeys consistent",
+      "acceptance": "Expired, revoked and revised links behave correctly; private internal files never leak through a public link.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/public-portal.ts",
+            "server/quotes.ts"
+          ],
+          "detail": "Public approval/payment states honor expiry, revision, revocation and audience without exposing internal files."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-quote-policy.mjs",
+            "scripts/check-customer-previews.mjs",
+            "scripts/check-preview-connections.mjs",
+            "scripts/check-invoice-payment-options.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R50",
+      "title": "Connect completion, reviews and portfolio",
+      "acceptance": "A review request respects communication settings; only explicitly approved photos/details reach a public site.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/job-completion.ts",
+            "client/src/components/JobCompletion.tsx"
+          ],
+          "detail": "Versioned internal completion review tracks handover, feedback and portfolio consent without automatically messaging or publishing."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R51",
+      "title": "Measure improvement work through outcomes",
+      "acceptance": "Source site remains distinct from the trade that fulfills a job; reporting handles unknown/referral sources honestly.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/improvement-results.ts",
+            "server/marketing-workflows.ts",
+            "client/src/components/PageImprovement.tsx"
+          ],
+          "detail": "Frozen baseline and equal-period cohorts connect page/campaign changes to outcomes while distinguishing attribution from causation."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-page-performance.mjs",
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/website-analytics.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R52",
+      "title": "Show communication in the customer’s context",
+      "acceptance": "Users can verify which version and attachments were sent; reply context is preserved; no unsupported inbox-delivery claim.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/record-communication.ts",
+            "client/src/components/RecordCommunication.tsx"
+          ],
+          "detail": "Record-context communication shows frozen recipient, version, attachments and honest provider-accepted/uncertain status."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/mailer-archive-check.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R53",
+      "title": "Expand connected-journey regression gates",
+      "acceptance": "A release is blocked by any failed critical journey; tests use isolated data and never send real customer messages.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "package.json",
+            ".github/workflows/test.yml",
+            "scripts/check-roadmap-release.mjs"
+          ],
+          "detail": "Full regression and release gates use isolated data and block failed critical journeys."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R54",
+      "title": "Capture actionable, privacy-aware errors",
+      "acceptance": "One failure can be traced from UI to server safely; alerts distinguish a single bad record from a service outage.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/operational-status.ts",
+            "server/http-util.ts",
+            "client/src/components/SupportReference.tsx"
+          ],
+          "detail": "Bounded safe diagnostic references include route, status and release without customer payloads; record corrections differ from outages."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R55",
+      "title": "Measure queries and refresh only what changed",
+      "acceptance": "Representative large datasets remain usable; pagination never changes totals; unrelated screens do not refetch for every event.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/record-connections.ts",
+            "client/src/lib/suite-sync.ts",
+            "scripts/check-roadmap-scale.mjs"
+          ],
+          "detail": "A 7,501-record benchmark enforces bounded queries/response; revision topics refresh only affected areas."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-scale.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R56",
+      "title": "Set and enforce phone performance budgets",
+      "acceptance": "Baseline and agreed budgets are recorded per critical page; the phone stays responsive during uploads, graphs and model viewing.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "tests/roadmap-performance.spec.mjs",
+            "docs/ROADMAP-RELEASE.md"
+          ],
+          "detail": "Six cold-cache throttled phone budgets cover useful content, transfer, memory and input during a pending upload."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-performance.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R57",
+      "title": "Refactor large modules and prove dead code before removal",
+      "acceptance": "Each deletion has usage evidence and a passing build/journey check; legacy links get redirects; no customer data is deleted as cleanup.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "docs/code-usage-audit.json",
+            "scripts/audit-code-usage.mjs",
+            "server/auth.ts",
+            "server/storage.ts"
+          ],
+          "detail": "Responsibilities extracted into focused modules; usage audit found no removable files. Only proven obsolete automatic business purgers were removed."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        },
+        {
+          "kind": "build",
+          "paths": [
+            ".gitignore",
+            "scripts/build-film-field-book.mjs"
+          ],
+          "detail": "Reproducible 2 MB field-book output is built and checked for runtime use, not duplicated in Git. Source drawings remain tracked."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R58",
+      "title": "Practice recovery as well as downloading backups",
+      "acceptance": "A restored sample reproduces linked records and files; failed integrity checks prevent deployment or destructive cleanup.",
+      "status": "verification-pending",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "scripts/restore-backup.mjs",
+            "docs/ROADMAP-RELEASE.md"
+          ],
+          "detail": "Checksummed isolated restores cover links, files and new tables. Production backup verification remains approval-dependent."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-release.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented",
+      "remaining": "Production backup download was blocked by automatic approval review; explicit user permission requested for recovery verification."
+    },
+    {
+      "id": "R59",
+      "title": "Verify permissions through every entry point",
+      "acceptance": "A worker cannot retrieve finance or another worker’s private data through a copied URL; session recovery preserves unsaved work safely.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/auth.ts",
+            "server/employee.ts",
+            "server/routes.ts"
+          ],
+          "detail": "Role checks cover copied URLs, restricted files, finance and setup; stronger owner credentials and session rules remain enforced."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs",
+            "scripts/check-employee.mjs",
+            "scripts/check-release.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R60",
+      "title": "Keep queues observable and retry-safe",
+      "acceptance": "Restart and concurrent workers process each business effect once; operator actions cannot unknowingly resend old financial communications.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/suite-worker.ts",
+            "server/mail-queue.ts",
+            "client/src/components/OperationalStatus.tsx"
+          ],
+          "detail": "Worker heartbeat and grouped attempts expose age/recovery while frozen payloads and uncertainty holds prevent blind resends."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-suite-recovery.mjs",
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R61",
+      "title": "Use one metric definition everywhere",
+      "acceptance": "Chart, detail list and exported totals reconcile; comparisons exclude unavailable periods and separate snapshots from period activity.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "shared/page-performance.ts",
+            "shared/search-reporting.ts",
+            "client/src/components/Insights.tsx",
+            "client/src/hooks/useBusinessReport.ts"
+          ],
+          "detail": "Shared period/metric definitions preserve chart drill-through and distinguish snapshots, unknown coverage and overlapping totals."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-insights.mjs",
+            "scripts/check-page-performance.mjs",
+            "tests/insights.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R62",
+      "title": "Add help where decisions are made",
+      "acceptance": "A new user can complete the main workflows without memorizing internal IDs or reading a long manual.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "client/src/components/SuiteHelp.tsx",
+            "client/src/components/SupportReference.tsx"
+          ],
+          "detail": "Short page-specific help and redacted support context explain next steps without requiring internal IDs."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "tests/roadmap-phone.spec.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R63",
+      "title": "Review orphaned files and retention safely",
+      "acceptance": "Every candidate has age, size and references; backups are verified; recoverable retention precedes permanent purge.",
+      "status": "complete",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "server/storage-review.ts",
+            "client/src/components/StorageReview.tsx"
+          ],
+          "detail": "Read-only age/size/reference inventory includes historical database references and protects recent files; no automatic purge action is added."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-roadmap-reliability.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented"
+    },
+    {
+      "id": "R64",
+      "title": "Use staged rollouts with visible release status",
+      "acceptance": "Each release has recorded validation, backup status and rollback instructions; an app refresh cannot strand an unsaved draft.",
+      "status": "verification-pending",
+      "evidence": [
+        {
+          "kind": "implementation",
+          "paths": [
+            "docs/ROADMAP-RELEASE.md",
+            "scripts/check-roadmap-release.mjs",
+            "client/src/components/OperationalStatus.tsx"
+          ],
+          "detail": "Visible release status and a whole-scope gate require exact-commit checks, private backup verification and recorded rollback before deployment."
+        },
+        {
+          "kind": "regression",
+          "paths": [
+            "scripts/check-draft-saves.mjs",
+            "scripts/check-release.mjs"
+          ],
+          "result": "Candidate regression coverage passed. Final release-commit checks remain separately required by the release gate."
+        }
+      ],
+      "implementation": "implemented",
+      "remaining": "Physical phone results; explicit complete-backup permission and verified isolated recovery; renewed hosting authentication and rollback metadata; exact final-commit release checks. No production deployment has occurred."
+    }
+  ],
+  "releaseChecks": {},
+  "privacy": "Requirements and synthetic test evidence only. Production customer screenshots and raw observations remain outside the repository.",
+  "scopeDecisions": [
+    {
+      "item": "R36",
+      "date": "2026-10-14",
+      "authority": "user",
+      "instruction": "dont worry about that",
+      "context": "Response to the request for plant-measured and approved dimensions and tolerances.",
+      "decision": "Do not wait for physical manufacturing measurements for this website release. Keep unmeasured dimensions visibly unverified and excluded from claims of manufacturing readiness. Software checks still required."
+    }
+  ],
+  "candidateVerification": {
+    "date": "2026-10-14T15:43:35.398Z",
+    "browser": {
+      "passed": 123,
+      "failed": 0,
+      "duration": "7.5 minutes"
+    },
+    "performance": [
+      {
+        "page": "Today",
+        "conditions": "4x CPU / 1.6 Mbps / 150 ms RTT / cold cache / 390x844",
+        "usefulMs": 2759,
+        "heapMb": 5.935630798339844,
+        "transferredBytes": 164029,
+        "inputP95Ms": null,
+        "budget": {
+          "usefulMs": 6000,
+          "heapMb": 96,
+          "inputP95Ms": 250,
+          "transferredBytes": 1500000
+        }
+      },
+      {
+        "page": "Jobs",
+        "conditions": "4x CPU / 1.6 Mbps / 150 ms RTT / cold cache / 390x844",
+        "usefulMs": 2721,
+        "heapMb": 5.148384094238281,
+        "transferredBytes": 156216,
+        "inputP95Ms": null,
+        "budget": {
+          "usefulMs": 6000,
+          "heapMb": 96,
+          "inputP95Ms": 250,
+          "transferredBytes": 1500000
+        }
+      },
+      {
+        "page": "Customer search",
+        "conditions": "4x CPU / 1.6 Mbps / 150 ms RTT / cold cache / 390x844",
+        "usefulMs": 2641,
+        "heapMb": 5.224521636962891,
+        "transferredBytes": 194560,
+        "inputP95Ms": 88,
+        "budget": {
+          "usefulMs": 6000,
+          "heapMb": 96,
+          "inputP95Ms": 250,
+          "transferredBytes": 1500000
+        }
+      },
+      {
+        "page": "Job files",
+        "conditions": "4x CPU / 1.6 Mbps / 150 ms RTT / cold cache / 390x844",
+        "usefulMs": 3222,
+        "heapMb": 6.143421173095703,
+        "transferredBytes": 226107,
+        "inputP95Ms": 112,
+        "budget": {
+          "usefulMs": 8000,
+          "heapMb": 96,
+          "inputP95Ms": 250,
+          "transferredBytes": 1500000
+        }
+      },
+      {
+        "page": "Marketing graphs",
+        "conditions": "4x CPU / 1.6 Mbps / 150 ms RTT / cold cache / 390x844",
+        "usefulMs": 3967,
+        "heapMb": 8.01376724243164,
+        "transferredBytes": 422494,
+        "inputP95Ms": 186,
+        "budget": {
+          "usefulMs": 10000,
+          "heapMb": 160,
+          "inputP95Ms": 250,
+          "transferredBytes": 1500000
+        }
+      },
+      {
+        "page": "Film 2D fallback",
+        "conditions": "4x CPU / 1.6 Mbps / 150 ms RTT / cold cache / 390x844",
+        "usefulMs": 2746,
+        "heapMb": 5.742397308349609,
+        "transferredBytes": 187506,
+        "inputP95Ms": null,
+        "budget": {
+          "usefulMs": 10000,
+          "heapMb": 160,
+          "inputP95Ms": 250,
+          "transferredBytes": 1500000
+        }
+      }
+    ],
+    "productionDataMutated": false,
+    "productionBackupVerified": false,
+    "productionDeployed": false,
+    "exactReleaseCommitChecks": "pending"
+  }
+}

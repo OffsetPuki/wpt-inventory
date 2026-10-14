@@ -1,7 +1,8 @@
 import Insights from '@/components/Insights';
 import DeleteJobButton from '@/components/DeleteJobButton';
 import {ActiveFilters} from '@/components/ActiveFilters';
-import {useListPage,PageButtons} from "@/lib/list-page";
+import {PageButtons} from "@/lib/list-page";
+import {usePageFilters} from '@/hooks/usePageFilters';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {useBusiness} from '@/hooks/useBusiness';
 import {RetryBlock} from '@/components/RetryBlock';
@@ -130,8 +131,9 @@ export default function ProjectsPage() {
   // Manager + technician both create / manage projects.
   const { isElevated: isManager } = useAuth();
   const [, setLocation] = useLocation();
-  const [q, setQ] = useState("");
-  const {page,setPage}=useListPage("jobs",[q,business]);
+  const [filters,setFilters]=usePageFilters({q:'',page:'0'});
+  const q=filters.q,setQ=(q:string)=>setFilters({q});
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   const [templateOpen, setTemplateOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
 

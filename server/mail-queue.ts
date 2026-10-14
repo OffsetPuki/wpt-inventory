@@ -4,6 +4,7 @@ import path from "node:path";
 import { sqlite, dataDir } from "./storage";
 import { enqueueFollowup } from "./outbox";
 import type { MailMessage } from "./mailer";
+import { mailAddressError } from './mail-validation';
 
 sqlite.exec(
   `CREATE TABLE IF NOT EXISTS suite_mail(key TEXT PRIMARY KEY,payload TEXT NOT NULL,first_attempt_at INTEGER,accepted_at INTEGER,provider_id TEXT);`,
@@ -34,6 +35,8 @@ export function storedMail(
       const payload=JSON.stringify({msg:{...msg,attachments},bcc,from});
       sqlite.prepare('INSERT INTO suite_mail(key,payload) VALUES(?,?)').run(deliveryKey,payload);
       enqueueFollowup('delivery:'+deliveryKey,'mail',{key:deliveryKey});
+      const validationError=mailAddressError(msg,bcc);
+      if(validationError) sqlite.prepare("UPDATE suite_outbox SET status='review',last_error=? WHERE event_key=?").run(validationError,'delivery:'+deliveryKey);
       return {key:deliveryKey,payload,first_attempt_at:null,accepted_at:null};
     })();
     // An outer synchronous SQLite transaction may still roll back after this

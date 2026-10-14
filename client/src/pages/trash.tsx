@@ -11,7 +11,6 @@ import Header from "@/components/Header";
 import { Loader2, RotateCcw, Trash2, FolderKanban, Package } from "lucide-react";
 import type { Item, Project } from "@shared/schema";
 
-const RETENTION_DAYS = 30;
 function DeletedCustomers({resource,label}:{resource:'clients'|'leads';label:string}){
   const [search,setSearch]=useState('');
   const query=useQuery<{id:number;name:string;email:string|null;phone:string|null;deletedAt:number}[]>({queryKey:['trash',resource,search],staleTime:0,queryFn:async()=>(await apiRequest('GET',`/api/crm/${resource}/deleted?q=${encodeURIComponent(search)}`)).json()});
@@ -24,11 +23,6 @@ function DeletedCustomers({resource,label}:{resource:'clients'|'leads';label:str
 
 interface DeletedItem extends Item { deletedAt: number }
 interface DeletedProject extends Project { deletedAt: number }
-
-function daysLeft(deletedAt: number): number {
-  const ms = deletedAt + RETENTION_DAYS * 24 * 60 * 60 * 1000 - Date.now();
-  return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
-}
 
 export default function TrashPage() {
   // Restoring (items or projects) is owner-only; the server enforces it and
@@ -71,7 +65,7 @@ export default function TrashPage() {
     <div className="mx-auto max-w-4xl">
       <Header
         title="Trash"
-        description={`Restore deleted records here. Items and jobs remain recoverable for ${RETENTION_DAYS} days.`}
+        description="Deleted records stay recoverable here. Restoring does not resend messages, restart payments or restore material reservations. Permanent cleanup requires a separate review."
       />
       {isElevated&&<><DeletedCustomers resource="clients" label="Customers"/><DeletedCustomers resource="leads" label="Leads"/></>}
 
@@ -95,7 +89,7 @@ export default function TrashPage() {
                   <div className="min-w-0">
                     <p className="truncate font-medium text-foreground">{it.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Deleted {formatDateTime(it.deletedAt)} · purges in {daysLeft(it.deletedAt)} day(s)
+                      Deleted {formatDateTime(it.deletedAt)} · Retained for recovery
                     </p>
                   </div>
                   <button
@@ -133,7 +127,7 @@ export default function TrashPage() {
                   <div className="min-w-0">
                     <p className="truncate font-medium text-foreground">{p.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {p.jobNumber} · deleted {formatDateTime(p.deletedAt)} · purges in {daysLeft(p.deletedAt)} day(s)
+                      {p.jobNumber} · deleted {formatDateTime(p.deletedAt)} · Retained for recovery
                     </p>
                   </div>
                   <button

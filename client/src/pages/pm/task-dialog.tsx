@@ -1,3 +1,4 @@
+import {L} from '@/lib/language';
 import {RecordSelect} from "@/components/RecordSelect";
 import {validateTaskDates} from "@shared/suite-contracts";
 import { useDialogDraft } from "@/lib/dialog-draft";
@@ -25,6 +26,7 @@ import { Loader2, Timer, Trash2 } from "lucide-react";
 
 // loggedMin: actual minutes logged against the task (Phase D #24b).
 export type TaskRow = PmTask & {
+  _version?:number;
   projectName: string | null;
   assigneeName: string | null;
   loggedMin?: number;
@@ -213,9 +215,9 @@ export function TaskDialog({
         className="flex flex-col gap-4"
       >
         {recovered.notice}
-        {task && Number(projectId)!==task.projectId && projectId && <div className="rounded-xl border bg-muted/40 p-4 text-sm"><p>Keep the original task and its hours on its original job. Copy the task below to start future work on the selected job.</p><button type="button" disabled={copy.isPending} onClick={()=>copy.mutate()} className="mt-2 min-h-11 rounded-lg border px-4">Copy task to selected job</button></div>}
+        {task && Number(projectId)!==task.projectId && projectId && <div className="rounded-xl border bg-muted/40 p-4 text-sm"><p><L>{"Keep the original task and its hours on its original job. Copy the task below to start future work on the selected job."}</L></p><button type="button" disabled={copy.isPending} onClick={()=>copy.mutate()} className="mt-2 min-h-11 rounded-lg border px-4"><L>{"Copy task to selected job"}</L></button></div>}
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Title</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Title"}</L></span>
           <input
             className={inputCls}
             value={title}
@@ -224,8 +226,7 @@ export function TaskDialog({
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">
-            Description (optional)
-          </span>
+            <L>{"Description (optional)"}</L>{" "}</span>
           <textarea
             className={cn(inputCls, "h-auto min-h-[80px] py-2")}
             rows={3}
@@ -235,7 +236,7 @@ export function TaskDialog({
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Job</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Job"}</L></span>
             <RecordSelect type="jobs"
               className={inputCls}
               value={projectId}
@@ -243,7 +244,7 @@ export function TaskDialog({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Status</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Status"}</L></span>
             <select
               className={inputCls}
               value={status}
@@ -258,8 +259,7 @@ export function TaskDialog({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">
-              Priority
-            </span>
+              <L>{"Priority"}</L>{" "}</span>
             <select
               className={inputCls}
               value={priority}
@@ -275,14 +275,13 @@ export function TaskDialog({
           {isElevated && (
             <label className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-foreground">
-                Assignee
-              </span>
+                <L>{"Assignee"}</L>{" "}</span>
               <select
                 className={inputCls}
                 value={assigneeId}
                 onChange={(e) => setAssigneeId(e.target.value)}
               >
-                <option value="">Unassigned</option>
+                <option value=""><L>{"Unassigned"}</L></option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
@@ -293,8 +292,7 @@ export function TaskDialog({
           )}
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">
-              Start date
-            </span>
+              <L>{"Start date"}</L>{" "}</span>
             <input
               type="date"
               className={inputCls}
@@ -304,8 +302,7 @@ export function TaskDialog({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">
-              Due date
-            </span>
+              <L>{"Due date"}</L>{" "}</span>
             <input
               type="date"
               className={inputCls}
@@ -315,8 +312,7 @@ export function TaskDialog({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-foreground">
-              Estimate (hours)
-            </span>
+              <L>{"Estimate (hours)"}</L>{" "}</span>
             <input
               type="number"
               min="0"
@@ -336,7 +332,7 @@ export function TaskDialog({
                     : "text-muted-foreground",
                 )}
               >
-                Logged {fmtH(task.loggedMin ?? 0)}
+                <L>{"Logged"}</L>{" "}{fmtH(task.loggedMin ?? 0)}
                 {task.estimateHours != null && ` / est ${task.estimateHours}h`}
               </span>
             )}
@@ -357,8 +353,7 @@ export function TaskDialog({
                 ) : (
                   <Timer className="h-4 w-4" />
                 )}
-                Start timer
-              </button>
+                <L>{"Start timer"}</L>{" "}</button>
               <button
                 type="button"
                 onClick={() => { del.reset(); setConfirmDelete(true); }}
@@ -366,8 +361,7 @@ export function TaskDialog({
                 className="flex h-11 items-center gap-2 rounded-xl border border-border px-4 font-medium text-red-600 hover:border-red-500 disabled:opacity-60 dark:text-red-400"
               >
                 <Trash2 className="h-4 w-4" />
-                Delete
-              </button>
+                <L>{"Delete"}</L>{" "}</button>
             </>
           )}
           <button
@@ -380,7 +374,7 @@ export function TaskDialog({
           </button>
         </div></div>
       </form>
-      {confirmDelete && task && <ConfirmDialog title="Delete task?" confirmLabel="Delete task" busy={del.isPending} error={del.error?.message} onClose={() => setConfirmDelete(false)} onConfirm={() => del.mutate()}><p>Remove “{task.title}” from your tasks?</p><p>Previously recorded time stays in your records.</p></ConfirmDialog>}
+      {confirmDelete && task && <ConfirmDialog title="Delete task?" confirmLabel="Delete task" busy={del.isPending} error={del.error?.message} onClose={() => setConfirmDelete(false)} onConfirm={() => del.mutate()}><p><L>{"Remove “"}</L>{task.title}<L>{"” from your tasks?"}</L></p><p><L>{"Previously recorded time stays in your records."}</L></p></ConfirmDialog>}
     </Modal>
   );
 }

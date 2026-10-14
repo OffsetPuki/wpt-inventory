@@ -12,7 +12,7 @@ export function registerBusinessReport(app:Express){
   // Unknown ownership stays visible as Unassigned; it is never guessed from a vendor.
   const invoiceSite="coalesce(p.site,l.site,CASE WHEN json_valid(q.payload) THEN coalesce(json_extract(q.payload,'$.business'),CASE q.type WHEN 'concrete' THEN 'concrete' WHEN 'insulation' THEN 'insulation' ELSE 'metals' END) END,'unassigned')";
   const joins='LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN crm_leads l ON l.id=i.lead_id LEFT JOIN quotes q ON q.id=i.quote_id';
-  const paymentDate="coalesce(nullif(t.paid_at,''),date(t.created_at/1000,'unixepoch','localtime'))";
+  const paymentDate="coalesce(nullif(t.paid_at,''),business_day(t.created_at))";
   const kind=String(req.query.kind||'all'),search=String(req.query.q||'').slice(0,100),page=Math.max(0,Math.min(100000,Math.trunc(Number(req.query.page)||0))),limit=25;
   if(!['all','paid','expense','cash','outstanding'].includes(kind))return res.status(400).json({message:'Choose a valid report filter.'});
   const cte=`WITH records AS (

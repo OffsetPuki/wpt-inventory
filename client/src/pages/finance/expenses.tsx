@@ -1,10 +1,12 @@
+import {L} from '@/lib/language';
 import Insights from '@/components/Insights';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {RecordSelect} from "@/components/RecordSelect";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
 import {ExpenseCorrection} from "@/components/ExpenseCorrection";
 import { useDialogDraft } from '@/lib/dialog-draft';
-import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import {PageButtons} from '@/lib/list-page';
+import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useRecordLink, readContext } from "@/lib/record-link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -73,14 +75,13 @@ function ReceiptPreview({ url }: { url: string }) {
     <div className="overflow-hidden rounded-xl border border-border bg-muted/30">
       {failed ? (
         <div role="status" className="space-y-2 p-4 text-sm text-muted-foreground">
-          <p>Receipt preview could not load.</p>
+          <p><L>{"Receipt preview could not load."}</L></p>
           <button
             type="button"
             className={secondaryBtn}
             onClick={() => { setFailed(false); setAttempt(value => value + 1); }}
           >
-            Retry receipt
-          </button>
+            <L>{"Retry receipt"}</L>{" "}</button>
         </div>
       ) : (
         <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Open receipt full size">
@@ -118,6 +119,7 @@ function ExpenseFormModal({
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -191,6 +193,7 @@ function ExpenseFormModal({
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
     }
   };
 
@@ -218,10 +221,65 @@ function ExpenseFormModal({
       >
         {recovered.notice}
         {!!expense?.invoiceId && <ExpenseCorrection expense={expense} onDone={onClose}/>}
+        {/* Receipt photo */}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground"><L>{"Receipt photo (optional)"}</L></span>
+          <p className="text-xs text-muted-foreground"><L>{"Start with your receipt, then enter the amount and job. Your form stays saved if you need to come back."}</L></p>
+          {receiptUrl ? (
+            <div className="space-y-2">
+              <ReceiptPreview key={receiptUrl} url={receiptUrl} />
+              <div className="flex items-center gap-2 text-sm">
+                <a
+                  href={receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-primary underline-offset-2 hover:underline"
+                >
+                  <Paperclip className="h-4 w-4" />
+                  <L>{"View attached receipt"}</L>{" "}</a>
+                <button
+                  type="button"
+                  aria-label="Remove receipt"
+                  onClick={() => setReceiptUrl(null)}
+                  className="flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2"><button type="button" disabled={uploading} onClick={() => cameraRef.current?.click()} className={secondaryBtn}><L>{"Take receipt photo"}</L></button><button
+              type="button"
+              disabled={uploading}
+              onClick={() => fileRef.current?.click()}
+              className={cn(secondaryBtn, "w-fit")}
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              {uploading ? "Uploading…" : "Choose receipt photo"}
+            </button></div>
+          )}
+          <input
+            ref={cameraRef} type="file" accept="image/*" capture="environment" aria-label="Take receipt photo" className="hidden" onChange={e => handleFile(e.target.files?.[0])}
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            aria-label="Upload receipt photo"
+            className="hidden"
+            onChange={(e) => handleFile(e.target.files?.[0])}
+          />
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Date</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Date"}</L></span>
             <input
+              name="date" required
               type="date"
               className={inputCls}
               value={date}
@@ -229,16 +287,18 @@ function ExpenseFormModal({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Vendor</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Vendor"}</L></span>
             <input
+              name="vendor" autoComplete="organization"
               className={inputCls}
               value={vendor}
               onChange={(e) => setVendor(e.target.value)}
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Category</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Category"}</L></span>
             <select
+              name="category"
               className={inputCls}
               value={category}
               onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
@@ -251,8 +311,9 @@ function ExpenseFormModal({
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Amount $</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Amount $"}</L></span>
             <input
+              name="amountCents" required
               className={inputCls}
               inputMode="decimal"
               placeholder="0.00"
@@ -261,8 +322,9 @@ function ExpenseFormModal({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Method</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Method"}</L></span>
             <select
+              name="paymentMethod"
               className={inputCls}
               value={method}
               onChange={(e) => setMethod(e.target.value as PaymentMethod)}
@@ -275,8 +337,8 @@ function ExpenseFormModal({
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Job (optional)</span>
-            <RecordSelect type="jobs"
+            <span className="text-sm font-medium text-foreground"><L>{"Job (optional)"}</L></span>
+            <RecordSelect type="jobs" name="projectId"
               className={inputCls}
               disabled={!!expense?.invoiceId} value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
@@ -284,73 +346,23 @@ function ExpenseFormModal({
           </label>
         </div>
 
-        <label className="flex items-center gap-2.5">
+        <p className="text-xs text-muted-foreground"><L>{"Choose a job to record its cost. Charging the customer is a separate billing decision; saving an expense does not send an invoice."}</L></p>
+        <label className="flex min-h-11 items-center gap-2.5">
           <input
+            name="billable"
             type="checkbox"
             disabled={!!expense?.invoiceId} checked={billable}
             onChange={(e) => setBillable(e.target.checked)}
             className="h-5 w-5 rounded border-input accent-[hsl(var(--primary))]"
           />
           <span className="text-sm font-medium text-foreground">
-            Billable to client / project
-          </span>
+            <L>{"Charge this expense to the customer"}</L>{" "}</span>
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Notes (optional)</span>
-          <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <span className="text-sm font-medium text-foreground"><L>{"Notes (optional)"}</L></span>
+          <input name="notes" className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
-
-        {/* Receipt photo */}
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Receipt photo</span>
-          {receiptUrl ? (
-            <div className="space-y-2">
-              <ReceiptPreview key={receiptUrl} url={receiptUrl} />
-              <div className="flex items-center gap-2 text-sm">
-                <a
-                  href={receiptUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-primary underline-offset-2 hover:underline"
-                >
-                  <Paperclip className="h-4 w-4" />
-                  View attached receipt
-                </a>
-                <button
-                  type="button"
-                  aria-label="Remove receipt"
-                  onClick={() => setReceiptUrl(null)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              disabled={uploading}
-              onClick={() => fileRef.current?.click()}
-              className={cn(secondaryBtn, "w-fit")}
-            >
-              {uploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              {uploading ? "Uploading…" : "Upload photo"}
-            </button>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            aria-label="Upload receipt photo"
-            className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0])}
-          />
-        </div>
 
         <div className="suite-modal-actions"><div className="flex gap-2">
           <button
@@ -371,7 +383,7 @@ function ExpenseFormModal({
               className={cn(secondaryBtn, "text-red-600 dark:text-red-400")}
             >
               <Trash2 className="h-4 w-4" />
-              Delete
+              <L>{"Delete"}</L>
             </button>
           )}
         </div></div>
@@ -383,19 +395,20 @@ function ExpenseFormModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ExpensesPage() {
-  const [category, setCategory] = useRememberedState("client/src/pages/finance/expenses.tsx:category","");
-  const [projectId, setProjectId] = useRememberedState("client/src/pages/finance/expenses.tsx:projectId",readContext("projectId"),"projectId");
-  const [from, setFrom] = useRememberedState("client/src/pages/finance/expenses.tsx:from","");
-  const [to, setTo] = useRememberedState("client/src/pages/finance/expenses.tsx:to","");
-  const [q, setQ] = useRememberedState("client/src/pages/finance/expenses.tsx:q","");
-  useEffect(()=>{const apply=()=>{if(readContext('projectId')){setCategory('');setFrom('');setTo('');setQ('');}};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
+  const [filters,setFilters]=usePageFilters({category:"",projectId:"",from:"",to:"",q:"",page:"0"});
+  const category=filters.category,setCategory=(category:string)=>setFilters({category});
+  const projectId=filters.projectId,setProjectId=(projectId:string)=>setFilters({projectId});
+  const from=filters.from,setFrom=(from:string)=>setFilters({from});
+  const to=filters.to,setTo=(to:string)=>setFilters({to});
+  const q=filters.q,setQ=(q:string)=>setFilters({q});
+
   const [formOpen, setFormOpen] = useState(()=>readContext("new")==="1");
   const [editing, setEditing] = useState<Expense | null>(null);
   useRecordLink("expense", "/api/finance/expenses", row=>{setEditing(row);setFormOpen(true);});
 
 
 
-  const {page,setPage}=useListPage('rows:client/src/pages/finance/expenses.tsx',[category,projectId,from,to,q]);
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   const url = useMemo(() => {
     const params = new URLSearchParams();
     params.set('page',String(page));params.set('limit','50');
@@ -426,8 +439,7 @@ export default function ExpensesPage() {
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
         >
           <Plus className="h-5 w-5" />
-          Add expense
-        </button>
+          <L>{"Add expense"}</L>{" "}</button>
       </Header>
       {!projectId&&<Insights area="expenses"/>}
 
@@ -439,7 +451,7 @@ export default function ExpensesPage() {
           value={category}
           onChange={(e) => setCategory(e.target.value)}
         >
-          <option value="">All categories</option>
+          <option value=""><L>{"All categories"}</L></option>
           {EXPENSE_CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {EXPENSE_CATEGORY_LABELS[c]}
@@ -505,8 +517,7 @@ export default function ExpensesPage() {
               className={primaryBtn}
             >
               <Plus className="h-5 w-5" />
-              Add expense
-            </button>
+              <L>{"Add expense"}</L>{" "}</button>
           )}
         </EmptyState>
       ) : (
@@ -514,14 +525,14 @@ export default function ExpensesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-medium uppercase text-muted-foreground">
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Vendor</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Job</th>
-                <th className="px-4 py-3">Method</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3 text-center">Billable</th>
-                <th className="px-4 py-3 text-center">Receipt</th>
+                <th className="px-4 py-3"><L>{"Date"}</L></th>
+                <th className="px-4 py-3"><L>{"Vendor"}</L></th>
+                <th className="px-4 py-3"><L>{"Category"}</L></th>
+                <th className="px-4 py-3"><L>{"Job"}</L></th>
+                <th className="px-4 py-3"><L>{"Method"}</L></th>
+                <th className="px-4 py-3 text-right"><L>{"Amount"}</L></th>
+                <th className="px-4 py-3 text-center"><L>{"Billable"}</L></th>
+                <th className="px-4 py-3 text-center"><L>{"Receipt"}</L></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">

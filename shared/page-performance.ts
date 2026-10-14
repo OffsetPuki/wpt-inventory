@@ -6,6 +6,7 @@ export type PagePerformance = {
   views: number | null; keyEvents: number | null; clicks: number | null;
   impressions: number | null; ctr: number | null; position: number | null;
   previousSessions: number | null; previousClicks: number | null;
+  recordedLeads: number; qualifiedLeads: number; wonLeads: number;
 };
 
 // Join only the same site's public pathname. Never match pages across businesses,
@@ -32,6 +33,7 @@ export function pagePerformance(sites: WebsiteResult[]): PagePerformance[] {
         path, url: `https://${site.domain}${path}`, sessions: null, engaged: null, engagement: null,
         views: null, keyEvents: null, clicks: null, impressions: null, ctr: null, position: null,
         previousSessions: null, previousClicks: null,
+        recordedLeads: 0, qualifiedLeads: 0, wonLeads: 0,
       });
       return pages.get(path)!;
     };
@@ -53,6 +55,14 @@ export function pagePerformance(sites: WebsiteResult[]): PagePerformance[] {
       page.impressions = add(oldImpressions, impressions);
       page.position = impressions !== null && position !== null && (oldImpressions === null || page.position !== null)
         ? ratio((page.position ?? 0) * (oldImpressions ?? 0) + position * impressions, page.impressions) : null;
+    }
+    // These are recorded inquiry cohorts, not GA conversions or all company sales.
+    // Missing/foreign landing pages stay unattributed instead of crediting the home page.
+    for (const row of site.current.bySource) {
+      const page = get({page: row.page}, 'page'); if (!page) continue;
+      page.recordedLeads += row.leads;
+      page.qualifiedLeads += row.qualified;
+      page.wonLeads += row.won;
     }
     for (const row of site.previous.reports.landing?.rows || []) {
       const path = publicPage(row.landingPagePlusQueryString, site.domain), page = path ? pages.get(path) : null;

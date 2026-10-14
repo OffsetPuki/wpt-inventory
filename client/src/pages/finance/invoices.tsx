@@ -1,3 +1,6 @@
+import {L} from '@/lib/language';
+import {Link} from 'wouter';
+import ConnectedRecords from '@/components/ConnectedRecords';
 import Insights from '@/components/Insights';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
@@ -5,7 +8,8 @@ import DocumentActivityButton from '@/components/DocumentActivity';
 import InvoicePaymentEditor from '@/components/InvoicePaymentEditor';
 import { defaultPaymentOptions, invoicePaymentOptionsSchema, readPaymentOptions, type InvoicePaymentOptions } from '@shared/invoice-payment-options';
 import { useDialogDraft } from '@/lib/dialog-draft';
-import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import {PageButtons} from '@/lib/list-page';
+import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from '@/components/RetryBlock';
 import { readContext } from "@/lib/record-link";
 import { useDeepLink,consumeRecordLink } from "@/lib/deep-link";
@@ -147,9 +151,9 @@ function LineItemsEditor({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
-        <span className="flex-1">Description</span>
-        <span className="w-16 text-right">Qty</span>
-        <span className="w-24 text-right">Unit $</span>
+        <span className="flex-1"><L>{"Description"}</L></span>
+        <span className="w-16 text-right"><L>{"Qty"}</L></span>
+        <span className="w-24 text-right"><L>{"Unit $"}</L></span>
         <span className="w-8 [@media(pointer:coarse)]:w-11" />
       </div>
       {drafts.map((d, i) => (
@@ -189,8 +193,7 @@ function LineItemsEditor({
         className="flex h-9 w-fit items-center gap-1.5 rounded-lg border border-dashed border-border px-3 text-sm font-medium text-muted-foreground hover:border-primary hover:text-foreground"
       >
         <Plus className="h-4 w-4" />
-        Add line
-      </button>
+        <L>{"Add line"}</L>{" "}</button>
     </div>
   );
 }
@@ -276,8 +279,7 @@ function AttachmentsEditor({
       {!disabled && (
         <label className={cn(secondaryBtn, "w-fit cursor-pointer", uploading && "opacity-60")}>
           {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-          Attach file
-          <input
+          <L>{"Attach file"}</L>{" "}<input
             type="file"
             multiple
             accept=".pdf,.doc,.docx,image/*"
@@ -337,6 +339,7 @@ function InvoiceFormModal({
   // kind, so a balance invoice is never offered "settle the whole job".
   const [kind, setKind] = useState<Invoice["kind"]>(null);
   const [pickQuote, setPickQuote] = useState("");
+  const [billingContext,setBillingContext]=useState<any>(null);
   const [clientSearch,setClientSearch]=useState(""),[jobSearch,setJobSearch]=useState(""),[quoteSearch,setQuoteSearch]=useState("");
 
   useEffect(() => {
@@ -401,7 +404,7 @@ function InvoiceFormModal({
     }
     setProgressPct("");
     setProgressAmount("");
-    setPickQuote("");
+    setPickQuote("");setBillingContext(null);
   }, [open, invoice]);
 
   const { data: clients = [] } = useQuery<Client[]>({
@@ -468,9 +471,10 @@ function InvoiceFormModal({
       toast({ variant: "destructive", title: "Could not read that quote", description: e?.message });
       return;
     }
+    setBillingContext(d.billing);
     const src = d[mode];
     if (!src) {
-      toast({ variant: "destructive", title: "That quote has no deposit on it" });
+      toast({ variant: "destructive", title: mode==="full"?"This job already has issued invoices. Use Bill the balance.":mode==="deposit"?"No additional deposit remains to bill.":"This contract is already fully billed." });
       return;
     }
     if (d.clientId) {
@@ -615,18 +619,17 @@ function InvoiceFormModal({
         {recovered.notice}
         {!invoice && (
           <div className="rounded-lg border border-border bg-muted/40 p-3">
-            <p className="text-sm font-semibold text-foreground">Bill against a quote</p><input aria-label="Find quote" className={inputCls} placeholder="Search quote number or customer" value={quoteSearch} onChange={e=>setQuoteSearch(e.target.value)}/>
+            <p className="text-sm font-semibold text-foreground"><L>{"Bill against a quote"}</L></p><input aria-label="Find quote" className={inputCls} placeholder="Search quote number or customer" value={quoteSearch} onChange={e=>setQuoteSearch(e.target.value)}/>
             <p className="mt-1 text-xs text-muted-foreground">
-              Pulls the customer, the job and the priced lines straight from the quote
-              they accepted.
-            </p>
+              <L>{"Pulls the customer, the job and the priced lines straight from the quote they accepted."}</L>{" "}</p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <select
-                className={cn(inputCls, "flex-1 min-w-[14rem]")}
+                aria-label="Quote to bill"
+                className={cn(inputCls, "flex-1 min-w-0")}
                 value={pickQuote}
                 onChange={(e) => setPickQuote(e.target.value)}
               >
-                <option value="">— Pick a quote —</option>
+                <option value=""><L>{"— Pick a quote —"}</L></option>
                 {billable.map((q) => (
                   <option key={q.id} value={q.id}>
                     {q.number} — {q.customerName} — {formatMoney(q.totalCents)}
@@ -640,37 +643,35 @@ function InvoiceFormModal({
                 onClick={() => fillFromQuote("deposit")}
                 className={cn(primaryBtn, "disabled:opacity-50")}
               >
-                Bill the deposit
-              </button>
+                <L>{"Bill the deposit"}</L>{" "}</button>
               <button
                 type="button"
                 disabled={!pickQuote}
                 onClick={() => fillFromQuote("full")}
                 className={cn(secondaryBtn, "disabled:opacity-50")}
               >
-                Bill in full
-              </button>
+                <L>{"Bill in full"}</L>{" "}</button>
               <button
                 type="button"
                 disabled={!pickQuote}
                 onClick={() => fillFromQuote("balance")}
                 className={cn(secondaryBtn, "disabled:opacity-50")}
               >
-                Bill the balance
-              </button>
+                <L>{"Bill the balance"}</L>{" "}</button>
             </div>
           </div>
         )}
 
+        {billingContext&&<section aria-label="Billing stage review" className="space-y-2 rounded-xl border bg-primary/5 p-4 text-sm"><h3 className="font-semibold">{kind==='deposit'?'Deposit':kind==='balance'?'Final balance':kind==='full'?'Full contract':'Billing'} {" "}<L>{"· review before sending"}</L></h3><p><L>{"Contract + approved changes"}</L>{" "}{formatMoney(billingContext.contractCents)} {" "}<L>{"· Already issued"}</L>{" "}{formatMoney(billingContext.billedCents)} {" "}<L>{"· Left to bill"}</L>{" "}{formatMoney(billingContext.remainingCents)}</p><p><L>{"Payments settle existing invoices. They do not change how much of the contract has already been billed. The amount left is checked again when you mark this invoice sent."}</L></p>{billingContext.draftCount>0&&<p role="status">{billingContext.draftCount} {" "}<L>{"other draft invoice(s), totaling"}</L>{" "}{formatMoney(billingContext.draftCents)}<L>{", still need review. Open the job’s invoices before creating another bill."}</L></p>}{billingContext.projectId&&<Link className="inline-flex min-h-11 items-center underline" href={'/project/'+billingContext.projectId+'?tab=money'}><L>{"Review job billing"}</L></Link>}</section>}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Client</span><input aria-label="Find customer" className={inputCls} placeholder="Search customers" value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
+            <span className="text-sm font-medium text-foreground"><L>{"Client"}</L></span><input aria-label="Find customer" className={inputCls} placeholder="Search customers" value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
             <select
               className={inputCls}
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
             >
-              <option value="">— Pick a client —</option>
+              <option value=""><L>{"— Pick a client —"}</L></option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -688,7 +689,7 @@ function InvoiceFormModal({
           {!clientId &&
             (freeText ? (
               <label className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-foreground">Client name</span>
+                <span className="text-sm font-medium text-foreground"><L>{"Client name"}</L></span>
                 <input
                   className={inputCls}
                   placeholder="Free-text name"
@@ -702,17 +703,16 @@ function InvoiceFormModal({
                 onClick={() => setFreeText(true)}
                 className="w-fit self-end pb-3 text-sm text-muted-foreground hover:text-foreground hover:underline"
               >
-                No client record? Enter a name
-              </button>
+                <L>{"No client record? Enter a name"}</L>{" "}</button>
             ))}
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Job (optional)</span><input aria-label="Find job" className={inputCls} placeholder="Search jobs" value={jobSearch} onChange={e=>setJobSearch(e.target.value)}/>
+            <span className="text-sm font-medium text-foreground"><L>{"Job (optional)"}</L></span><input aria-label="Find job" className={inputCls} placeholder="Search jobs" value={jobSearch} onChange={e=>setJobSearch(e.target.value)}/>
             <select
               className={inputCls}
               value={projectId}
               onChange={(e) => {setProjectId(e.target.value);const job=projects.find(p=>String(p.id)===e.target.value);if(job?.clientId)setClientId(String(job.clientId));}}
             >
-              <option value="">— None —</option>
+              <option value=""><L>{"— None —"}</L></option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.jobNumber} — {p.name}
@@ -721,7 +721,7 @@ function InvoiceFormModal({
             </select>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Issue date</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Issue date"}</L></span>
             <input
               type="date"
               className={inputCls}
@@ -730,7 +730,7 @@ function InvoiceFormModal({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Due date</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Due date"}</L></span>
             <input
               type="date"
               className={inputCls}
@@ -741,25 +741,24 @@ function InvoiceFormModal({
         </div>
 
         <div>
-          <p className="mb-2 text-sm font-medium text-foreground">Line items</p>
+          <p className="mb-2 text-sm font-medium text-foreground"><L>{"Line items"}</L></p>
           <LineItemsEditor drafts={drafts} onChange={setDrafts} />
           <p className="mt-1.5 text-xs text-muted-foreground">
-            A negative unit price (−300) works as a discount or credit line.
-          </p>
+            <L>{"A negative unit price (−300) works as a discount or credit line."}</L>{" "}</p>
         </div>
 
         {/* Phase G #2: progress billing against the job's effective contract
             total (contract + approved COs) — commercial jobs bill in slices. */}
         {!!projectId && effectiveContractCents > 0 && (
           <div className="rounded-lg border border-border bg-background p-3">
-            <p className="text-sm font-semibold text-foreground">Progress billing</p>
+            <p className="text-sm font-semibold text-foreground"><L>{"Progress billing"}</L></p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Contract total {formatMoney(effectiveContractCents)} · Billed to date{" "}
+              <L>{"Contract total"}</L>{" "}{formatMoney(effectiveContractCents)} {" "}<L>{"· Billed to date"}</L>{" "}
               {formatMoney(billedToDateCents)}
             </p>
             <div className="mt-2 flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-muted-foreground">% of contract</span>
+                <span className="text-xs font-medium text-muted-foreground"><L>{"% of contract"}</L></span>
                 <input
                   className={cn(inputCls, "h-10 w-24 text-sm")}
                   inputMode="decimal"
@@ -768,9 +767,9 @@ function InvoiceFormModal({
                   onChange={(e) => setProgressPct(e.target.value)}
                 />
               </label>
-              <span className="pb-2.5 text-xs text-muted-foreground">or</span>
+              <span className="pb-2.5 text-xs text-muted-foreground"><L>{"or"}</L></span>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-muted-foreground">Amount $</span>
+                <span className="text-xs font-medium text-muted-foreground"><L>{"Amount $"}</L></span>
                 <input
                   className={cn(inputCls, "h-10 w-28 text-sm")}
                   inputMode="decimal"
@@ -785,8 +784,7 @@ function InvoiceFormModal({
                 className="flex h-10 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary"
               >
                 <Plus className="h-4 w-4" />
-                Add line
-              </button>
+                <L>{"Add line"}</L>{" "}</button>
               {parseFloat(progressPct) > 0 && (
                 <span className="pb-2.5 text-xs tabular-nums text-muted-foreground">
                   = {formatMoney(Math.round((effectiveContractCents * parseFloat(progressPct)) / 100))}
@@ -798,7 +796,7 @@ function InvoiceFormModal({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Tax %</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Tax %"}</L></span>
             <input
               className={inputCls}
               inputMode="decimal"
@@ -809,7 +807,7 @@ function InvoiceFormModal({
           {/* Phase G #3: only meaningful on project-linked (commercial) work. */}
           {!!projectId && (
             <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Retainage withheld %</span>
+              <span className="text-sm font-medium text-foreground"><L>{"Retainage withheld %"}</L></span>
               <input
                 className={inputCls}
                 inputMode="decimal"
@@ -820,7 +818,7 @@ function InvoiceFormModal({
             </label>
           )}
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Discount %</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Discount %"}</L></span>
             <input
               className={inputCls}
               inputMode="decimal"
@@ -830,7 +828,7 @@ function InvoiceFormModal({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Discount $</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Discount $"}</L></span>
             <input
               className={inputCls}
               inputMode="decimal"
@@ -840,7 +838,7 @@ function InvoiceFormModal({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Notes (optional)</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Notes (optional)"}</L></span>
             {/* Multi-line: the owner keeps a running note per bill. Internal —
                 the customer's copy never prints it (server/pay.ts). */}
             <textarea
@@ -857,20 +855,17 @@ function InvoiceFormModal({
         {/* What the customer reads, in the owner's words. Blank keeps the
             page's own wording, so nothing changes until the owner wants it to. */}
         <div className="rounded-lg border border-border bg-muted/40 p-3">
-          <p className="text-sm font-semibold text-foreground">Customer wording (optional)</p>
+          <p className="text-sm font-semibold text-foreground"><L>{"Customer wording (optional)"}</L></p>
           <p className="mt-1 text-xs text-muted-foreground">
-            What prints on the customer's invoice. Leave a box blank to keep the standard wording.
-          </p>
+            <L>{"What prints on the customer's invoice. Leave a box blank to keep the standard wording."}</L>{" "}</p>
           <label className="mt-3 flex flex-col gap-1.5">
             <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
-              Note under the line items
-              <button
+              <L>{"Note under the line items"}</L>{" "}<button
                 type="button"
                 onClick={() => setCustomerNote(STANDARD_CUSTOMER_NOTE)}
                 className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
               >
-                Insert standard wording
-              </button>
+                <L>{"Insert standard wording"}</L>{" "}</button>
             </span>
             <textarea
               className={cn(inputCls, "min-h-[5.5rem] py-2 leading-snug")}
@@ -880,19 +875,16 @@ function InvoiceFormModal({
               onChange={(e) => setCustomerNote(e.target.value)}
             />
             <span className="text-xs text-muted-foreground">
-              {"{contract}"}, {"{later}"} and {"{prior}"} fill in with the amounts.
-            </span>
+              {"{contract}"}, {"{later}"} {" "}<L>{"and"}</L>{" "}{"{prior}"} {" "}<L>{"fill in with the amounts."}</L>{" "}</span>
           </label>
           <label className="mt-3 flex flex-col gap-1.5">
             <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
-              Terms
-              <button
+              <L>{"Terms"}</L>{" "}<button
                 type="button"
                 onClick={() => setTerms(standardTerms)}
                 className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
               >
-                Insert standard terms
-              </button>
+                <L>{"Insert standard terms"}</L>{" "}</button>
             </span>
             <textarea
               className={cn(inputCls, "min-h-[5.5rem] py-2 leading-snug")}
@@ -901,49 +893,48 @@ function InvoiceFormModal({
               value={terms}
               onChange={(e) => setTerms(e.target.value)}
             />
-            <span className="text-xs text-muted-foreground">One term per line, printed exactly as written.</span>
+            <span className="text-xs text-muted-foreground"><L>{"One term per line, printed exactly as written."}</L></span>
           </label>
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Attachments (optional)</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Attachments (optional)"}</L></span>
           <p className="text-xs text-muted-foreground">
-            A signed contract, a drawing — anything the customer should get with this invoice.
-          </p>
+            <L>{"A signed contract, a drawing — anything the customer should get with this invoice."}</L>{" "}</p>
           <AttachmentsEditor value={attachments} onChange={setAttachments} onUploadingChange={setAttachmentsUploading} />
         </div>
 
         <div className="rounded-lg border border-border bg-background p-3 text-sm">
           <div className="flex justify-between py-0.5">
-            <span className="text-muted-foreground">Subtotal</span>
+            <span className="text-muted-foreground"><L>{"Subtotal"}</L></span>
             <span className="tabular-nums text-foreground">{formatMoney(subtotalCents)}</span>
           </div>
           {discountCents > 0 && (
             <div className="flex justify-between py-0.5">
-              <span className="text-emerald-700 dark:text-emerald-400">Discount</span>
+              <span className="text-emerald-700 dark:text-emerald-400"><L>{"Discount"}</L></span>
               <span className="tabular-nums text-emerald-700 dark:text-emerald-400">
                 −{formatMoney(discountCents)}
               </span>
             </div>
           )}
           <div className="flex justify-between py-0.5">
-            <span className="text-muted-foreground">Tax ({formatBp(taxRateBp)})</span>
+            <span className="text-muted-foreground"><L>{"Tax ("}</L>{formatBp(taxRateBp)})</span>
             <span className="tabular-nums text-foreground">{formatMoney(taxCents)}</span>
           </div>
           <div className="flex justify-between border-t border-border pt-1.5 font-semibold">
-            <span className="text-foreground">Total</span>
+            <span className="text-foreground"><L>{"Total"}</L></span>
             <span className="tabular-nums text-foreground">{formatMoney(totalCents)}</span>
           </div>
           {retainageCents > 0 && (
             <>
               <div className="flex justify-between pt-0.5">
-                <span className="text-amber-700 dark:text-amber-400">Retainage withheld</span>
+                <span className="text-amber-700 dark:text-amber-400"><L>{"Retainage withheld"}</L></span>
                 <span className="tabular-nums text-amber-700 dark:text-amber-400">
                   −{formatMoney(retainageCents)}
                 </span>
               </div>
               <div className="flex justify-between pt-0.5 font-medium">
-                <span className="text-foreground">Due now</span>
+                <span className="text-foreground"><L>{"Due now"}</L></span>
                 <span className="tabular-nums text-foreground">
                   {formatMoney(totalCents - retainageCents)}
                 </span>
@@ -952,7 +943,7 @@ function InvoiceFormModal({
           )}
           {(invoice?.depositCents ?? 0) > 0 && (
             <div className="flex justify-between pt-0.5">
-              <span className="text-amber-700 dark:text-amber-400">Deposit due</span>
+              <span className="text-amber-700 dark:text-amber-400"><L>{"Deposit due"}</L></span>
               <span className="tabular-nums text-amber-700 dark:text-amber-400">
                 {formatMoney(invoice!.depositCents!)}
               </span>
@@ -1018,10 +1009,10 @@ function RecordPaymentForm({
       }}
       className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4"
     >
-      <p className="text-sm text-muted-foreground">{invoice.number} · {invoice.clientName} · Balance {formatMoney(invoice.balanceCents)}</p>
+      <p className="text-sm text-muted-foreground">{invoice.number} · {invoice.clientName} {" "}<L>{"· Balance"}</L>{" "}{formatMoney(invoice.balanceCents)}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Amount $</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Amount $"}</L></span>
           <input
             className={inputCls}
             inputMode="decimal"
@@ -1030,7 +1021,7 @@ function RecordPaymentForm({
           />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Method</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Method"}</L></span>
           <select
             className={inputCls}
             value={method}
@@ -1044,7 +1035,7 @@ function RecordPaymentForm({
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Reference</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Reference"}</L></span>
           <input
             className={inputCls}
             placeholder="Check #, transaction id…"
@@ -1053,7 +1044,7 @@ function RecordPaymentForm({
           />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Date</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Date"}</L></span>
           <input
             type="date"
             className={inputCls}
@@ -1065,10 +1056,9 @@ function RecordPaymentForm({
       <div className="flex gap-2">
         <button type="submit" disabled={record.isPending} className={cn(primaryBtn, "flex-1")}>
           {record.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
-          Record payment
-        </button>
+          <L>{"Record payment"}</L>{" "}</button>
         <ModalClose className={secondaryBtn}>
-          Cancel
+          <L>{"Cancel"}</L>
         </ModalClose>
       </div>
     </form>
@@ -1225,10 +1215,10 @@ function InvoiceDetailModal({
               {inv.clientName ?? "No client"}
             </span>
             {inv.issueDate && (
-              <span className="text-muted-foreground">Issued {formatDate(inv.issueDate)}</span>
+              <span className="text-muted-foreground"><L>{"Issued"}</L>{" "}{formatDate(inv.issueDate)}</span>
             )}
             {inv.dueDate && (
-              <span className="text-muted-foreground">Due {formatDate(inv.dueDate)}</span>
+              <span className="text-muted-foreground"><L>{"Due"}</L>{" "}{formatDate(inv.dueDate)}</span>
             )}
           </div>
 
@@ -1238,13 +1228,13 @@ function InvoiceDetailModal({
           {/* The owner's own customer wording, when there is any. */}
           {inv.customerNote && (
             <p className="whitespace-pre-line text-sm text-foreground">
-              <span className="text-muted-foreground">Note to customer: </span>
+              <span className="text-muted-foreground"><L>{"Note to customer:"}</L>{" "}</span>
               {inv.customerNote}
             </p>
           )}
           {inv.terms && (
             <p className="whitespace-pre-line text-xs text-muted-foreground">
-              <span className="font-medium">Terms: </span>
+              <span className="font-medium"><L>{"Terms:"}</L>{" "}</span>
               {inv.terms}
             </p>
           )}
@@ -1253,7 +1243,7 @@ function InvoiceDetailModal({
               invoice with none has nothing to show. */}
           {(inv.status !== "void" || attachments.length > 0) && (
             <div>
-              <p className="mb-2 text-sm font-semibold text-foreground">Attachments</p>
+              <p className="mb-2 text-sm font-semibold text-foreground"><L>{"Attachments"}</L></p>
               {/* One row per file: the name downloads, the × removes. A void
                   invoice is read-only — names only. */}
               <AttachmentsEditor
@@ -1271,18 +1261,17 @@ function InvoiceDetailModal({
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs font-medium uppercase text-muted-foreground">
-                  <th className="px-3 py-2">Description</th>
-                  <th className="px-3 py-2 text-right">Qty</th>
-                  <th className="px-3 py-2 text-right">Unit</th>
-                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2"><L>{"Description"}</L></th>
+                  <th className="px-3 py-2 text-right"><L>{"Qty"}</L></th>
+                  <th className="px-3 py-2 text-right"><L>{"Unit"}</L></th>
+                  <th className="px-3 py-2 text-right"><L>{"Amount"}</L></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {items.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
-                      No line items
-                    </td>
+                      <L>{"No line items"}</L>{" "}</td>
                   </tr>
                 ) : (
                   items.map((it, i) => (
@@ -1307,7 +1296,7 @@ function InvoiceDetailModal({
           {/* Totals */}
           <div className="ml-auto w-full max-w-xs text-sm">
             <div className="flex justify-between py-0.5">
-              <span className="text-muted-foreground">Subtotal</span>
+              <span className="text-muted-foreground"><L>{"Subtotal"}</L></span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.subtotalCents)}</span>
             </div>
             {/* Either an owner discount entered on the form or the pay-in-full
@@ -1317,18 +1306,18 @@ function InvoiceDetailModal({
                 why it sits above the Total line. */}
             {(inv.discountCents ?? 0) > 0 && (
               <div className="flex justify-between py-0.5">
-                <span className="text-emerald-700 dark:text-emerald-400">Discount</span>
+                <span className="text-emerald-700 dark:text-emerald-400"><L>{"Discount"}</L></span>
                 <span className="tabular-nums text-emerald-700 dark:text-emerald-400">
                   −{formatMoney(inv.discountCents!)}
                 </span>
               </div>
             )}
             <div className="flex justify-between py-0.5">
-              <span className="text-muted-foreground">Tax ({formatBp(inv.taxRateBp)})</span>
+              <span className="text-muted-foreground"><L>{"Tax ("}</L>{formatBp(inv.taxRateBp)})</span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.taxCents)}</span>
             </div>
             <div className="flex justify-between border-t border-border py-1 font-semibold">
-              <span className="text-foreground">Total</span>
+              <span className="text-foreground"><L>{"Total"}</L></span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.totalCents)}</span>
             </div>
             {/* Phase G #3: retainage reduces the due-now balance only — it
@@ -1336,7 +1325,7 @@ function InvoiceDetailModal({
             {(inv.retainageCents ?? 0) > 0 && (
               <div className="flex justify-between py-0.5">
                 <span className="text-amber-700 dark:text-amber-400">
-                  Retainage {inv.retainageReleasedAt != null ? "(released)" : "withheld"}
+                  <L>{"Retainage"}</L>{" "}{inv.retainageReleasedAt != null ? "(released)" : "withheld"}
                 </span>
                 <span className="tabular-nums text-amber-700 dark:text-amber-400">
                   −{formatMoney(inv.retainageCents!)}
@@ -1345,18 +1334,18 @@ function InvoiceDetailModal({
             )}
             {(inv.depositCents ?? 0) > 0 && (
               <div className="flex justify-between py-0.5">
-                <span className="text-amber-700 dark:text-amber-400">Deposit due</span>
+                <span className="text-amber-700 dark:text-amber-400"><L>{"Deposit due"}</L></span>
                 <span className="tabular-nums text-amber-700 dark:text-amber-400">
                   {formatMoney(inv.depositCents!)}
                 </span>
               </div>
             )}
             <div className="flex justify-between py-0.5">
-              <span className="text-muted-foreground">Paid</span>
+              <span className="text-muted-foreground"><L>{"Paid"}</L></span>
               <span className="tabular-nums text-foreground">{formatMoney(inv.paidCents)}</span>
             </div>
             <div className="flex justify-between py-0.5 font-semibold">
-              <span className="text-foreground">Balance</span>
+              <span className="text-foreground"><L>{"Balance"}</L></span>
               <span
                 className={cn(
                   "tabular-nums",
@@ -1373,7 +1362,7 @@ function InvoiceDetailModal({
           {/* Payments */}
           {payments.length > 0 && (
             <div>
-              <p className="mb-2 text-sm font-semibold text-foreground">Payments</p>
+              <p className="mb-2 text-sm font-semibold text-foreground"><L>{"Payments"}</L></p>
               <div className="divide-y divide-border rounded-lg border border-border">
                 {payments.map((p) => (
                   <div key={p.id} className="flex items-center gap-3 px-3 py-2 text-sm">
@@ -1404,7 +1393,8 @@ function InvoiceDetailModal({
             </div>
           )}
 
-          <DocumentActivityButton kind="invoice" id={id}/>
+          <ConnectedRecords kind="invoice" id={id}/>
+<DocumentActivityButton kind="invoice" id={id}/>
 
           {/* The customer's copy. Minted on the first send — or early, if the
               owner previewed a draft. Already in the invoice email; this is for
@@ -1437,8 +1427,7 @@ function InvoiceDetailModal({
                   className={secondaryBtn}
                 >
                   <Copy className="h-4 w-4" />
-                  Copy
-                </button>
+                  <L>{"Copy"}</L>{" "}</button>
               </div>
             </div>
           )}
@@ -1446,8 +1435,8 @@ function InvoiceDetailModal({
           {/* Actions by state */}
           {versionConflict && (
             <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-              <p className="font-semibold">This invoice changed</p>
-              <p className="mt-1">Reload to review the latest details, then try your action again. Your last action was not applied.</p>
+              <p className="font-semibold"><L>{"This invoice changed"}</L></p>
+              <p className="mt-1"><L>{"Reload to review the latest details, then try your action again. Your last action was not applied."}</L></p>
               <button type="button" className={cn(secondaryBtn, "mt-3")} disabled={detailRefreshing}
                 onClick={async () => {
                   const result = await retryDetail();
@@ -1463,7 +1452,7 @@ function InvoiceDetailModal({
                 <>
                   <button onClick={() => onEdit(inv)} className={secondaryBtn}>
                     <Pencil className="h-4 w-4" />
-                    Edit
+                    <L>{"Edit"}</L>
                   </button>
                   {inv.projectId != null && (
                     <button
@@ -1499,15 +1488,14 @@ function InvoiceDetailModal({
                     {preview.isPending
                       ? <Loader2 className="h-4 w-4 animate-spin" />
                       : <Eye className="h-4 w-4" />}
-                    Preview
-                  </button>
+                    <L>{"Preview"}</L>{" "}</button>
                   <button
                     onClick={() => setStatus.mutate("sent")}
                     disabled={setStatus.isPending || detailRefreshing || preview.isPending || versionConflict}
                     className={primaryBtn}
                   >
                     <Send className="h-4 w-4" />
-                    Mark sent
+                    <L>{"Mark sent"}</L>
                   </button>
                 </>
               )}
@@ -1515,8 +1503,7 @@ function InvoiceDetailModal({
                 <>
                   <button onClick={() => { setPayPrefill(null); setPaying(true); }} className={primaryBtn}>
                     <CreditCard className="h-4 w-4" />
-                    Record payment
-                  </button>
+                    <L>{"Record payment"}</L>{" "}</button>
                   {/* The deposit handed over in cash or by check — one click
                       opens the payment form with exactly the deposit still
                       owing filled in; method and date are picked there. */}
@@ -1532,7 +1519,7 @@ function InvoiceDetailModal({
                         title="Record the deposit as paid — cash, check, or however it arrived"
                       >
                         <Banknote className="h-4 w-4" />
-                        Deposit paid — {formatMoney(depositLeft)}
+                        <L>{"Deposit paid —"}</L>{" "}{formatMoney(depositLeft)}
                       </button>
                     ) : null;
                   })()}
@@ -1542,8 +1529,7 @@ function InvoiceDetailModal({
                     className={cn(secondaryBtn, "text-red-600 dark:text-red-400")}
                   >
                     <Ban className="h-4 w-4" />
-                    Void
-                  </button>
+                    <L>{"Void"}</L>{" "}</button>
                 </>
               )}
               {(inv.status === "paid" || inv.status === "void") && (
@@ -1560,7 +1546,7 @@ function InvoiceDetailModal({
                   className={cn(secondaryBtn, "ml-auto text-red-600 dark:text-red-400")}
                 >
                   {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                  Delete
+                  <L>{"Delete"}</L>
                 </button>
               )}
             </div>
@@ -1575,7 +1561,7 @@ function InvoiceDetailModal({
         error={(confirmation.kind === 'reverse' ? reversePayment.error : confirmation.kind === 'void' ? setStatus.error : del.error)?.message}
         onClose={() => setConfirmation(null)}
         onConfirm={() => { if (confirmation.kind === 'reverse') reversePayment.mutate(confirmation.payment.id); else if (confirmation.kind === 'void') setStatus.mutate('void'); else del.mutate(); }}>
-        {confirmation.kind === 'reverse' ? <><p>Remove the {formatMoney(confirmation.payment.amountCents)} payment from {inv.number}?</p><p>The amount will become due again. This updates your records; it does not send a refund.</p></> : confirmation.kind === 'void' ? <><p>Void invoice {inv.number}?</p><p>Its history stays in your records. You cannot undo this from the app.</p></> : <><p>Delete invoice {inv.number}?</p><p>It will leave your books. Work pulled onto this invoice will become available to bill again.</p></>}
+        {confirmation.kind === 'reverse' ? <><p><L>{"Remove the"}</L>{" "}{formatMoney(confirmation.payment.amountCents)} {" "}<L>{"payment from"}</L>{" "}{inv.number}?</p><p><L>{"The amount will become due again. This updates your records; it does not send a refund."}</L></p></> : confirmation.kind === 'void' ? <><p><L>{"Void invoice"}</L>{" "}{inv.number}?</p><p><L>{"Its history stays in your records. You cannot undo this from the app."}</L></p></> : <><p><L>{"Delete invoice"}</L>{" "}{inv.number}?</p><p><L>{"It will leave your books. Work pulled onto this invoice will become available to bill again."}</L></p></>}
       </ConfirmDialog>}
     </Modal>
   );
@@ -1593,17 +1579,18 @@ const TABS: { key: string; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
- const [projectFilter,setProjectFilter]=useRememberedState("invoice-project",readContext("projectId"),"projectId");
-  const [tab, setTab] = useRememberedState("client/src/pages/finance/invoices.tsx:tab",readContext("status"), "status");
-  const [q, setQ] = useRememberedState("client/src/pages/finance/invoices.tsx:q","");
-  useEffect(()=>{const apply=()=>{if(readContext('status')||readContext('projectId'))setQ('');if(readContext('projectId'))setTab('');};apply();window.addEventListener('hashchange',apply);return()=>window.removeEventListener('hashchange',apply);},[]);
+ const [filters,setFilters]=usePageFilters({projectId:"",status:"",q:"",page:"0"});
+ const projectFilter=filters.projectId,setProjectFilter=(projectId:string)=>setFilters({projectId});
+  const tab=filters.status,setTab=(status:string)=>setFilters({status});
+  const q=filters.q,setQ=(q:string)=>setFilters({q});
+
   const [newOpen, setNewOpen] = useState(()=>readContext("new")==="1");
   const invoiceLink = useDeepLink("invoice");
   const [detailId, setDetailId] = useState<number | null>(invoiceLink ? Number(invoiceLink) : null);
   useEffect(() => { if (invoiceLink) {setDetailId(Number(invoiceLink));consumeRecordLink("invoice");} }, [invoiceLink]);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
 
-  const {page,setPage}=useListPage('rows:client/src/pages/finance/invoices.tsx',[tab,q,projectFilter]);
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   const url = useMemo(() => {
     const params = new URLSearchParams();
     params.set('page',String(page));params.set('limit','50');
@@ -1624,10 +1611,10 @@ export default function InvoicesPage() {
       <Header title="Invoices" description="Billing and accounts receivable">
         <button onClick={() => setNewOpen(true)} className={primaryBtn}>
           <Plus className="h-5 w-5" />
-          New invoice
+          <L>{"New invoice"}</L>
         </button>
       </Header>
-      {!projectFilter?<Insights area="invoices"/>:<p className="my-4 text-sm">Invoices for job #{projectFilter} <button className="ml-2 underline" onClick={()=>setProjectFilter('')}>Show all jobs</button></p>}
+      {!projectFilter?<Insights area="invoices"/>:<p className="my-4 text-sm"><L>{"Invoices for job #"}</L>{projectFilter} <button className="ml-2 underline" onClick={()=>setProjectFilter('')}><L>{"Show all jobs"}</L></button></p>}
 
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -1666,7 +1653,7 @@ export default function InvoicesPage() {
           {!tab && !q && (
             <button onClick={() => setNewOpen(true)} className={primaryBtn}>
               <Plus className="h-5 w-5" />
-              New invoice
+              <L>{"New invoice"}</L>
             </button>
           )}
         </EmptyState>
@@ -1675,13 +1662,13 @@ export default function InvoicesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-medium uppercase text-muted-foreground">
-                <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3">Client</th>
-                <th className="px-4 py-3">Issued</th>
-                <th className="px-4 py-3">Due</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-right">Balance</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"><L>{"Number"}</L></th>
+                <th className="px-4 py-3"><L>{"Client"}</L></th>
+                <th className="px-4 py-3"><L>{"Issued"}</L></th>
+                <th className="px-4 py-3"><L>{"Due"}</L></th>
+                <th className="px-4 py-3 text-right"><L>{"Total"}</L></th>
+                <th className="px-4 py-3 text-right"><L>{"Balance"}</L></th>
+                <th className="px-4 py-3"><L>{"Status"}</L></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">

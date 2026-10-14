@@ -1,0 +1,2 @@
+import {useState} from 'react';
+export default function SupportReference({reference}:{reference?:string}){const [copied,setCopied]=useState(false);if(!reference)return null;return <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>Support reference: <code>{reference}</code></span><button type="button" className="min-h-11 rounded-lg border px-3" onClick={async()=>{try{await navigator.clipboard.writeText(reference);setCopied(true);}catch{setCopied(false);}}}>{copied?'Copied':'Copy reference'}</button></div>;}

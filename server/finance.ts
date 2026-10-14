@@ -1,4 +1,6 @@
 import {businessScope,invoiceBusiness,expenseBusiness} from "./business-scope";
+import {validateQuoteBilling} from './quote-billing';
+import {registerJobForecast} from './job-forecast';
 import {inventoryOnce} from "./inventory-core";
 import { initializePurchaseOrders, registerPurchaseOrders } from './purchase-orders';
 import {resolveReviewSite} from './marketing-core';
@@ -22,7 +24,7 @@ import { requireElevated } from "./auth";
 import { mailEnabled, sendMail, queueMail, isOptedOut } from "./mailer";
 import { renderTemplate, firstNameOf, shopBrand } from "./email-templates";
 import {
-  invoices, invoicePayments, expenses, 
+  invoices, invoicePayments, expenses,
   finSettings,
   insertInvoiceSchema, insertInvoicePaymentSchema, insertExpenseSchema,
   updateFinSettingsSchema, pullUnbilledSchema, retainagePctSchema,
@@ -413,8 +415,7 @@ export async function run_queueReviewRequest(inv: Invoice, _deliveryKey:string) 
 function queuePaymentReceipt(inv: Invoice, amountCents: number): void { enqueueFollowup(`payment-receipt:${inv.id}:${(sqlite.prepare("SELECT max(id) id FROM fin_invoice_payments WHERE invoice_id=?").get(inv.id) as any).id}`,"queuePaymentReceipt",{inv,amountCents}); }
 export async function run_queuePaymentReceipt(inv: Invoice, amountCents: number, deliveryKey:string) {
       if (inv.clientId == null) return;
-      const client = db.select({ name: clients.name, email: clients.email })
-        .from(clients).where(eq(clients.id, inv.clientId)).get();
+      const client = billingContact(inv.clientId);
       if (!client?.email) return;
 
       const first = firstNameOf(client.name ?? inv.clientName);
@@ -431,7 +432,7 @@ export async function run_queuePaymentReceipt(inv: Invoice, amountCents: number,
           balance: usd(balanceCents),
         },
       );
-      const ok = msg ? await sendMail({ to: client.email, ...msg,deliveryKey }) : false;
+      const ok = msg ? await sendMail({ to: client.email, ...msg,deliveryKey,context:{invoiceId:inv.id,quoteId:inv.quoteId,jobId:inv.projectId,customerId:inv.clientId} }) : false;
       // Phase B #9: receipt on the timeline.
       if (ok) {
         logEmailActivity({
@@ -479,21 +480,18 @@ export function payInFullDiscountBp(): number {
 // already passed and the money had sat unasked-for for the whole window.
 export function invoiceRecipient(inv: Invoice): string | null {
   const client = inv.clientId != null
-    ? db.select({ name: clients.name, email: clients.email })
-        .from(clients).where(eq(clients.id, inv.clientId)).get()
+    ? billingContact(inv.clientId)
     : undefined;
   // Fallback: any email typed into the invoice notes (unlinked clients).
-  return client?.email
-    || (inv.notes ?? "").match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/)?.[0]
-    || null;
+  if(inv.clientId != null)return client?.email || null;
+  return (inv.notes ?? "").match(/[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/)?.[0] || null;
 }
 
 function queueInvoiceEmail(inv: Invoice): void { enqueueFollowup(`invoice-email:${inv.id}:${inv.sentAt}`,"queueInvoiceEmail",{inv}); }
 export async function run_queueInvoiceEmail(inv: Invoice, deliveryKey:string) {
 
       const client = inv.clientId != null
-        ? db.select({ name: clients.name, email: clients.email })
-            .from(clients).where(eq(clients.id, inv.clientId)).get()
+        ? billingContact(inv.clientId)
         : undefined;
       const to = invoiceRecipient(inv);
       if (!to) return;
@@ -545,7 +543,7 @@ export async function run_queueInvoiceEmail(inv: Invoice, deliveryKey:string) {
       const comm=communicationContext({invoiceNumber:inv.number});
       const spanish=comm.lang==='es';
       const ok = await sendMail({
-        deliveryKey,to,
+        deliveryKey,to,context:{invoiceId:inv.id,quoteId:inv.quoteId,jobId:inv.projectId,customerId:inv.clientId},
         subject: spanish ? `Factura ${inv.number} — ${comm.brand || shopBrand()}` : `Invoice ${inv.number} from ${shopBrand()}${inv.dueDate ? ` — due ${inv.dueDate}` : ""}`,
         text: spanish ? `Hola ${first},\n\nTu factura ${inv.number} está lista.\nTotal: ${usd(inv.totalCents)}\nSaldo: ${usd(inv.totalCents-retainageOf(inv)-inv.paidCents)}\n${inv.dueDate ? `Vencimiento: ${inv.dueDate}\n` : ''}\n${payUrl || ''}\n\nRevisa la factura para ver el detalle y las opciones de pago. Si tienes preguntas, responde a este correo.\n\n${comm.brand || shopBrand()}` :
           `Hi ${first},\n\n` +
@@ -782,6 +780,7 @@ function validateInvoiceJob(projectId:number|null|undefined,clientId:number|null
 }
 
 export function registerFinanceRoutes(app: Express): void {
+  registerJobForecast(app);
   registerReceivingRoutes(app);
   sqlite.exec('CREATE TABLE IF NOT EXISTS fin_payment_instructions (id INTEGER PRIMARY KEY CHECK(id=1), wire_details TEXT NOT NULL)');
   app.get('/api/finance/payment-instructions', requireElevated, (_req, res) => {
@@ -1022,6 +1021,7 @@ export function registerFinanceRoutes(app: Express): void {
         : undefined;
       itemsJson = body.items ?? "[]";
       totals = computeTotals(itemsJson, body.taxRateBp ?? 0, discountFor(itemsJson, discount, null));
+      if(body.status&&body.status!=='draft'&&body.status!=='void')validateQuoteBilling({...body,totalCents:totals.totalCents});
     } catch (e: any) {
       return res.status(400).json({ message: e.message });
     }
@@ -1194,6 +1194,9 @@ export function registerFinanceRoutes(app: Express): void {
       return res.json(presentInvoice(inv, todayLocal()));
     }
 
+    if((body.status==='sent'&&inv.status==='draft')||(touchesMoney&&inv.status!=='draft'&&inv.status!=='void')){
+      try{validateQuoteBilling({...inv,...updates});}catch(e:any){return res.status(409).json({message:e.message});}
+    }
     if(body.status==='void'){const adjustment=activeExpenseAdjustment(inv.id);if(adjustment)return res.status(409).json({message:`Void the linked expense adjustment ${adjustment.number} first so the expense cannot be billed twice.`});}
     const row=sqlite.transaction(()=>{
 
@@ -1506,18 +1509,21 @@ export function registerFinanceRoutes(app: Express): void {
     // a done job with contract money left unbilled is the cash leak this
     // whole card exists to catch. pm_contracts belongs to pm → try/catch.
     let contractCents = 0;
+    let signedContractCount = 0;
     try {
-      contractCents = db.select({ s: sql<number>`coalesce(sum(${contracts.valueCents}), 0)` })
+      const contractTotal = db.select({ s: sql<number>`coalesce(sum(${contracts.valueCents}), 0)`, count: sql<number>`count(*)` })
         .from(contracts)
         .where(and(
           isNull(contracts.deletedAt),
           eq(contracts.projectId, projectId),
           inArray(contracts.status, ["active", "signed"]),
         ))
-        .get()?.s ?? 0;
+        .get();
+      contractCents = contractTotal?.s ?? 0;
+      signedContractCount = contractTotal?.count ?? 0;
     } catch { /* pm module absent — no contract to reconcile */ }
 
-    if(!contractCents)contractCents=(sqlite.prepare("SELECT q.total_cents n FROM projects p JOIN quotes q ON q.id=p.quote_id WHERE p.id=? AND q.status='accepted' AND q.deleted_at IS NULL").get(projectId) as any)?.n || 0;
+    if(!signedContractCount)contractCents=(sqlite.prepare("SELECT q.total_cents n FROM projects p JOIN quotes q ON q.id=p.quote_id WHERE p.id=? AND q.status='accepted' AND q.deleted_at IS NULL").get(projectId) as any)?.n || 0;
     // Phase G #1: approved change orders move the goalposts — the job's
     // effective contract total is contractCents + changeOrderCents (signed;
     // deductive COs subtract). pm_change_orders belongs to pm → try/catch.
@@ -1537,6 +1543,9 @@ export function registerFinanceRoutes(app: Express): void {
     res.json({
       invoices: live.map((i) => presentInvoice(i, today)),
       totals: {
+        contractKnown: !!sqlite.prepare("SELECT 1 FROM pm_contracts WHERE project_id=? AND deleted_at IS NULL AND status IN ('active','signed') UNION ALL SELECT 1 FROM projects p JOIN quotes q ON q.id=p.quote_id WHERE p.id=? AND q.status='accepted' AND q.deleted_at IS NULL LIMIT 1").get(projectId,projectId),
+        remainingToBillCents: Math.max(0,contractCents+changeOrderCents-invoicedCents),
+        billedAboveContractCents: Math.max(0,invoicedCents-contractCents-changeOrderCents),
         draftCents: drafts.reduce((sum,i)=>sum+i.totalCents,0),
         missingRateMinutes: labor.missingRateMinutes,
         salaryEstimated: labor.salaryEstimated,
@@ -1718,3 +1727,4 @@ export function registerFinanceRoutes(app: Express): void {
   });
   registerPurchaseOrders(app);
 }
+import {billingContact} from './customer-accounts';

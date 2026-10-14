@@ -52,9 +52,8 @@ test('Job settings save without a quote, explain missing requirements, and uploa
   await expect(dialog).toHaveCount(0);
   expect(app.sqlite.prepare('SELECT quote_id,site_address,schedule_state FROM projects WHERE id=?').get(job.id)).toEqual({quote_id:null,site_address:'Fixture workshop address',schedule_state:'tentative'});
   await page.goto(app.base+`/#/project/${job.id}?tab=files`);
-  await page.getByLabel('Upload job file').setInputFiles({name:'Floor plan.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\nFixture plan\n%%EOF')});
-  await expect(page.getByLabel('File title',{exact:true})).toHaveValue('Floor plan.pdf');
-  await page.getByRole('button',{name:'Save to job',exact:true}).click();
+  await page.getByLabel('Choose job files',{exact:true}).setInputFiles({name:'Floor plan.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\nFixture plan\n%%EOF')});
+  await page.getByRole('button',{name:'Upload / retry remaining files',exact:true}).click();
   const download=page.getByRole('button',{name:'Download Floor plan.pdf',exact:true});
   await expect(download).toBeVisible();
   await expect(page.locator('img[src$=".pdf"]')).toHaveCount(0);

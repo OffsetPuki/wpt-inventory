@@ -14,6 +14,7 @@ test.afterAll(async()=>app.close());
 test.beforeEach(async({page})=>{await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);});
 test('Graphs open matching records, then the exact invoice; mobile layout and filters',async({page},info)=>{
  await page.goto(app.base+'/#/finance/invoices');
+ await page.getByRole('button',{name:'Show graphs',exact:true}).click();
  const graph=page.getByRole('region',{name:'Money to collect',exact:true});
  await expect(graph).toBeVisible();
  await page.getByRole('combobox',{name:'Business',exact:true}).selectOption('concrete');
@@ -53,10 +54,12 @@ test('Shared date selection, comparisons, expand/collapse, and Sales business sc
 });
 test('Job costs link to that job’s expenses and invoices',async({page})=>{
  await page.goto(app.base+'/#/project/'+job.id+'?tab=money');
+ await page.getByText('Money graphs',{exact:true}).click();
  await page.getByRole('link',{name:/Direct expenses/}).click();
  await expect(page.getByRole('heading',{name:'Expenses',exact:true})).toBeVisible();
  await expect(page).toHaveURL(new RegExp('projectId='+job.id));
  await page.goto(app.base+'/#/project/'+job.id+'?tab=money');
+ await page.getByText('Money graphs',{exact:true}).click();
  await page.getByRole('link',{name:/Billed to date/}).click();
  await expect(page.getByText('Invoices for job #'+job.id,{exact:false})).toBeVisible();
  await expect(page.getByText(invoice.number,{exact:true})).toBeVisible();

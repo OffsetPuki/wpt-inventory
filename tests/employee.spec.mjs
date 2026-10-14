@@ -19,6 +19,19 @@ test.beforeAll(async()=>{
   task=await call('/api/pm/tasks',{title:'Install entrance panels',description:'Confirm measurements before installation.',projectId:job.id,assigneeId:worker.id});
 });
 test.afterAll(async()=>app.close());
+test('Spanish field controls preserve job notes and fit a small phone',async({page})=>{
+ await page.setViewportSize({width:360,height:800});await page.addInitScript(t=>localStorage.setItem('wpt-auth-token',t),token);
+ await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ await page.goto(app.base+'/#/employee/jobs/'+job.id);
+ const note=page.getByLabel('Post a job update');await note.fill('Keep this original customer wording unchanged.');
+ await page.getByLabel('Interface language / Idioma').selectOption('es');
+ await expect(page.getByRole('navigation',{name:'Navegación del empleado'})).toBeVisible();
+ await expect(page.getByRole('navigation').getByRole('link',{name:'Mis trabajos',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:job.name,exact:true})).toBeVisible();
+ await expect(note).toHaveValue('Keep this original customer wording unchanged.');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ await page.getByLabel('Interface language / Idioma').selectOption('en');await expect(note).toHaveValue('Keep this original customer wording unchanged.');
+});
 test('Phone clock, lost-response recovery, jobs, review and payroll',async({page,context,browser})=>{
   test.setTimeout(120000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

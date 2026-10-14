@@ -179,6 +179,7 @@ export function registerPurchaseOrders(app: Express) {
         const filters=[isNull(purchaseOrders.deletedAt)];
         if(req.query.orderType)filters.push(eq(purchaseOrders.orderType,z.enum(['supplier','customer']).parse(req.query.orderType)));
         if(req.query.status)filters.push(eq(purchaseOrders.status,z.enum(ORDER_STATUSES).parse(req.query.status)));
+        if(req.query.projectId)filters.push(eq(purchaseOrders.projectId,pid(String(req.query.projectId))));
         const needle=String(req.query.q||'').trim().toLowerCase();
         if(needle)filters.push(sql`instr(lower(${purchaseOrders.number}||' '||${purchaseOrders.vendor}||' '||${purchaseOrders.customerName}||' '||${purchaseOrders.customerPoNumber}||' '||${purchaseOrders.customerProjectNumber}),${needle})>0`);
         filters.push(sql.raw(businessScope(req,"coalesce((SELECT site FROM projects WHERE id=fin_purchase_orders.project_id),CASE WHEN json_valid(fin_purchase_orders.details) THEN json_extract(fin_purchase_orders.details,'$.business') END)")));

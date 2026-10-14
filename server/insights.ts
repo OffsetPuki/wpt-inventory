@@ -12,7 +12,7 @@ const scope=(expression:string)=>`(@site='all' OR coalesce(${expression},'unassi
 export const quoteSite="coalesce((SELECT site FROM crm_leads WHERE id=q.lead_id),CASE WHEN json_valid(q.payload) THEN json_extract(q.payload,'$.business') END,CASE q.type WHEN 'concrete' THEN 'concrete' WHEN 'insulation' THEN 'insulation' ELSE 'metals' END)";
 const invJoins='LEFT JOIN projects p ON p.id=i.project_id LEFT JOIN crm_leads l ON l.id=i.lead_id LEFT JOIN quotes q ON q.id=i.quote_id';
 const invSite=`coalesce(p.site,l.site,CASE WHEN q.id IS NOT NULL THEN ${quoteSite} END)`;
-const localDate=(column:string)=>`date(${column}/1000,'unixepoch','localtime')`;
+const localDate=(column:string)=>`business_day(${column})`;
 const selected=(date:string)=>`${date} BETWEEN @from AND @to`;
 const invoiceDue="max(0,i.total_cents-coalesce(i.retainage_cents,0)-i.paid_cents)";
 const age="CAST(julianday(@today)-julianday(i.due_date) AS INTEGER)";

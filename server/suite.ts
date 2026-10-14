@@ -1,9 +1,22 @@
+import {registerTaskReschedule} from './task-reschedule';
+import {readableValidation} from '../shared/validation-message';
+import {registerDesignRegistry} from './design-registry';
+import {registerDesignMeasurements} from './design-measurements';
+import {registerJobCompletion} from './job-completion';
+import {registerRelationshipReview} from './relationship-review';
+import {registerDeletionReview} from './deletion-review';
+import {registerStorageReview} from './storage-review';
+import {registerRecordCommunication} from './record-communication';
+import {registerJobPacks} from './job-pack';
+import {registerRecordConnections} from './record-connections';
+import {registerCustomerAccounts} from './customer-accounts';
 import {jobReadinessMany} from "./suite-data";
 import {registerJobFileRoutes} from './job-files';
 import {businessScope} from "./business-scope";
 import {registerCustomerProjectPage} from './customer-project-page';
 import {registerBusinessReport} from './business-report';
-import { mailEnabled } from "./mailer";
+import { suiteHealth } from './suite-health-data';
+import { businessTimeZone } from './business-clock';
 import { registerSuiteControls } from "./suite-controls";
 import type { Express, Request } from "express";
 import { z } from "zod";
@@ -64,6 +77,17 @@ function localUpload(value: string) {
 }
 export function registerSuiteRoutes(app: Express) {
   initializeSuite();
+  registerCustomerAccounts(app);
+  registerDesignRegistry(app);
+  registerDesignMeasurements(app);
+  registerTaskReschedule(app);
+  registerJobCompletion(app);
+  registerRelationshipReview(app);
+  registerDeletionReview(app);
+  registerStorageReview(app);
+  registerJobPacks(app);
+  registerRecordConnections(app);
+  registerRecordCommunication(app);
   registerJobFileRoutes(app);
   registerSuiteControls(app);
   registerBusinessReport(app);
@@ -82,10 +106,9 @@ export function registerSuiteRoutes(app: Express) {
         try {
           res.json(await fn(req));
         } catch (e: any) {
-          const message = e instanceof z.ZodError
-            ? e.issues.map(issue => `${({quoteId:'Accepted quote',clientId:'Customer',startDate:'Start date',dueDate:'Finish date'} as Record<string,string>)[String(issue.path[0])] || 'Job settings'}: ${issue.message}`).join('\n')
-            : e.message;
-          res.status(e.status || 400).json({ message });
+          const message = e instanceof z.ZodError ? readableValidation(e.issues)?.message || e.message : e.message;
+          const fields = e instanceof z.ZodError ? [...new Set(e.issues.map(issue => String(issue.path[0] || '')).filter(Boolean))] : e.fields;
+          res.status(e.status || 400).json({ message, ...(fields?.length ? {fields} : {}) });
         }
       },
     );
@@ -143,6 +166,7 @@ export function registerSuiteRoutes(app: Express) {
       : [];
     if (!isElevated(req)) {
       delete (readiness as any).depositDue;
+      delete (readiness as any).deposit;
       readiness.materials = readiness.materials.map(
         ({ last_cost_cents, ...m }) => m,
       );
@@ -192,7 +216,7 @@ export function registerSuiteRoutes(app: Express) {
           { status: 409 },
         );
       if (body.startDate && body.dueDate && body.startDate > body.dueDate)
-        throw new Error("End date must follow the start date.");
+        throw Object.assign(new Error("Finish date must be on or after the start date."), {fields:['dueDate']});
       if (
         body.clientId &&
         !sqlite
@@ -257,9 +281,16 @@ export function registerSuiteRoutes(app: Express) {
           .prepare("UPDATE projects SET quote_id=? WHERE id=?")
           .run(body.quoteId, id);
       for (const itemId of body.tools) activeItem(sqlite, itemId);
+      const previousRules=sqlite.prepare('SELECT * FROM suite_job_rules WHERE project_id=?').get(id) as any;
+      const sameSet=(a:unknown,b:unknown)=>JSON.stringify(Array.isArray(a)?[...a].sort():[])===JSON.stringify(Array.isArray(b)?[...b].sort():[]);
+      const confirmationChanged=body.scheduleState==='confirmed' && (
+        before.schedule_state!=='confirmed'||before.start_date!==body.startDate||before.due_date!==body.dueDate||
+        before.client_id!==body.clientId||(body.quoteId!==undefined&&before.quote_id!==body.quoteId)||before.billing_mode!==body.billingMode||
+        !!previousRules?.deposit_required!==body.depositRequired||!sameSet(parse(previousRules?.documents_required||'[]'),body.documentsRequired)||!sameSet(parse(previousRules?.tools||'[]'),body.tools)
+      );
       sqlite
         .prepare(
-          `INSERT INTO suite_job_rules(project_id,deposit_required,documents_required,tools) VALUES(?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET deposit_required=excluded.deposit_required,documents_required=excluded.documents_required,tools=excluded.tools,override_reason=NULL,override_by=NULL,override_at=NULL`,
+          `INSERT INTO suite_job_rules(project_id,deposit_required,documents_required,tools) VALUES(?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET deposit_required=excluded.deposit_required,documents_required=excluded.documents_required,tools=excluded.tools`,
         )
         .run(
           id,
@@ -268,7 +299,8 @@ export function registerSuiteRoutes(app: Express) {
           JSON.stringify([...new Set(body.tools)]),
         );
       const ready = jobReadiness(id);
-      if (body.scheduleState === "confirmed" && !ready.ready) {
+      if(confirmationChanged||body.scheduleState==='tentative')sqlite.prepare('UPDATE suite_job_rules SET override_reason=NULL,override_by=NULL,override_at=NULL WHERE project_id=?').run(id);
+      if (confirmationChanged && !ready.ready) {
         if (!body.overrideReason?.trim())
           throw new Error(
             `Before confirming the schedule:\n${ready.blockers.map(b=>`• ${b.label}`).join('\n')}\nSave as tentative, or enter a reason to confirm despite these items.`,
@@ -604,17 +636,18 @@ export function registerSuiteRoutes(app: Express) {
       },
     );
   });
+  endpoint('get','/api/suite/clock',false,()=>({date:todayLocal(),timeZone:businessTimeZone,now:Date.now()}));
   endpoint("get", "/api/suite/today", false, (req) => {
     const owner = isElevated(req),
       uid = req.user!.userId;
     const tasks = sqlite
       .prepare(
-        `SELECT t.id,t.title,t.due_date,t.project_id,p.name AS project_name FROM pm_tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.deleted_at IS NULL AND t.status!='done' AND ${businessScope(req,"coalesce(p.site,(SELECT site FROM crm_leads WHERE id=t.lead_id))")} ${owner ? "" : "AND t.assignee_id=?"} ORDER BY t.due_date IS NULL,t.due_date,t.id LIMIT 25`,
+        `SELECT count(*) OVER() AS total_count,t.id,t.title,t.due_date,t.project_id,p.name AS project_name,(SELECT name FROM users WHERE id=t.assignee_id) AS owner FROM pm_tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.deleted_at IS NULL AND t.status!='done' AND ${businessScope(req,"coalesce(p.site,(SELECT site FROM crm_leads WHERE id=t.lead_id))")} ${owner ? "" : "AND t.assignee_id=?"} ORDER BY t.due_date IS NULL,t.due_date,t.id LIMIT 25`,
       )
-      .all(...(owner ? [] : [uid]));
+      .all(...(owner ? [] : [uid])) as any[];
     const jobs = sqlite
       .prepare(
-        `SELECT DISTINCT p.* FROM projects p LEFT JOIN pm_tasks t ON t.project_id=p.id WHERE p.deleted_at IS NULL AND p.status='active' AND ${businessScope(req,'p.site')} ${owner ? "" : "AND t.assignee_id=? AND t.deleted_at IS NULL"} ORDER BY p.start_date IS NULL,p.start_date,p.id DESC LIMIT 12`,
+        `SELECT count(*) OVER() AS total_count,p.* FROM projects p WHERE p.deleted_at IS NULL AND p.status='active' AND ${businessScope(req,'p.site')} ${owner ? "" : "AND EXISTS(SELECT 1 FROM pm_tasks t WHERE t.project_id=p.id AND t.assignee_id=? AND t.deleted_at IS NULL)"} ORDER BY p.start_date IS NULL,p.start_date,p.id DESC LIMIT 12`,
       )
       .all(...(owner ? [] : [uid])) as any[];
     const loans = sqlite
@@ -623,7 +656,23 @@ export function registerSuiteRoutes(app: Express) {
       )
       .all(...(owner ? [] : [uid]));
     const readiness=jobReadinessMany(jobs.map(j=>j.id));
+    const today=todayLocal();
+    const jobCandidates=[...jobs];
+    const jobsNeeded=Math.max(0,5-tasks.filter(t=>t.due_date&&t.due_date<=today).length);
+    // Look beyond the display page, so a ready first page never hides an
+    // upcoming job with blockers. Batch only as far as the five actions need.
+    for(let offset=12;offset<(jobs[0]?.total_count||0)&&jobCandidates.filter(j=>!readiness.get(j.id)!.ready).length<jobsNeeded;offset+=50){
+      const more=sqlite.prepare(`SELECT p.* FROM projects p WHERE p.deleted_at IS NULL AND p.status='active' AND ${businessScope(req,'p.site')} ${owner?'':'AND EXISTS(SELECT 1 FROM pm_tasks t WHERE t.project_id=p.id AND t.assignee_id=? AND t.deleted_at IS NULL)'} ORDER BY p.start_date IS NULL,p.start_date,p.id DESC LIMIT 50 OFFSET ?`).all(...(owner?[]:[uid]),offset) as any[];
+      for(const [id,row] of jobReadinessMany(more.map(j=>j.id)))readiness.set(id,row);
+      jobCandidates.push(...more);
+    }
+    const nextActions=[
+      ...tasks.map(t=>({key:`task:${t.id}`,title:t.title,href:`/pm/board?task=${t.id}`,owner:t.owner||'Unassigned',reason:t.due_date?`${t.due_date<today?'Overdue':t.due_date===today?'Due today':'Due'} · ${t.due_date}`:'Choose a follow-up date',rank:t.due_date&&t.due_date<=today?0:3,date:t.due_date||'9999',action:'Open task'})),
+      ...jobCandidates.filter(j=>!readiness.get(j.id)!.ready).map(j=>({key:`job:${j.id}`,title:j.name,href:`/project/${j.id}`,owner:'Job team',reason:readiness.get(j.id)!.blockers[0]?.label,rank:j.start_date&&j.start_date<=today?1:2,date:j.start_date||'9999',action:'Review job'}))
+    ].sort((a,b)=>a.rank-b.rank||a.date.localeCompare(b.date)||a.key.localeCompare(b.key)).slice(0,5);
     return {
+      nextActions,
+      totals:{tasks:tasks[0]?.total_count||0,jobs:jobs[0]?.total_count||0},
       tasks,
       jobs: jobs.map((p) => {
         const r = readiness.get(p.id)!;
@@ -640,48 +689,7 @@ export function registerSuiteRoutes(app: Express) {
       date: todayLocal(),
     };
   });
-  endpoint("get", "/api/suite/health", true, () => ({
-    mailConfigured: mailEnabled(),
-    recentMailFailures: sqlite
-      .prepare(
-        "SELECT id,created_at,target_name FROM audit_log WHERE action='email.failed' ORDER BY id DESC LIMIT 10",
-      )
-      .all(),
-    paymentExceptions: sqlite
-      .prepare(
-        "SELECT id,invoice_id,kind,created_at FROM fin_payment_exceptions WHERE resolved_at IS NULL ORDER BY id DESC LIMIT 20",
-      )
-      .all(),
-    intake: sqlite
-      .prepare(
-        "SELECT site,count(*) AS count,max(created_at) AS latest FROM crm_leads WHERE source='website' GROUP BY site",
-      )
-      .all(),
-    outbox: sqlite
-      .prepare(
-        "SELECT id,event_key,kind,status,attempts,available_at,last_error,created_at FROM suite_outbox ORDER BY id DESC LIMIT 100",
-      )
-      .all(),
-    review: sqlite
-      .prepare(
-        "SELECT * FROM suite_review_actions WHERE resolved_at IS NULL ORDER BY id DESC LIMIT 50",
-      )
-      .all(),
-    unlinkedJobs: sqlite
-      .prepare(
-        "SELECT id,name,customer,billing_mode FROM projects WHERE deleted_at IS NULL AND (client_id IS NULL OR billing_mode='review') ORDER BY id DESC LIMIT 100",
-      )
-      .all(),
-    duplicateClients: sqlite
-      .prepare(
-        `SELECT lower(trim(email)) AS contact,group_concat(id) AS ids,count(*) AS count FROM crm_clients WHERE deleted_at IS NULL AND trim(coalesce(email,''))!='' GROUP BY lower(trim(email)) HAVING count(*)>1 LIMIT 30`,
-      )
-      .all(),
-    restoreVerification:
-      sqlite
-        .prepare("SELECT * FROM suite_restore_checks ORDER BY id DESC LIMIT 1")
-        .get() || null,
-  }));
+  endpoint("get", "/api/suite/health", true, req => suiteHealth(req.query));
   endpoint("patch", "/api/suite/review/:id", true, (req) => {
     const body = z
       .object({ reason: z.string().trim().min(3).max(500) })

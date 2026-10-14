@@ -1,0 +1,32 @@
+{
+  "generatedAt": "2026-10-14T15:44:07.462Z",
+  "scope": "Tracked and new non-ignored source files; import, route-module, literal file and public URL references",
+  "limitations": "Computed paths, deployment tools, external public links and generated assets require manual review. Nothing is deleted by this report.",
+  "sourceFiles": 516,
+  "productionReachable": 395,
+  "supportReachable": 525,
+  "dynamicImports": [
+    {
+      "file": "scripts/check-dependency-security.mjs",
+      "line": 44,
+      "kind": "computed import"
+    }
+  ],
+  "reviewCandidates": [],
+  "testOrScriptOnly": [
+    "client/src/components/design-studio/field-book-entry.tsx",
+    "client/src/types/pdfmake.d.ts",
+    "shared/operational-schema.ts",
+    "shared/suite-schema.ts"
+  ],
+  "confirmedRemovals": [
+    {
+      "symbols": [
+        "purgeOldDeletedItems",
+        "purgeOldDeletedProjects"
+      ],
+      "reason": "Only callers were the automatic 30-day reaper. Those calls were removed to preserve linked financial and file history. Authentication reaping remains.",
+      "verification": "Type check, deleted-job retention and restore regression checks"
+    }
+  ]
+}

@@ -1,8 +1,16 @@
+import {L} from '@/lib/language';
+import {DesignRegistry} from '@/components/design-studio/DesignRegistry';
+import JobFileUploader from '@/components/JobFileUploader';
+import JobCompletion from '@/components/JobCompletion';
+import RecordCommunication from '@/components/RecordCommunication';
+import OfflineJobPack from '@/components/OfflineJobPack';
+import ConnectedRecords from '@/components/ConnectedRecords';
 import JobMoneyGraphs from '@/components/JobMoneyGraphs';
 import DeleteJobButton from '@/components/DeleteJobButton';
 import {JOB_STATUS_LABELS} from "@shared/suite-contracts";
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { ExtraBilling } from "./suite-reviews";
+import JobForecast from '@/components/JobForecast';
 import { useSuiteQuery } from "@/lib/suite-query";
 import { lazy, Suspense, useState } from "react";
 import { Link, useLocation } from "wouter";
@@ -83,7 +91,7 @@ export default function JobWorkspace({ id }: { id: string }) {
     successTitle: "Job updated",
   });
   if (query.isError) return <RetryBlock query={query} />;
-  if (!query.data) return <p role="status">Loading job…</p>;
+  if (!query.data) return <p role="status"><L>{"Loading job…"}</L></p>;
   const d = query.data,
     j = d.job;
   const project = {
@@ -95,8 +103,7 @@ export default function JobWorkspace({ id }: { id: string }) {
   return (
     <div className="space-y-5">
       <Link className="text-sm underline" href="/projects">
-        ← Jobs
-      </Link>
+        <L>{"← Jobs"}</L>{" "}</Link>
       <Header
         title={j.name}
         description={`${j.job_number} · ${j.site} · ${JOB_STATUS_LABELS[j.status]||j.status}`}
@@ -107,12 +114,12 @@ export default function JobWorkspace({ id }: { id: string }) {
           onClick={() => start.mutate()}
           disabled={start.isPending}
         >
-          Start work
+          <L>{"Start work"}</L>
         </button>
         {isElevated && (
           <>
             <button className={secondaryBtn} onClick={() => setPlanning(true)}>
-              Job settings
+              <L>{"Job settings"}</L>
             </button>
             <select
               aria-label="Job status"
@@ -121,15 +128,17 @@ export default function JobWorkspace({ id }: { id: string }) {
               onChange={(e) => status.mutate(e.target.value)}
               disabled={status.isPending}
             >
-              <option value="active">Active</option>
-              <option value="on_hold">On hold</option>
-              <option value="done">Completed</option>
+              <option value="active"><L>{"Active"}</L></option>
+              <option value="on_hold"><L>{"On hold"}</L></option>
+              <option value="done"><L>{"Completed"}</L></option>
             </select>
             <DeleteJobButton job={{id:j.id,name:j.name,jobNumber:j.job_number,_version:j._version}} onDeleted={()=>setLocation('/projects')}/>
           </>
         )}
       </div>
-      <div className="flex flex-wrap gap-3 text-sm" aria-label="Connected records">{isElevated&&j.client_id&&<Link className="rounded-full border px-3 py-2 hover:bg-muted" href={`/crm/clients?client=${j.client_id}`}>Customer history</Link>}{isElevated&&j.quote_id&&<Link className="rounded-full border px-3 py-2 hover:bg-muted" href={`/crm/quotes?quote=${j.quote_id}`}>Linked quote</Link>}<Link className="rounded-full border px-3 py-2 hover:bg-muted" href={`/pm/time?projectId=${id}`}>Job hours</Link></div>
+      <ConnectedRecords kind="job" id={Number(id)}/>
+      <OfflineJobPack id={Number(id)}/>
+      {isElevated&&tab==='overview'&&<JobCompletion key={id} id={Number(id)}/>}
       <nav
         aria-label="Job sections"
         className="flex gap-1 overflow-x-auto border-b pb-2"
@@ -151,12 +160,12 @@ export default function JobWorkspace({ id }: { id: string }) {
           </Link>
         ))}
       </nav>
-      <Suspense fallback={<p role="status">Loading section…</p>}>
+      <Suspense fallback={<p role="status"><L>{"Loading section…"}</L></p>}>
         {tab === "overview" && (
           <div className="grid gap-5 lg:grid-cols-2">
             <Card title="Next actions">
               {d.readiness.ready ? (
-                <p>Ready for the planned work.</p>
+                <p><L>{"Ready for the planned work."}</L></p>
               ) : (
                 d.readiness.blockers.map((b: any, i: number) => (
                   <Link
@@ -178,14 +187,12 @@ export default function JobWorkspace({ id }: { id: string }) {
               )}
               {d.readiness.override && (
                 <p className="mt-3 text-sm text-amber-700">
-                  Date confirmed with exception: {d.readiness.override.reason}
+                  <L>{"Date confirmed with exception:"}</L>{" "}{d.readiness.override.reason}
                 </p>
               )}
               {j.status === "done" && (
                 <p className="mt-3">
-                  Review final billing, unused materials, tools and
-                  completed-work photos.
-                </p>
+                  <L>{"Review final billing, unused materials, tools and completed-work photos."}</L>{" "}</p>
               )}
             </Card>
             <Card title="Customer & scope">
@@ -210,7 +217,7 @@ export default function JobWorkspace({ id }: { id: string }) {
                   </p>
                 </>
               ) : (
-                <p>Customer link needs review.</p>
+                <p><L>{"Customer link needs review."}</L></p>
               )}
               <p className="mt-3">{j.site_address || "Job address not set"}</p>
               <p className="text-sm">
@@ -223,7 +230,7 @@ export default function JobWorkspace({ id }: { id: string }) {
                   className="mt-3 block underline"
                   href={`/crm/quotes?quote=${d.quote.id}`}
                 >
-                  Open {d.quote.number} · {d.quote.status}
+                  <L>{"Open"}</L>{" "}{d.quote.number} · {d.quote.status}
                 </Link>
               )}
             </Card>
@@ -237,17 +244,14 @@ export default function JobWorkspace({ id }: { id: string }) {
                   className={primaryBtn}
                   onClick={() => setAddingTask(true)}
                 >
-                  Add task
-                </button>
+                  <L>{"Add task"}</L>{" "}</button>
                 <Link
                   className={secondaryBtn}
                   href={`/pm/time?projectId=${id}`}
                 >
-                  Time entries
-                </Link>
+                  <L>{"Time entries"}</L>{" "}</Link>
                 <Link className={secondaryBtn} href="/pm/schedule">
-                  Crew calendar
-                </Link>
+                  <L>{"Crew calendar"}</L>{" "}</Link>
               </div>
               {d.readiness.tasks.length ? (
                 d.readiness.tasks.map((t: any) => (
@@ -261,7 +265,7 @@ export default function JobWorkspace({ id }: { id: string }) {
                   </Link>
                 ))
               ) : (
-                <p>No open tasks.</p>
+                <p><L>{"No open tasks."}</L></p>
               )}
             </Card>
             {!!d.readiness.conflicts.length && (
@@ -283,6 +287,7 @@ export default function JobWorkspace({ id }: { id: string }) {
           <>
             {isElevated&&<RelatedPreviews projectId={Number(id)}/>}
             <JobFiles id={Number(id)} />
+            {isElevated&&<RecordCommunication key={id} kind="job" id={Number(id)}/>}
             <Documents projectId={Number(id)} />
             <Contracts project={project} />
             {isElevated && (
@@ -290,8 +295,7 @@ export default function JobWorkspace({ id }: { id: string }) {
                 className={secondaryBtn}
                 onClick={() => setPublishing(true)}
               >
-                Publish completed-work photo
-              </button>
+                <L>{"Publish completed-work photo"}</L>{" "}</button>
             )}
           </>
         )}
@@ -301,7 +305,7 @@ export default function JobWorkspace({ id }: { id: string }) {
           <TaskDialog
             open
             task={null}
-           
+
             users={people.data as any}
             isElevated={isElevated}
             defaultProjectId={Number(id)}
@@ -335,6 +339,10 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
     overrideReason: "",
   });
   const stale = form.version !== j.version;
+  const [reviewedLinks,setReviewedLinks]=useState('');
+  const relationshipKey=JSON.stringify([form.clientId,form.quoteId,form.billingMode]);
+  const relationshipsChanged=form.clientId!==j.client_id||(form.quoteId||null)!==(j.quote_id||null)||form.billingMode!==j.billing_mode;
+  const linksReviewed=!relationshipsChanged||reviewedLinks===relationshipKey;
   const [search, setSearch] = useState("");
   const clients = useSuiteQuery<any[]>(
     ["crm-client-picker", search, form.clientId],
@@ -376,13 +384,14 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          save.mutate(undefined);
+          if(linksReviewed)save.mutate(undefined);
         }}
       >
+        <p className="text-sm text-muted-foreground"><L>{"1. Check customer & billing. 2. Set work dates. 3. Review requirements before confirming. Work status stays separate from this plan."}</L></p>
         {!j.quote_id && (
           <label className="block">
-            Find customer
-            <input
+            <L>{"Find customer"}</L>{" "}<input
+              name="clientId"
               className={inputCls}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -410,23 +419,21 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
         )}
         {!j.quote_id && (
           <div className="space-y-2">
-            <label className="block">Find an accepted quote (optional)
-              <input className={inputCls} value={quoteSearch} onChange={e=>setQuoteSearch(e.target.value)} placeholder="Quote number or customer name" disabled={!form.clientId}/>
+            <label className="block"><L>{"Find an accepted quote (optional)"}</L>{" "}<input className={inputCls} value={quoteSearch} onChange={e=>setQuoteSearch(e.target.value)} placeholder="Quote number or customer name" disabled={!form.clientId}/>
             </label>
-            <label className="block">Link accepted quote
-              <select className={inputCls} value={form.quoteId||''} disabled={!form.clientId||acceptedQuotes.isLoading} onChange={e=>field('quoteId',e.target.value?Number(e.target.value):null)}>
-                <option value="">No linked quote</option>
-                {form.quoteId&&!acceptedQuotes.data?.some(q=>q.id===form.quoteId)&&<option value={form.quoteId}>Previous selection — search to review</option>}
+            <label className="block"><L>{"Link accepted quote"}</L>{" "}<select name="quoteId" className={inputCls} value={form.quoteId||''} disabled={!form.clientId||acceptedQuotes.isLoading} onChange={e=>field('quoteId',e.target.value?Number(e.target.value):null)}>
+                <option value=""><L>{"No linked quote"}</L></option>
+                {form.quoteId&&!acceptedQuotes.data?.some(q=>q.id===form.quoteId)&&<option value={form.quoteId}><L>{"Previous selection — search to review"}</L></option>}
                 {acceptedQuotes.data?.map(q=><option key={q.id} value={q.id}>{q.number} · {q.customerName||customerName} · {formatMoney(q.totalCents)}</option>)}
               </select>
             </label>
-            {acceptedQuotes.isError?<p role="alert">Could not load quotes. <button type="button" className="underline" onClick={()=>acceptedQuotes.refetch()}>Try again</button></p>:<p className="text-sm text-muted-foreground">{!form.clientId?'Choose a customer to see their accepted quotes.':acceptedQuotes.data?.length?'Only this customer’s accepted quotes without another linked job are shown.':'No matching quotes available. Accepting a quote normally creates its job automatically. You can save this job without a quote.'}</p>}
+            {acceptedQuotes.isError?<p role="alert"><L>{"Could not load quotes."}</L>{" "}<button type="button" className="underline" onClick={()=>acceptedQuotes.refetch()}><L>{"Try again"}</L></button></p>:<p className="text-sm text-muted-foreground">{!form.clientId?'Choose a customer to see their accepted quotes.':acceptedQuotes.data?.length?'Only this customer’s accepted quotes without another linked job are shown.':'No matching quotes available. Accepting a quote normally creates its job automatically. You can save this job without a quote.'}</p>}
           </div>
         )}
-        {j.quote_id&&<p className="text-sm">Linked quote: <strong>{data.quote?.number||'Previously accepted quote'}</strong>{data.customer?.name&&` · ${data.customer.name}`}</p>}
+        {j.quote_id&&<p className="text-sm"><L>{"Linked quote:"}</L>{" "}<strong>{data.quote?.number||'Previously accepted quote'}</strong>{data.customer?.name&&` · ${data.customer.name}`}</p>}
         <label className="block">
-          Trade
-          <select
+          <L>{"Trade"}</L>{" "}<select
+            name="site"
             className={inputCls}
             value={form.site}
             onChange={(e) => field("site", e.target.value)}
@@ -437,25 +444,24 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
           </select>
         </label>
         <label className="block">
-          Job address
-          <input
+          <L>{"Job address"}</L>{" "}<input
+            name="siteAddress"
             className={inputCls}
             value={form.siteAddress}
             onChange={(e) => field("siteAddress", e.target.value)}
           />
         </label>
         <label className="block">
-          Billing
-          <select
+          <L>{"Billing"}</L>{" "}<select
+            name="billingMode"
             className={inputCls}
             value={form.billingMode}
             onChange={(e) => field("billingMode", e.target.value)}
           >
-            <option value="review">Needs review</option>
-            <option value="fixed">Fixed price — costs included in quote</option>
+            <option value="review"><L>{"Needs review"}</L></option>
+            <option value="fixed"><L>{"Fixed price — costs included in quote"}</L></option>
             <option value="time_materials">
-              Time & materials — bill recorded work
-            </option>
+              <L>{"Time & materials — bill recorded work"}</L>{" "}</option>
           </select>
         </label>
         <div className="grid grid-cols-2 gap-3">
@@ -465,6 +471,7 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
               <input
                 className={inputCls}
                 type="date"
+                name={f}
                 value={(form as any)[f]}
                 onChange={(e) => field(f, e.target.value)}
               />
@@ -472,20 +479,20 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
           ))}
         </div>
         <label className="block">
-          Schedule
+          <L>{"Schedule"}</L>
           <select
             className={inputCls}
             value={form.scheduleState}
+            name="scheduleState"
             onChange={(e) => field("scheduleState", e.target.value)}
           >
-            <option value="tentative">Tentative</option>
-            <option value="confirmed">Confirmed</option>
+            <option value="tentative"><L>{"Tentative"}</L></option>
+            <option value="confirmed"><L>{"Confirmed"}</L></option>
           </select>
         </label>
         <details>
           <summary className="cursor-pointer py-2">
-            Readiness requirements & language
-          </summary>
+            <L>{"Readiness requirements & language"}</L>{" "}</summary>
           <div className="space-y-3">
             <label className="block">
               <input
@@ -493,17 +500,16 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
                 checked={form.depositRequired}
                 onChange={(e) => field("depositRequired", e.target.checked)}
               />{" "}
-              Require deposit before work
-            </label>
+              <L>{"Require deposit before work"}</L>{" "}</label>
             <label className="block">
-              Language
-              <select
+              <L>{"Language"}</L>{" "}<select
+                name="preferredLanguage"
                 className={inputCls}
                 value={form.preferredLanguage}
                 onChange={(e) => field("preferredLanguage", e.target.value)}
               >
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
+                <option value="en"><L>{"English"}</L></option>
+                <option value="es"><L>{"Spanish"}</L></option>
               </select>
             </label>
             {["coi", "w9", "lien_waiver", "contract"].map((k) => (
@@ -520,10 +526,10 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
                     )
                   }
                 />{" "}
-                Require {k.replaceAll("_", " ")}
+                <L>{"Require"}</L>{" "}{k.replaceAll("_", " ")}
               </label>
             ))}
-            <p>Shared tools needed</p>
+            <p><L>{"Shared tools needed"}</L></p>
             {tools.data?.items?.map((t: any) => (
               <label className="block" key={t.id}>
                 <input
@@ -543,10 +549,10 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
             ))}
           </div>
         </details>
+        <details className="rounded-xl border p-3"><summary className="min-h-11 cursor-pointer py-3 font-medium"><L>{"Current readiness ·"}</L>{" "}{data.readiness.ready?'Ready':`${data.readiness.blockers.length} checks need attention`}</summary><p className="mb-2 text-xs text-muted-foreground"><L>{"These are the saved job’s checks before your edits. Dates, crew, payments and requirements are checked again when you save. Work status is changed separately on the job page."}</L></p>{data.readiness.blockers.map((b:any,i:number)=><p key={i} className="border-t py-2 text-sm">{b.label}</p>)}</details>
         {form.scheduleState === "confirmed" && (
           <label className="block">
-            Reason to confirm despite missing requirements (optional)
-            <textarea
+            <L>{"Reason to confirm despite missing requirements (optional)"}</L>{" "}<textarea
               className={inputCls}
               value={form.overrideReason}
               onChange={(e) => field("overrideReason", e.target.value)}
@@ -555,7 +561,7 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
         )}
         {stale && (
           <p role="alert">
-            This job changed while this draft was open. Your draft is preserved.{" "}
+            <L>{"This job changed while this draft was open. Your draft is preserved."}</L>{" "}
             <button
               type="button"
               className="underline"
@@ -564,14 +570,14 @@ function JobPlan({ data, close }: { data: any; close: () => void }) {
                 close();
               }}
             >
-              Discard draft and reopen current settings
-            </button>
+              <L>{"Discard draft and reopen current settings"}</L>{" "}</button>
           </p>
         )}
         {save.isError&&<p role="alert" className="whitespace-pre-line rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">{save.error.message}</p>}
-        {form.scheduleState==='confirmed'&&<p className="text-sm text-muted-foreground">Confirming checks dates, crew, deposits, materials, and required paperwork. Save as tentative if you are still arranging these.</p>}
-        <div className="suite-modal-actions">{form.scheduleState==='confirmed'&&<button type="button" className={secondaryBtn} disabled={save.isPending||stale} onClick={()=>save.mutate('tentative')}>Save as tentative</button>}<button className={primaryBtn} disabled={save.isPending || stale}>
-          Save job settings
+        {relationshipsChanged&&<section className="space-y-2 rounded-xl border border-amber-400/40 bg-amber-400/5 p-3"><h3 className="font-semibold"><L>{"Review what will change"}</L></h3><p className="text-sm"><L>{"Customer:"}</L>{" "}{customerName||data.customer?.name||'Not selected'}<L>{". Quote:"}</L>{" "}{acceptedQuotes.data?.find(q=>q.id===form.quoteId)?.number||data.quote?.number||(form.quoteId?'Selected accepted quote':'No linked quote')}<L>{". Billing:"}</L>{" "}{form.billingMode==='fixed'?'Fixed price':form.billingMode==='time_materials'?'Time & materials':'Needs review'}.</p><p className="text-xs text-muted-foreground"><L>{"This changes the job’s connections and billing rules. Existing issued quotes, invoices and recorded payments keep their original history. Linking a quote does not accept it."}</L></p><label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={linksReviewed} onChange={e=>setReviewedLinks(e.target.checked?relationshipKey:'')}/><L>{"I reviewed the customer, quote and billing rules."}</L></label></section>}
+        {form.scheduleState==='confirmed'&&<p className="text-sm text-muted-foreground"><L>{"Confirming checks dates, crew, deposits, materials, and required paperwork. Save as tentative if you are still arranging these."}</L></p>}
+        <div className="suite-modal-actions">{form.scheduleState==='confirmed'&&<button type="button" className={secondaryBtn} disabled={save.isPending||stale||!linksReviewed} onClick={()=>save.mutate('tentative')}><L>{"Save as tentative"}</L></button>}<button className={primaryBtn} disabled={save.isPending || stale||!linksReviewed}>
+          <L>{"Save job settings"}</L>
         </button></div>
       </form>
     </Modal>
@@ -601,11 +607,9 @@ function JobMaterials({ data, owner }: { data: any; owner: boolean }) {
               onClick={() => reserve.mutate()}
               disabled={reserve.isPending}
             >
-              Reserve available stock
-            </button>
+              <L>{"Reserve available stock"}</L>{" "}</button>
             <button className={primaryBtn} onClick={() => setOrdering(true)}>
-              Order shortages
-            </button>
+              <L>{"Order shortages"}</L>{" "}</button>
           </div>
         )}
         {data.readiness.materials.map((m: any) => (
@@ -620,13 +624,11 @@ function JobMaterials({ data, owner }: { data: any; owner: boolean }) {
               )}
             </strong>
             <p className="text-sm">
-              Needed {m.needed} · Reserved {m.reserved} · Ordered {m.ordered} ·
-              Missing {m.missing} {m.unit || "each"}
+              <L>{"Needed"}</L>{" "}{m.needed} {" "}<L>{"· Reserved"}</L>{" "}{m.reserved} {" "}<L>{"· Ordered"}</L>{" "}{m.ordered} {" "}<L>{"· Missing"}</L>{" "}{m.missing} {m.unit || "each"}
             </p>
             {!m.item_id && (
               <p className="text-sm text-amber-700">
-                Link an inventory item in the checklist before ordering.
-              </p>
+                <L>{"Link an inventory item in the checklist before ordering."}</L>{" "}</p>
             )}
             {m.orders.map((o: any) =>
               owner ? (
@@ -699,8 +701,7 @@ function JobOrder({ data, close }: { data: any; close: () => void }) {
         }}
       >
         <label className="block">
-          Supplier
-          <input
+          <L>{"Supplier"}</L>{" "}<input
             required
             className={inputCls}
             value={form.vendor}
@@ -708,8 +709,7 @@ function JobOrder({ data, close }: { data: any; close: () => void }) {
           />
         </label>
         <label className="block">
-          Expected arrival
-          <input
+          <L>{"Expected arrival"}</L>{" "}<input
             type="date"
             className={inputCls}
             value={form.expectedDate}
@@ -721,8 +721,7 @@ function JobOrder({ data, close }: { data: any; close: () => void }) {
             <strong>{l.name}</strong>
             <div className="grid grid-cols-2 gap-3">
               <label>
-                Quantity
-                <input
+                <L>{"Quantity"}</L>{" "}<input
                   className={inputCls}
                   type="number"
                   min="0"
@@ -741,8 +740,7 @@ function JobOrder({ data, close }: { data: any; close: () => void }) {
                 />
               </label>
               <label>
-                Cost each ($)
-                <input
+                <L>{"Cost each ($)"}</L>{" "}<input
                   className={inputCls}
                   type="number"
                   min="0"
@@ -768,13 +766,12 @@ function JobOrder({ data, close }: { data: any; close: () => void }) {
             </div>
           </div>
         ))}
-        {!form.lines.length && <p>No linked shortages to order.</p>}
+        {!form.lines.length && <p><L>{"No linked shortages to order."}</L></p>}
         <div className="suite-modal-actions"><button
           className={primaryBtn}
           disabled={save.isPending || !form.lines.length}
         >
-          Create purchase order
-        </button></div>
+          <L>{"Create purchase order"}</L>{" "}</button></div>
       </form>
     </Modal>
   );
@@ -789,13 +786,22 @@ function JobMoney({ project, actions }: { project: any; actions: any[] }) {
       `/api/finance/invoices?projectId=${project.id}`,
     );
   if (q.isError) return <RetryBlock query={q} />;
-  if (!q.data) return <p>Loading job money…</p>;
+  if (!q.data) return <p><L>{"Loading job money…"}</L></p>;
   const t = q.data.totals;
   return (
     <div className="space-y-5">
-      <JobMoneyGraphs id={project.id} totals={t}/><Card title="Job money">
+      <Card title="Contract to cash"><p className="mb-4 text-sm text-muted-foreground"><L>{"These amounts describe the same job at different stages. Do not add them together. Contract and billed amounts include any recorded tax; drafts are excluded from billing."}</L></p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[
+        {label:'Contract + approved changes',amount:t.contractKnown?t.contractCents+t.changeOrderCents:null,note:'Signed contract, or accepted quote, plus approved scope changes.',href:(project.quoteId||project.quote_id)?`/crm/quotes?quote=${project.quoteId||project.quote_id}`:undefined},
+        {label:'Billed',amount:t.invoicedCents,note:'Issued invoices, excluding voids and double-counted retainage releases.',href:`/finance/invoices?projectId=${project.id}`},
+        {label:'Collected',amount:t.paidCents,note:'Recorded invoice payments after payment reversals.',href:`/finance/invoices?projectId=${project.id}`},
+        {label:'Due now',amount:t.dueNowCents,note:'Unpaid billed amount, excluding retainage still held.',href:`/finance/invoices?projectId=${project.id}`},
+        {label:'Remaining to bill',amount:t.contractKnown?t.remainingToBillCents:null,note:'Contract and approved changes minus issued invoices. This is not an unpaid invoice.',href:`/finance/invoices?projectId=${project.id}`},
+        {label:'Retainage still held',amount:t.retainageHeldCents,note:'Uncollected retainage already included in billed amounts.',href:`/finance/invoices?projectId=${project.id}`},
+      ].map(m=><div key={m.label} className="rounded-xl border p-4"><p className="text-sm font-medium">{m.label}</p><p className="my-2 text-xl font-semibold">{m.amount===null?'Not recorded':formatMoney(m.amount)}</p><p className="text-xs text-muted-foreground">{m.note}</p>{m.href&&<Link className="mt-2 inline-flex min-h-11 items-center text-xs underline" href={m.href}><L>{"View source records"}</L></Link>}</div>)}</div>{t.contractKnown&&t.billedAboveContractCents>0&&<p role="status" className="mt-3 text-sm text-amber-700"><L>{"Invoices exceed the recorded contract by"}</L>{" "}{formatMoney(t.billedAboveContractCents)}<L>{". Review approved scope changes and tax treatment."}</L></p>}<p className="mt-3 text-xs text-muted-foreground">{formatMoney(t.draftCents)} {" "}<L>{"in draft invoices is still awaiting review."}</L></p></Card>
+      <JobForecast id={project.id} totals={t}/>
+      <Card title="Job costs">
         <p className="mb-3">
-          Billing:{" "}
+          <L>{"Billing:"}</L>{" "}
           {project.billing_mode === "fixed"
             ? "Fixed price"
             : project.billing_mode === "time_materials"
@@ -804,16 +810,9 @@ function JobMoney({ project, actions }: { project: any; actions: any[] }) {
         </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {[
-            ["Draft invoices", t.draftCents],
-            ["Billed", t.invoicedCents],
-            ["Collected", t.paidCents],
-            ["Outstanding", t.outstandingCents],
             ["Direct expenses", t.expenseCents],
             ["Stock used", t.stockCostCents],
             ["Labor cost", t.laborCostCents],
-            ["Quoted + extras", t.contractCents + t.changeOrderCents],
-            ["Retained", t.retainageHeldCents],
-            ["Due now", t.dueNowCents],
           ].map(([label, value]) => (
             <div key={label}>
               <p className="text-sm text-muted-foreground">{label}</p>
@@ -821,38 +820,35 @@ function JobMoney({ project, actions }: { project: any; actions: any[] }) {
             </div>
           ))}
         </div>
+        <p className="mt-3 text-xs text-muted-foreground"><L>{"Stock purchases are excluded from direct expenses and counted when consumed, so costs appear once. Missing rates and stock costs need review below."}</L></p>
         {t.missingRateMinutes > 0 && (
           <p role="alert" className="mt-3 text-amber-700">
-            Labor costs are incomplete: some hours have no dated rate.
-          </p>
+            <L>{"Labor costs are incomplete: some hours have no dated rate."}</L>{" "}</p>
         )}
         {(t.unknownStockQuantity > 0 ||
           t.historicalMovementsWithoutCost > 0) && (
           <p role="alert" className="mt-3 text-amber-700">
-            Some stock movements have no verified historical cost. Job margin is
-            incomplete.
-          </p>
+            <L>{"Some stock movements have no verified historical cost. Job margin is incomplete."}</L>{" "}</p>
         )}
         {t.salaryEstimated && (
           <p className="mt-3 text-sm">
-            Salary allocation is estimated from recorded hours.
-          </p>
+            <L>{"Salary allocation is estimated from recorded hours."}</L>{" "}</p>
         )}
         <div className="mt-4 flex flex-wrap gap-3">
           <Link
             className={secondaryBtn}
             href={`/finance/invoices?new=1&projectId=${project.id}&clientId=${project.clientId || ""}`}
           >
-            New invoice
+            <L>{"New invoice"}</L>
           </Link>
           <Link
             className={secondaryBtn}
             href={`/finance/expenses?new=1&projectId=${project.id}`}
           >
-            Add expense
-          </Link>
+            <L>{"Add expense"}</L>{" "}</Link>
         </div>
       </Card>
+      <details className="rounded-xl border p-4"><summary className="min-h-11 cursor-pointer py-2 font-medium"><L>{"Money graphs"}</L></summary><JobMoneyGraphs id={project.id} totals={t}/></details>
       <Card title="Invoices">
         {invoices.isError ? (
           <RetryBlock query={invoices} />
@@ -874,8 +870,7 @@ function JobMoney({ project, actions }: { project: any; actions: any[] }) {
             <ExtraBilling key={a.id} action={a} projectId={project.id} />
           ))}
           <Link className="underline" href="/suite-health">
-            Review actions
-          </Link>
+            <L>{"Review actions"}</L>{" "}</Link>
         </Card>
       )}
       <Changes projectId={project.id} />
@@ -933,19 +928,17 @@ function JobActivity({ id }: { id: number }) {
         >
           {form.parentId && (
             <p>
-              Replying to comment #{form.parentId}{" "}
+              <L>{"Replying to comment #"}</L>{form.parentId}{" "}
               <button
                 type="button"
                 className="underline"
                 onClick={() => set({ ...form, parentId: null })}
               >
-                Cancel reply
-              </button>
+                <L>{"Cancel reply"}</L>{" "}</button>
             </p>
           )}
           <label className="block">
-            Comment
-            <textarea
+            <L>{"Comment"}</L>{" "}<textarea
               required
               className={inputCls}
               value={form.body}
@@ -954,8 +947,7 @@ function JobActivity({ id }: { id: number }) {
             />
           </label>
           <label className="block">
-            Notify teammate
-            <select
+            <L>{"Notify teammate"}</L>{" "}<select
               className={inputCls}
               value=""
               onChange={(e) => {
@@ -968,7 +960,7 @@ function JobActivity({ id }: { id: number }) {
                   });
               }}
             >
-              <option value="">Choose a teammate</option>
+              <option value=""><L>{"Choose a teammate"}</L></option>
               {people.data?.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -993,20 +985,18 @@ function JobActivity({ id }: { id: number }) {
           ))}
           {isElevated && (
             <label className="block">
-              Visibility
-              <select
+              <L>{"Visibility"}</L>{" "}<select
                 className={inputCls}
                 value={form.visibility}
                 onChange={(e) => set({ ...form, visibility: e.target.value })}
               >
-                <option value="team">Team — internal only</option>
-                <option value="owner">Owner only</option>
+                <option value="team"><L>{"Team — internal only"}</L></option>
+                <option value="owner"><L>{"Owner only"}</L></option>
               </select>
             </label>
           )}
           <label className="block">
-            Attach photo
-            <input
+            <L>{"Attach photo"}</L>{" "}<input
               type="file"
               accept="image/*"
               disabled={uploading}
@@ -1026,12 +1016,11 @@ function JobActivity({ id }: { id: number }) {
             />
           </label>
           {form.attachments.length > 0 && (
-            <p>{form.attachments.length} photo(s) attached</p>
+            <p>{form.attachments.length} {" "}<L>{"photo(s) attached"}</L></p>
           )}
           {error && <p role="alert">{error}</p>}
           <button className={primaryBtn} disabled={send.isPending || uploading}>
-            Post internal comment
-          </button>
+            <L>{"Post internal comment"}</L>{" "}</button>
         </form>
         {query.isError ? (
           <RetryBlock query={query} />
@@ -1062,24 +1051,21 @@ function JobActivity({ id }: { id: number }) {
                   set({ ...form, parentId: c.id, visibility: c.visibility })
                 }
               >
-                Reply
-              </button>
+                <L>{"Reply"}</L>{" "}</button>
             </article>
           ))
         )}
         <div className="mt-4 flex gap-4">
           {before && (
             <button className="underline" onClick={() => setBefore(null)}>
-              Latest comments
-            </button>
+              <L>{"Latest comments"}</L>{" "}</button>
           )}
           {query.data?.length === 40 && (
             <button
               className="underline"
               onClick={() => setBefore(query.data!.at(-1).id)}
             >
-              Older comments
-            </button>
+              <L>{"Older comments"}</L>{" "}</button>
           )}
         </div>
       </Card>
@@ -1134,8 +1120,10 @@ function JobFiles({ id }: { id: number }) {
   });
   return (
     <Card title="Photos, drawings & measurements">
-      <p className="mb-4 text-sm text-muted-foreground">One history of this job’s request, designs and files. Uploads here stay with your team; customer sharing happens in Design Studio.</p>
+      <p className="mb-4 text-sm text-muted-foreground"><L>{"One history of this job’s request, designs and files. Uploads here stay with your team; customer sharing happens in Design Studio."}</L></p>
       {sources.isError?<RetryBlock query={sources}/>:!!sources.data?.length&&<div className="mb-5 grid gap-3 sm:grid-cols-2">{sources.data.map(f=><a key={f.id} href={f.url} className="rounded-xl border p-3 hover:bg-muted" target="_blank" rel="noreferrer">{f.image&&<img src={f.url} alt={f.title} loading="lazy" className="mb-2 aspect-video w-full rounded-lg object-cover"/>}<strong className="text-sm">{f.title}</strong><p className="text-xs text-muted-foreground">{f.source} · {f.visibility}</p></a>)}</div>}
+      <DesignRegistry jobId={id}/><JobFileUploader key={id} id={id}/>
+      <details className="mb-5"><summary className="min-h-11 cursor-pointer text-sm font-medium"><L>{"Replace a revision or reuse an existing file"}</L></summary>
       <form
         className="mb-5 space-y-3"
         onSubmit={(e) => {
@@ -1144,8 +1132,7 @@ function JobFiles({ id }: { id: number }) {
         }}
       >
         <label className="block">
-          File title
-          <input
+          <L>{"File title"}</L>{" "}<input
             required
             className={inputCls}
             value={title}
@@ -1153,8 +1140,7 @@ function JobFiles({ id }: { id: number }) {
           />
         </label>
         <label className="block">
-          File type
-          <select
+          <L>{"File type"}</L>{" "}<select
             className={inputCls}
             value={kind}
             onChange={(e) => setKind(e.target.value)}
@@ -1196,12 +1182,11 @@ function JobFiles({ id }: { id: number }) {
             }
           }}
         />
-        <p className="text-xs text-muted-foreground">Photos, PDF, Word, Excel, CSV, text, CAD drawings, and ZIP · up to 25 MB. Documents keep their original quality.</p>
-        {uploading&&<p role="status">Uploading file…</p>}
+        <p className="text-xs text-muted-foreground"><L>{"Photos, PDF, Word, Excel, CSV, text, CAD drawings, and ZIP · up to 25 MB. Documents keep their original quality."}</L></p>
+        {uploading&&<p role="status"><L>{"Uploading file…"}</L></p>}
         <details>
           <summary className="cursor-pointer">
-            Reuse a file or replace a revision
-          </summary>
+            <L>{"Reuse a file or replace a revision"}</L>{" "}</summary>
           <input
             aria-label="Existing suite file"
             className={inputCls}
@@ -1215,7 +1200,7 @@ function JobFiles({ id }: { id: number }) {
             value={replaces}
             onChange={(e) => setReplaces(e.target.value)}
           >
-            <option value="">New file</option>
+            <option value=""><L>{"New file"}</L></option>
             {q.data?.map((f) => (
               <option value={f.id} key={f.id}>
                 {f.title}
@@ -1228,16 +1213,15 @@ function JobFiles({ id }: { id: number }) {
           className={secondaryBtn}
           disabled={!url || uploading || add.isPending}
         >
-          Save to job
-        </button>
-      </form>
+          <L>{"Save to job"}</L>{" "}</button>
+      </form></details>
       {q.isError ? (
         <RetryBlock query={q} />
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {q.data?.map((f) => (
             <div className="min-w-0 rounded-xl border p-3" key={f.id}>
-              {isJobImage(f.url)?<a href={f.url} target="_blank" rel="noreferrer"><img
+              {isJobImage(f.url)&&! /\.hei[cf]$/i.test(f.url)?<a href={f.url} target="_blank" rel="noreferrer"><img
                 className="aspect-square w-full rounded object-cover"
                 src={f.thumbnail_url || f.url}
                 loading="lazy"
@@ -1248,7 +1232,7 @@ function JobFiles({ id }: { id: number }) {
                 {q.data.some((n) => n.replaces_id === f.id)
                   ? "Older revision"
                   : "Current"}{" "}
-                · Team only · {f.user_name}
+                <L>{"· Team only ·"}</L>{" "}{f.user_name}
               </p>
               <button type="button" className={`${secondaryBtn} mt-3`} aria-label={`Download ${f.title}`} disabled={downloading===f.id} onClick={()=>downloadFile(f)}><Download className="h-4 w-4" aria-hidden="true"/>{downloading===f.id?'Downloading…':'Download'}</button>
             </div>
@@ -1280,16 +1264,14 @@ function JobTimeline({ id }: { id: number }) {
       <div className="flex gap-4">
         {before && (
           <button className="underline" onClick={() => setBefore(null)}>
-            Latest activity
-          </button>
+            <L>{"Latest activity"}</L>{" "}</button>
         )}
         {q.data?.length === 40 && (
           <button
             className="underline"
             onClick={() => setBefore(q.data!.at(-1).id)}
           >
-            Older activity
-          </button>
+            <L>{"Older activity"}</L>{" "}</button>
         )}
       </div>
     </Card>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { groupMetric, pageAdvice, pagePerformance, publicPage } from '../shared/page-performance.ts';
 const report = rows => ({ rows, fetchedAt: Date.now() });
-const site = (name, domain) => ({ site: name, domain, current: { reports: { landing: report([
+const site = (name, domain) => ({ site: name, domain, current: { bySource: [], reports: { landing: report([
   { landingPagePlusQueryString: '/service?campaign=a', sessions: 20, engagedSessions: 5, keyEvents: 0 },
   { landingPagePlusQueryString: '/service?campaign=b', sessions: 80, engagedSessions: 25, keyEvents: 2 },
   { landingPagePlusQueryString: '/private', sessions: 8000, engagedSessions: 8000 },

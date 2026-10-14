@@ -27,7 +27,7 @@ test('Concrete guide saves service selections and repair units',async({page})=>{
   await page.screenshot({path:'test-results/concrete-guide-mobile.png',fullPage:true});
 });
 
-test('Build type stays in Design and preserves the same customer and quote',async({page})=>{
+test('Build type stays in Scope and preserves the same customer and quote',async({page})=>{
  await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),token);
  await page.goto(app.base+'/#/crm/quotes');
@@ -37,7 +37,7 @@ test('Build type stays in Design and preserves the same customer and quote',asyn
  const current=await page.evaluate(()=>JSON.parse(localStorage.getItem('cjm.session.v2.user.1')));
  await page.getByRole('button',{name:/Build type/i}).click();
  await expect(page.getByRole('heading',{name:'Choose build type'})).toBeVisible();
- await expect(page.getByRole('navigation',{name:'Quote steps'}).getByRole('button',{name:/Design/})).toHaveAttribute('aria-current','step');
+ await expect(page.getByRole('navigation',{name:'Quote steps'}).getByRole('button',{name:/Scope/})).toHaveAttribute('aria-current','step');
  await expect(page.getByLabel('Customer name',{exact:true})).toHaveCount(0);
  await expect(page.locator('.type-card')).toHaveCount(10);
  await page.locator('.type-card').filter({has:page.getByRole('heading',{name:'Insulation',exact:true})}).click();

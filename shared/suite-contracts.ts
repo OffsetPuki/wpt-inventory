@@ -1,5 +1,5 @@
 // Shared terminology and relationship contracts used by the suite.
-export const CUSTOMER_REFERENCE_TABLES = ['projects','crm_leads','pm_contracts','fin_invoices','mk_reviews','review_requests','customer_previews','fin_purchase_orders'] as const;
+export const CUSTOMER_REFERENCE_TABLES = ['projects','crm_leads','pm_contracts','fin_invoices','mk_reviews','review_requests','customer_previews','fin_purchase_orders','suite_designs'] as const;
 // This identically named column is an anonymous analytics visitor ID, not CRM identity.
 export const NON_CUSTOMER_CLIENT_ID_TABLES = ['mk_lead_attribution'] as const;
 export const JOB_STATUS_LABELS: Record<string,string> = {planned:'Planning',active:'Work in progress',in_progress:'Work in progress',on_hold:'On hold',done:'Completed',completed:'Completed'};

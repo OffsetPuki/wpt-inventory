@@ -1,4 +1,5 @@
 import {safeGooglePage} from './google-reporting';
+import {businessDay} from './business-clock';
 import type {Express} from 'express';
 import {z} from 'zod';
 import {sqlite} from './storage';
@@ -8,12 +9,38 @@ import {inventoryOnce} from './inventory-core';
 import {audit} from './audit';
 import {GOOGLE_SITES} from './lead-measurement';
 const site=z.enum(['metals','concrete','insulation','trades']);
-const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>!Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v&&v<=new Date().toISOString().slice(0,10),'Choose a valid date, not in the future.');
+const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>!Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v&&v<=businessDay(),'Choose a valid date, not in the future.');
 const spend=z.object({site,date,channel:z.enum(['google','meta','microsoft','other']),campaign:z.string().trim().max(100).default(''),amountCents:z.number().int().min(0).max(100000000),notes:z.string().max(1000).default('')});
+const opportunityInput=z.object({site,path:z.string().min(1).max(180),hypothesis:z.string().trim().max(1500).optional(),campaign:z.string().trim().max(120).default(''),period:z.object({start:date,end:date}).refine(p=>p.start<=p.end).optional(),evidence:z.object({sessions:z.number().nonnegative().nullable(),clicks:z.number().nonnegative().nullable(),impressions:z.number().nonnegative().nullable(),engagement:z.number().min(0).max(1).nullable(),leads:z.number().int().nonnegative().nullable().optional(),qualified:z.number().int().nonnegative().nullable().optional(),won:z.number().int().nonnegative().nullable().optional()}).optional()});
 export function registerMarketingWorkflows(app:Express){
+ sqlite.exec('CREATE TABLE IF NOT EXISTS mk_page_improvements(task_id INTEGER PRIMARY KEY,site TEXT NOT NULL,path TEXT NOT NULL,hypothesis TEXT NOT NULL,period TEXT,evidence TEXT,created_at INTEGER NOT NULL);CREATE INDEX IF NOT EXISTS mk_page_improvements_page ON mk_page_improvements(site,path,created_at);');
+ const columns=new Set((sqlite.prepare('PRAGMA table_info(mk_page_improvements)').all() as any[]).map(c=>c.name));
+ for(const [name,type] of [['campaign',"TEXT NOT NULL DEFAULT ''"],['change_date','TEXT'],['change_note','TEXT'],['version','INTEGER NOT NULL DEFAULT 1']])if(!columns.has(name))sqlite.exec(`ALTER TABLE mk_page_improvements ADD COLUMN ${name} ${type}`);
+ app.get('/api/marketing/opportunities',requireElevated,(req,res)=>{
+  const s=site.safeParse(req.query.site),path=String(req.query.path||'');if(!s.success||safeGooglePage(path)!==path||!path.startsWith('/'))return res.status(400).json({message:'Choose a public website page.'});
+  const key='marketing:search:'+s.data+':'+path;
+  res.json(sqlite.prepare('SELECT t.id,t.title,t.status,t.due_date,t.completed_at,i.hypothesis,i.period,i.evidence,i.created_at,i.campaign,i.change_date,i.change_note,i.version FROM pm_tasks t LEFT JOIN mk_page_improvements i ON i.task_id=t.id WHERE t.auto_key=? AND t.deleted_at IS NULL ORDER BY t.id DESC LIMIT 25').all(key));
+ });
  app.post('/api/marketing/opportunities',requireElevated,marketingManager,(req,res)=>{
-  const b=z.object({site,path:z.string().min(1).max(180)}).safeParse(req.body);if(!b.success||safeGooglePage(b.data.path)!==b.data.path||!b.data.path.startsWith('/')||['/private','/other'].includes(b.data.path))return res.status(400).json({message:'Choose a public search page.'});
-  const key='marketing:search:'+b.data.site+':'+b.data.path;let row=sqlite.prepare('SELECT id FROM pm_tasks WHERE auto_key=?').get(key) as any;if(!row){const id=sqlite.prepare("INSERT INTO pm_tasks(title,kind,status,auto_created,auto_key,description) VALUES(?,'other','todo',1,?,?)").run('Improve CJM '+b.data.site+' search page',key,'Review search intent, title, useful project evidence and internal links: https://'+GOOGLE_SITES[b.data.site].domain+b.data.path).lastInsertRowid;row={id:Number(id)};}audit(req,'marketing.opportunity_task',{targetId:row.id,details:b.data});res.json(row);
+  const b=opportunityInput.safeParse(req.body);if(!b.success||safeGooglePage(b.data.path)!==b.data.path||!b.data.path.startsWith('/')||['/private','/other'].includes(b.data.path))return res.status(400).json({message:'Choose a public page and a valid reporting period.'});
+  const row=sqlite.transaction(()=>{
+   const key='marketing:search:'+b.data.site+':'+b.data.path;
+   const existing=sqlite.prepare("SELECT id FROM pm_tasks WHERE auto_key=? AND deleted_at IS NULL AND status!='done' ORDER BY id DESC LIMIT 1").get(key) as any;
+   if(existing)return {...existing,existing:true};
+   const hypothesis=b.data.hypothesis||'Review search intent, title, useful project evidence and internal links.';
+   const description=hypothesis+'\n\nWebsite: https://'+GOOGLE_SITES[b.data.site].domain+b.data.path+'\nAfter making a change, record the change date and compare an equal reporting period. A change in results alone does not prove causation.';
+   const id=Number(sqlite.prepare("INSERT INTO pm_tasks(title,kind,status,auto_created,auto_key,description) VALUES(?,'other','todo',0,?,?)").run('Improve CJM '+b.data.site+' page: '+b.data.path,key,description).lastInsertRowid);
+   sqlite.prepare('INSERT INTO mk_page_improvements(task_id,site,path,hypothesis,period,evidence,created_at,campaign) VALUES(?,?,?,?,?,?,?,?)').run(id,b.data.site,b.data.path,hypothesis,b.data.period?JSON.stringify(b.data.period):null,b.data.evidence?JSON.stringify(b.data.evidence):null,Date.now(),b.data.campaign);
+   audit(req,'marketing.opportunity_task',{targetId:id,details:{site:b.data.site,path:b.data.path}});
+   return {id,existing:false};
+  })();res.json(row);
+ });
+ app.post('/api/marketing/opportunities/:id/change',requireElevated,marketingManager,(req,res)=>{
+  const b=z.object({version:z.number().int().positive(),date,note:z.string().trim().min(1).max(1500)}).safeParse(req.body);
+  if(!b.success)return res.status(400).json({message:'Enter the actual change date, a short description and the current saved version.'});
+  const before=sqlite.prepare('SELECT i.* FROM mk_page_improvements i JOIN pm_tasks t ON t.id=i.task_id WHERE i.task_id=? AND t.deleted_at IS NULL').get(Number(req.params.id)) as any;
+  if(!before)return res.status(404).json({message:'Improvement task not found.'});if(versionConflict(req,res,before.version))return;
+  sqlite.transaction(()=>{sqlite.prepare('UPDATE mk_page_improvements SET change_date=?,change_note=?,version=version+1 WHERE task_id=?').run(b.data.date,b.data.note,before.task_id);audit(req,'marketing.improvement_change',{targetType:'task',targetId:before.task_id,details:{before:{date:before.change_date,note:before.change_note},after:{date:b.data.date,note:b.data.note}}});})();res.json({ok:true});
  });
 
  app.get('/api/marketing/review-checks',requireElevated,marketingManager,(_req,res)=>{

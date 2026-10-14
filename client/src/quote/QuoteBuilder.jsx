@@ -1,6 +1,8 @@
+import {L} from '@/lib/language';
 import {BUSINESSES,quoteBusiness,businessShop} from "../../../shared/business.js";
 import {useBusiness} from "@/hooks/useBusiness";
 import CustomerFields from './components/CustomerFields.jsx';
+import IssuedQuoteDialog from './components/IssuedQuoteDialog';
 import { QuotePreviewContext } from './lib/preview-context.jsx';
 // =============================================================================
 //  Quote builder — the standalone CJM Quote app, embedded in the suite.
@@ -542,8 +544,13 @@ export default function QuoteBuilder({ initialSettings }) {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Reopen a saved quote from the suite — edits keep saving to the same number.
+  const [issuedQuote, setIssuedQuote] = useState(null);
   const openSaved = (sess) => replaceDraft(migrateSession(sess, priceBook), true);
-  useRecordLink('quote','/api/quotes', row=>{const payload=JSON.parse(row.payload);openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status});});
+  useRecordLink('quote','/api/quotes', row=>{
+    if(row.status!=='draft'){setIssuedQuote(row);setView('saved');return true;}
+    const payload=JSON.parse(row.payload);
+    return openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status});
+  });
   const duplicateSaved=async(sess,fromCurrent=false)=>{
     if(copyBusy)return;
     setCopyBusy(true);
@@ -610,39 +617,36 @@ export default function QuoteBuilder({ initialSettings }) {
         <header className="topbar no-print">
           <nav className="topnav">
             <button className={inQuoteFlow ? "active" : ""} onClick={goHome}>
-              New quote
-            </button>
+              <L>{"New quote"}</L>{" "}</button>
             <button
               className={view === "find" ? "active" : ""}
               onClick={() => setView("find")}
             >
-              Find design
-            </button>
+              <L>{"Find design"}</L>{" "}</button>
             <button
               className={view === "saved" ? "active" : ""}
               onClick={() => setView("saved")}
             >
-              Saved
-            </button>
+              <L>{"Saved"}</L>{" "}</button>
 
           </nav>
         </header>
         {settingsError&&<div className="container draft-recovery" role="alert"><strong>Price book not saved</strong><p>{settingsError}</p><p>Reloading replaces these unsaved rate edits with the shared price book. Saved quotes keep their prices.</p><button className="btn ghost" onClick={reloadSettings}>Reload shared rates</button></div>}
         <nav className="quote-tool-row container no-print" aria-label="Quote tools">
-          <span>Tools</span>
-          <button type="button" className="btn ghost" aria-pressed={view==='costing'} onClick={()=>setView('costing')}>Costing</button>
-          <button type="button" className="btn ghost" aria-pressed={view==='pricebook'} onClick={()=>setView('pricebook')}>Price book</button>
+          <span><L>{"Tools"}</L></span>
+          <button type="button" className="btn ghost" aria-pressed={view==='costing'} onClick={()=>setView('costing')}><L>{"Costing"}</L></button>
+          <button type="button" className="btn ghost" aria-pressed={view==='pricebook'} onClick={()=>setView('pricebook')}><L>{"Price book"}</L></button>
         </nav>
         {activeView !== 'saved' && session && (draft.error?.status === 404 || draft.status === 'Conflict') && (
           <div className="container draft-recovery no-print" data-draft-recovery role="alert">
             <strong>{draft.error?.status === 404 ? 'This saved quote is no longer available' : 'This quote has changed elsewhere'}</strong>
             <p>{draft.error?.status === 404 ? 'To start fresh, choose a quote type below. Or keep the old draft’s details with the button here.' : 'Your edits are still here. Save them as a new quote to continue, keeping your customer details, design and pricing. The original quote stays unchanged.'}</p>
-            <button className="btn" onClick={recoverDraft}>Keep edits as new quote</button>
+            <button className="btn" onClick={recoverDraft}><L>{"Keep edits as new quote"}</L></button>
           </div>
         )}
-        {inQuoteFlow && <nav className="quote-steps container" aria-label="Quote steps">{[['customer','Customer'],['configure','Design'],['price','Price'],['details','Review & send']].map(([step,label],i)=><button key={step} type="button" aria-current={(activeView===step||step==='configure'&&activeView==='build-type'||step==='customer'&&activeView==='home')?'step':undefined} disabled={step!=='customer'&&!session || ['customer','configure','price'].includes(step)&&!!session?.quoteStatus&&session.quoteStatus!=='draft'} onClick={()=>{if(step==='details')reviewQuote();else {setView(step==='customer'&&!session?'home':step);window.scrollTo({top:0});}}}><span>{i+1}</span>{label}</button>)}</nav>}
-        <Suspense fallback={<p className="container hint" role="status">Loading…</p>}>
-        {activeView === 'customer' && session && <div className="container page"><h1 className="display">Customer</h1><label className="field"><span>Quoting business</span><select value={quoteBusiness(session)} onChange={e=>setSession(s=>({...s,business:e.target.value}))}>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label><CustomerFields customer={session.customer} onChange={setCustomer}/><button className="btn" onClick={()=>setView('configure')}>Next: design →</button></div>}
+        {inQuoteFlow && <nav className="quote-steps container" aria-label="Quote steps">{[['customer','Customer'],['configure','Scope'],['price','Price'],['details','Review & send']].map(([step,label],i)=><button key={step} type="button" aria-current={(activeView===step||step==='configure'&&activeView==='build-type'||step==='customer'&&activeView==='home')?'step':undefined} disabled={step!=='customer'&&!session || ['customer','configure','price'].includes(step)&&!!session?.quoteStatus&&session.quoteStatus!=='draft'} onClick={()=>{if(step==='details')reviewQuote();else {setView(step==='customer'&&!session?'home':step);window.scrollTo({top:0});}}}><span>{i+1}</span><L>{label}</L></button>)}</nav>}
+        <Suspense fallback={<p className="container hint" role="status"><L>{"Loading…"}</L></p>}>
+        {activeView === 'customer' && session && <div className="container page"><h1 className="display"><L>{"Customer"}</L></h1><label className="field"><span><L>{"Quoting business"}</L></span><select value={quoteBusiness(session)} onChange={e=>setSession(s=>({...s,business:e.target.value}))}>{Object.entries(BUSINESSES).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label><CustomerFields customer={session.customer} onChange={setCustomer}/><button className="btn" onClick={()=>setView('configure')}><L>{"Next: design →"}</L></button></div>}
         {activeView === 'build-type' && session && <Home designOnly onPick={changeBuildType} onContinue={()=>setView('configure')}/>}
         {activeView === "home" && (
           <Home
@@ -658,7 +662,7 @@ export default function QuoteBuilder({ initialSettings }) {
         )}
         {activeView === "find" && <FindDesign onStartQuote={startFromLead} />}
         {activeView === "saved" && (
-          <SavedQuotes onOpen={openSaved} onDuplicate={duplicateSaved} />
+          <><SavedQuotes onOpen={openSaved} onDuplicate={duplicateSaved} />{issuedQuote && <IssuedQuoteDialog key={issuedQuote.id} quote={issuedQuote} onClose={()=>setIssuedQuote(null)} />}</>
         )}
         {activeView === "costing" && (
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
@@ -762,13 +766,13 @@ export default function QuoteBuilder({ initialSettings }) {
             <div className="draft-status" role="status" aria-live="polite">
               <span>{draft.status}{draft.status === 'Saving' ? '…' : ''}</span>
               {!draft.localSaved && <small>Device backup unavailable. Keep this page open until saved.</small>}
-              {draft.status === 'Offline' && <small>Sync resumes when connected</small>}
+              {draft.status === 'Offline' && <small><L>{"Sync resumes when connected"}</L></small>}
               {draft.error && draft.status !== 'Offline' && <small>{draft.error.message}</small>}
-              {['Not saved', 'Offline'].includes(draft.status) && draft.error?.status !== 404 && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}>Retry save</button>}
+              {['Not saved', 'Offline'].includes(draft.status) && draft.error?.status !== 404 && <button className="back-link" onClick={() => draft.retry().catch(showSaveError)}><L>{"Retry save"}</L></button>}
             </div>
-            {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn ghost" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}>{saveBusy?'Saving quote…':'Save Quote'}</button>}
-            {activeView === "configure" && <button className="btn" onClick={()=>{setView("price");window.scrollTo({top:0});}}>Next: price →</button>}
-            {activeView === "price" ? <button className={activeView === "configure" ? "btn ghost" : "btn"} disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}>{reviewBusy ? 'Saving…' : 'Review quote'} <span aria-hidden="true">→</span></button>
+            {(!session.quoteStatus||session.quoteStatus==='draft')&&<button className="btn ghost" disabled={saveBusy||copyBusy||reviewBusy} onClick={saveQuote}><L>{saveBusy?'Saving quote…':'Save Quote'}</L></button>}
+            {activeView === "configure" && <button className="btn" onClick={()=>{setView("price");window.scrollTo({top:0});}}><L>{"Next: price →"}</L></button>}
+            {activeView === "price" ? <button className={activeView === "configure" ? "btn ghost" : "btn"} disabled={reviewBusy||saveBusy||copyBusy} onClick={reviewQuote}><L>{reviewBusy ? 'Saving…' : 'Review quote'}</L> <span aria-hidden="true">→</span></button>
               : activeView==='details'&&<div id="quote-send-actions" />}
           </div>
         )}

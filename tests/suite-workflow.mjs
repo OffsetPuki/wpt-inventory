@@ -202,7 +202,7 @@ export async function suiteWorkflow(page, browser, app, expect) {
     ).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
     await page.goto(app.base + `/#/project/${job.id}?tab=money`);
-    await expect(page.getByText("Job money", { exact: true })).toBeVisible();
+    await expect(page.getByText("Contract to cash", { exact: true })).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth + 1,

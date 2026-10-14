@@ -8,12 +8,16 @@ const reject=async(url,method,body,status)=>assert.equal((await api(url,method,b
 try{
  const customer=await call('/api/crm/clients','POST',{name:'Audit customer'}),target=await call('/api/crm/clients','POST',{name:'Surviving customer'});
  const preview=await call('/api/customer-previews','POST',{title:'Customer drawing',clientId:customer.id});
+ const designJob=await call('/api/projects','POST',{name:'Merge design fixture',jobNumber:'MERGE-DESIGN',clientId:customer.id});
+ const design=await call('/api/design-studio/registry','POST',{name:'Merge design',modelKey:'film-plant',jobId:designJob.id});
  const first=await call(`/api/suite/customer-merge?source=${customer.id}&target=${target.id}`);
  await call('/api/customer-previews','POST',{title:'New drawing during review',clientId:customer.id});
  await reject('/api/suite/customer-merge','POST',{requestKey:crypto.randomUUID(),source:customer.id,target:target.id,version:first.version,reason:'Review changed'},409);
  const reviewed=await call(`/api/suite/customer-merge?source=${customer.id}&target=${target.id}`);
  await call('/api/suite/customer-merge','POST',{requestKey:crypto.randomUUID(),source:customer.id,target:target.id,version:reviewed.version,reason:'Combine duplicate records'});
  assert.equal(sqlite.prepare('SELECT client_id FROM customer_previews WHERE id=?').get(preview.id).client_id,target.id);
+ assert.equal(sqlite.prepare('SELECT client_id FROM suite_designs WHERE id=?').get(design.id).client_id,target.id);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM suite_design_history WHERE design_id=?').get(design.id).n,2,'Design merge retains its original customer in history');
  const actual=sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().filter(t=>sqlite.pragma(`table_info(${t.name})`).some(c=>c.name==='client_id')).map(t=>t.name).sort();
  assert.deepEqual([...CUSTOMER_REFERENCE_TABLES,...NON_CUSTOMER_CLIENT_ID_TABLES].sort(),actual,'Every client_id column must declare whether it represents a customer');
  console.log('PASS customer references, previews and stale merge review');

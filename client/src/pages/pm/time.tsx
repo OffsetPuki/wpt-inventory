@@ -1,8 +1,8 @@
-import {useDeepLink} from '@/lib/deep-link';
+import {usePageFilters} from '@/hooks/usePageFilters';
 import Insights from '@/components/Insights';
 import {RecordSelect} from "@/components/RecordSelect";
 import {useScopedQuery as useQuery} from "@/hooks/useScopedQuery";
-import {useListPage,PageButtons} from "@/lib/list-page";
+import {PageButtons} from "@/lib/list-page";
 import { RetryBlock } from "@/components/RetryBlock";
 import { readContext } from '@/lib/record-link';
 import { useEffect, useMemo, useState } from "react";
@@ -319,14 +319,10 @@ export default function PmTimePage() {
   const [now, setNow] = useState(Date.now());
 
   // Filters
-  const [from, setFrom] = useState(()=>readContext("from"));
-  const [to, setTo] = useState(()=>readContext("to"));
-  const [userFilter, setUserFilter] = useState(()=>readContext("userId"));
-  const [projectFilter,setProjectFilter]=useState(()=>readContext('projectId'));
-  const {page,setPage}=useListPage('time-history',[from,to,userFilter,projectFilter]);
-
-  const linkedFrom=useDeepLink('from'),linkedTo=useDeepLink('to'),linkedUser=useDeepLink('userId'),linkedProject=useDeepLink('projectId');
-  useEffect(()=>{if(linkedFrom!==null)setFrom(linkedFrom);if(linkedTo!==null)setTo(linkedTo);if(linkedUser!==null)setUserFilter(linkedUser);if(linkedProject!==null)setProjectFilter(linkedProject);},[linkedFrom,linkedTo,linkedUser,linkedProject]);
+  const [filters,setFilters]=usePageFilters({from:'',to:'',userId:'',projectId:'',page:'0'});
+  const from=filters.from,setFrom=(from:string)=>setFilters({from}),to=filters.to,setTo=(to:string)=>setFilters({to});
+  const userFilter=filters.userId,setUserFilter=(userId:string)=>setFilters({userId}),projectFilter=filters.projectId,setProjectFilter=(projectId:string)=>setFilters({projectId});
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [correcting, setCorrecting] = useState<TimeRow | null>(null);

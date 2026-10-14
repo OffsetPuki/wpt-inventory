@@ -1,3 +1,5 @@
+import {L,useLanguage} from '@/lib/language';
+import {useBusinessDay} from '@/hooks/useBusinessReport';
 import { useRouteScroll } from '@/lib/route-scroll';
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
@@ -41,6 +43,7 @@ import {
   ClipboardCheck,
   Users2,
   PencilRuler,
+  Star,
 } from "lucide-react";
 
 function ThemeToggle() {
@@ -180,7 +183,13 @@ function groupForLocation(location: string): string | null {
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
-  const { isElevated } = useAuth();
+  const {t}=useLanguage();
+  const { isElevated,user } = useAuth();
+  const favoriteKey=`suite-favorites:${user?.id}`;
+  const readFavorites=()=>{try{const value=JSON.parse(localStorage.getItem(favoriteKey)||'[]');return Array.isArray(value)?value.filter((v:unknown)=>typeof v==='string'):[];}catch{return [];}};
+  const [favorites,setFavorites]=useState<string[]>(readFavorites);
+  useEffect(()=>{setFavorites(readFavorites());const sync=()=>setFavorites(readFavorites());window.addEventListener('suite-favorites',sync);return()=>window.removeEventListener('suite-favorites',sync);},[favoriteKey]);
+  const toggleFavorite=(to:string)=>{const next=favorites.includes(to)?favorites.filter(v=>v!==to):[...favorites,to];setFavorites(next);try{localStorage.setItem(favoriteKey,JSON.stringify(next));window.dispatchEvent(new Event('suite-favorites'));}catch{}};
   const [location] = useLocation();
   const [filter,setFilter]=useState('');
   // Daily destinations stay visible. Secondary groups open when needed.
@@ -207,19 +216,20 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     );
 
   return (
-    <nav aria-label="Main navigation" className="suite-nav flex flex-col gap-0.5 px-3">
-      <label className="mb-3 block"><span className="sr-only">Find a page</span><input type="search" value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Find a page…" className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"/></label>
-      <Link href="/today" aria-current={location==='/today'?'page':undefined} onClick={onNavigate} className={linkCls(location === '/today')}><LayoutDashboard className="h-[18px] w-[18px]"/><span>Today</span></Link>
+    <nav aria-label={t("Main navigation")} className="suite-nav flex flex-col gap-0.5 px-3">
+      <label className="mb-3 block"><span className="sr-only"><L>{"Find a page"}</L></span><input type="search" value={filter} onChange={e=>setFilter(e.target.value)} placeholder={t("Find a page…")} className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"/></label>
+      <Link href="/today" aria-current={location==='/today'?'page':undefined} onClick={onNavigate} className={linkCls(location === '/today')}><LayoutDashboard className="h-[18px] w-[18px]"/><span><L>{"Today"}</L></span></Link>
+      {!filter.trim()&&favorites.length>0&&<div aria-label={t("Favorite pages")} className="mb-2 border-b pb-2"><p className="px-3 py-2 text-xs text-muted-foreground"><L>{"Favorites"}</L></p>{NAV_GROUPS.filter(g=>canSee(g.needs)).flatMap(g=>g.entries).filter(e=>canSee(e.needs)&&favorites.includes(e.to)).map(e=><Link key={e.to} href={e.to} onClick={onNavigate} className={linkCls(location===e.to)}><Star className="h-4 w-4" aria-hidden/>{t(e.label)}</Link>)}</div>}
 
       {NAV_GROUPS.map((g) => {
         if (!canSee(g.needs)) return null;
-        const entries = g.entries.filter(e => canSee(e.needs) && `${g.label} ${e.section || ""} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase()));
+        const entries = g.entries.filter(e => canSee(e.needs) && `${t(g.label)} ${e.section || ""} ${t(e.label)}`.toLowerCase().includes(filter.trim().toLowerCase()));
         if (entries.length === 0) return null;
         const isOpen = !!g.alwaysOpen || !!filter.trim() || !!open[g.key];
         const containsActive = groupForLocation(location) === g.key;
         return (
           <div key={g.key} className="mt-1.5">
-            {g.alwaysOpen ? <p className="suite-nav-heading px-3 pt-3 pb-2 text-xs font-medium text-muted-foreground">{g.label}</p> : <button
+            {g.alwaysOpen ? <p className="suite-nav-heading px-3 pt-3 pb-2 text-xs font-medium text-muted-foreground">{t(g.label)}</p> : <button
               aria-controls={`nav-${onNavigate ? 'mobile' : 'desktop'}-${g.key}`}
               aria-expanded={isOpen}
               onClick={() => setOpen(() => isOpen ? {} : { [g.key]: true })}
@@ -230,7 +240,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                   : "text-muted-foreground hover:text-sidebar-foreground"
               )}
             >
-              {g.label}
+              {t(g.label)}
               <ChevronDown
                 className={cn("h-3.5 w-3.5 transition-transform", !isOpen && "-rotate-90")}
               />
@@ -246,11 +256,11 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                   const Icon = e.icon;
                   return (
                     <div key={e.to}>
-                    {e.section && entries[index-1]?.section !== e.section && <p className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">{e.section}</p>}
-                    <Link aria-current={active?'page':undefined} href={e.to} onClick={onNavigate} className={linkCls(active)}>
+                    {e.section && entries[index-1]?.section !== e.section && <p className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">{t(e.section)}</p>}
+                    <div className="flex items-center"><Link aria-current={active?'page':undefined} href={e.to} onClick={onNavigate} className={linkCls(active)+' min-w-0 flex-1'}>
                       <Icon className="h-[18px] w-[18px] shrink-0" />
-                      <span>{e.label}</span>
-                    </Link>
+                      <span>{t(e.label)}</span>
+                    </Link><button type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-sidebar-accent" aria-label={`${favorites.includes(e.to)?'Remove':'Add'} ${t(e.label)} ${favorites.includes(e.to)?'from':'to'} favorites`} aria-pressed={favorites.includes(e.to)} onClick={()=>toggleFavorite(e.to)}><Star className={cn('h-4 w-4',favorites.includes(e.to)?'fill-amber-500 text-amber-600':'text-muted-foreground')} aria-hidden/></button></div>
                     </div>
                   );
                 })}
@@ -259,7 +269,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         );
       })}
-      {filter.trim()&&!NAV_GROUPS.some(g=>canSee(g.needs)&&g.entries.some(e=>canSee(e.needs)&&`${g.label} ${e.section || ""} ${e.label}`.toLowerCase().includes(filter.trim().toLowerCase())))&&<p className="px-3 py-4 text-sm text-muted-foreground">No matching pages. Try another name.</p>}
+      {filter.trim()&&!NAV_GROUPS.some(g=>canSee(g.needs)&&g.entries.some(e=>canSee(e.needs)&&`${t(g.label)} ${e.section || ""} ${t(e.label)}`.toLowerCase().includes(filter.trim().toLowerCase())))&&<p className="px-3 py-4 text-sm text-muted-foreground"><L>{"No matching pages. Try another name."}</L></p>}
     </nav>
   );
 }
@@ -287,7 +297,7 @@ function UserFooter() {
           className="flex items-center gap-1.5 rounded-lg bg-sidebar-accent px-3 py-2 text-sm font-medium text-sidebar-accent-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
         >
           <LogOut className="h-4 w-4" />
-          Sign out
+          <L>{"Sign out"}</L>
         </button>
       </div>
     </div>
@@ -316,6 +326,7 @@ function UserChip() {
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  useBusinessDay();
   const [mobileOpen, setMobileOpen] = useState(false);
   const scrollRef=useRouteScroll();
   const drawer=useRef<HTMLElement>(null);
@@ -338,7 +349,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   },[mobileOpen]);
 
   return (
-    <div className="suite-shell flex min-h-screen bg-background"><a href="#suite-main" onClick={e=>{e.preventDefault();document.getElementById('suite-main')?.focus();}} className="suite-skip">Skip to content</a>
+    <div className="suite-shell flex min-h-screen bg-background"><a href="#suite-main" onClick={e=>{e.preventDefault();document.getElementById('suite-main')?.focus();}} className="suite-skip"><L>{"Skip to content"}</L></a>
       {/* Desktop sidebar */}
       <aside className="suite-sidebar hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:flex lg:h-screen">
         <div className="flex items-center px-5 py-5">
@@ -413,7 +424,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <SuiteBar />
+        <div className="flex items-center gap-2 border-b px-3"><div className="min-w-0 flex-1"><SuiteBar /></div><SuiteHelp/></div>
         <main id="suite-main" tabIndex={-1} ref={scrollRef} className="suite-content page-enter flex-1 overflow-y-auto p-5 sm:p-7 lg:p-10">
           {children}
         </main>
@@ -421,3 +432,4 @@ export default function AppShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
+import SuiteHelp from './SuiteHelp';

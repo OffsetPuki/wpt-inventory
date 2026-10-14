@@ -22,3 +22,7 @@ test-results/
 playwright-report/
 
 .npm-cache/
+roadmap-release-evidence.json
+# Recreated and verified by npm run build; source drawings stay tracked.
+/server/design-studio/current/field-book.html
+/server/design-studio/current/field-book-meta.json

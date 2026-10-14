@@ -2,11 +2,14 @@ import { readMail } from "./mail-queue";
 import { sqlite } from "./storage";
 import { sendMail, sendOwnerMail } from "./mailer";
 import { renderTemplate, firstNameOf } from "./email-templates";
+import {workerStarted,workerFinished} from './operational-status';
 let busy = false;
 export async function runSuiteFollowups() {
   if (busy) return;
   busy = true;
+  let failed=false;
   try {
+    workerStarted('follow-ups');
     resolveObsoleteTasks();
     sqlite
       .prepare(
@@ -92,7 +95,7 @@ export async function runSuiteFollowups() {
             ok =
               !msg ||
               (await sendMail(
-                { to: customer.email, ...msg, deliveryKey: row.event_key },
+                { to: customer.email, ...msg, deliveryKey: row.event_key, context:{quoteId:quote.id,version:quote.version} },
                 { deliveryKey: row.event_key },
               ));
           }
@@ -126,7 +129,11 @@ export async function runSuiteFollowups() {
           );
       }
     }
+  } catch {
+    failed=true;
+    console.error('[suite-worker] Follow-up sweep failed; see health status.');
   } finally {
+    try {workerFinished('follow-ups',failed);}catch{console.error('[suite-worker] Could not record heartbeat.');}
     busy = false;
   }
 }
@@ -137,7 +144,7 @@ export function startSuiteWorker() {
   return () => clearInterval(timer);
 }
 
-function resolveObsoleteTasks() {
+export function resolveObsoleteTasks() {
   const rows = sqlite
     .prepare(
       "SELECT id,auto_key FROM pm_tasks WHERE auto_created=1 AND status!='done' AND deleted_at IS NULL AND auto_key IS NOT NULL",
@@ -146,6 +153,14 @@ function resolveObsoleteTasks() {
   for (const t of rows) {
     let clear = false;
     const k = String(t.auto_key);
+    if (k.startsWith('auto:quote-follow-up:'))
+      clear = !sqlite.prepare("SELECT 1 FROM quotes WHERE number=? AND deleted_at IS NULL AND status='sent'").get(k.slice('auto:quote-follow-up:'.length));
+    if (k.startsWith('auto:draft-invoice:'))
+      clear = !sqlite.prepare("SELECT 1 FROM fin_invoices WHERE number=? AND deleted_at IS NULL AND status='draft'").get(k.slice('auto:draft-invoice:'.length));
+    if (/^auto:(lead-follow-up|stale-lead|lead-quote-chase):/.test(k))
+      clear = !sqlite.prepare("SELECT 1 FROM crm_leads WHERE id=? AND deleted_at IS NULL AND stage NOT IN ('won','lost')").get(Number(k.split(':')[2]));
+    if (k === 'auto:missing-receipts')
+      clear = !sqlite.prepare("SELECT 1 FROM fin_expenses WHERE deleted_at IS NULL AND coalesce(receipt_url,'')='' AND amount_cents>=7500 AND created_at<? LIMIT 1").get(Date.now()-3*86400000);
     if (k.startsWith("suite:review:"))
       clear = !sqlite
         .prepare(
@@ -155,13 +170,13 @@ function resolveObsoleteTasks() {
     if (k.startsWith("auto:invoice-chase:"))
       clear = !sqlite
         .prepare(
-          "SELECT 1 FROM fin_invoices WHERE number=? AND deleted_at IS NULL AND status IN ('sent','partial','overdue') AND total_cents-coalesce(retainage_cents,0)-paid_cents>0 AND due_date<date('now','localtime')",
+          "SELECT 1 FROM fin_invoices WHERE number=? AND deleted_at IS NULL AND status IN ('sent','partial','overdue') AND total_cents-coalesce(retainage_cents,0)-paid_cents>0 AND due_date<business_today()",
         )
         .get(k.slice("auto:invoice-chase:".length));
     if (k.startsWith("auto:late-po:"))
       clear = !sqlite
         .prepare(
-          "SELECT 1 FROM fin_purchase_orders WHERE number=? AND deleted_at IS NULL AND order_type='supplier' AND status IN ('open','sent') AND expected_date<date('now','localtime')",
+          "SELECT 1 FROM fin_purchase_orders WHERE number=? AND deleted_at IS NULL AND order_type='supplier' AND status IN ('open','sent') AND expected_date<business_today()",
         )
         .get(k.slice("auto:late-po:".length));
     if (k.startsWith("auto:unbilled:")) {

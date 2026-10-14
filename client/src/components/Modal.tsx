@@ -38,6 +38,7 @@ export default function Modal({
 }: ModalProps) {
   const titleId = useId();
   const card = useRef<HTMLDivElement>(null);
+  const [viewport,setViewport]=useState<{height:number;top:number}|null>(null);
   const dirty = useRef(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const confirming = useRef(false);
@@ -57,6 +58,22 @@ export default function Modal({
     if (draftPreserved.current || !(unsaved.current ?? dirty.current)) close.current();
     else setConfirmDiscard(true);
   };
+  useEffect(() => {
+    if (!open) return;
+    const vv=window.visualViewport;
+    const measure=()=>{if(vv)setViewport({height:vv.height,top:vv.offsetTop});};measure();
+    vv?.addEventListener('resize',measure);vv?.addEventListener('scroll',measure);
+    const validation=(event:Event)=>{
+      const dialogs=document.querySelectorAll('[data-cjm-modal]');if(dialogs[dialogs.length-1]!==card.current)return;
+      const fields=(event as CustomEvent<{fields:string[]}>).detail?.fields||[];
+      for(const field of fields){const input=card.current?.querySelector<HTMLElement>(`[name="${CSS.escape(field)}"], [data-field="${CSS.escape(field)}"]`);if(input){
+        for(let parent=input.parentElement;parent&&parent!==card.current;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;
+        input.focus();input.scrollIntoView({block:'nearest'});break;
+      }}
+    };
+    window.addEventListener('suite-validation',validation);
+    return()=>{vv?.removeEventListener('resize',measure);vv?.removeEventListener('scroll',measure);window.removeEventListener('suite-validation',validation);};
+  },[open]);
   useEffect(() => {
     if (!open) return;
     dirty.current = false;
@@ -121,7 +138,7 @@ export default function Modal({
   }, [confirmDiscard]);
   if (!open) return null;
   return createPortal(
-    <DismissContext.Provider value={dismiss}><div className="fixed inset-0 z-50 flex items-end justify-center p-2 sm:items-center sm:p-4">
+    <DismissContext.Provider value={dismiss}><div style={viewport?{height:viewport.height,top:viewport.top,bottom:'auto'}:undefined} className="fixed inset-0 z-50 flex items-end justify-center p-2 sm:items-center sm:p-4">
       <div
         className="absolute inset-0 touch-none bg-black/60"
         onClick={dismiss}
@@ -135,6 +152,7 @@ export default function Modal({
         aria-labelledby={titleId}
         aria-busy={busy || undefined}
         tabIndex={-1}
+        style={viewport?{maxHeight:Math.max(80,viewport.height-32)}:undefined}
         onClickCapture={event => { if (busy) { event.preventDefault(); event.stopPropagation(); } }}
         onSubmitCapture={event => { if (busy) { event.preventDefault(); event.stopPropagation(); } }}
         onChangeCapture={() => {

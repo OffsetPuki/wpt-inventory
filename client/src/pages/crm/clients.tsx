@@ -1,9 +1,16 @@
+import DeleteRecordReview from '@/components/DeleteRecordReview';
+import {L} from '@/lib/language';
+import CustomerAccount from '@/components/CustomerAccount';
+import CustomerHistory from '@/components/CustomerHistory';
+import RecordCommunication from '@/components/RecordCommunication';
+import ConnectedRecords from '@/components/ConnectedRecords';
 import {ActiveFilters} from '@/components/ActiveFilters';
 import {MergeReview} from '@/pages/suite-reviews';
 import {Link} from 'wouter';
 import RelatedPreviews from '@/components/RelatedPreviews';
 import { useDialogDraft } from '@/lib/dialog-draft';
-import { useListPage,PageButtons,useRememberedState } from '@/lib/list-page';
+import {PageButtons} from '@/lib/list-page';
+import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from '@/components/RetryBlock';
 import { useRecordLink } from "@/lib/record-link";
 import { useState } from "react";
@@ -27,7 +34,7 @@ import {
   type CrmActivity,
 } from "@shared/crm-schema";
 import { type Project, type ProjectStatus } from "@shared/schema";
-import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote, Trash2 } from "lucide-react";
+import { Loader2, Plus, Contact, Search, Archive, ArchiveRestore, Pencil, StickyNote } from "lucide-react";
 
 const LEAD_STAGE_TONE: Record<LeadStage, ChipTone> = {
   new: "zinc",
@@ -126,47 +133,47 @@ function ClientFormModal({ client, onClose }: { client: Client | null; onClose: 
         {recovered.notice}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Name</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Name"}</L></span>
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Company</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Company"}</L></span>
             <input className={inputCls} value={company} onChange={(e) => setCompany(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Email</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Email"}</L></span>
             <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">Phone</span>
+            <span className="text-sm font-medium text-foreground"><L>{"Phone"}</L></span>
             <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
           </label>
         </div>
-        <details className="rounded-xl border border-border p-4"><summary className="text-sm font-medium">Address, language & notes</summary><div className="mt-4 space-y-4">
+        <details className="rounded-xl border border-border p-4"><summary className="text-sm font-medium"><L>{"Address, language & notes"}</L></summary><div className="mt-4 space-y-4">
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Customer language</span>
-          <select className={inputCls} value={preferredLanguage} onChange={e=>setPreferredLanguage(e.target.value as "en"|"es")}><option value="en">English</option><option value="es">Español</option></select>
+          <span className="text-sm font-medium text-foreground"><L>{"Customer language"}</L></span>
+          <select className={inputCls} value={preferredLanguage} onChange={e=>setPreferredLanguage(e.target.value as "en"|"es")}><option value="en"><L>{"English"}</L></option><option value="es">Español</option></select>
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Address</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Address"}</L></span>
           <input className={inputCls} value={address} onChange={(e) => setAddress(e.target.value)} />
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">City</span>
+            <span className="text-sm font-medium text-foreground"><L>{"City"}</L></span>
             <input className={inputCls} value={city} onChange={(e) => setCity(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-foreground">ZIP</span>
+            <span className="text-sm font-medium text-foreground"><L>{"ZIP"}</L></span>
             <input className={inputCls} value={zip} onChange={(e) => setZip(e.target.value)} />
           </label>
         </div>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Tags (comma-separated)</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Tags (comma-separated)"}</L></span>
           <input className={inputCls} placeholder="vip, repeat, commercial" value={tags} onChange={(e) => setTags(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Notes</span>
+          <span className="text-sm font-medium text-foreground"><L>{"Notes"}</L></span>
           <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
         </div></details>
@@ -191,6 +198,8 @@ interface ClientInvoice {
   status: string;
   totalCents: number;
   balanceCents: number;
+  projectId?: number | null;
+  createdAt?: number;
   dueDate: string | null;
 }
 
@@ -200,7 +209,7 @@ interface ClientDetail {
   activities: CrmActivity[];
   projects: Project[];
   invoices: ClientInvoice[]; // empty for non-elevated roles
-  quotes:{id:number;number:string;status:string;totalCents:number}[];
+  quotes:{id:number;number:string;status:string;totalCents:number;createdAt?:number}[];
   relatedCustomers:{id:number;name:string;company:string|null;email:string|null;phone:string|null}[];
   reviewCount: number;
 }
@@ -263,33 +272,33 @@ function ClientDetailModal({
             <div className="flex items-start justify-between gap-3">
               <div className="grid flex-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
                 {client.company && (
-                  <p><span className="text-muted-foreground">Company: </span>{client.company}</p>
+                  <p><span className="text-muted-foreground"><L>{"Company:"}</L>{" "}</span>{client.company}</p>
                 )}
                 {client.email && (
-                  <p><span className="text-muted-foreground">Email: </span>{client.email}</p>
+                  <p><span className="text-muted-foreground"><L>{"Email:"}</L>{" "}</span>{client.email}</p>
                 )}
                 {client.phone && (
-                  <p><span className="text-muted-foreground">Phone: </span>{client.phone}</p>
+                  <p><span className="text-muted-foreground"><L>{"Phone:"}</L>{" "}</span>{client.phone}</p>
                 )}
                 {(client.city || client.zip) && (
                   <p>
-                    <span className="text-muted-foreground">Location: </span>
+                    <span className="text-muted-foreground"><L>{"Location:"}</L>{" "}</span>
                     {[client.address, client.city, client.zip].filter(Boolean).join(", ")}
                   </p>
                 )}
                 <p>
-                  <span className="text-muted-foreground">Since: </span>
+                  <span className="text-muted-foreground"><L>{"Since:"}</L>{" "}</span>
                   {formatDate(client.createdAt as any)}
                 </p>
                 {data.reviewCount > 0 && (
                   <p>
-                    <span className="text-muted-foreground">Reviews: </span>
-                    <span className="text-amber-500">★</span> {data.reviewCount} review{data.reviewCount === 1 ? "" : "s"}
+                    <span className="text-muted-foreground"><L>{"Reviews:"}</L>{" "}</span>
+                    <span className="text-amber-500">★</span> {data.reviewCount} {" "}<L>{"review"}</L>{data.reviewCount === 1 ? "" : "s"}
                   </p>
                 )}
                 {client.notes && (
                   <p className="sm:col-span-2">
-                    <span className="text-muted-foreground">Notes: </span>{client.notes}
+                    <span className="text-muted-foreground"><L>{"Notes:"}</L>{" "}</span>{client.notes}
                   </p>
                 )}
               </div>
@@ -298,21 +307,10 @@ function ClientDetailModal({
                   onClick={() => onEdit(client)}
                   className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary"
                 >
-                  <Pencil className="h-4 w-4" /> Edit
+                  <Pencil className="h-4 w-4" /> <L>{"Edit"}</L>
                 </button>
                 {isElevated && (
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Delete customer "${client.name}"? This can't be undone from the app. Their jobs and invoices are kept (the name still shows on them).`)) {
-                        del.mutate();
-                      }
-                    }}
-                    disabled={del.isPending}
-                    className="flex h-9 items-center gap-1.5 rounded-lg border border-destructive/40 px-3 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
-                  >
-                    {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    Delete
-                  </button>
+                  <DeleteRecordReview kind="customer" id={clientId} name={client.name} busy={del.isPending} error={del.error?.message} onConfirm={()=>del.mutate()}/>
                 )}
               </div>
             </div>
@@ -325,14 +323,19 @@ function ClientDetailModal({
             )}
           </div>
 
-          {isElevated && <RelatedPreviews clientId={client.id}/>}
-          {isElevated&&!!data.relatedCustomers?.length&&<section className="rounded-xl border border-amber-300 bg-amber-50/30 p-4"><h3 className="font-semibold">Related customer records</h3><p className="mt-1 text-sm text-muted-foreground">These records share a company or email. If they belong to the same customer, combine them to keep quotes, jobs, and invoices in one history.</p>{data.relatedCustomers.map(other=><div key={other.id} className="mt-3 space-y-2"><p className="text-sm"><strong>{other.name}</strong>{other.company&&` · ${other.company}`}<br/>{[other.email,other.phone].filter(Boolean).join(' · ')}</p><button type="button" className="min-h-11 rounded-lg border px-3 text-sm" onClick={()=>setMergeId(other.id)}>Review combining with {other.name}</button></div>)}</section>}
-          {isElevated&&<section><h3 className="mb-2 text-sm font-medium text-muted-foreground">Quotes</h3>{!data.quotes?.length?<p className="text-sm text-muted-foreground">No quotes linked to this customer.</p>:<ul className="divide-y">{data.quotes.map(q=><li key={q.id}><Link href={`/crm/quotes?quote=${q.id}`} onClick={onClose} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"><span className="font-medium underline">{q.number}</span><span className="capitalize">{q.status} · {formatMoney(q.totalCents)}</span></Link></li>)}</ul>}</section>}
+          <ConnectedRecords kind="customer" id={client.id}/>
+          {isElevated&&<CustomerHistory data={data} onNavigate={onClose}/>}
+          {isElevated&&<RecordCommunication key={client.id} kind="customer" id={client.id}/>}
+          {isElevated&&<CustomerAccount key={client.id} id={client.id}/>}
+{isElevated && <RelatedPreviews clientId={client.id}/>}
+          <details className="space-y-4"><summary className="min-h-11 cursor-pointer py-2 font-medium"><L>{"All records"}</L></summary>
+          {isElevated&&!!data.relatedCustomers?.length&&<section className="rounded-xl border border-amber-300 bg-amber-50/30 p-4"><h3 className="font-semibold"><L>{"Related customer records"}</L></h3><p className="mt-1 text-sm text-muted-foreground"><L>{"These records share a company or email. If they belong to the same customer, combine them to keep quotes, jobs, and invoices in one history."}</L></p>{data.relatedCustomers.map(other=><div key={other.id} className="mt-3 space-y-2"><p className="text-sm"><strong>{other.name}</strong>{other.company&&` · ${other.company}`}<br/>{[other.email,other.phone].filter(Boolean).join(' · ')}</p><button type="button" className="min-h-11 rounded-lg border px-3 text-sm" onClick={()=>setMergeId(other.id)}><L>{"Review combining with"}</L>{" "}{other.name}</button></div>)}</section>}
+          {isElevated&&<section><h3 className="mb-2 text-sm font-medium text-muted-foreground"><L>{"Quotes"}</L></h3>{!data.quotes?.length?<p className="text-sm text-muted-foreground"><L>{"No quotes linked to this customer."}</L></p>:<ul className="divide-y">{data.quotes.map(q=><li key={q.id}><Link href={`/crm/quotes?quote=${q.id}`} onClick={onClose} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"><span className="font-medium underline">{q.number}</span><span className="capitalize">{q.status} · {formatMoney(q.totalCents)}</span></Link></li>)}</ul>}</section>}
           {isElevated && (
             <div>
-              <h3 className="mb-2 text-sm font-medium text-muted-foreground">Invoices</h3>
+              <h3 className="mb-2 text-sm font-medium text-muted-foreground"><L>{"Invoices"}</L></h3>
               {data.invoices.length === 0 ? (
-                <p className="py-2 text-sm text-muted-foreground">No invoices for this client</p>
+                <p className="py-2 text-sm text-muted-foreground"><L>{"No invoices for this client"}</L></p>
               ) : (
                 <>
                   {(() => {
@@ -341,7 +344,7 @@ function ClientDetailModal({
                       .reduce((s, inv) => s + inv.balanceCents, 0);
                     return (
                       <p className={`mb-1 text-sm font-medium ${owedCents > 0 ? "text-destructive" : "text-muted-foreground"}`}>
-                        Balance owed: {formatMoney(owedCents)}
+                        <L>{"Balance owed:"}</L>{" "}{formatMoney(owedCents)}
                       </p>
                     );
                   })()}
@@ -351,7 +354,7 @@ function ClientDetailModal({
                         <span className="min-w-0 truncate text-sm text-foreground">
                           <Link href={`/finance/invoices?invoice=${inv.id}`} onClick={onClose} className="font-mono text-xs underline">{inv.number}</Link>
                           {inv.dueDate && (
-                            <span className="ml-2 text-xs text-muted-foreground">due {formatDate(inv.dueDate)}</span>
+                            <span className="ml-2 text-xs text-muted-foreground"><L>{"due"}</L>{" "}{formatDate(inv.dueDate)}</span>
                           )}
                         </span>
                         <div className="flex shrink-0 items-center gap-3">
@@ -362,8 +365,7 @@ function ClientDetailModal({
                             {formatMoney(inv.totalCents)}
                             {inv.balanceCents > 0 && inv.status !== "void" && inv.balanceCents !== inv.totalCents && (
                               <span className="ml-1 text-xs text-muted-foreground">
-                                ({formatMoney(inv.balanceCents)} left)
-                              </span>
+                                ({formatMoney(inv.balanceCents)} {" "}<L>{"left)"}</L>{" "}</span>
                             )}
                           </span>
                         </div>
@@ -376,14 +378,14 @@ function ClientDetailModal({
           )}
 
           <div>
-            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Leads</h3>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground"><L>{"Leads"}</L></h3>
             {data.leads.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">No leads linked to this client</p>
+              <p className="py-2 text-sm text-muted-foreground"><L>{"No leads linked to this client"}</L></p>
             ) : (
               <ul className="divide-y divide-border">
                 {data.leads.map((l) => (
                   <li key={l.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.name}</span>
+                    <Link href={`/crm/leads?lead=${l.id}`} className="min-w-0 py-2 text-sm font-medium text-primary underline">{l.name}</Link>
                     <div className="flex shrink-0 items-center gap-3">
                       <Chip tone={LEAD_STAGE_TONE[l.stage]}>
                         {LEAD_STAGE_LABELS[l.stage]}
@@ -399,17 +401,17 @@ function ClientDetailModal({
           </div>
 
           <div>
-            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Jobs</h3>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground"><L>{"Jobs"}</L></h3>
             {data.projects.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">No jobs linked to this client</p>
+              <p className="py-2 text-sm text-muted-foreground"><L>{"No jobs linked to this client"}</L></p>
             ) : (
               <ul className="divide-y divide-border">
                 {data.projects.map((p) => (
                   <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <span className="min-w-0 truncate text-sm text-foreground">
+                    <Link href={`/project/${p.id}`} className="min-w-0 py-2 text-sm text-primary underline">
                       <span className="font-mono text-xs text-muted-foreground">{p.jobNumber}</span>{" "}
                       {p.name}
-                    </span>
+                    </Link>
                     <Chip tone={PROJECT_STATUS_TONE[p.status]} className="shrink-0">
                       {PROJECT_STATUS_LABEL[p.status]}
                     </Chip>
@@ -419,11 +421,12 @@ function ClientDetailModal({
             )}
           </div>
 
+          </details>
           <div>
-            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Activity</h3>
+            <h3 className="mb-2 text-sm font-medium text-muted-foreground"><L>{"Contact activity"}</L></h3>
             <div className="mb-3 flex items-center gap-2">
               <input
-                className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring"
+                className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring"
                 placeholder="Add a note…"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -432,13 +435,12 @@ function ClientDetailModal({
                 type="button"
                 disabled={logNote.isPending || !note.trim()}
                 onClick={() => logNote.mutate()}
-                className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary disabled:opacity-60"
+                className="flex h-11 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:border-primary disabled:opacity-60"
               >
-                <StickyNote className="h-4 w-4" /> Log note
-              </button>
+                <StickyNote className="h-4 w-4" /> {" "}<L>{"Log note"}</L>{" "}</button>
             </div>
             {data.activities.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">No activity yet</p>
+              <p className="py-2 text-sm text-muted-foreground"><L>{"No activity yet"}</L></p>
             ) : (
               <ul className="divide-y divide-border">
                 {data.activities.map((a) => (
@@ -467,14 +469,15 @@ function ClientDetailModal({
 
 export default function ClientsPage() {
   const {isElevated}=useAuth();
-  const [q, setQ] = useRememberedState("client/src/pages/crm/clients.tsx:q","");
-  const [status, setStatus] = useRememberedState("client/src/pages/crm/clients.tsx:status","active");
+  const [filters,setFilters]=usePageFilters({q:"",status:"active",page:"0"});
+  const q=filters.q,setQ=(q:string)=>setFilters({q});
+  const status=filters.status,setStatus=(status:string)=>setFilters({status});
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   useRecordLink("client", "/api/crm/clients", row=>setDetailId(row.id));
 
-  const {page,setPage}=useListPage('clients:client/src/pages/crm/clients.tsx',[q.trim(),status]);
+  const page=Math.max(0,Math.floor(Number(filters.page)||0)),setPage=(page:number)=>setFilters({page:String(page)});
   const params = new URLSearchParams();
     params.set('page',String(page));params.set('limit','50');
   if (q.trim()) params.set("q", q.trim());
@@ -501,7 +504,7 @@ export default function ClientsPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <Header title="Customers" description="Customer records, history, and contact info">
-        {isElevated&&<Link href="/trash" className="flex min-h-11 items-center rounded-xl border px-4 text-sm">View Trash</Link>}
+        {isElevated&&<Link href="/trash" className="flex min-h-11 items-center rounded-xl border px-4 text-sm"><L>{"View Trash"}</L></Link>}
         <button
           onClick={() => {
             setEditing(null);
@@ -510,8 +513,7 @@ export default function ClientsPage() {
           className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
         >
           <Plus className="h-5 w-5" />
-          New customer
-        </button>
+          <L>{"New customer"}</L>{" "}</button>
       </Header>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
@@ -529,9 +531,9 @@ export default function ClientsPage() {
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
-          <option value="active">Active</option>
-          <option value="archived">Archived</option>
-          <option value="">All</option>
+          <option value="active"><L>{"Active"}</L></option>
+          <option value="archived"><L>{"Archived"}</L></option>
+          <option value=""><L>{"All"}</L></option>
         </select>
       </div>
 
@@ -549,21 +551,20 @@ export default function ClientsPage() {
             className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground hover:opacity-90"
           >
             <Plus className="h-5 w-5" />
-            Add your first client
-          </button>
+            <L>{"Add your first client"}</L>{" "}</button>
         </EmptyState>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase text-muted-foreground">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Company</th>
-                <th className="px-4 py-3 font-medium">Contact</th>
-                <th className="px-4 py-3 font-medium">City</th>
-                <th className="px-4 py-3 font-medium">Tags</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 text-right font-medium">Actions</th>
+                <th className="px-4 py-3 font-medium"><L>{"Name"}</L></th>
+                <th className="px-4 py-3 font-medium"><L>{"Company"}</L></th>
+                <th className="px-4 py-3 font-medium"><L>{"Contact"}</L></th>
+                <th className="px-4 py-3 font-medium"><L>{"City"}</L></th>
+                <th className="px-4 py-3 font-medium"><L>{"Tags"}</L></th>
+                <th className="px-4 py-3 font-medium"><L>{"Status"}</L></th>
+                <th className="px-4 py-3 text-right font-medium"><L>{"Actions"}</L></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -613,11 +614,11 @@ export default function ClientsPage() {
                     >
                       {c.status === "active" ? (
                         <>
-                          <Archive className="h-3.5 w-3.5" /> Archive
+                          <Archive className="h-3.5 w-3.5" /> <L>{"Archive"}</L>
                         </>
                       ) : (
                         <>
-                          <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                          <ArchiveRestore className="h-3.5 w-3.5" /> <L>{"Restore"}</L>
                         </>
                       )}
                     </button>

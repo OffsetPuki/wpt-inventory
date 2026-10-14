@@ -47,7 +47,7 @@ export function registerEmployeeBoundary(app: Express) {
     if (!session || ['owner','manager'].includes(session.role)) return next();
     const safe = /^\/api\/(auth\/(login|logout|me)|security\/(password|revoke-sessions))$/.test(apiPath)
       || apiPath.startsWith('/api/employee/')
-      || (req.method==='GET' && ['/api/settings','/api/hr/me','/api/hr/leave','/api/suite/events'].includes(apiPath))
+      || (req.method==='GET' && ['/api/settings','/api/hr/me','/api/hr/leave','/api/suite/events','/api/suite/clock'].includes(apiPath))
       || (['POST','DELETE'].includes(req.method) && /^\/api\/hr\/leave(?:\/\d+)?$/.test(apiPath));
     if (safe || apiPath.startsWith('/api/public/')) return next();
     return res.status(403).json({message:'Use your employee workspace for assigned jobs, time and messages.'});

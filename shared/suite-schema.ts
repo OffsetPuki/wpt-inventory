@@ -1,4 +1,6 @@
 import { projects, users } from "./schema";
+import {clients as crmClients} from './crm-schema';
+import {quotes} from './quote-schema';
 import { pmTasks } from "./pm-schema";
 // Catalog of additive suite tables. Runtime migrations live with their modules.
 import {
@@ -9,6 +11,8 @@ import {
   primaryKey,
   unique,
   index,
+  uniqueIndex,
+  check,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
@@ -267,3 +271,41 @@ export const webLeadAccess = sqliteTable('web_lead_access', {
 export const webLeadSupplements = sqliteTable('web_lead_supplements', {
  submissionId:text('submission_id').primaryKey(), tokenHash:text('token_hash').notNull(), payloadHash:text('payload_hash').notNull(), createdAt:integer('created_at').notNull(),
 });
+
+// Roadmap additions remain in the schema-tool catalog as well as additive
+// runtime migrations; schema maintenance must never drop their saved history.
+export const crmAccountContacts=sqliteTable('crm_account_contacts',{
+ contactId:integer('contact_id').primaryKey(),accountId:integer('account_id').notNull(),primaryBilling:integer('primary_billing').notNull().default(0),
+},t=>[index('crm_account_contacts_account').on(t.accountId),uniqueIndex('crm_account_primary_billing').on(t.accountId).where(sql`${t.primaryBilling}=1`),check('crm_account_distinct',sql`${t.contactId}!=${t.accountId}`)]);
+export const suiteJobCompletion=sqliteTable('suite_job_completion',{
+ projectId:integer('project_id').notNull().references(()=>projects.id),item:text('item').notNull(),state:text('state').notNull(),note:text('note').notNull(),updatedAt:integer('updated_at').notNull(),updatedBy:integer('updated_by').notNull().references(()=>users.id),
+},t=>[primaryKey({columns:[t.projectId,t.item]})]);
+export const suiteTemplateRuns=sqliteTable('suite_template_runs',{
+ projectId:integer('project_id').primaryKey(),templateKey:text('template_key').notNull(),templateVersion:text('template_version').notNull(),definitionJson:text('definition_json').notNull(),parametersJson:text('parameters_json').notNull(),createdAt:integer('created_at').notNull(),
+});
+export const suiteServiceHealth=sqliteTable('suite_service_health',{
+ name:text('name').primaryKey(),startedAt:integer('started_at'),completedAt:integer('completed_at'),lastError:text('last_error'),
+});
+export const suiteErrorEvents=sqliteTable('suite_error_events',{
+ id:text('id').primaryKey(),method:text('method').notNull(),route:text('route').notNull(),status:integer('status').notNull(),release:text('release').notNull(),durationMs:integer('duration_ms').notNull(),createdAt:integer('created_at').notNull(),
+},t=>[index('suite_error_age').on(t.createdAt)]);
+export const mkPageImprovements=sqliteTable('mk_page_improvements',{
+ taskId:integer('task_id').primaryKey(),site:text('site').notNull(),path:text('path').notNull(),hypothesis:text('hypothesis').notNull(),period:text('period'),evidence:text('evidence'),createdAt:integer('created_at').notNull(),campaign:text('campaign').notNull().default(''),changeDate:text('change_date'),changeNote:text('change_note'),version:integer('version').notNull().default(1),
+},t=>[index('mk_page_improvements_page').on(t.site,t.path,t.createdAt)]);
+export const suiteDesigns=sqliteTable('suite_designs',{
+ id:integer('id').primaryKey({autoIncrement:true}),name:text('name').notNull(),modelKey:text('model_key').notNull(),modelRevision:text('model_revision').notNull(),
+ projectId:integer('project_id').references(()=>projects.id),clientId:integer('client_id').references(()=>crmClients.id),quoteId:integer('quote_id').references(()=>quotes.id),
+ approvedAt:integer('approved_at'),approvedBy:integer('approved_by').references(()=>users.id),archivedAt:integer('archived_at'),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull(),
+},t=>[index('suite_designs_job').on(t.projectId,t.archivedAt,t.updatedAt)]);
+export const suiteDesignHistory=sqliteTable('suite_design_history',{
+ id:integer('id').primaryKey({autoIncrement:true}),designId:integer('design_id').notNull().references(()=>suiteDesigns.id),snapshotJson:text('snapshot_json').notNull(),createdAt:integer('created_at').notNull(),createdBy:integer('created_by').notNull().references(()=>users.id),
+});
+export const suiteDesignMeasurements=sqliteTable('suite_design_measurements',{
+ id:integer('id').primaryKey({autoIncrement:true}),designId:integer('design_id').notNull().references(()=>suiteDesigns.id),modelRevision:text('model_revision').notNull(),part:text('part').notNull(),dimension:text('dimension').notNull(),valueMm:real('value_mm').notNull(),toleranceMm:real('tolerance_mm').notNull(),enteredUnit:text('entered_unit').notNull(),datum:text('datum').notNull(),source:text('source').notNull(),reference:text('reference').notNull(),measuredDate:text('measured_date').notNull(),sourceFileId:integer('source_file_id').references(()=>suiteFiles.id),verifiedById:integer('verified_by_id').notNull().references(()=>users.id),verifiedAt:integer('verified_at').notNull(),
+},t=>[unique().on(t.designId,t.modelRevision,t.part,t.dimension)]);
+export const suiteJobForecasts=sqliteTable('suite_job_forecasts',{
+ projectId:integer('project_id').primaryKey().references(()=>projects.id),revenueCents:integer('revenue_cents'),materialCents:integer('material_cents'),laborCents:integer('labor_cents'),otherCents:integer('other_cents'),note:text('note').notNull(),sourceVersion:text('source_version').notNull(),reviewedBy:integer('reviewed_by').notNull().references(()=>users.id),reviewedAt:integer('reviewed_at').notNull(),
+});
+export const suiteJobForecastHistory=sqliteTable('suite_job_forecast_history',{
+ id:integer('id').primaryKey({autoIncrement:true}),projectId:integer('project_id').notNull().references(()=>projects.id),snapshotJson:text('snapshot_json').notNull(),createdAt:integer('created_at').notNull(),createdBy:integer('created_by').notNull().references(()=>users.id),
+},t=>[index('suite_job_forecast_history_job').on(t.projectId,t.id)]);

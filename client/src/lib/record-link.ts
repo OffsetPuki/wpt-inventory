@@ -12,7 +12,7 @@ export function readContext(name: string) {
 export function useRecordLink(
   name: string,
   endpoint: string,
-  onOpen: (row: any) => void,
+  onOpen: (row: any) => void | boolean | Promise<void | boolean>,
 ) {
   const id = useDeepLink(name);
   const valid = !!id && /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id));
@@ -37,13 +37,14 @@ export function useRecordLink(
   useEffect(() => {
     if (valid && q.isSuccess && !q.isFetching && q.data && id && opened.current !== id) {
       opened.current = id;
-      try {
-        open.current(q.data);
-        clearLink();
-      } catch {
-        const notice = toast({ variant: 'destructive', title: 'Could not read this record', description: 'Its saved details could not be opened. Your record has not been changed.', action: { label: 'Back to list', onClick: clearLink } });
-        return () => dismissToast(notice);
-      }
+      void Promise.resolve().then(() => open.current(q.data)).then(result => {
+        if (result !== false && readContext(name) === id) clearLink();
+        else if (result === false) {
+          toast({ variant: 'destructive', title: 'Your current draft needs attention', description: 'Your requested record link is still here. Review the draft, then try again.', action: { label: 'Try opening again', onClick: () => { opened.current = null; void q.refetch(); } } });
+        }
+      }).catch(() => {
+        toast({ variant: 'destructive', title: 'Could not read this record', description: 'Your saved information has not been changed.', action: { label: 'Try again', onClick: () => { opened.current = null; void q.refetch(); } } });
+      });
     }
   }, [q.data, q.isSuccess, q.isFetching, id, valid]);
   useEffect(() => {

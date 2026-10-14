@@ -1,8 +1,7 @@
-import { useEffect, useRef } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useAuth } from "./auth";
 export function useRouteScroll() {
-  const [location] = useLocation();
+  const location = useSyncExternalStore(subscribe, () => window.location.hash, () => "");
   const { user } = useAuth();
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -49,4 +48,9 @@ export function useRouteScroll() {
     };
   }, [location, user?.id]);
   return ref;
+}
+function subscribe(listener: () => void) {
+  window.addEventListener('hashchange', listener);
+  window.addEventListener('popstate', listener);
+  return () => { window.removeEventListener('hashchange', listener); window.removeEventListener('popstate', listener); };
 }

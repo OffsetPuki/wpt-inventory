@@ -7,7 +7,7 @@ import {normalize as normalizeBarndo,validate as validateBarndo} from '../client
 import {cleanBarndoQuote,purchasing,scopeIssues} from '../client/src/quote/lib/barndoQuote.js';
 import {computeTotals} from '../client/src/quote/lib/quote.js';
 import {duplicateSession} from '../client/src/quote/lib/store.js';
-import { issuedPayload, preserveLegacyQuoteTerms } from './quote-policy';
+import { issuedPayload, preserveLegacyQuoteTerms, quotePolicy, isQuoteExpired } from './quote-policy';
 import {registerQuoteOptionRoutes} from './quote-options';
 import { projectLabor } from './labor-cost';
 import { jobStockCost } from './stock-cost';
@@ -541,6 +541,7 @@ export function registerQuoteRoutes(app: Express): void {
         customerName: quotes.customerName,
         designRef: quotes.designRef,
         leadId: quotes.leadId,
+        projectId: sql<number | null>`(SELECT p.id FROM projects p WHERE p.quote_id=${quotes.id} AND p.deleted_at IS NULL ORDER BY p.id DESC LIMIT 1)`,
         revisionOf: quotes.revisionOf,
         version: quotes.version,
         totalCents: quotes.totalCents,
@@ -583,7 +584,11 @@ export function registerQuoteRoutes(app: Express): void {
       .where(and(eq(quotes.id, pid(req.params.id)), isNull(quotes.deletedAt)))
       .get();
     if (!quote) return res.status(404).json({ message: "Quote not found" });
-    res.json(quote);
+    const root=quote.revisionOf??quote.id;
+    const family=sqlite.prepare('SELECT count(*) total,sum(CASE WHEN id<=? THEN 1 ELSE 0 END) position FROM quotes WHERE id=? OR revision_of=?').get(quote.id,root,root) as any;
+    const accepted=sqlite.prepare("SELECT id,number,accepted_at,deleted_at FROM quotes WHERE (id=? OR revision_of=?) AND status='accepted' ORDER BY accepted_at DESC,id DESC LIMIT 1").get(root,root);
+    const event=sqlite.prepare("SELECT user_name,details FROM audit_log WHERE action='quote.accepted' AND target_type='quote' AND target_id=? ORDER BY id LIMIT 1").get(quote.id) as any;
+    res.json({...quote,review:{revision:family.position,revisions:family.total,policy:quotePolicy(quote),expired:isQuoteExpired(quote),accepted:accepted||null,acceptance:event?{by:event.user_name,method:parseJson<any>(event.details,{}).method||'recorded'}:null}});
   });
 
   app.post("/api/quotes", requireAuth, (req, res) => {
@@ -781,7 +786,7 @@ export function registerQuoteRoutes(app: Express): void {
         quoteNumber: quote.number,
         quoteUrl: url,
       });
-      emailed = msg ? await sendMail({ to, ...msg }) : false;
+      emailed = msg ? await sendMail({ to, ...msg, context:{quoteId:id,version:quote.version} }) : false;
       // Phase B #9: the share email on the lead's timeline (matched by
       // address — onQuoteEvent above creates the lead if it's new to CRM).
       if (emailed) {

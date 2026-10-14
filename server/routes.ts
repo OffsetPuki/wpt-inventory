@@ -1,3 +1,4 @@
+import {registerOperationalStatus} from './operational-status';
 import { registerEmployeeBoundary, registerEmployeeRoutes } from './employee';
 import { employeeFileAllowed } from './employee-data';
 import {registerInsightRoutes} from './insights';
@@ -123,6 +124,8 @@ const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000;
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
+  registerOperationalStatus(app);
+  sqlite.exec('CREATE TABLE IF NOT EXISTS suite_template_runs(project_id INTEGER PRIMARY KEY,template_key TEXT NOT NULL,template_version TEXT NOT NULL,definition_json TEXT NOT NULL,parameters_json TEXT NOT NULL,created_at INTEGER NOT NULL)');
   registerEmployeeBoundary(app);
   registerEmployeeRoutes(app);
   registerCustomerPreviews(app);
@@ -386,7 +389,7 @@ export function registerRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
-  // Restore endpoint for items soft-deleted in the last 30 days. The
+  // Restore endpoint for retained soft-deleted items. The
   // listing endpoint is registered higher up so /deleted isn't captured
   // as :id by /api/items/:id.
   app.post("/api/items/:id/restore", requireElevated, (req, res) => {
@@ -613,6 +616,7 @@ export function registerRoutes(app: Express): void {
       notes: part.notes,
     }));
 
+    res.setHeader('X-Template-Version',crypto.createHash('sha256').update(JSON.stringify(tpl)).digest('hex'));
     res.json(result);
   });
 
@@ -625,25 +629,31 @@ export function registerRoutes(app: Express): void {
   app.post("/api/projects/from-template", requireElevated, (req, res) => {
     try {
       const body = fromTemplateSchema.parse(req.body);
+      const linkedCustomer=body.clientId?sqlite.prepare('SELECT id,name FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(body.clientId) as {id:number;name:string}|undefined:undefined;
+      if(body.clientId&&!linkedCustomer)return res.status(400).json({message:'Choose an active customer, or leave the customer blank.'});
       const tpl = storage.getTemplateByKey(body.templateKey);
       if (!tpl) return res.status(404).json({ message: "Template not found" });
+      const templateVersion=crypto.createHash('sha256').update(JSON.stringify(tpl)).digest('hex');
+      if(typeof req.body.templateVersion==='string'&&req.body.templateVersion!==templateVersion)return res.status(409).json({message:'This template changed. Preview the current checklist before creating the job.'});
 
       const parts: TemplatePart[] = JSON.parse(tpl.parts as string);
 
       // Create project — only the user's own notes are stored. The template /
       // params used to be prepended as an "audit block" but that surfaced as a
       // noisy box on the project page (Template: X / Params: ...), so we drop it.
-      const project = storage.createProject({
+      const project = sqlite.transaction(()=>{const created = storage.createProject({
         jobNumber: body.jobNumber,
         name: body.name,
-        customer: body.customer,
+        customer: linkedCustomer?.name||body.customer,
+        clientId: linkedCustomer?.id,
         notes: body.notes,
       });
 
       // Evaluate and create checklist rows
       parts.forEach((part, idx) => {
         const qty = evalQty(part.qty, body.params);
-        storage.createChecklistRow(project.id, {
+        if(!Number.isFinite(qty)||qty<0)throw new Error(`${part.label}: review the template quantities.`);
+        storage.createChecklistRow(created.id, {
           label: part.label,
           qty: String(qty),
           unit: part.unit,
@@ -654,6 +664,8 @@ export function registerRoutes(app: Express): void {
           status: "pending",
         });
       });
+      sqlite.prepare('INSERT INTO suite_template_runs VALUES(?,?,?,?,?,?)').run(created.id,tpl.key,templateVersion,JSON.stringify(tpl),JSON.stringify(body.params),Date.now());
+      return created;})();
 
       res.status(201).json(project);
     } catch (e: any) {

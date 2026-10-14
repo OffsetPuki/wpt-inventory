@@ -8,21 +8,21 @@ import {useUnit} from './MeasurementContext';
 import {dimension} from './fractions';
 
 const VIEWS=[['overall','Whole setup'],['photo','Plant photo angle'],['rack','Film & tape rack'],['bar','Wheeled bar'],['guides','Side guide wheels'],['supports','Pipe supports'],['top','Top view']];
-export default function PlantFilmModel({inspect=false}){
+export default function PlantFilmModel({inspect=false,lowDetail=false}){
  const host=useRef(null),control=useRef(null),inspectRef=useRef(inspect),unit=useUnit();inspectRef.current=inspect;
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0),[parts,setParts]=useState([]),[selected,setSelected]=useState(''),[hidden,setHidden]=useState([]),[playing,setPlaying]=useState(false),[time,setTime]=useState(0),[view,setView]=useState('overall');
  useEffect(()=>{control.current?.select('');control.current?.pause();},[inspect]);
  useEffect(()=>{
   let disposed=false,cleanup=()=>{};setReady(false);setError('');setSelected('');setHidden([]);setPlaying(false);setTime(0);
   try{
-   const el=host.current,renderer=new T.WebGLRenderer({antialias:true,powerPreference:'default'});el.appendChild(renderer.domElement);
+   const el=host.current,renderer=new T.WebGLRenderer({antialias:!lowDetail,powerPreference:lowDetail?'low-power':'default'});el.appendChild(renderer.domElement);
    const model=createPlantFilmModel(),scene=new T.Scene();scene.background=new T.Color('#eaf0ed');scene.add(model.root);
    renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.92;
-   renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
+   renderer.shadowMap.enabled=!lowDetail;renderer.shadowMap.type=T.PCFSoftShadowMap;
    model.root.traverse(o=>{if(o.isMesh&&!o.userData.filmWeb){o.castShadow=true;o.receiveShadow=true;}});
    const camera=new T.PerspectiveCamera(38,1,.015,100),orbit=new OrbitControls(camera,renderer.domElement);orbit.enableDamping=true;orbit.minDistance=.12;orbit.maxDistance=45;orbit.maxPolarAngle=Math.PI*.52;
    const environment=new RoomEnvironment(),pmrem=new T.PMREMGenerator(renderer),env=pmrem.fromScene(environment,.04);scene.environment=env.texture;scene.environmentIntensity=.65;environment.dispose();pmrem.dispose();
-   scene.add(new T.HemisphereLight('#f5faff','#8e9a90',1));const light=new T.DirectionalLight('#fff5df',2.4);light.position.set(-4,9,-2);light.castShadow=true;light.shadow.mapSize.set(1024,1024);Object.assign(light.shadow.camera,{left:-7,right:7,top:7,bottom:-7,near:.1,far:25});light.shadow.bias=-.0001;light.shadow.normalBias=.009;scene.add(light);
+   scene.add(new T.HemisphereLight('#f5faff','#8e9a90',1));const light=new T.DirectionalLight('#fff5df',2.4);light.position.set(-4,9,-2);light.castShadow=!lowDetail;light.shadow.mapSize.set(1024,1024);Object.assign(light.shadow.camera,{left:-7,right:7,top:7,bottom:-7,near:.1,far:25});light.shadow.bias=-.0001;light.shadow.normalBias=.009;scene.add(light);
    const floor=new T.Mesh(new T.PlaneGeometry(100,100),new T.MeshStandardMaterial({color:'#dbe3dc',roughness:1}));floor.rotation.x=-Math.PI/2;floor.position.y=-.005;floor.receiveShadow=true;scene.add(floor);
    const outline=new T.Box3Helper(new T.Box3(),0x168876);outline.material.depthTest=false;outline.renderOrder=10;outline.visible=false;scene.add(outline);
    const map=new Map(model.parts.map(p=>[p.id,p])),ray=new T.Raycaster(),pointer=new T.Vector2(),hiddenIds=new Set();
@@ -54,7 +54,7 @@ export default function PlantFilmModel({inspect=false}){
    function pause(){play=false;setPlaying(false);}
    function select(id){pause();selection=map.has(id)?id:'';if(selection)hiddenIds.delete(selection);setSelected(selection);setHidden([...hiddenIds]);refresh();frame();}
    control.current={select,pause,view(id){select('');preset=id;setView(id);frame();},hide(){if(!selection)return;hiddenIds.add(selection);selection='';setSelected('');setHidden([...hiddenIds]);refresh();frame();},showAll(){hiddenIds.clear();setHidden([]);refresh();},seek(t){pause();clock=Math.max(0,Math.min(28,t));model.pose(clock);setTime(clock);refresh();},toggle(){if(clock===28)clock=0;play=!play;setPlaying(play);last=performance.now();request();}};
-   function resize(){const w=el.clientWidth,h=el.clientHeight;if(!w||!h)return;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio,1.25,Math.sqrt(900000/(w*h))));renderer.setSize(w,h);frame();}
+   function resize(){const w=el.clientWidth,h=el.clientHeight;if(!w||!h)return;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio,lowDetail?1:1.25,Math.sqrt((lowDetail?360000:900000)/(w*h))));renderer.setSize(w,h);frame();}
    const ro=new ResizeObserver(resize);ro.observe(el);resize();
    const io=new IntersectionObserver(([entry])=>{inView=entry.isIntersecting;last=performance.now();if(inView)request();else{cancelAnimationFrame(raf);raf=0;}});io.observe(el);
    function visibility(){last=performance.now();if(document.hidden){cancelAnimationFrame(raf);raf=0;}else request();}document.addEventListener('visibilitychange',visibility);orbit.addEventListener('change',request);
@@ -69,7 +69,7 @@ export default function PlantFilmModel({inspect=false}){
    cleanup=()=>{cancelAnimationFrame(raf);ro.disconnect();io.disconnect();document.removeEventListener('visibilitychange',visibility);orbit.dispose();canvas.removeEventListener('webglcontextlost',contextLost);const gs=new Set(),ms=new Set(),textures=new Set();scene.traverse(o=>{if(o.geometry)gs.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])ms.add(m);});gs.forEach(g=>g.dispose());ms.forEach(m=>{if(m.map)textures.add(m.map);m.dispose();});textures.forEach(t=>t.dispose());env.dispose();renderer.dispose();renderer.forceContextLoss();canvas.remove();control.current=null;delete el.dataset.ready;};
   }catch(e){setError(e.message||'Could not open the plant preview.');}
   return()=>{disposed=true;cleanup();};
- },[retry]);
+ },[retry,lowDetail]);
  const part=parts.find(p=>p.id===selected),step=PLANT_STEPS.find(s=>time<s.end)||PLANT_STEPS.at(-1);
  return <section aria-label="Plant film setup" className="plant-model">
   <div className="plant-summary"><span><b>6 × 6 m</b> work table</span><span><b>6 film rolls</b> staggered on 2 pipes</span><span><b>5 tape seams</b> from the rear pipe</span></div>

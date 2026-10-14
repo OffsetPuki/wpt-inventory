@@ -7,6 +7,7 @@ import type {SearchConnections} from '../shared/search-reporting';
 export function searchConnections(site:Site,start:string,end:string):SearchConnections {
   const config=GOOGLE_SITES[site],origin='https://'+config.domain+'/',id=encodeURIComponent(origin);
   return {
+    setup:{analyticsProperty:String(config.property),reportingAccount:reportingIdentity(),website:origin},
     googleConfigured:!!reportingIdentity(),bingConfigured:bingConfigured(),googleStatus:reportingStatus('google',site,start,end),
     googleSitemaps:googleReport(site,start,end,'sitemaps'),googleIndexing:googleReport(site,start,end,'indexing'),
     links:{
