@@ -75,7 +75,7 @@ try{
  sqlite.prepare("UPDATE fin_purchase_orders SET status='cancelled' WHERE id=?").run(poId);assert.equal((await get(`/api/finance/projects/${billingJob}/forecast`)).committedCents,0);
  sqlite.prepare('UPDATE quotes SET total_cents=120000 WHERE id=?').run(billingQuote);const changedPlan=await get(`/api/finance/projects/${billingJob}/forecast`);assert(changedPlan.sourceChanged);assert.equal(changedPlan.expectedMarginCents,null,'changed quote invalidates the planned margin until reviewed');
  }
- const registry=await get('/api/design-studio/registry');assert.equal(registry.models.length,3);assert(registry.models.every(m=>m.available&&m.revision));
+ const registry=await get('/api/design-studio/registry');assert.equal(registry.models.length,4);assert(registry.models.every(m=>m.available&&m.revision));
  const design=await api('/api/design-studio/registry','POST',{name:'Synthetic plant plan',modelKey:'film-plant',jobId:id},owner);assert.equal(design.status,201,JSON.stringify(design.data));
  assert.equal(design.data.client_id,customerId);assert.equal(design.data.quote_id,quoteId);assert.equal(design.data.approved_at,null);
  const approvedDesign=await api('/api/design-studio/registry/'+design.data.id,'PATCH',{version:design.data.version,action:'review',approve:true},owner);assert.equal(approvedDesign.status,200);assert(approvedDesign.data.approved_at);
