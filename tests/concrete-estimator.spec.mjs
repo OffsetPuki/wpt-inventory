@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {readFile} from 'node:fs/promises';
 import {testApp} from '../scripts/test-app.mjs';
 let app,design;
 test.beforeAll(async()=>{app=await testApp({serve:true});app.sqlite.prepare("UPDATE users SET credential_type='password' WHERE role='owner'").run();design=(await app.api('/api/design-studio/registry','POST',{name:'Emily · Concrete site visit',modelKey:'residential-concrete',jobId:null},app.owner)).data;});
@@ -22,4 +23,22 @@ test('measure each section, recalculate, recover and save the site estimate',asy
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/concrete-mobile.png',fullPage:true});
  await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:'test-results/concrete-desktop.png',fullPage:true});
  const server=await app.api(`/api/design-studio/registry/${design.id}/concrete-estimate`,'GET',undefined,app.owner);expect(server.data.data.sections.sidewalk.length.feet).toBe(22);expect(server.data.version).toBe(2);
+});
+test('materials stay independent by section, persist and export without silently changing price',async({page})=>{
+ test.setTimeout(120000);
+ const fresh=(await app.api('/api/design-studio/registry','POST',{name:'Materials site visit',modelKey:'residential-concrete',jobId:null},app.owner)).data;
+ await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);await page.goto(app.base+'/#'+fresh.href);
+ await expect(page.getByTestId('concrete-total')).toHaveText('$17,900');
+ const materials=page.getByRole('region',{name:'Materials and installation'}),tabs=page.getByRole('navigation',{name:'Material sections'});
+ await expect(materials.getByLabel('Slab thickness · in',{exact:true})).toHaveValue('5');
+ await materials.getByLabel('Selling rate reviewed for these materials',{exact:true}).check();
+ await materials.getByLabel('Slab thickness · in',{exact:true}).fill('6');await materials.getByLabel('Concrete strength · PSI at 28 days',{exact:true}).fill('4500');await materials.getByLabel('Rebar size',{exact:true}).selectOption('#4');await materials.getByLabel('Bar spacing · in each way',{exact:true}).fill('12');
+ await expect(materials.getByLabel('Selling rate reviewed for these materials',{exact:true})).not.toBeChecked();await expect(page.getByTestId('concrete-material-volume')).toHaveText('11.02 yd³');await expect(page.getByTestId('concrete-total')).toHaveText('$17,900');
+ await tabs.getByRole('button',{name:'RV parking',exact:true}).click();await expect(materials.getByText(/RV weight is unknown/)).toBeVisible();await expect(materials.getByLabel('Concrete strength · PSI at 28 days',{exact:true})).toHaveValue('4000');
+ await tabs.getByRole('button',{name:'Right-side walkway',exact:true}).click();await expect(page.getByTestId('concrete-material-volume')).toHaveText('Measure first');await expect(materials.getByLabel('Slab thickness · in',{exact:true})).toHaveValue('4');
+ await tabs.getByRole('button',{name:'Driveway',exact:true}).click();await materials.getByLabel('Concrete strength · PSI at 28 days',{exact:true}).fill('1500');await expect(page.getByRole('button',{name:'Save estimate',exact:true})).toBeDisabled();await materials.getByLabel('Concrete strength · PSI at 28 days',{exact:true}).fill('4500');
+ await page.getByRole('button',{name:'Save estimate',exact:true}).click();await expect(page.getByText('Estimate saved in Design Studio.',{exact:true})).toBeVisible();await page.reload();await expect(materials.getByLabel('Concrete strength · PSI at 28 days',{exact:true})).toHaveValue('4500');await expect(materials.getByLabel('Rebar size',{exact:true})).toHaveValue('#4');
+ const dl=page.waitForEvent('download');await page.getByRole('button',{name:'Estimate summary',exact:true}).click();const report=await readFile(await(await dl).path(),'utf8');expect(report).toContain('4,500 PSI at 28 days');expect(report).toContain('#4 · 1/2 in diameter at 12 in each way');expect(report).toContain('TOTAL: $17,900.28');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await materials.screenshot({path:'test-results/concrete-materials-mobile.png'});await page.setViewportSize({width:1440,height:1000});await materials.screenshot({path:'test-results/concrete-materials-desktop.png'});
+ const saved=await app.api(`/api/design-studio/registry/${fresh.id}/concrete-estimate`,'GET',undefined,app.owner);expect(saved.data.data.sections.drive.materials.strengthPsi).toBe(4500);expect(saved.data.data.sections.rv.materials.strengthPsi).toBe(4000);
 });
