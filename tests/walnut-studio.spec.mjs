@@ -9,7 +9,7 @@ test('Design Studio is a project chooser and opens only the selected workspace',
   await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);
   await page.goto(app.base+'/#/design-studio');
   const gallery=page.getByRole('region',{name:'Design Studio projects'});
-  await expect(gallery.getByRole('link')).toHaveCount(2);
+  await expect(gallery.getByRole('link')).toHaveCount(3);
   await expect(page.locator('canvas')).toHaveCount(0);
   expect(modelRequests).toHaveLength(0);
   await gallery.getByRole('link',{name:'Open Dallas table',exact:true}).click();
