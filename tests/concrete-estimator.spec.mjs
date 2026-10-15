@@ -1,0 +1,25 @@
+import {test,expect} from '@playwright/test';
+import {testApp} from '../scripts/test-app.mjs';
+let app,design;
+test.beforeAll(async()=>{app=await testApp({serve:true});app.sqlite.prepare("UPDATE users SET credential_type='password' WHERE role='owner'").run();design=(await app.api('/api/design-studio/registry','POST',{name:'Emily · Concrete site visit',modelKey:'residential-concrete',jobId:null},app.owner)).data;});
+test.afterAll(async()=>app.close());
+test('measure each section, recalculate, recover and save the site estimate',async({page})=>{
+ test.setTimeout(180000);await page.addInitScript(token=>localStorage.setItem('wpt-auth-token',token),app.owner);await page.goto(app.base+'/#'+design.href);
+ const editor=page.getByRole('region',{name:'Concrete site estimator'});await expect(editor).toBeVisible();await expect(page.getByTestId('concrete-total')).toHaveText('$17,900');
+ await page.getByRole('button',{name:'2D plan',exact:true}).click();
+ await page.getByLabel('Length feet',{exact:true}).fill('35');await expect(page.getByTestId('concrete-total')).toHaveText('$18,112');
+ await page.getByLabel('Dimensions measured on site',{exact:true}).check();
+ await page.getByRole('navigation',{name:'Concrete sections'}).getByRole('button',{name:/5 Right-side walkway/}).click();
+ await page.getByLabel('Length feet',{exact:true}).fill('20');await page.getByLabel('Width feet',{exact:true}).fill('3');await page.getByLabel('Section shape',{exact:true}).selectOption('two-rectangles');await page.getByLabel('Return length feet',{exact:true}).fill('4');await page.getByLabel('Return width feet',{exact:true}).fill('3');await expect(page.getByText('72 sq ft',{exact:true})).toBeVisible();await expect(page.getByTestId('concrete-total')).toHaveText('$18,008');await page.getByLabel('Dimensions measured on site',{exact:true}).check();
+ await page.getByRole('button',{name:'Save estimate',exact:true}).click();await expect(page.getByText('Estimate saved in Design Studio.',{exact:true})).toBeVisible();
+ await page.reload();await expect(page.getByTestId('concrete-total')).toHaveText('$18,008');await page.getByRole('navigation',{name:'Concrete sections'}).getByRole('button',{name:/5 Right-side walkway/}).click();await expect(page.getByLabel('Length feet',{exact:true})).toHaveValue('20');
+ await page.getByLabel('Length feet',{exact:true}).fill('22');await page.reload();await expect(page.getByText('Recovered your unsaved measurements from this device.',{exact:true})).toBeVisible();await page.getByRole('navigation',{name:'Concrete sections'}).getByRole('button',{name:/5 Right-side walkway/}).click();await expect(page.getByLabel('Length feet',{exact:true})).toHaveValue('22');
+ await page.getByLabel('Width inches',{exact:true}).fill('12');await expect(page.getByTestId('concrete-total')).toHaveText('Check entries');await expect(page.getByRole('button',{name:'Save estimate',exact:true})).toBeDisabled();await page.getByLabel('Width inches',{exact:true}).fill('0');
+ await page.getByLabel('Include this section',{exact:true}).uncheck();await expect(page.getByTestId('concrete-total')).toHaveText('$16,712');await page.getByLabel('Include this section',{exact:true}).check();
+ await page.getByRole('button',{name:'Save estimate',exact:true}).click();await expect(page.getByText('Estimate saved in Design Studio.',{exact:true})).toBeVisible();
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'Measurement backup',exact:true}).click();expect((await download).suggestedFilename()).toBe('cjm-concrete-measurements.json');
+ await page.getByRole('button',{name:'3D',exact:true}).click();await expect(page.getByRole('img',{name:'Concrete project: tap a colored section; drag to rotate'})).toHaveAttribute('data-ready','true',{timeout:60000});await expect(page.getByRole('img',{name:'Concrete project: tap a colored section; drag to rotate'})).toHaveAttribute('data-selected','sidewalk');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/concrete-mobile.png',fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:'test-results/concrete-desktop.png',fullPage:true});
+ const server=await app.api(`/api/design-studio/registry/${design.id}/concrete-estimate`,'GET',undefined,app.owner);expect(server.data.data.sections.sidewalk.length.feet).toBe(22);expect(server.data.version).toBe(2);
+});

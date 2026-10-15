@@ -1,6 +1,7 @@
 import {registerTaskReschedule} from './task-reschedule';
 import {readableValidation} from '../shared/validation-message';
 import {registerDesignRegistry} from './design-registry';
+import {registerConcreteEstimates} from './concrete-estimates';
 import {registerDesignMeasurements} from './design-measurements';
 import {registerJobCompletion} from './job-completion';
 import {registerRelationshipReview} from './relationship-review';
@@ -79,6 +80,7 @@ export function registerSuiteRoutes(app: Express) {
   initializeSuite();
   registerCustomerAccounts(app);
   registerDesignRegistry(app);
+  registerConcreteEstimates(app);
   registerDesignMeasurements(app);
   registerTaskReschedule(app);
   registerJobCompletion(app);

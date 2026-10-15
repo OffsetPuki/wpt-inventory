@@ -10,9 +10,10 @@ const models = [
  {key:'film-plant', name:'Film table · current plant layout', workspace:'film-table', file:'client/src/components/design-studio/plant-film-model.js', referenceOnly:true},
  {key:'film-earlier', name:'Film table · earlier bolted design', workspace:'film-table', file:'server/design-studio/current/parts.json', referenceOnly:true},
  {key:'walnut-table', name:'Dallas walnut table', workspace:'dallas-table', file:'server/design-studio/walnut-table/model.json', referenceOnly:true},
+ {key:'residential-concrete', name:'Residential concrete · five-area estimate', workspace:'residential-concrete', file:'client/src/components/design-studio/concrete/reference-scene.json', referenceOnly:true},
 ] as const;
 const id = z.coerce.number().int().positive();
-const create = z.object({name:z.string().trim().min(2).max(120),modelKey:z.enum(['film-plant','film-earlier','walnut-table']),jobId:z.number().int().positive().nullable()});
+const create = z.object({name:z.string().trim().min(2).max(120),modelKey:z.enum(['film-plant','film-earlier','walnut-table','residential-concrete']),jobId:z.number().int().positive().nullable()});
 const digest=(value:unknown)=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fail=(res:Response,e:any)=>res.status(e instanceof z.ZodError?400:e.status||500).json({message:e.message});
 const problem=(message:string,status=400)=>Object.assign(new Error(message),{status});
