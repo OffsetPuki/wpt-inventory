@@ -1,5 +1,6 @@
 import {crmStats,crmReports} from './crm-reporting';
 import { registerLeadReply } from './lead-reply';
+import { registerLeadMerge, canonicalLeadId } from './lead-merge';
 import {customerAccountIds} from './customer-accounts';
 import {registerCrmRecovery} from './crm-recovery';
 import { recordHumanContact } from './lead-experience';
@@ -387,7 +388,7 @@ export function logEmailActivity(info: {
 }): void {
   setImmediate(() => {
     try {
-      let leadId = info.leadId ?? null;
+      let leadId = info.leadId == null ? null : canonicalLeadId(info.leadId);
       const clientId = info.clientId ?? null;
       if (leadId == null && clientId == null) {
         const emailNorm = (info.email ?? "").trim().toLowerCase();
@@ -587,6 +588,7 @@ export function closeQuotesForLead(
 
 export function registerCrmRoutes(app: Express): void {
   registerLeadReply(app);
+  registerLeadMerge(app);
   registerCrmRecovery(app);
   // `pid`/`qstr` (req.params/req.query narrowing) live in ./http-util.
 
@@ -646,7 +648,7 @@ export function registerCrmRoutes(app: Express): void {
   });
 
   app.get('/api/crm/leads/:id', requireAuth, (req,res)=>{
-    const row=db.select().from(leads).where(and(eq(leads.id,Number(req.params.id)),isNull(leads.deletedAt))).get();
+    const row=db.select().from(leads).where(and(eq(leads.id,canonicalLeadId(Number(req.params.id))),isNull(leads.deletedAt))).get();
     return row?res.json(row):res.status(404).json({message:'Lead not found'});
   });
 
@@ -978,6 +980,7 @@ export function registerCrmRoutes(app: Express): void {
   app.post("/api/crm/activities", requireAuth, (req, res) => {
     try {
       const data = insertCrmActivitySchema.parse(req.body);
+      if (data.entityType === 'lead' && canonicalLeadId(data.entityId) !== data.entityId) return res.status(409).json({message:'This lead was merged. Reopen the combined lead before adding activity.'});
       const row = db.insert(crmActivities).values({
         ...data,
         userId: req.user?.userId ?? null,

@@ -60,7 +60,9 @@ export function registerLeadExperience(app: Express, hasLeadKey: (req: Request) 
      for (const photo of body.photos) urls.push(saveLeadPhoto(photo));
      sqlite.transaction(()=>{
        const existing=JSON.parse(access.photos || '[]');
-       if (!Array.isArray(existing) || existing.length+urls.length>12) throw new Error('Too many photos; please contact us.');
+       // Merging two requests can retain more than twelve existing photos.
+       // Keep accepting text updates without expanding the upload allowance.
+       if (!Array.isArray(existing) || (urls.length>0 && existing.length+urls.length>12)) throw new Error('Too many photos; please contact us.');
        sqlite.prepare('UPDATE crm_leads SET photos=?,notes=? WHERE id=?').run(JSON.stringify([...existing,...urls]),`${access.notes||''}\n\nCustomer update (${new Date().toISOString()}):\n${body.details}${urls.length ? `\n${urls.length} additional photo(s)` : ''}`,access.lead_id);
        sqlite.prepare('INSERT INTO web_lead_supplements VALUES (?,?,?,?)').run(body.submissionId,tokenHash,payloadHash,Date.now());
        sqlite.prepare('UPDATE crm_lead_intake SET updated_at=? WHERE lead_id=?').run(Date.now(),access.lead_id);

@@ -6,6 +6,7 @@ import {useBusiness,setBusiness} from '@/hooks/useBusiness';
 import { LeadIntake } from '@/components/LeadIntake';
 import LeadPhotos, { leadPhotos } from '@/components/LeadPhotos';
 import LeadReply from '@/components/LeadReply';
+import LeadMerge from '@/components/LeadMerge';
 import {PageButtons} from '@/lib/list-page';
 import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -324,13 +325,16 @@ function LeadDetailModal({
   isElevated,
   onClose,
   onOutcome,
+  onMerged,
 }: {
   lead: Lead;
   users: PublicUser[];
   isElevated: boolean;
   onClose: () => void;
   onOutcome: (to: 'won' | 'lost') => void;
+  onMerged: (id: number) => void;
 }) {
+  const [merging, setMerging] = useState(false);
   const [original] = useState(lead);
   const [editVersion] = useState((lead as any)._version);
   const [tab, setTab] = useState<'Overview' | 'Activity' | 'Details'>('Overview');
@@ -482,6 +486,7 @@ function LeadDetailModal({
   const formId = `lead-details-${lead.id}`;
   const hasLinkedRecords = !!(extras?.quotes.length || extras?.projects.length || extras?.invoices.length);
 
+  if (merging) return <LeadMerge lead={lead} onClose={() => setMerging(false)} onMerged={onMerged} />;
   return (
     <Modal open busy={save.isPending || logActivity.isPending || del.isPending || convert.isPending} onClose={onClose} title={lead.name} maxWidth="max-w-2xl" focusDialog hasUnsavedChanges={hasUnsavedChanges}
       footer={<div className="flex items-center justify-between gap-3">
@@ -509,6 +514,10 @@ function LeadDetailModal({
             <button type="button" onClick={quoteThisLead} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90"><PencilRuler className="h-4 w-4" /><L>{"Create quote"}</L></button>
             {phoneLink && <><a className={quickBtn} href={`tel:${phoneLink}`}><Phone className="h-4 w-4" /><L>{"Call"}</L></a><a className={quickBtn} href={`sms:${phoneLink}`}><L>{"Text"}</L></a></>}
             {email && <a className={quickBtn} href={`mailto:${email.trim()}`}><Mail className="h-4 w-4" /><L>{"Email"}</L></a>}
+            {isElevated && <button type="button" className={quickBtn} onClick={() => {
+              if (hasUnsavedChanges) { toast({ title: 'Save your changes and log any activity note before merging' }); return; }
+              setMerging(true);
+            }}>Merge duplicate</button>}
           </div>
         </section>
 
@@ -625,6 +634,7 @@ export default function LeadsPage() {
   const [newOpen, setNewOpen] = useState(false);
   const leadLink = useDeepLink("lead");
   const [detailId, setDetailId] = useState<number | null>(leadLink ? Number(leadLink) : null);
+  const [mergeRevision, setMergeRevision] = useState(0);
   useEffect(() => { if (leadLink) {setDetailId(Number(leadLink));consumeRecordLink("lead");} }, [leadLink]);
   const [closing, setClosing] = useState<{ lead: Lead; to: "won" | "lost" } | null>(null);
   const [dragOverStage, setDragOverStage] = useState<LeadStage | null>(null);
@@ -833,11 +843,12 @@ export default function LeadsPage() {
       )}
       {detailLead && (
         <LeadDetailModal
-          key={detailLead.id}
+          key={`${detailLead.id}-${mergeRevision}`}
           lead={detailLead}
           users={users}
           isElevated={isElevated}
           onClose={() => setDetailId(null)}
+          onMerged={id => { setMergeRevision(n => n + 1); setDetailId(id); }}
           onOutcome={to => { setClosing({ lead: detailLead, to }); setDetailId(null); }}
         />
       )}
