@@ -12,8 +12,8 @@ test('Owner can review and merge duplicate leads on phone and desktop, including
     const token = crypto.randomBytes(32).toString('hex');
     app.sqlite.prepare("INSERT INTO sessions(token,user_id,role,name,expires_at) VALUES(?,1,'owner','Owner',?)").run(token, Date.now() + 3600000);
     await page.addInitScript(t => localStorage.setItem('wpt-auth-token', t), token);
-    const a = await app.api('/api/crm/leads', 'POST', { name: 'Synthetic Neal', phone: '(469) 735-3836', site: 'metals', source: 'website', serviceRequested: 'Fence', notes: 'Customer asked for a fence' }, token);
-    const b = await app.api('/api/crm/leads', 'POST', { name: 'Synthetic Neal quote', phone: '14697353836', site: 'metals', source: 'other', stage: 'quote_sent', estimatedValueCents: 120000, notes: 'Quote conversation' }, token);
+    const a = await app.api('/api/crm/leads', 'POST', { name: 'Synthetic Neal', phone: '(817) 555-0136', site: 'metals', source: 'website', serviceRequested: 'Fence', notes: 'Customer asked for a fence' }, token);
+    const b = await app.api('/api/crm/leads', 'POST', { name: 'Synthetic Neal quote', phone: '18175550136', site: 'metals', source: 'other', stage: 'quote_sent', estimatedValueCents: 120000, notes: 'Quote conversation' }, token);
     expect(a.status).toBe(201); expect(b.status).toBe(201);
     const source = a.data.id, target = b.data.id;
     await page.goto(`${app.base}/#/crm/leads?lead=${source}`);

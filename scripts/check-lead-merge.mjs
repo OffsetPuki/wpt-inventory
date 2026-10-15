@@ -13,10 +13,10 @@ const merge = b => api('/api/crm/lead-merge', 'POST', b, owner);
 try {
   const references = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name).filter(t => sqlite.pragma(`table_info(${t})`).some(c => c.name === 'lead_id')).sort();
   assert.deepEqual(references, [...LEAD_MERGE_REFERENCES, ...LEAD_MERGE_SPECIAL].sort(), 'Every lead reference needs an explicit merge policy');
-  const source = lead({ phone: '(469) 735-3836', source: 'website', notes: 'Original fence request', photos: '["/uploads/fence.png"]', service_requested: 'Fence', preferred_language: 'es', created_at: 10000 });
-  const target = lead({ phone: '14697353836', source: 'other', stage: 'quote_sent', notes: 'Quote discussion', photos: '["/uploads/frame.png","/uploads/fence.png"]', estimated_value_cents: 120000, created_at: 20000 });
-  const deleted = lead({ phone: '4697353836', deleted_at: Date.now() });
-  const differentSite = lead({ phone: '4697353836', site: 'concrete' });
+  const source = lead({ phone: '(817) 555-0136', source: 'website', notes: 'Original fence request', photos: '["/uploads/fence.png"]', service_requested: 'Fence', preferred_language: 'es', created_at: 10000 });
+  const target = lead({ phone: '18175550136', source: 'other', stage: 'quote_sent', notes: 'Quote discussion', photos: '["/uploads/frame.png","/uploads/fence.png"]', estimated_value_cents: 120000, created_at: 20000 });
+  const deleted = lead({ phone: '8175550136', deleted_at: Date.now() });
+  const differentSite = lead({ phone: '8175550136', site: 'concrete' });
   const receiptToken = crypto.randomBytes(32).toString('hex'), tokenHash = crypto.createHash('sha256').update(receiptToken).digest('hex');
   const refs = {
     quotes: { number: 'Q-MERGE', type: 'custom', status: 'accepted', total_cents: 120000, payload: '{"customer":{"name":"Frozen name"},"state":{"price":1200}}', share_token: 'unchanged-quote-token' },
@@ -98,7 +98,7 @@ try {
   assert.equal(packet.photos.length, 3);
   sqlite.prepare('UPDATE crm_leads SET photos=? WHERE id=?').run(JSON.stringify(Array.from({length: 14}, (_, i) => `/uploads/merged-${i}.png`)), target);
   assert.equal((await api('/api/public/lead-details', 'POST', { site: 'metals', token: receiptToken, submissionId: crypto.randomUUID(), details: 'Text still works with a combined photo collection' }, null, { 'X-Lead-Key': 'test-intake-key' })).status, 200);
-  const next = lead({ phone: '4697353836' });
+  const next = lead({ phone: '8175550136' });
   const nextPreview = await preview(target, next);
   assert.equal((await merge(body(target, next, nextPreview.data.version))).status, 200);
   assert.equal((await api(`/api/crm/leads/${source}`, 'GET', undefined, owner)).data.id, next, 'Chains of merges retain old links');
