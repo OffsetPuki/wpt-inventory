@@ -1,4 +1,5 @@
 import {crmStats,crmReports} from './crm-reporting';
+import { registerLeadReply } from './lead-reply';
 import {customerAccountIds} from './customer-accounts';
 import {registerCrmRecovery} from './crm-recovery';
 import { recordHumanContact } from './lead-experience';
@@ -585,6 +586,7 @@ export function closeQuotesForLead(
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 export function registerCrmRoutes(app: Express): void {
+  registerLeadReply(app);
   registerCrmRecovery(app);
   // `pid`/`qstr` (req.params/req.query narrowing) live in ./http-util.
 

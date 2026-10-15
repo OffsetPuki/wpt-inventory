@@ -5,6 +5,7 @@ import ConnectedRecords from '@/components/ConnectedRecords';
 import {useBusiness,setBusiness} from '@/hooks/useBusiness';
 import { LeadIntake } from '@/components/LeadIntake';
 import LeadPhotos, { leadPhotos } from '@/components/LeadPhotos';
+import LeadReply from '@/components/LeadReply';
 import {PageButtons} from '@/lib/list-page';
 import {usePageFilters} from '@/hooks/usePageFilters';
 import { RetryBlock } from '@/components/RetryBlock';
@@ -510,6 +511,8 @@ function LeadDetailModal({
             {email && <a className={quickBtn} href={`mailto:${email.trim()}`}><Mail className="h-4 w-4" /><L>{"Email"}</L></a>}
           </div>
         </section>
+
+        {isElevated && <LeadReply key={lead.id} leadId={lead.id} unsaved={hasUnsavedChanges} />}
 
         <div role="tablist" aria-label="Lead sections" className="grid grid-cols-3 gap-1 rounded-xl bg-muted p-1">
           {tabs.map((label, index) => <button key={label} id={`${formId}-${label}-tab`} type="button" role="tab" aria-selected={tab === label} aria-controls={`${formId}-${label}`} tabIndex={tab === label ? 0 : -1}
