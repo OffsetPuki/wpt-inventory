@@ -39,7 +39,8 @@ test('Build type stays in Scope and preserves the same customer and quote',async
  await expect(page.getByRole('heading',{name:'Choose build type'})).toBeVisible();
  await expect(page.getByRole('navigation',{name:'Quote steps'}).getByRole('button',{name:/Scope/})).toHaveAttribute('aria-current','step');
  await expect(page.getByLabel('Customer name',{exact:true})).toHaveCount(0);
- await expect(page.locator('.type-card')).toHaveCount(10);
+ await expect(page.locator('.type-card')).toHaveCount(9);
+ await expect(page.getByRole('heading',{name:'Barndominium',exact:true})).toHaveCount(0);
  await page.locator('.type-card').filter({has:page.getByRole('heading',{name:'Insulation',exact:true})}).click();
  await expect(page.getByRole('heading',{name:'Insulation',exact:true})).toBeVisible();
  await expect(page.locator('.draft-status')).toHaveText('Saved');
