@@ -909,21 +909,21 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
   .qa .quote-review + .quote-actionbar .draft-status { flex: 0; }
   .qa #quote-send-actions .btn { padding-inline: 10px; font-size: .65rem; }
 }
-.qa .barndo-quote-tools{padding-top:20px;padding-bottom:0}.qa .barndo-template-actions{display:flex;gap:10px;flex-wrap:wrap}.qa .barndo-template-form{max-width:560px;border:1px solid var(--line);padding:20px;margin-top:16px}.qa .barndo-template-form label{display:grid;gap:8px}.qa .barndo-template-form input{width:100%;min-height:44px;padding:10px;border:1px solid var(--line);background:var(--paper,#fff)}.qa .barndo-templates h1{font-size:32px;margin:24px 0 12px}.qa .barndo-templates h2{font-size:22px;margin:28px 0 16px}.qa .barndo-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.qa .barndo-template-card{border:1px solid var(--line);padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0}.qa .barndo-template-card h3{font-size:20px;overflow-wrap:anywhere}.qa .barndo-template-card .btn{margin-top:auto;white-space:normal}.qa .barndo-template-form [role=alert]{color:#9d2222;margin:10px 0}.qa .barndo-template-actions .btn{min-height:44px}
-.qa .barndo-detail-grid,.qa .barndo-option-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
-.qa .barndo-business-details{margin:20px 0}
-.qa .barndo-scope-row{display:grid;grid-template-columns:minmax(160px,1fr) 2fr;gap:14px;padding:12px 0;border-bottom:1px solid #ddd}
-.qa .barndo-check{display:flex;align-items:flex-start;gap:10px;padding:12px 0;line-height:1.5}
-.qa .barndo-check input{width:20px;height:20px;flex-shrink:0;margin-top:3px}
-.qa .barndo-purchase-list>div{padding:10px 0;border-bottom:1px solid #ddd}
-.qa .barndo-purchase-list span{display:block;color:#555}
-.qa .barndo-options-fields{border:0;padding:0;margin-bottom:24px;min-width:0}
-.qa .barndo-option-drawing svg{width:100%;height:auto}
-.qa .barndo-comparison-table{overflow-x:auto;margin:18px 0}
-.qa .barndo-comparison-table table{width:100%;table-layout:fixed;border-collapse:collapse}
-.qa .barndo-comparison-table td,.qa .barndo-comparison-table th{border:1px solid #ccc;padding:10px;text-align:left;overflow-wrap:anywhere;vertical-align:top}
-.qa .barndo-options .field input,.qa .barndo-options .field select,.qa .barndo-options .field textarea,.qa .barndo-business-details .field input,.qa .barndo-business-details .field select{width:100%;min-height:44px;box-sizing:border-box}
-@media(max-width:650px){.qa .barndo-detail-grid,.qa .barndo-option-grid,.qa .barndo-scope-row{grid-template-columns:1fr}.qa .barndo-comparison-table td,.qa .barndo-comparison-table th{padding:6px;font-size:13px}}
+.qa .quote-quote-tools{padding-top:20px;padding-bottom:0}.qa .quote-template-actions{display:flex;gap:10px;flex-wrap:wrap}.qa .quote-template-form{max-width:560px;border:1px solid var(--line);padding:20px;margin-top:16px}.qa .quote-template-form label{display:grid;gap:8px}.qa .quote-template-form input{width:100%;min-height:44px;padding:10px;border:1px solid var(--line);background:var(--paper,#fff)}.qa .quote-templates h1{font-size:32px;margin:24px 0 12px}.qa .quote-templates h2{font-size:22px;margin:28px 0 16px}.qa .quote-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}.qa .quote-template-card{border:1px solid var(--line);padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0}.qa .quote-template-card h3{font-size:20px;overflow-wrap:anywhere}.qa .quote-template-card .btn{margin-top:auto;white-space:normal}.qa .quote-template-form [role=alert]{color:#9d2222;margin:10px 0}.qa .quote-template-actions .btn{min-height:44px}
+.qa .quote-detail-grid,.qa .quote-option-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.qa .quote-business-details{margin:20px 0}
+.qa .quote-scope-row{display:grid;grid-template-columns:minmax(160px,1fr) 2fr;gap:14px;padding:12px 0;border-bottom:1px solid #ddd}
+.qa .quote-check{display:flex;align-items:flex-start;gap:10px;padding:12px 0;line-height:1.5}
+.qa .quote-check input{width:20px;height:20px;flex-shrink:0;margin-top:3px}
+.qa .quote-purchase-list>div{padding:10px 0;border-bottom:1px solid #ddd}
+.qa .quote-purchase-list span{display:block;color:#555}
+.qa .quote-options-fields{border:0;padding:0;margin-bottom:24px;min-width:0}
+.qa .quote-option-drawing svg{width:100%;height:auto}
+.qa .quote-comparison-table{overflow-x:auto;margin:18px 0}
+.qa .quote-comparison-table table{width:100%;table-layout:fixed;border-collapse:collapse}
+.qa .quote-comparison-table td,.qa .quote-comparison-table th{border:1px solid #ccc;padding:10px;text-align:left;overflow-wrap:anywhere;vertical-align:top}
+.qa .quote-options .field input,.qa .quote-options .field select,.qa .quote-options .field textarea,.qa .quote-business-details .field input,.qa .quote-business-details .field select{width:100%;min-height:44px;box-sizing:border-box}
+@media(max-width:650px){.qa .quote-detail-grid,.qa .quote-option-grid,.qa .quote-scope-row{grid-template-columns:1fr}.qa .quote-comparison-table td,.qa .quote-comparison-table th{padding:6px;font-size:13px}}
 
 .qa .website-product-preview iframe{display:block;border:0;width:100%;height:560px;background:#ebe6dc}
 .qa .product-fullscreen{margin:8px 0}
@@ -932,16 +932,16 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
 .qa .preview:fullscreen iframe{height:100%;min-height:70vh}
 .qa .preview:fullscreen .preview-stage{flex:1;min-height:0}
 .qa .preview:fullscreen .preview-stage svg{height:100%;max-height:82vh}
-.qa .barndo-product:fullscreen{background:#f5f2eb;overflow:auto;padding:16px}
-.qa .barndo-product:fullscreen .bd-workspace{grid-template-columns:1fr}
-.qa .barndo-product:fullscreen .bd-controls{display:none}
-.qa .barndo-product:fullscreen .bd-preview{width:100%;max-width:none}
-.qa .barndo-product:fullscreen .bd-frame3d,.qa .barndo-product:fullscreen .bd-home3d{height:80vh}
-.qa .barndo-product:fullscreen .bd-frame3d{display:flex;flex-direction:column}
-.qa .barndo-product:fullscreen .bd-frame-stage{flex:1;min-height:0;height:auto}
+.qa .quote-product:fullscreen{background:#f5f2eb;overflow:auto;padding:16px}
+.qa .quote-product:fullscreen .bd-workspace{grid-template-columns:1fr}
+.qa .quote-product:fullscreen .bd-controls{display:none}
+.qa .quote-product:fullscreen .bd-preview{width:100%;max-width:none}
+.qa .quote-product:fullscreen .bd-frame3d,.qa .quote-product:fullscreen .bd-home3d{height:80vh}
+.qa .quote-product:fullscreen .bd-frame3d{display:flex;flex-direction:column}
+.qa .quote-product:fullscreen .bd-frame-stage{flex:1;min-height:0;height:auto}
 @media(max-width:600px){.qa .website-product-preview iframe{height:460px}}
 
-.qa .preview:fullscreen .product-studio-stage,.qa .barndo-product:fullscreen .product-studio-stage{height:80vh!important}
+.qa .preview:fullscreen .product-studio-stage,.qa .quote-product:fullscreen .product-studio-stage{height:80vh!important}
 .qa .website-product-preview iframe{background:#f2f0e9}
 
 .qa .product-preview-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}
@@ -1010,19 +1010,6 @@ body.qa-page main { padding: 0; background: #f5f2ec; overflow: visible; }
  .qa .share-panel,.qa .customer-preview iframe {border-radius:14px;}
  .qa .preview {border-radius:16px;background:hsl(var(--card));border:1px solid var(--line);}
  .qa .quote-tool-row .btn[aria-pressed="true"] {background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-color:transparent;}
- .qa .barndo {font-family:inherit;}
- .qa .barndo button,.qa .barndo input,.qa .barndo select {border-radius:9px;background:hsl(var(--card));border-color:var(--line-strong);color:var(--ink);}
- .qa .barndo button[aria-pressed=true] {background:hsl(var(--primary)/.12);color:hsl(var(--primary));border-color:hsl(var(--primary)/.5);}
- .qa .barndo button:focus-visible,.qa .barndo input:focus-visible,.qa .barndo select:focus-visible {outline-color:hsl(var(--ring));}
- .qa .barndo .bd-controls {color:var(--ink);}
- .qa .bd-controls .bd-simple-panel {background:hsl(var(--card));border-color:var(--line);border-radius:16px;}
- .qa .bd-controls :is(.bd-fields label,.bd-intro,.bd-scope,.bd-hint,.bd-optional p) {color:var(--steel);}
- .qa .bd-controls .bd-count {background:hsl(var(--muted));color:var(--ink);}
- .qa .bd-controls :is(.bd-details,.bd-optional) {border-color:var(--line);}
- .qa .bd-controls h2 {font-size:22px;font-weight:600;letter-spacing:-.025em;}
- .qa .bd-controls h3 {font-weight:600;}
- .qa .barndo .bd-preview {border-radius:14px;}
- .qa .barndo .bd-step-number {text-transform:none;letter-spacing:0;}
  @media(min-width:1024px){.qa .quote-actionbar{left:240px;}}
  @media(max-width:640px){.qa .container{padding-inline:16px;}.qa .topbar{padding:12px 16px;}.qa .quote-steps{gap:4px;}.qa .quote-steps button{padding:10px 7px;font-size:12px;}.qa .quote-home .type-card{padding:16px;}.qa .quote-home .type-card h2{font-size:18px;}.qa .quote-actionbar{padding-inline:16px;}}
  @media(max-width:640px){

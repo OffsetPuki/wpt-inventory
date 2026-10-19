@@ -88,7 +88,6 @@ const bagsControl = {
 // -----------------------------------------------------------------------------
 
 export const TYPES = [
-  {key:'barndominium',label:'Barndominium',tagline:'Steel shell, doors, windows and porches'},
   { key: 'fence',   label: 'Fence',   tagline: 'Perimeter fencing, by the run' },
   { key: 'gate',    label: 'Gate',    tagline: 'Swing or sliding entry gate' },
   { key: 'carport', label: 'Carport', tagline: 'Free-standing or attached cover' },
@@ -734,7 +733,7 @@ export const CONFIG = {
 };
 
 export function typeLabel(type) {
-  return (TYPES.find((t) => t.key === type) || {}).label || 'Custom';
+  return type === 'barndominium' ? 'Historical quote' : (TYPES.find((t) => t.key === type) || {}).label || 'Custom';
 }
 
 /** The visible label for a control option value (e.g. 'single' → 'Single Swing'). */

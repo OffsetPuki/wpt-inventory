@@ -44,6 +44,7 @@ function comparison(input:any){
  if(!ids.includes(input.recommendedId))throw new Error('Choose your recommended option.');
  const found=ids.map(loadQuote),sessions=found.map((q:any)=>JSON.parse(q.payload));
  if(found[0].type!==found[1].type||quoteBusiness(sessions[0])!==quoteBusiness(sessions[1]))throw new Error('Choose options for the same product and business.');
+ if(found.some((q:any)=>q.type==='barndominium'))throw new Error('This quote type is no longer available.');
  const [a,b]=sessions.map((s:any)=>s.customer||{});
  const same=(x:any,y:any)=>String(x||'').trim().toLowerCase()===String(y||'').trim().toLowerCase();
  if(!a.name?.trim()||!b.name?.trim()||!same(a.name,b.name)||!same(a.location,b.location)||

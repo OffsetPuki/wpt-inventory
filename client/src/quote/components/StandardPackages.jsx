@@ -1,6 +1,5 @@
 import {defaultState} from '../data/configurators.js';
 const packages={
- barndominium:[['30 × 40 shop',{width:30,depth:40}],['40 × 60 shop',{width:40,depth:60}]],
  carport:[['One vehicle',{width:12,depth:20}],['Two vehicles',{width:20,depth:20}],['Extended cover',{width:24,depth:30}]],
  concrete:[['Driveway',{project:'driveway',lengthFt:30,widthFt:20}],['Patio',{project:'patio',lengthFt:20,widthFt:15}],['Shop slab',{project:'slab',lengthFt:40,widthFt:30}]],
  gate:[['Single swing',{type:'single',width:10}],['Double swing',{type:'double',width:16,extraPosts:'yes'}]],

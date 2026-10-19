@@ -60,8 +60,8 @@ export function normalizeRef(input) {
 /** The configurator tool a design code came from, or null. */
 export function refTool(ref) {
   const r = String(ref || '').trim().toUpperCase();
-  const m = /^CJM-([FGCRPTB])/.exec(r);
-  if (m) return { B: 'barndominium', F: 'fence', G: 'gate', C: 'carport', R: 'railing', P: 'pergola', T: 'table' }[m[1]] || null;
+  const m = /^CJM-([FGCRPT])/.exec(r);
+  if (m) return { F: 'fence', G: 'gate', C: 'carport', R: 'railing', P: 'pergola', T: 'table' }[m[1]] || null;
   if (r.startsWith('CJC-')) return 'concrete';
   if (r.startsWith('CJI-')) return 'insulation';
   // CJT- (trades planner) spans multiple shops — no single configurator.

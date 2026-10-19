@@ -3,7 +3,6 @@ import {customerProjectUrl} from './customer-project-page';
 import {validateQuoteAmount} from './quote-validation';
 import {carportPricingIssues} from '../client/src/quote/lib/carportPricing.js';
 import { shortLink } from './share-links';
-import {normalize as normalizeBarndo,validate as validateBarndo} from '../client/src/quote/lib/barndominium/model.js';
 import {cleanBarndoQuote,purchasing,scopeIssues} from '../client/src/quote/lib/barndoQuote.js';
 import {computeTotals} from '../client/src/quote/lib/quote.js';
 import {duplicateSession} from '../client/src/quote/lib/store.js';
@@ -68,13 +67,6 @@ sqlite.exec(`
     price_book TEXT NOT NULL DEFAULT '{}',
     shop TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS barndominium_quote_templates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-    state TEXT NOT NULL,
-    created_by INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS quote_option_sets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,14 +140,7 @@ function normalizePayload(body: Record<string, unknown>): void {
     body.payload = JSON.stringify(body.payload);
   }
   const parsed = parseJson<any>(body.payload as string, null);
-  if (body.type === 'barndominium' || parsed?.type === 'barndominium') {
-    if(parsed?.type !== 'barndominium' || !parsed.state || !Array.isArray(parsed.state.openings) || !Array.isArray(parsed.state.porches) || parsed.state.openings.length>40 || parsed.state.porches.length>8) throw new Error('Invalid barndominium design.');
-    const clean=normalizeBarndo(parsed.state);
-    if(validateBarndo(clean).length) throw new Error('Review building dimensions, openings and porch clearances before saving.');
-    parsed.state=clean;
-    if(parsed.overrides?.barndoQuote)parsed.overrides.barndoQuote=cleanBarndoQuote(parsed.overrides.barndoQuote);
-    body.payload=JSON.stringify(parsed);
-  }
+  if (body.type === 'barndominium' || parsed?.type === 'barndominium') throw new Error('This quote type is no longer available.');
   if (parsed?.customer?.clientId != null && (!Number.isInteger(parsed.customer.clientId) || !sqlite.prepare('SELECT 1 FROM crm_clients WHERE id=? AND deleted_at IS NULL').get(parsed.customer.clientId))) throw new Error('Choose an active customer or remove the customer link.');
   if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("payload must be a JSON object");
@@ -223,24 +208,7 @@ function insertQuoteWithNumber(
 export function registerQuoteRoutes(app: Express): void {
   preserveLegacyQuoteTerms();
   registerQuoteOptionRoutes(app);
-  app.get('/api/quotes/barndominium-templates', requireAuth, (_req, res) => {
-    const rows=sqlite.prepare('SELECT id,name,state,created_at AS createdAt FROM barndominium_quote_templates ORDER BY name COLLATE NOCASE').all() as {id:number;name:string;state:string;createdAt:number}[];
-    res.json(rows.map(row=>({...row,state:JSON.parse(row.state)})));
-  });
-  app.post('/api/quotes/barndominium-templates', requireAuth, (req, res) => {
-    try {
-      const name=typeof req.body?.name==='string'?req.body.name.trim():'';
-      if(!name||name.length>80)return res.status(400).json({message:'Enter a template name of 1–80 characters.'});
-      const body:Record<string,unknown>={type:'barndominium',payload:{type:'barndominium',state:req.body?.state}};
-      normalizePayload(body);
-      const state=JSON.parse(body.payload as string).state;
-      const row=sqlite.prepare('INSERT INTO barndominium_quote_templates(name,state,created_by,created_at) VALUES(?,?,?,?) RETURNING id,name,state,created_at AS createdAt').get(name,JSON.stringify(state),req.user!.userId,Date.now()) as {id:number;name:string;state:string;createdAt:number};
-      audit(req,'quote.template_create',{targetType:'quote_template',targetId:row.id,targetName:row.name});
-      res.status(201).json({...row,state:JSON.parse(row.state)});
-    } catch(error:any){
-      res.status(error.code==='SQLITE_CONSTRAINT_UNIQUE'?409:400).json({message:error.code==='SQLITE_CONSTRAINT_UNIQUE'?'That template name already exists. Choose another name to keep both designs.':error.message});
-    }
-  });
+  app.all('/api/quotes/barndominium-templates', requireAuth, (_req, res) => res.status(410).json({message:'This feature is no longer available.'}));
   const pid = (v: string | string[]): number => parseInt(v as string, 10);
 
   try { sqlite.exec("ALTER TABLE quote_settings ADD COLUMN version INTEGER NOT NULL DEFAULT 0"); } catch {}
@@ -626,6 +594,7 @@ export function registerQuoteRoutes(app: Express): void {
     try {
       const original=db.select().from(quotes).where(and(eq(quotes.id,pid(req.params.id)),isNull(quotes.deletedAt))).get();
       if(!original)return res.status(404).json({message:'Building quote not found.'});
+      if(original.type==='barndominium')return res.status(410).json({message:'This quote type is no longer available.'});
       if(original.status!=='draft')return res.status(409).json({message:'Create alternatives before issuing the quotes.'});
       if(req.body?.version!==original.version)return res.status(409).json({message:'The quote changed. Reopen it before making an alternative.'});
       const source=parseJson<any>(original.payload,{}),key=typeof req.body?.requestKey==='string'?req.body.requestKey:'';
@@ -641,6 +610,7 @@ export function registerQuoteRoutes(app: Express): void {
   app.post("/api/quotes/:id/revision", requireAuth, (req, res) => {
     const original = db.select().from(quotes).where(eq(quotes.id, pid(req.params.id))).get();
     if (!original || original.deletedAt != null) return res.status(404).json({ message: "Quote not found" });
+    if(original.type==='barndominium')return res.status(410).json({message:'This quote type is no longer available.'});
     if (original.status === "accepted") return res.status(409).json({ message: "This job is already accepted. Use a project change order, or duplicate it for a separate job." });
     const row = sqlite.transaction(() => {
       const created = insertQuoteWithNumber({ type: original.type, customerName: original.customerName,
@@ -667,6 +637,7 @@ export function registerQuoteRoutes(app: Express): void {
       .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
       .get();
     if (!existing) return res.status(404).json({ message: "Quote not found" });
+    if(existing.type==='barndominium')return res.status(410).json({message:'This quote type is no longer available.'});
     if (existing.status !== "draft") return res.status(409).json({ message: "This quote has been issued. Create a revision to change it." });
     if (req.body?.version !== existing.version) return res.status(409).json({ message: "This draft changed on another screen. Reopen it before saving." });
     try {
@@ -723,6 +694,7 @@ export function registerQuoteRoutes(app: Express): void {
       .where(and(eq(quotes.id, id), isNull(quotes.deletedAt)))
       .get();
     if (!quote) return res.status(404).json({ message: "Quote not found" });
+    if (quote.type === 'barndominium' && quote.status === 'draft' && !req.body?.preview) return res.status(410).json({message:'This quote type is no longer available.'});
     if (req.body?.version !== undefined && req.body.version !== quote.version) return res.status(409).json({ message: 'This quote changed after your review. Reopen it before sending.' });
 
     const token = quote.shareToken ?? crypto.randomBytes(24).toString("hex");

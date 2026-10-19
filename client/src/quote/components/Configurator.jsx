@@ -3,8 +3,6 @@ import StandardPackages from './StandardPackages.jsx';
 import PriceSummary from './PriceSummary.jsx';
 import CarportPricing, { CarportOptions } from './CarportPricing.jsx';
 import { concreteGuide, isFlatwork } from '../data/concreteGuide.js';
-import Barndominium from './Barndominium.jsx';
-import BarndoQuoteDetails from './BarndoQuoteDetails.jsx';
 import { visibleControls, typeLabel } from '../data/configurators.js';
 import Control from './Controls.jsx';
 import Preview from './Preview.jsx';
@@ -23,7 +21,7 @@ export default function Configurator({
   onAddCustomLine, onRemoveCustomLine, onSetLineRemoved, onMoveLine, onUnlockPrices, onResetOverrides,
   onChangeMaterialMarkup, onChangeLaborMarkup, onChangeTax, onChangeDiscount,
   onChangeDeliveryMiles, onChangeDeliveryRate, onBack, onContinue,
-  customer, onChangeCustomer, onChangeState, barndoQuote, onChangeBarndoQuote,
+  customer, onChangeCustomer, onChangeState,
 }) {
   const packageCarport = type==='carport' && state.pricingMode==='package';
   const guide = type === 'concrete' && state.pricingMode === 'guide' ? concreteGuide(state) : null;
@@ -57,8 +55,6 @@ export default function Configurator({
         </div>
 
         {mode==='design' && <StandardPackages type={type} onChange={onChangeState}/>}
-        {mode==='design' && type === 'barndominium' && <Barndominium state={state} onChange={onChangeState} customer={customer} />}
-        {mode==='design' && type === 'barndominium' && <BarndoQuoteDetails state={state} value={barndoQuote} onChange={onChangeBarndoQuote} />}
         <div className={mode==='price'?'quote-price-layout':'cfg'}>
           {mode==='design' && <form className="cfg-controls" onSubmit={(e) => e.preventDefault()}>
             {type==='carport'&&state.roof==='gable'&&state.gableFrame==='rigid'&&<p className="hint">Open rigid frame concept: clear gable opening with reinforced corners. Final steel sizes, connections, foundations and price require a project-specific design.</p>}
@@ -81,7 +77,7 @@ export default function Configurator({
             {mode==='price' && !packageCarport && <section className="quote-section"><h2><L>{"Included work"}</L></h2><p>Review the included work below. Change rates, labor, delivery or tax in Advanced pricing.</p><ul className="quote-price-summary">{lineState.items.map(item=><li key={item.key}><span>{item.name}</span><strong>{Number(item.qty).toLocaleString()} {item.unit||({area:'sq ft',length:'ft',flat:'job'}[item.kind]||'each')}</strong></li>)}</ul><p>Tax: ${Number(totals?.tax||0).toFixed(2)} · Discount: ${Number(totals?.discountAmt||0).toFixed(2)}</p></section>}
             {!!advancedControls.length && <details className="quote-section"><summary><L>{"Concrete pricing options"}</L></summary><div className="quote-control-grid">{advancedControls.map(renderControl)}</div></details>}
             {guide && <section className="quote-section" aria-label="CJM pricing guide"><h2>{guide.label}</h2><p>{guide.qty} {guide.unit} · Guide: ${guide.low}–${guide.high}{['panel','wall','drainage','roots'].includes(state.repairType) ? '+' : ''} / {guide.unit}</p><p>Selected base: ${guide.rate.toFixed(2)} / {guide.unit}{guide.minimum > 0 ? ` · Minimum: $${guide.minimum}` : ''}</p><p className="hint">Installed guide rates include labor. Finishes and extras are separate. Any markup, tax or delivery in Advanced pricing is additional. Final pricing depends on site conditions.</p>{isFlatwork(state) && Number(state.thickness)>4 && <p className="hint">Confirm the base rate for {state.thickness}″ concrete or enter an extra thickness allowance; the guides do not specify a thickness surcharge.</p>}{state.project==='retaining' && <p className="hint">Quantity is length × wall height (wall face area).</p>}{state.project==='brick' && <p className="hint">Enter affected {guide.unit}; repair scope and structural work require site review.</p>}</section>}
-            {mode==='design' && type !== 'barndominium' && !(type === 'concrete' && !isFlatwork(state)) && <Preview type={type} state={state} customer={customer} />}
+            {mode==='design' && !(type === 'concrete' && !isFlatwork(state)) && <Preview type={type} state={state} customer={customer} />}
             {!packageCarport && missing.length > 0 && <div className="pricing-attention"><strong>{missing.length} {missing.length === 1 ? 'cost needs' : 'costs need'} attention</strong><p>{missing.map(it => it.name).join(', ')}</p><button className="back-link" onClick={() => setPricingOpen(true)}><L>{"Edit missing costs"}</L></button></div>}
             {packageCarport && mode==='price' && <CarportPricing state={state} lines={lineState} totals={totals} onChange={onChangeOption} taxPct={taxPct} discountPct={discountPct} onChangeTax={onChangeTax} onChangeDiscount={onChangeDiscount} />}
             {!packageCarport && <details className="quote-section pricing-section" open={pricingOpen} onToggle={e => setPricingOpen(e.currentTarget.open)}>

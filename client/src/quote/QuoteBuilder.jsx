@@ -43,7 +43,7 @@ import { fmtMoney } from "./lib/format.js";
 import {scopeIssues} from './lib/barndoQuote.js';
 import Home from "./components/Home.jsx";
 import Configurator from "./components/Configurator.jsx";
-import {BarndominiumQuoteTools} from './components/BarndominiumTemplates.jsx';
+import {QuoteTools} from './components/QuoteTools.jsx';
 const QuoteForm = lazy(() => import("./components/QuoteForm.jsx"));
 const QuoteOptions = lazy(() => import('./components/QuoteOptions.jsx'));
 const PriceBookPanel = lazy(() => import("./components/PriceBookPanel.jsx"));
@@ -99,7 +99,7 @@ function newSession(type, priceBook) {
  * markup rates (preserving the previous total).
  */
 function migrateSession(sess, priceBook) {
-  if (!sess) return sess;
+  if (!sess || sess.type === 'barndominium') return null;
   const legacy = sess.markupPct;
   return {
     ...sess,
@@ -147,6 +147,7 @@ export default function QuoteBuilder({ initialSettings }) {
     ),
   );
   const [view, setView] = useState("home");
+  const [retiredQuote, setRetiredQuote] = useState(null);
   // settingsDirty is set only by the explicit edit paths (updatePriceBook /
   // updateShop / resetPriceBook) — not by an effect watching state — so a
   // StrictMode double-mount or remount never writes untouched settings back.
@@ -545,13 +546,18 @@ export default function QuoteBuilder({ initialSettings }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Reopen a saved quote from the suite — edits keep saving to the same number.
   const [issuedQuote, setIssuedQuote] = useState(null);
-  const openSaved = (sess) => replaceDraft(migrateSession(sess, priceBook), true);
+  const openSaved = async (sess) => {
+    if (sess.type !== 'barndominium') return replaceDraft(migrateSession(sess, priceBook), true);
+    try { if (session) await flushQuote(); setRetiredQuote(sess); setView('retired'); }
+    catch (error) { showSaveError(error); }
+  };
   useRecordLink('quote','/api/quotes', row=>{
     if(row.status!=='draft'){setIssuedQuote(row);setView('saved');return true;}
     const payload=JSON.parse(row.payload);
-    return openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status});
+    return openSaved({...payload,quoteId:row.id,number:row.number,version:row.version,leadId:row.leadId,quoteStatus:row.status,totalCents:row.totalCents});
   });
   const duplicateSaved=async(sess,fromCurrent=false)=>{
+    if (sess?.type === 'barndominium') { toast({title:'This quote type has been retired',description:'Existing records are available for reference. Choose an available product to start a new quote.'}); return; }
     if(copyBusy)return;
     setCopyBusy(true);
     try{
@@ -660,6 +666,13 @@ export default function QuoteBuilder({ initialSettings }) {
             }
           />
         )}
+        {activeView === 'retired' && retiredQuote && <section className="container page" aria-label="Historical quote">
+          <button className="btn ghost" onClick={()=>setView('saved')}>← Saved quotes</button>
+          <h1>{retiredQuote.number || 'Historical quote'}</h1>
+          <p>This quote type is no longer offered. This saved record is available for reference.</p>
+          <dl><dt>Customer</dt><dd>{retiredQuote.customer?.name || '—'}</dd><dt>Saved total</dt><dd>${fmtMoney((retiredQuote.totalCents || 0) / 100)}</dd><dt>Design reference</dt><dd>{retiredQuote.designRef || '—'}</dd></dl>
+          {retiredQuote.notes && <p style={{whiteSpace:'pre-wrap'}}>{retiredQuote.notes}</p>}
+        </section>}
         {activeView === "find" && <FindDesign onStartQuote={startFromLead} />}
         {activeView === "saved" && (
           <><SavedQuotes onOpen={openSaved} onDuplicate={duplicateSaved} />{issuedQuote && <IssuedQuoteDialog key={issuedQuote.id} quote={issuedQuote} onClose={()=>setIssuedQuote(null)} />}</>
@@ -668,15 +681,13 @@ export default function QuoteBuilder({ initialSettings }) {
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
         {activeView==='options'&&session?.quoteId&&<QuoteOptions quoteId={session.quoteId} onBack={()=>setView('configure')} onShared={()=>setSession(s=>({...s,quoteStatus:'sent'}))} onDone={issued} />}
-        {session && ['configure','price','details'].includes(activeView) && <BarndominiumQuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
+        {session && ['configure','price','details'].includes(activeView) && <QuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
         {["configure","price"].includes(activeView) && session && (
           <Configurator
             estimate={session.costEstimate} onChangeEstimate={costEstimate=>setSession(s=>({...s,costEstimate}))}
             key={`configure-${session.sid}-${activeView}`}
             mode={activeView==='price'?'price':'design'}
             customer={session.customer}
-            barndoQuote={session.overrides?.barndoQuote}
-            onChangeBarndoQuote={barndoQuote=>setSession(s=>({...s,overrides:{...s.overrides,barndoQuote}}))}
             onChangeCustomer={setCustomer}
             type={session.type}
             state={session.state}

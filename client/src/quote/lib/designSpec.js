@@ -1,4 +1,3 @@
-import {normalize as normalizeBarndo,validate as validateBarndo} from './barndominium/model.js';
 // =============================================================================
 //  Design-spec parser — turns a website lead back into configurator state.
 //
@@ -337,12 +336,7 @@ export function parseLead(lead) {
   if (rawState) {
     try {
       const parsed = JSON.parse(rawState);
-      if(parsed?.type === 'barndominium' && parsed.state && typeof parsed.state === 'object') {
-        const state=normalizeBarndo(parsed.state);
-        const issues=validateBarndo(state);
-        if(issues.length) return {type:'barndominium',state:issues.every(e=>['porch-eave','porch-clearance','porch-access'].includes(e.code))?state:defaultState('barndominium'),warnings:['The saved building layout needs review. Resolve the highlighted conflicts before quoting.'],hasSpec:true};
-        return {type:'barndominium',state,warnings:[],hasSpec:true};
-      }
+      if (parsed?.type === 'barndominium') return null;
       if (parsed && TOOLS[parsed.type] && parsed.state && typeof parsed.state === 'object') {
         return {
           type: parsed.type,

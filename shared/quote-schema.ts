@@ -15,8 +15,10 @@ import { z } from "zod";
 // "concrete" and "insulation" are the sister shops' trades (flatwork and
 // industrial insulation) quoted through the same builder — their configurator
 // schemas + estimators live beside the metals ones in client/src/quote.
-export const QUOTE_TYPES = ["barndominium", "fence", "gate", "carport", "railing", "pergola", "table", "concrete", "insulation", "custom"] as const;
-export type QuoteType = (typeof QUOTE_TYPES)[number];
+export const QUOTE_TYPES = ["fence", "gate", "carport", "railing", "pergola", "table", "concrete", "insulation", "custom"] as const;
+// Historical records retain their stored type; new quotes use QUOTE_TYPES only.
+const STORED_QUOTE_TYPES = [...QUOTE_TYPES, "barndominium"] as const;
+export type QuoteType = (typeof STORED_QUOTE_TYPES)[number];
 
 // Share/accept lifecycle: draft (builder only) → sent (share link created) →
 // accepted / declined. Mirrors crm_estimates' statuses minus "expired".
@@ -33,7 +35,7 @@ export type QuoteDeclineReason = (typeof QUOTE_DECLINE_REASONS)[number];
 export const quotes = sqliteTable("quotes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: text("number").notNull().unique(), // "Q-2026-0001", server-assigned
-  type: text("type", { enum: QUOTE_TYPES }).notNull(),
+  type: text("type", { enum: STORED_QUOTE_TYPES }).notNull(),
   customerName: text("customer_name"),
   designRef: text("design_ref"), // website design code ("CJM-F7K2") if started from one
   leadId: integer("lead_id"),
@@ -88,7 +90,7 @@ export const quoteSettings = sqliteTable("quote_settings", {
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
-export const insertQuoteSchema = createInsertSchema(quotes).omit({
+export const insertQuoteSchema = createInsertSchema(quotes).extend({type: z.enum(QUOTE_TYPES)}).omit({
   id: true,
   number: true, // server-assigned
   revisionOf: true,
@@ -130,7 +132,7 @@ export const QUOTE_TYPE_LABELS: Record<QuoteType, string> = {
   fence: "Fence",
   gate: "Gate",
   carport: "Carport",
-  barndominium: "Barndominium",
+  barndominium: "Historical quote",
   railing: "Railing",
   pergola: "Pergola",
   table: "Table",

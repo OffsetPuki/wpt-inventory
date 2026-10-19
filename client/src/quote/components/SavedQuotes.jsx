@@ -178,7 +178,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
       // them anyway, but not handing them over makes that impossible to undo by
       // accident later.
       if (duplicate) onDuplicate({...payload,number:row.number});
-      else onOpen({ ...payload, quoteId: row.id, number: row.number, version: row.version, leadId: row.leadId, quoteStatus: row.status });
+      else onOpen({ ...payload, quoteId: row.id, number: row.number, version: row.version, leadId: row.leadId, quoteStatus: row.status, totalCents: row.totalCents });
     },
     onError: (e) => toast({ variant: 'destructive', title: 'Could not open quote', description: e?.message }),
   });
@@ -299,12 +299,12 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                     {trash ? <><span className="sq-meta">Deleted {fmtDate(q.deletedAt)}</span><button className="btn ghost sq-btn" disabled={restoreQuote.isPending} onClick={() => restoreQuote.mutate(q.id)}>Restore</button></> : <>
                     <DocumentActivityButton kind="quote" id={q.id} className="btn ghost sq-btn"/>
                     <button className="btn ghost sq-btn" onClick={() => q.status === 'draft' ? openQuote.mutate({ id: q.id }) : viewQuote.mutate(q.id)} disabled={openQuote.isPending || viewQuote.isPending}>
-                      {q.status === 'draft' ? 'Edit draft' : 'View issued quote'}
+                      {q.type === 'barndominium' && q.status === 'draft' ? 'View saved record' : q.status === 'draft' ? 'Edit draft' : 'View issued quote'}
                     </button>
                     {isElevated && ['draft', 'sent'].includes(q.status) && <button className="btn ghost sq-btn" onClick={() => { acceptQuote.reset(); setAcceptNote(''); setAccepting(q); }}>Mark accepted</button>}
-                    {['sent', 'declined'].includes(q.status) && <button className="btn ghost sq-btn" disabled={reviseQuote.isPending} onClick={() => { reviseQuote.reset(); setRevising(q); }}>Revise</button>}
+                    {q.type !== 'barndominium' && ['sent', 'declined'].includes(q.status) && <button className="btn ghost sq-btn" disabled={reviseQuote.isPending} onClick={() => { reviseQuote.reset(); setRevising(q); }}>Revise</button>}
                     {q.projectId ? <a className="btn ghost sq-btn" href={`/#/project/${q.projectId}`}>Open job</a> : q.leadId && <a className="btn ghost sq-btn" href={`/#/crm/leads?lead=${q.leadId}`}>Open lead</a>}
-                    {onDuplicate && (
+                    {onDuplicate && q.type !== 'barndominium' && (
                       <button
                         className="btn ghost sq-btn"
                         title="Start a new quote from this one — same lines and rates, blank customer"
@@ -314,7 +314,7 @@ export default function SavedQuotes({ onOpen, onDuplicate }) {
                         Duplicate
                       </button>
                     )}
-                    <button className="btn ghost sq-btn" onClick={() => setShareId(shareId === q.id ? null : q.id)}>
+                    <button className="btn ghost sq-btn" disabled={q.type === 'barndominium' && q.status === 'draft'} onClick={() => setShareId(shareId === q.id ? null : q.id)}>
                       {shareId === q.id ? 'Close' : 'Send'}
                     </button>
                     {isElevated && <button

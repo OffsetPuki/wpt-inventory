@@ -669,7 +669,7 @@ export function registerPublicRoutes(app: Express): void {
         photos:portfolioItems.photos,
       })
         .from(portfolioItems)
-        .where(and(eq(portfolioItems.published, true),isNull(portfolioItems.archivedAt),eq(portfolioItems.site,site.data)))
+        .where(and(eq(portfolioItems.published, true),isNull(portfolioItems.archivedAt),eq(portfolioItems.site,site.data),sql`lower(coalesce(${portfolioItems.serviceSlug}, '') || ' ' || coalesce(${portfolioItems.category}, '') || ' ' || coalesce(${portfolioItems.title}, '') || ' ' || coalesce(${portfolioItems.titleEs}, '')) NOT LIKE '%barndo%'`))
         .orderBy(asc(portfolioItems.orderIndex), desc(portfolioItems.createdAt), desc(portfolioItems.id))
         .offset(offset.data).limit(61).all();
     res.json({site:site.data,items:items.slice(0,60),nextOffset:items.length>60?offset.data+60:null});
