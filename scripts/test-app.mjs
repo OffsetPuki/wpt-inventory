@@ -1,3 +1,4 @@
+import {leadUploadBody} from '../server/lead-upload-body.ts';
 // Isolated HTTP test fixture. No real accounts, databases, mail, or Stripe requests.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -94,6 +95,7 @@ export async function testApp({ serve = false, prepareDatabase } = {}) {
     "/api/public/stripe/webhook",
     express.raw({ type: "application/json" }),
   );
+  app.use(["/api/public/leads","/api/public/lead-details"],...leadUploadBody);
   app.use(express.json({ limit: "6mb" }));
   registerRoutes(app);
   registerAttentionRoute(app);

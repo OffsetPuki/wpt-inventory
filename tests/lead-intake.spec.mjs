@@ -12,13 +12,17 @@ test('Website request opens from Today beyond the list page; contact and qualifi
   await page.addInitScript(t=>localStorage.setItem('wpt-auth-token',t),token);
   const photo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=';
   const receiptToken=crypto.randomBytes(32).toString('hex');
-  const input=await app.api('/api/public/leads','POST',{name:'Website project to contact',site:'insulation',email:'customer@example.test',service:'Pipe insulation',contact:'Email',bestTime:'Weekdays after 3 pm',area:'Arlington',receiptToken,photos:[photo],qualification:{facilityCompany:'Synthetic facility',deadline:'2026-10-01'}},null,{'X-Lead-Key':'test-intake-key'});
+  const document=Buffer.from('%PDF-1.7\nSynthetic project plan');
+  const input=await app.api('/api/public/leads','POST',{name:'Website project to contact',site:'insulation',email:'customer@example.test',service:'Pipe insulation',contact:'Email',bestTime:'Weekdays after 3 pm',area:'Arlington',receiptToken,photos:[photo],attachments:[{name:'project.pdf',data:document.toString('base64')}],qualification:{facilityCompany:'Synthetic facility',deadline:'2026-10-01'}},null,{'X-Lead-Key':'test-intake-key'});
   expect(input.status).toBe(201);
   for(let n=0;n<52;n++)await app.api('/api/crm/leads','POST',{name:`Later request ${n}`,site:'metals'},token);
   await page.goto(app.base+'/#/today');
   await page.getByText('More workspaces & follow-ups',{exact:true}).click();
   await page.getByRole('link',{name:'Website project to contact',exact:true}).click();
   const dialog=page.getByRole('dialog');await expect(dialog).toBeVisible();
+  const files=dialog.getByRole('region',{name:'Request files'});await expect(files).toContainText('project.pdf');
+  const fileDownload=page.waitForEvent('download');await files.getByRole('button',{name:'Download project.pdf',exact:true}).click();
+  const received=await fileDownload;expect(received.suggestedFilename()).toBe('project.pdf');expect(fs.readFileSync(await received.path())).toEqual(document);
   const gallery=dialog.getByRole('region',{name:'Request photos'});
   await expect(gallery.getByRole('heading',{name:'Request photos (1)',exact:true})).toBeVisible();
   const image=gallery.getByRole('img',{name:'Request photo 1',exact:true});await image.scrollIntoViewIfNeeded();

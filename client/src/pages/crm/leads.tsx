@@ -1,3 +1,4 @@
+import LeadFiles,{type LeadFile} from '@/components/LeadFiles';
 import DeleteRecordReview from '@/components/DeleteRecordReview';
 import {L} from '@/lib/language';
 import {businessFollowUp,businessDateInput} from '@/lib/format';
@@ -367,6 +368,7 @@ function LeadDetailModal({
   const [language, setLanguage] = useState(lead.preferredLanguage ?? "en");
   const { data: extras, isError: detailFailed, refetch: retryDetail } = useQuery<{
     photos: string | null;
+    files: LeadFile[];
     quotes: { id: number; number: string; status: string; totalCents: number }[];
     projects: { id: number; name: string }[];
     invoices: { id: number; number: string; status: string; totalCents: number; paidCents: number }[];
@@ -565,6 +567,7 @@ function LeadDetailModal({
               {followUp && <p className="mt-2 text-xs text-muted-foreground"><L>{"Saving this date schedules a follow-up task."}</L></p>}
             </section>
 
+            <LeadFiles leadId={lead.id} files={extras?.files || []} />
             {photos.length > 0 && <LeadPhotos leadId={lead.id} photos={photos} />}
             {detailFailed && <p role="alert" className="text-sm"><L>{"Photos and linked records could not refresh."}</L>{" "}<button type="button" className="underline" onClick={() => retryDetail()}><L>{"Retry"}</L></button></p>}
             {hasLinkedRecords && <section aria-label="Quotes and jobs" className="space-y-3 border-t border-border pt-4"><h3 className="font-semibold"><L>{"Quotes & jobs"}</L></h3>

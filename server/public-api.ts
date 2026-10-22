@@ -1,3 +1,4 @@
+import {requestFilesSchema,stageLeadFiles,attachLeadFiles,discardLeadFiles,registerLeadFiles,type StoredLeadFile} from './lead-files';
 import { qualificationSchema, saveLeadIntake, hasLeadReceipt, registerLeadExperience } from './lead-experience';
 import { saveLeadAttribution } from './lead-measurement';
 import { saveLeadPhoto, leadPhotoAttachments, leadPhotoLink } from "./media";
@@ -156,6 +157,7 @@ const intakeSchema = z.object({
   // by saveDesignPng, never a reason to reject the lead itself.
   designPng: z.unknown().optional(),
   photos: z.array(z.string().max(1_400_000)).max(3).optional(),
+  attachments: requestFilesSchema,
   submissionId: z.string().regex(/^[a-zA-Z0-9-]{16,80}$/).optional(),
 });
 
@@ -345,6 +347,7 @@ function noteBadIntakeKey(): void {
 
 export function registerPublicRoutes(app: Express): void {
   registerLeadExperience(app, hasLeadKey);
+  registerLeadFiles(app);
   app.post("/api/public/leads", intakeLimiter, (req, res) => {
     // Shared secret: the website's server sends X-Lead-Key. Unset env means
     // the pipe is intentionally closed (e.g. local dev) — 503, not 401, so
@@ -366,18 +369,19 @@ export function registerPublicRoutes(app: Express): void {
       return res.status(400).json({ message: e.message });
     }
 
-    const payloadHash = crypto.createHash('sha256').update(canonicalPayload({...body,site:body.site||'metals'})).digest('hex');
+    const payloadHash = crypto.createHash('sha256').update(canonicalPayload({...body,attachments:body.attachments.length?body.attachments:undefined,site:body.site||'metals'})).digest('hex');
     if(body.submissionId) {
       const receipt=sqlite.prepare("SELECT r.lead_id,r.payload_hash,l.site FROM web_lead_receipts r JOIN crm_leads l ON l.id=r.lead_id WHERE submission_id=? AND l.deleted_at IS NULL").get(body.submissionId) as any;
       if(receipt) {
         if(receipt.site!==(body.site||'metals'))return res.status(409).json({message:'Submission belongs to another website.'});
         if(receipt.payload_hash && receipt.payload_hash!==payloadHash)return res.status(409).json({message:'This request ID was already used for different details. Submit again with a new request ID.',code:'submission_conflict'});
-        return res.status(200).json({ok:true,id:receipt.lead_id,deduped:true,receiptEnabled:hasLeadReceipt(receipt.lead_id,receipt.site,body.receiptToken)});
+        return res.status(200).json({ok:true,id:receipt.lead_id,attachmentsSaved:body.attachments.length,deduped:true,receiptEnabled:hasLeadReceipt(receipt.lead_id,receipt.site,body.receiptToken)});
       }
     }
     let photoUrls:string[]=[];
-    try {for(const photo of body.photos || [])photoUrls.push(saveLeadPhoto(photo));}
-    catch(error:any){for(const url of photoUrls){try{fs.unlinkSync(path.join(uploadsDir,path.basename(url)));}catch{}}return res.status(400).json({message:error.message});}
+    let attachmentFiles:StoredLeadFile[]=[];
+    try {attachmentFiles=stageLeadFiles(body.attachments,body.photos);for(const photo of body.photos || [])photoUrls.push(saveLeadPhoto(photo));}
+    catch(error:any){discardLeadFiles(attachmentFiles);for(const url of photoUrls){try{fs.unlinkSync(path.join(uploadsDir,path.basename(url)));}catch{}}return res.status(400).json({message:error.message});}
     const createdFiles = [...photoUrls];
     try {
     const {row,dupe}=sqlite.transaction(()=>{
@@ -470,6 +474,7 @@ export function registerPublicRoutes(app: Express): void {
       }).returning().get();
     }
 
+    attachLeadFiles(row.id,attachmentFiles);
     saveLeadIntake(row.id, site, body);
     saveLeadAttribution(row.id, site, body.attribution);
 
@@ -558,7 +563,7 @@ export function registerPublicRoutes(app: Express): void {
         (body.designSpec ? `\nDesign spec:\n${body.designSpec}\n` : "") +
         `\nNotes:\n${body.message || "(none)"}\n` +
         `\nLang: ${body.lang ?? "en"} · Page: ${body.page || "?"} · Lead #${row.id}` +
-        `\n\n${photoUrls.length + (pngUrl ? 1 : 0)} photo(s) attached. View this request and its photos:\n${leadPhotoLink(row.id)}`;
+        `\n\n${photoUrls.length + (pngUrl ? 1 : 0)} photo(s) and ${attachmentFiles.length} file(s) attached. View this request and its files:\n${leadPhotoLink(row.id)}`;
       queueOwnerMail({
         deliveryKey:`lead-intake-owner:${row.id}`,
         subject: `[CJM Suite] New lead from ${domain} — ${body.name}`,
@@ -570,11 +575,11 @@ export function registerPublicRoutes(app: Express): void {
     // A fresh submission can add photos to a recent lead. Its initial alert
     // already went out, so deliver only these new images, once per receipt.
     const newImages = [...photoUrls, ...(pngUrl ? [pngUrl] : [])];
-    if (dupe && newImages.length && mailEnabled()) {
+    if (dupe && (newImages.length || attachmentFiles.length) && mailEnabled()) {
       queueOwnerMail({
-        deliveryKey: `lead-intake-photos:${body.submissionId || newImages[0]}`,
-        subject: `[CJM Suite] New request photos — ${body.name}`,
-        text: `${newImages.length} new photo(s) attached to lead #${row.id}.\n\n${body.message || ''}\n\nView the request and all photos:\n${leadPhotoLink(row.id)}`,
+        deliveryKey: `lead-intake-photos:${body.submissionId || newImages[0] || attachmentFiles[0]?.id}`,
+        subject: `[CJM Suite] New request files — ${body.name}`,
+        text: `${newImages.length} new photo(s) and ${attachmentFiles.length} file(s) attached to lead #${row.id}.\n\n${body.message || ''}\n\nView the request and all photos:\n${leadPhotoLink(row.id)}`,
         attachments: leadPhotoAttachments(row.id, newImages),
       });
     }
@@ -598,9 +603,10 @@ export function registerPublicRoutes(app: Express): void {
     return {row,dupe};
     })();
     res.status(201).json(
-      { ok: true, id: row.id, deduped: !!dupe, receiptEnabled: hasLeadReceipt(row.id, body.site || 'metals', body.receiptToken) },
+      { ok: true, id: row.id, attachmentsSaved:body.attachments.length, deduped: !!dupe, receiptEnabled: hasLeadReceipt(row.id, body.site || 'metals', body.receiptToken) },
     );
     } catch(error) {
+      discardLeadFiles(attachmentFiles);
       for(const url of createdFiles) { try { fs.unlinkSync(path.join(uploadsDir,path.basename(url))); } catch {} }
       console.error('[lead-intake] persistence failed', error instanceof Error ? error.message : 'unknown error');
       return res.status(503).json({message:'We could not save this request. Please try again.'});

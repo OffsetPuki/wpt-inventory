@@ -65,7 +65,7 @@ try {
   assert.equal(sqlite.prepare('SELECT count(*) n FROM employee_shifts WHERE user_id=?').get(worker.id).n,1);
   const {dayKey,employeePayrollIssues}=await import('../server/employee-data.ts');
   const from=dayKey(initial),to=dayKey(now);
-  const summary=()=>call(`/api/hr/payroll/summary?from=${from}&to=${to}`);
+  const summary=()=>call(`/api/hr/payroll/summary?from=${from}&to=${dayKey(now)}`);
   assert.equal((await summary()).find(r=>r.employeeId===employee.id).hours,0,'Unapproved hours are not payable worksheet hours');
   await call('/api/hr/payroll/record-expense','POST',{from,to,amountCents:9000},owner,400);
   const e=shift.entries[0],correction={entryId:e.id,startedAt:e.started_at,endedAt:e.ended_at-5*60000,reason:'Actual arrival was recorded incorrectly'};

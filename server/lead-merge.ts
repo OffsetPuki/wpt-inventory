@@ -8,7 +8,7 @@ import { audit } from './audit';
 import type { LeadMergePreview, MergeLeadSummary } from '../shared/lead-merge';
 
 // Explicit inventory: a regression test fails if a new lead reference lacks a policy.
-export const LEAD_MERGE_REFERENCES = ['quotes', 'projects', 'fin_invoices', 'fin_purchase_orders', 'pm_tasks', 'mk_tasks', 'review_requests', 'web_designs', 'web_lead_receipts', 'web_lead_access'] as const;
+export const LEAD_MERGE_REFERENCES = ['quotes', 'projects', 'fin_invoices', 'fin_purchase_orders', 'pm_tasks', 'mk_tasks', 'review_requests', 'web_designs', 'web_lead_receipts', 'web_lead_access', 'crm_lead_files'] as const;
 export const LEAD_MERGE_SPECIAL = ['crm_lead_intake', 'mk_lead_attribution', 'mk_measurement_events'] as const;
 sqlite.exec(`CREATE TABLE IF NOT EXISTS crm_lead_merges (
   source_id INTEGER PRIMARY KEY, target_id INTEGER NOT NULL, merged_at INTEGER NOT NULL,

@@ -29,6 +29,7 @@ try {
     web_designs: { ref: 'CJM-MERGE', design_spec: 'Fence dimensions', design_png_url: '/uploads/design.png' },
     web_lead_receipts: { submission_id: crypto.randomUUID(), created_at: Date.now(), payload_hash: 'original-hash' },
     web_lead_access: { token_hash: tokenHash, site: 'metals', expires_at: Date.now() + 86400000 },
+    crm_lead_files: {id:crypto.randomUUID(),name:'plan.pdf',size:10,created_at:Date.now()},
   };
   for (const [table, values] of Object.entries(refs)) insert(table, { lead_id: source, ...values });
   insert('crm_activities', { entity_type: 'lead', entity_id: source, kind: 'call', notes: 'Spoke about fence', user_id: 1 });
