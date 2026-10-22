@@ -1,3 +1,4 @@
+import {listLeadFiles} from './lead-files';
 import {crmStats,crmReports} from './crm-reporting';
 import { registerLeadReply } from './lead-reply';
 import { registerLeadMerge, canonicalLeadId } from './lead-merge';
@@ -727,7 +728,7 @@ export function registerCrmRoutes(app: Express): void {
       .map(({ payload, ...quote }) => ({ ...quote, expired: isQuoteExpired({ ...quote, payload }) }));
     const jobs = sqlite.prepare(`SELECT DISTINCT p.id, p.name FROM projects p JOIN fin_invoices i ON i.project_id = p.id WHERE i.lead_id = ? AND p.deleted_at IS NULL`).all(id);
     const invoices = isElevated(req) ? sqlite.prepare(`SELECT id, number, status, total_cents AS totalCents, paid_cents AS paidCents FROM fin_invoices WHERE lead_id = ? AND deleted_at IS NULL ORDER BY id DESC`).all(id) : [];
-    res.json({ photos: lead.photos, design, quotes, projects: jobs, invoices });
+    res.json({ photos: lead.photos, files:listLeadFiles(id), design, quotes, projects: jobs, invoices });
   });
 
   app.patch("/api/crm/leads/:id", requireAuth, (req, res) => {

@@ -1,3 +1,4 @@
+import {requestFilesSchema,stageLeadFiles,attachLeadFiles,discardLeadFiles,type StoredLeadFile} from './lead-files';
 import type { Express, Request } from 'express';
 import { createHash } from 'crypto';
 import fs from 'fs';
@@ -45,20 +46,23 @@ export function registerLeadExperience(app: Express, hasLeadKey: (req: Request) 
  app.post('/api/public/lead-details', (req,res) => {
    res.setHeader('Cache-Control','no-store');
    if (!hasLeadKey(req)) return res.status(401).json({message:'Unauthorized'});
-   const parsed = z.object({token: tokenSchema, site:z.enum(LEAD_SITES), submissionId:z.string().uuid(), details:z.string().trim().max(4000).default(''), photos:z.array(z.string().max(1_400_000)).max(3).default([])}).safeParse(req.body);
-   if (!parsed.success) return res.status(400).json({message:'Invalid details or photos.'});
-   const body=parsed.data, tokenHash=hash(body.token), payloadHash=hash(JSON.stringify({details:body.details,photos:body.photos}));
+   const parsed = z.object({token: tokenSchema, site:z.enum(LEAD_SITES), submissionId:z.string().uuid(), details:z.string().trim().max(4000).default(''), attachments:requestFilesSchema,photos:z.array(z.string().max(1_400_000)).max(3).default([])}).safeParse(req.body);
+   if (!parsed.success) return res.status(400).json({message:'Invalid details or files.'});
+   const body=parsed.data, tokenHash=hash(body.token), payloadHash=hash(JSON.stringify({details:body.details,photos:body.photos,...(body.attachments.length?{attachments:body.attachments}:{})}));
    const access=sqlite.prepare(`SELECT a.lead_id,l.photos,l.notes FROM web_lead_access a JOIN crm_leads l ON l.id=a.lead_id WHERE a.token_hash=? AND a.site=? AND a.expires_at>? AND l.site=a.site AND l.deleted_at IS NULL`).get(tokenHash,body.site,Date.now()) as {lead_id:number;photos:string|null;notes:string|null}|undefined;
    if (!access) return res.status(404).json({message:'This receipt has expired or is unavailable. Please contact us.'});
    const prior=sqlite.prepare('SELECT token_hash,payload_hash FROM web_lead_supplements WHERE submission_id=?').get(body.submissionId) as {token_hash:string;payload_hash:string}|undefined;
    if (prior) return prior.token_hash===tokenHash && prior.payload_hash===payloadHash ? res.json({ok:true,deduped:true}) : res.status(409).json({message:'Request changed. Please retry with a new submission.'});
-   if (!body.details && !body.photos.length) return res.status(400).json({message:'Add details or at least one photo.'});
+   if (!body.details && !body.photos.length && !body.attachments.length) return res.status(400).json({message:'Add details or at least one file.'});
    const count=sqlite.prepare('SELECT COUNT(*) AS n FROM web_lead_supplements WHERE token_hash=?').get(tokenHash) as {n:number};
    if (count.n>=3 || (access.notes?.length||0)>20000) return res.status(429).json({message:'Please contact us directly for more updates.'});
    let urls:string[]=[];
+   let attachmentFiles:StoredLeadFile[]=[];
    try {
+     attachmentFiles=stageLeadFiles(body.attachments,body.photos);
      for (const photo of body.photos) urls.push(saveLeadPhoto(photo));
      sqlite.transaction(()=>{
+       attachLeadFiles(access.lead_id,attachmentFiles);
        const existing=JSON.parse(access.photos || '[]');
        // Merging two requests can retain more than twelve existing photos.
        // Keep accepting text updates without expanding the upload allowance.
@@ -66,11 +70,12 @@ export function registerLeadExperience(app: Express, hasLeadKey: (req: Request) 
        sqlite.prepare('UPDATE crm_leads SET photos=?,notes=? WHERE id=?').run(JSON.stringify([...existing,...urls]),`${access.notes||''}\n\nCustomer update (${new Date().toISOString()}):\n${body.details}${urls.length ? `\n${urls.length} additional photo(s)` : ''}`,access.lead_id);
        sqlite.prepare('INSERT INTO web_lead_supplements VALUES (?,?,?,?)').run(body.submissionId,tokenHash,payloadHash,Date.now());
        sqlite.prepare('UPDATE crm_lead_intake SET updated_at=? WHERE lead_id=?').run(Date.now(),access.lead_id);
-       sqlite.prepare("INSERT OR IGNORE INTO suite_notifications(user_id,event_key,title,href) SELECT id,?,?,? FROM users WHERE role='owner' AND disabled_at IS NULL").run(`lead-details:${body.submissionId}`,'Customer added photos or project details',`/crm/leads?lead=${access.lead_id}`);
-       if(ownerMailStatus().enabled) queueOwnerMail({deliveryKey:`lead-details:${body.submissionId}`,subject:'[CJM Suite] Customer added project details',text:`Lead #${access.lead_id} has an update. ${urls.length} photo(s) attached.\n\n${body.details}\n\nView the request and all photos:\n${leadPhotoLink(access.lead_id)}`,attachments:leadPhotoAttachments(access.lead_id,urls)});
+       sqlite.prepare("INSERT OR IGNORE INTO suite_notifications(user_id,event_key,title,href) SELECT id,?,?,? FROM users WHERE role='owner' AND disabled_at IS NULL").run(`lead-details:${body.submissionId}`,'Customer added files or project details',`/crm/leads?lead=${access.lead_id}`);
+       if(ownerMailStatus().enabled) queueOwnerMail({deliveryKey:`lead-details:${body.submissionId}`,subject:'[CJM Suite] Customer added project details',text:`Lead #${access.lead_id} has an update. ${urls.length} photo(s) and ${attachmentFiles.length} file(s) attached.\n\n${body.details}\n\nView the request and all photos:\n${leadPhotoLink(access.lead_id)}`,attachments:leadPhotoAttachments(access.lead_id,urls)});
      })();
      return res.json({ok:true});
    } catch (error) {
+     discardLeadFiles(attachmentFiles);
      for (const url of urls) { try { fs.unlinkSync(path.join(uploadsDir,path.basename(url))); } catch {} }
      return res.status(400).json({message:error instanceof Error ? error.message : 'Unable to save details.'});
    }

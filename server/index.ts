@@ -1,3 +1,4 @@
+import {leadUploadBody} from './lead-upload-body';
 import "dotenv/config";
 import { startLeadMeasurement } from './lead-measurement';
 import { startGrowthReporting } from './growth';
@@ -122,11 +123,10 @@ app.use(compression());
 // Reduced from 50 MB to 1 MB. The only large payloads were photo uploads,
 // which go through multer (multipart) at 10 MB — they don't pass through
 // express.json. Keeping json/urlencoded at 50 MB was a free DoS vector.
-// Exception: the website's lead intake can carry a designPng data URL
-// (≤ 2M chars ≈ 1.5 MB of PNG). Mounted BEFORE the global parser — body-parser
-// skips a body that's already been parsed, so this scoped 4 MB limit wins for
-// that one route and everything else stays at 1 MB.
-app.use("/api/public/leads", express.json({ limit: "6mb" }));
+// Website intake and receipt updates accept 20 MB of files plus base64 and
+// a design snapshot. Only requests with the website key get the larger parser;
+// all other requests retain the 1 MB limit and normal route authentication.
+app.use(["/api/public/leads","/api/public/lead-details"],...leadUploadBody);
 // Stripe signs the exact bytes it sent, so this one route needs the raw body —
 // a reparsed-and-restringified JSON never matches the signature. Same
 // mounted-first trick as the lead route above: the global parser below skips a
