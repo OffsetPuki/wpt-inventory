@@ -23,6 +23,8 @@ jobs:
       - run: npm run test:browser
       - run: node scripts/check-dependency-security.mjs
       - uses: actions/upload-artifact@v4
+        # Test failures still block release; screenshot storage is optional.
+        continue-on-error: true
         if: always()
         with:
           name: browser-evidence
