@@ -87,6 +87,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     entries: [
       { to: "/crm/leads", label: "Leads", icon: UserPlus },
       { to: "/crm/clients", label: "Customers", icon: Contact },
+      { to: "/contacts", label: "Contacts & suppliers", icon: Contact, needs: "elevated" },
       { to: "/crm/quotes", label: "Quotes", icon: PencilRuler },
       { to: "/design-studio", label: "CJM Design Studio", icon: PencilRuler, needs: "elevated" },
       { to: "/crm/previews", label: "Customer previews", icon: PencilRuler, needs: "elevated" },

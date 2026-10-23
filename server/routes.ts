@@ -3,6 +3,7 @@ import { registerEmployeeBoundary, registerEmployeeRoutes } from './employee';
 import { employeeFileAllowed } from './employee-data';
 import {registerInsightRoutes} from './insights';
 import {listWindow} from "./pagination";
+import { registerContacts } from './contacts';
 import { registerShareLinks } from './share-links';
 import { registerCustomerPreviews } from "./customer-previews";
 import { registerDocumentActivity } from "./document-activity";
@@ -841,6 +842,7 @@ export function registerRoutes(app: Express): void {
   registerMarketingRoutes(app);
   registerGrowthRoutes(app);
   registerCrmRoutes(app);
+  registerContacts(app);
   registerInsightRoutes(app);
   registerPmRoutes(app);
   registerHrRoutes(app);
