@@ -37,6 +37,7 @@ const CrmOverviewPage = lazy(() => import("./pages/crm/index"));
 const CustomerPreviewsPage = lazy(() => import("./pages/crm/customer-previews"));
 const DesignStudioPage = lazy(() => import("./pages/design-studio"));
 const CrmLeadsPage = lazy(() => import("./pages/crm/leads"));
+const ContactsPage = lazy(() => import("./pages/contacts"));
 const CrmClientsPage = lazy(() => import("./pages/crm/clients"));
 const CrmQuoteBuilderPage = lazy(() => import("./pages/crm/quotes"));
 const MarketingPage = lazy(() => import("./pages/marketing/index"));
@@ -165,6 +166,7 @@ export default function App() {
           <Route path="/crm/leads">
             <CrmLeadsPage />
           </Route>
+          <Route path="/contacts"><ElevatedRoute><ContactsPage /></ElevatedRoute></Route>
           <Route path="/crm/clients">
             <CrmClientsPage />
           </Route>
