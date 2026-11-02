@@ -647,7 +647,9 @@ export function registerMarketingRoutes(app: Express): void {
     if((req.body.published??before.published)&&!['owner','manager'].includes(req.user!.role))return res.status(403).json({message:'Publishing requires an owner or manager.'});
     let body;
     try {
-      body = insertPortfolioItemSchema.partial().parse(req.body);
+      const parsed = insertPortfolioItemSchema.partial().parse(req.body);
+      // Create defaults must not reset fields omitted from a partial edit.
+      body = Object.fromEntries(Object.entries(parsed).filter(([key]) => Object.hasOwn(req.body,key))) as typeof parsed;
       const merged={...before,...body};
       if(merged.projectId){const job=storage.getProjectById(merged.projectId);if(!job||job.site!==merged.site)throw new Error('The website must match the linked job.');if(merged.published&&merged.workType==='completed'&&job.status!=='done')throw new Error('Complete the linked job before publishing finished work.');}
       validatePublication(merged,req.body?.approved);
