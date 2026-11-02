@@ -39,7 +39,7 @@ export const orderInputSchema = z.object({
     customerPoNumber: text(100), customerProjectNumber: text(100),
     items: z.preprocess(v => typeof v === 'string' ? JSON.parse(v) : v, z.array(orderLineSchema).min(1).max(200)),
     expectedDate: calendarDate.nullable().optional(), notes: text(10000).nullable().optional(),
-    details: orderDetailsSchema.default({}), discountCents: cents.default(0), shippingCents: cents.default(0),
+    details: orderDetailsSchema.prefault({}), discountCents: cents.default(0), shippingCents: cents.default(0),
     taxRateBp: z.number().int().min(0).max(10000).default(0), taxShipping: z.boolean().default(false),
     depositCents: cents.default(0),
 }).strict();

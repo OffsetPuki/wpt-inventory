@@ -305,7 +305,7 @@ export const insertTransactionSchema = z.object({
 
 export const fromTemplateSchema = z.object({
   templateKey: z.string().min(1),
-  params: z.record(z.any()),
+  params: z.record(z.string(), z.any()),
   jobNumber: z.string().min(1),
   name: z.string().min(1),
   customer: z.string().optional(),
