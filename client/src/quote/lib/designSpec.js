@@ -348,6 +348,19 @@ export function parseLead(lead) {
       // Sister-site envelopes: the concrete/insulation calculators' verbatim
       // estimateState, and the trades planner's planState.
       if (parsed && parsed.type === 'concrete-calculator' && parsed.state && typeof parsed.state === 'object') {
+        // Total area cannot determine perimeter, joint layout or rebar lengths.
+        // Keep the inquiry intact for a custom quote rather than inventing a 30×20 slab.
+        if (parsed.state.sizeMode === 'area') {
+          const area = inRange(parsed.state.squareFeet, 4, 40000);
+          const title = area ? `Concrete — ${area} sq ft` : 'Concrete — area to confirm';
+          return {
+            type: 'custom',
+            state: {...defaultState('custom'), title},
+            warnings: ['Area-only request. Confirm length and width before preparing a material takeoff.'],
+            hasSpec: false,
+            notes: String(lead?.designSpec || '').trim() || title,
+          };
+        }
         return { type: 'concrete', state: concreteFromEnvelope(parsed.state), warnings: [], hasSpec: true };
       }
       if (parsed && parsed.type === 'insulation-calculator' && parsed.state && typeof parsed.state === 'object') {

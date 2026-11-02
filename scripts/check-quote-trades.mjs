@@ -166,6 +166,13 @@ console.log('\nWebsite designState envelopes:');
   check('lengths ride through', concrete?.state.lengthFt === 40 && concrete?.state.widthFt === 18, JSON.stringify(concrete?.state));
   check('thickness / finish ride through', concrete?.state.thickness === 5 && concrete?.state.finish === 'stamped');
   check('booleans land as segment values', concrete?.state.demo === 'yes' && concrete?.state.rebar === 'yes');
+  const areaOnly = parseLead({
+    ref:'CJC-D7K2Q',service:'Driveway',designSpec:'Driveway — 753.25 sq ft; stamped, 6 inches; dimensions to be confirmed.',
+    designState:JSON.stringify({type:'concrete-calculator',ref:'CJC-D7K2Q',state:{project:'driveway',sizeMode:'area',squareFeet:753.25,finish:'stamped',thickness:6}})
+  });
+  check('area-only request keeps its scope for a custom quote',areaOnly?.type==='custom'&&areaOnly.state.title.includes('753.25'));
+  check('area-only import never invents dimensions',areaOnly?.state.lengthFt===undefined&&areaOnly?.state.widthFt===undefined&&areaOnly.warnings.length>0);
+  check('area-only options remain in the quote notes',areaOnly?.notes.includes('stamped, 6 inches'));
 
   // Junk values clamp to the defaults instead of poisoning the estimate.
   const junk = parseLead({

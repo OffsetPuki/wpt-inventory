@@ -592,7 +592,7 @@ export function registerPublicRoutes(app: Express): void {
         brand:({metals:"CJM Metals",concrete:"CJM Concrete",insulation:"CJM Insulation",trades:"CJM Trades"})[site],
         firstName: firstNameOf(body.name),
         service: body.service || body.message || "your project",
-        refLine: body.designRef ? (body.lang === "es" ? `Tu código de proyecto es ${body.designRef}.\n` : `Your project code is ${body.designRef}.\n`) : "",
+        refLine: body.designRef && site !== "concrete" ? (body.lang === "es" ? `Tu código de proyecto es ${body.designRef}.\n` : `Your project code is ${body.designRef}.\n`) : "",
       });
       if (msg) {
         queueMail({ to: body.email!, ...msg, deliveryKey:`lead-intake-customer:${row.id}` });
