@@ -7,6 +7,8 @@ const t=await testApp();const {api,owner,sqlite}=t;
 const key={'X-Lead-Key':'test-intake-key'};
 const token=crypto.randomBytes(32).toString('hex');
 const request={name:'Synthetic lead',email:'lead@example.test',site:'concrete',submissionId:crypto.randomUUID(),receiptToken:token,contact:'Email',bestTime:'After 3 pm',area:'Arlington',utm:{source:'google',campaign:'synthetic-driveways'},qualification:{removal:'Yes',dimensions:'20 x 30 ft'}};
+// Exercise intake for an explicitly active site in this disposable fixture.
+sqlite.prepare("UPDATE website_availability SET active=1 WHERE site='insulation'").run();
 try{
  const intake=await api('/api/public/leads','POST',request,null,key);assert.equal(intake.status,201);assert.equal(intake.data.receiptEnabled,true);const id=intake.data.id;
  const duplicate=await api('/api/public/leads','POST',request,null,key);assert.equal(duplicate.data.id,id);assert.equal(duplicate.data.deduped,true);assert.equal(duplicate.data.receiptEnabled,true);

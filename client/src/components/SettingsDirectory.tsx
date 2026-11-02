@@ -3,7 +3,7 @@ import {Link} from 'wouter';
 import {useQuery} from '@tanstack/react-query';
 import {apiRequest} from '@/lib/queryClient';
 const entries=[
- {group:'Websites',name:'Activate or deactivate Insulation website',detail:'Keep the business in the Suite while controlling its public website.',href:'#website-availability'},
+ {group:'Websites',name:'Websites, previews & trade visibility',detail:'Control all CJM websites, verify live status and review search cleanup.',href:'/websites'},
  {group:'Company',name:'Branding, logo & documents',detail:'Company-wide appearance and paperwork.',href:'#company-branding'},
  {group:'Company',name:'Backups & recovery',detail:'Download a complete copy and check restore evidence.',href:'#business-backup'},
  {group:'Company',name:'Connections & delivery problems',detail:'Review missing links, payment exceptions and failed email.',href:'/suite-health'},

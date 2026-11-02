@@ -5,6 +5,7 @@ import {testApp} from '../scripts/test-app.mjs';
 test('Website request opens from Today beyond the list page; contact and qualification stay connected',async({page})=>{
  test.setTimeout(90000);
  const app=await testApp({serve:true});
+ app.sqlite.prepare("UPDATE website_availability SET active=1 WHERE site='insulation'").run();
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  try{
   app.sqlite.prepare("UPDATE users SET credential_type='password',totp_secret='JBSWY3DPEHPK3PXP' WHERE id=1").run();

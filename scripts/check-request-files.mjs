@@ -6,6 +6,8 @@ import {testApp} from './test-app.mjs';
 import {restoreBackup} from './restore-backup.mjs';
 const app=await testApp(),{api,owner,sqlite}=app,key={'X-Lead-Key':'test-intake-key'};
 const file=(name,bytes)=>({name,data:Buffer.from(bytes).toString('base64')});
+// These upload cases exercise the explicitly activated site, using only fixture data.
+sqlite.prepare("UPDATE website_availability SET active=1 WHERE site='insulation'").run();
 try{
  const attachmentDir=path.join(process.env.DATA_DIR,'lead-files');
  for(const site of ['metals','concrete','insulation','trades']){

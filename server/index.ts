@@ -70,7 +70,7 @@ app.use(
             objectSrc: ["'none'"],
             frameAncestors: ["'none'"],
             baseUri: ["'self'"],
-            formAction: ["'self'"],
+            formAction: ["'self'", "https://www.cjmmetals.com", "https://www.cjm-concrete.com", "https://www.cjmtrades.com", "https://www.cjminsulation.com"],
             // CSP violations get POSTed here so we know if something tried
             // an injection attack that the CSP blocked.
             reportUri: ["/api/security/csp-report"],

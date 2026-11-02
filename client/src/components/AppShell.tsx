@@ -152,6 +152,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { to: "/audit", label: "Audit Log", icon: ShieldCheck, needs: "elevated" },
       { to: "/trash", label: "Trash", icon: Trash2, needs: "elevated" },
       { to: "/admin/templates", label: "Job Templates", icon: Sparkles, needs: "elevated" },
+      { to: "/websites", label: "Websites", icon: Settings, needs: "elevated" },
       { to: "/settings", label: "Settings", icon: Settings, needs: "elevated" },
     ],
   },

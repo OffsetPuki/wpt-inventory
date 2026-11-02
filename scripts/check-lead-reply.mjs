@@ -6,6 +6,8 @@ const app = await testApp();
 const { api, owner, sqlite } = app;
 const key = { 'X-Lead-Key': 'test-intake-key' };
 const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=';
+// Exercise intake for an explicitly active site in this disposable fixture.
+sqlite.prepare("UPDATE website_availability SET active=1 WHERE site='insulation'").run();
 try {
   const created = await api('/api/users', 'POST', { name: 'Reply worker', pin: '3456', role: 'worker' }, owner);
   assert.equal(created.status, 201);

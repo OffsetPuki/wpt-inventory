@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import {testApp} from './test-app.mjs';
 const app=await testApp();const {api,owner,sqlite}=app;
+// Exercise intake for an explicitly active site in this disposable fixture.
+sqlite.prepare("UPDATE website_availability SET active=1 WHERE site='insulation'").run();
 try {
  const {safeGooglePage}=await import('../server/google-reporting.ts');
  const {recordReportingStatus,reportingStatus}=await import('../server/reporting-status.ts');
