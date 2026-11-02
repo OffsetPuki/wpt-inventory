@@ -1,4 +1,5 @@
 import {registerOperationalStatus} from './operational-status';
+import {registerWebsiteAvailability} from './website-availability';
 import { registerEmployeeBoundary, registerEmployeeRoutes } from './employee';
 import { employeeFileAllowed } from './employee-data';
 import {registerInsightRoutes} from './insights';
@@ -126,6 +127,7 @@ const DUMMY_BCRYPT_HASH = bcrypt.hashSync("__nobody__", 10);
 
 export function registerRoutes(app: Express): void {
   registerOperationalStatus(app);
+  registerWebsiteAvailability(app);
   sqlite.exec('CREATE TABLE IF NOT EXISTS suite_template_runs(project_id INTEGER PRIMARY KEY,template_key TEXT NOT NULL,template_version TEXT NOT NULL,definition_json TEXT NOT NULL,parameters_json TEXT NOT NULL,created_at INTEGER NOT NULL)');
   registerEmployeeBoundary(app);
   registerEmployeeRoutes(app);
