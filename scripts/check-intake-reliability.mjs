@@ -48,5 +48,14 @@ try {
  assert.equal(app.sqlite.prepare('SELECT site FROM crm_leads WHERE id=?').get(trade.data.id).site,'trades');
  const context=JSON.parse(app.sqlite.prepare('SELECT context FROM crm_lead_intake WHERE lead_id=?').get(trade.data.id).context);
  assert.deepEqual(context.requestedTrades,['concrete']);assert.equal(context.fulfillmentTeam,'concrete');
- console.log('Photo/snapshot email delivery, rollback cleanup, retry conflicts and source/fulfillment separation passed.');
+ const concreteRef='CJC-PAB12',concreteState=JSON.stringify({type:'concrete-calculator',ref:concreteRef,state:{sizeMode:'area',squareFeet:753.25,project:'patio',finish:'stamped'}});
+ const concrete=await post({name:'Concrete area fixture',email:'area@example.invalid',site:'concrete',designRef:concreteRef,designSpec:'Patio — 753.25 sq ft, stamped; dimensions to confirm.',designState:concreteState,submissionId:crypto.randomUUID()});
+ assert.equal(concrete.status,201);
+ const savedConcrete=app.sqlite.prepare('SELECT ref,design_state FROM web_designs WHERE lead_id=?').get(concrete.data.id);
+ assert.equal(savedConcrete.ref,concreteRef);assert.equal(savedConcrete.design_state,concreteState);
+ const ownerConcrete=JSON.parse(app.sqlite.prepare('SELECT payload FROM suite_mail WHERE key=?').get('lead-intake-owner:'+concrete.data.id).payload);
+ const customerConcrete=JSON.parse(app.sqlite.prepare('SELECT payload FROM suite_mail WHERE key=?').get('lead-intake-customer:'+concrete.data.id).payload);
+ assert.ok(JSON.stringify(ownerConcrete).includes(concreteRef),'Owner retains the design code');
+ assert.ok(!JSON.stringify(customerConcrete).includes(concreteRef),'Customer confirmation omits the design code');
+ console.log('Photo/snapshot email delivery, rollback cleanup, retry conflicts, concrete area handoff and source/fulfillment separation passed.');
 } finally {await app.close();}

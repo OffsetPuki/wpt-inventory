@@ -67,7 +67,8 @@ try {
   assert.equal(out.receipt.entries.reduce((n,e)=>n+e.duration_min,0),60);assert.equal(out.receipt.entries.filter(e=>e.work_kind==='unpaid_meal').length,1);
   assert.equal((await call('/api/employee/home','GET',undefined,token)).lastProjectId,job.id);
   const current=await call(`/api/employee/hours?from=${dayKey(actualNow())}&to=${dayKey(now)}`,'GET',undefined,token);
-  assert.ok(Math.abs(current.totals.pending-60)<1e-8,'Pending minutes remain one hour across midnight');assert.equal(current.totals.unpaid,15);
+  // Cross-midnight segments can sum to 60.00000000000001 on the CI runtime.
+  assert.ok(Math.abs(current.totals.pending-60)<1e-9,'Pending time must total 60 minutes');assert.equal(current.totals.unpaid,15);
   initializeEmployeeTime();initializeEmployeeTime();assert.equal((await summary()).label,'Pay period','Migration preserves period settings');
   await call('/api/employee/clock-policy','POST',{breakPaid:true,mealPaid:false,periodFrom:null,periodTo:null});assert.equal((await call('/api/employee/home','GET',undefined,token)).period.label,'This week');
   console.log('Employee refinements passed: scoped period/day totals, cross-midnight payroll parity, statuses, clock receipt, next tasks, private photos, retry safety, rollback and owner follow-up.');
