@@ -2,6 +2,7 @@ import { applySuiteAccent } from "@/lib/theme-accent";
 import { useTheme } from "@/components/ThemeProvider";
 import { useEffect, useRef, useState } from "react";
 import SettingsDirectory from '@/components/SettingsDirectory';
+import WebsiteAvailability from '@/components/WebsiteAvailability';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getAuthToken } from "@/lib/queryClient";
 import { toast } from "@/components/ui/toaster";
@@ -259,6 +260,7 @@ export default function SettingsPage() {
       <Header title="Settings" description="Find company, team and website controls in one place." />
       <SettingsDirectory />
       <div className="flex flex-col gap-5">
+        <WebsiteAvailability />
         <div id="company-branding" className="scroll-mt-24"><BrandingTab /></div>
         {/* Phase G #4: the owner's own COI/W-9 — GCs ask for these on every
             commercial bid, so they live here ready to download and send. */}

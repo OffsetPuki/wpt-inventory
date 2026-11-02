@@ -118,8 +118,8 @@ export const insertQuoteSchema = createInsertSchema(quotes).extend({type: z.enum
 });
 
 export const quoteSettingsSchema = z.object({
-  priceBook: z.record(z.unknown()),
-  shop: z.record(z.unknown()),
+  priceBook: z.record(z.string(), z.unknown()),
+  shop: z.record(z.string(), z.unknown()),
 });
 
 // ─── Types ───────────────────────────────────────────────────────────────────

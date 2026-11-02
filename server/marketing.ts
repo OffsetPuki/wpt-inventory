@@ -648,6 +648,9 @@ export function registerMarketingRoutes(app: Express): void {
     let body;
     try {
       body = insertPortfolioItemSchema.partial().parse(req.body);
+      // Zod 4 applies inner defaults in optional fields. A PATCH must only
+      // change explicitly submitted fields, never reset other portfolio data.
+      body = Object.fromEntries(Object.entries(body).filter(([key]) => Object.hasOwn(req.body, key)));
       const merged={...before,...body};
       if(merged.projectId){const job=storage.getProjectById(merged.projectId);if(!job||job.site!==merged.site)throw new Error('The website must match the linked job.');if(merged.published&&merged.workType==='completed'&&job.status!=='done')throw new Error('Complete the linked job before publishing finished work.');}
       validatePublication(merged,req.body?.approved);
