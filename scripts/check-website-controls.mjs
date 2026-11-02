@@ -17,6 +17,7 @@ try{
  assert.equal((await app.api(path,'PUT',{active:true,version:status.version},app.owner)).status,422,'Broken private preview blocks activation');
  assert.equal((await app.api(pub)).data.active,false);
  network.setBrokenPreview(false);
+ for(const site of ['metals','concrete','trades','insulation'])assert.equal((await app.api('/api/settings/websites/'+site+'/check','POST',{preview:true},app.owner)).data.confirmed,true,site+' preflight uses an existing service page');
  let saved=await app.api(path,'PUT',{active:true,version:status.version},app.owner);assert.equal(saved.status,200);assert.equal(saved.data.active,true);
  const {registerWebsiteAvailability}=await import('../server/website-availability.ts');registerWebsiteAvailability(express());
  assert.equal((await app.api(pub)).data.active,true,'Restart preserves published choice');

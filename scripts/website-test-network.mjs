@@ -9,6 +9,8 @@ export function websiteTestNetwork(app){
   if(address.pathname==='/__cjm/status')return Response.json({site,active:entry.active,revision:stale?0:policy.revision,durable:true,syncHealthy:true});
   if(preview&&address.pathname==='/api/quote')return new Response('Read only',{status:403,headers:{'X-CJM-Preview':'true'}});
   if(preview&&brokenPreview)return new Response('Missing asset',{status:404});
+  const servicePaths={metals:'/services/custom-gates',concrete:'/services/concrete-driveways',trades:'/plan',insulation:'/services/pipe-insulation'};
+  if(!['/','/es/','/test.js',servicePaths[site]].includes(address.pathname))return new Response('Missing page',{status:404});
   if(preview||entry.active)return new Response('<html><head><script src="/test.js"></script></head><body>'+(preview?'<aside id="cjm-private-preview">Private preview</aside>':'')+'Website</body></html>',{status:200});
   return new Response('Unavailable',{status:410,headers:{'X-Robots-Tag':'noindex'}});
  };
