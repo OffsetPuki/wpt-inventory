@@ -124,7 +124,8 @@ test('HTML options run interactively in an isolated preview and publish as plain
  await page.route(app.base+'/',async route=>{const response=await route.fetch();await route.fulfill({response,headers:{...response.headers(),'content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self'; img-src 'self' data: blob:"}});});
  await page.goto(app.base+'/#/crm/previews');await page.getByRole('button',{name:'New preview',exact:true}).click();
  const dialog=page.getByRole('dialog');await dialog.getByLabel('Project title',{exact:true}).fill('HTML fixture');
- await dialog.getByLabel('Upload HTML file',{exact:true}).setInputFiles({name:'design.html',mimeType:'text/html',buffer:Buffer.from('<!doctype html><html><body><button onclick="this.textContent=\'Changed\'">Change color</button><script>try{parent.document.body.dataset.compromised="yes"}catch(e){}</script></body></html>')});
+ await expect(dialog.getByText(/Up to 25 MB; include its images and scripts/)).toBeVisible();
+ await dialog.getByLabel('Upload HTML file',{exact:true}).setInputFiles({name:'design.html',mimeType:'text/html',buffer:Buffer.from('<!doctype html><html><body><button onclick="this.textContent=\'Changed\'">Change color</button><script>try{parent.document.body.dataset.compromised="yes"}catch(e){}</script><!--'+' '.repeat(6*1024*1024)+'--></body></html>')});
  await dialog.getByRole('button',{name:'Create preview',exact:true}).click();
  const frame=page.frameLocator('iframe[title="Interactive HTML design"]');await frame.getByRole('button',{name:'Change color'}).click();await expect(frame.getByRole('button',{name:'Changed'})).toBeVisible();
  expect(await page.locator('body').getAttribute('data-compromised')).toBeNull();

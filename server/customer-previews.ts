@@ -167,7 +167,7 @@ function current(req: Request, res: Response, p: Preview): boolean {
 }
 function validatePreviewFile(bytes:Buffer,kind:string){
  if(kind==='glb'){validatePreviewGlb(bytes);return;}
- if(bytes.length>5*1024*1024)throw new Error('Choose an HTML file smaller than 5 MB.');
+ if(bytes.length>MAX_BYTES)throw new Error('Choose an HTML file up to 25 MB.');
  const html=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
  if(!/<(?:!doctype\s+html|html|body|div|canvas|main|section)\b/i.test(html)||html.includes('\0'))throw new Error('Choose a valid UTF-8 HTML document.');
 }
@@ -434,7 +434,7 @@ export function registerCustomerPreviews(app: Express): void {
   });
   app.post('/api/customer-previews/:id/models',requireElevated,(req,res) => {
     upload(req,res,(err:any) => {
-      if(err){res.status(400).json({message:err.code==='LIMIT_FILE_SIZE'?'Choose a model smaller than 25 MB.':'Upload one GLB model at a time.'});return;}
+      if(err){res.status(400).json({message:err.code==='LIMIT_FILE_SIZE'?'Choose a GLB or HTML file up to 25 MB.':'Upload one GLB or HTML file at a time.'});return;}
       const p=record(req,res);if(!p||!current(req,res,p))return;
       const label=z.string().trim().min(1).max(60).safeParse(req.body.label);
       if(!label.success||!req.file||!/\.(glb|html?)$/i.test(req.file.originalname)){res.status(400).json({message:'Choose a GLB or HTML file and give the option a name.'});return;}

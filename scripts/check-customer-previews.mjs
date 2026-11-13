@@ -7,6 +7,25 @@ const {api,owner,base,sqlite}=app;
 const key={'X-Lead-Key':'test-intake-key'};
 const model=fs.readFileSync(new URL('../server/preview-seeds/kalkat-5.glb',import.meta.url));
 try{
+  // HTML uses the same 25 MiB boundary for new options and replacements.
+  let htmlPreview=(await api('/api/customer-previews','POST',{title:'Large HTML upload boundary'},owner)).data;
+  const htmlUpload=async(bytes,replace=false)=>{
+    const form=new FormData();form.append('model',new Blob([bytes]),'design.html');form.append('label','Interactive design');form.append('version',String(htmlPreview.version));
+    const suffix=replace?`/models/${htmlPreview.options[0].id}/replace`:'/models';
+    const response=await fetch(`${base}/api/customer-previews/${htmlPreview.id}${suffix}`,{method:'POST',headers:{'X-Auth':owner},body:form});
+    return {status:response.status,data:await response.json()};
+  };
+  const htmlBytes=size=>{const open='<!doctype html><html><body>',close='</body></html>';return Buffer.from(open+' '.repeat(size-open.length-close.length)+close);};
+  let htmlResult=await htmlUpload(htmlBytes(6*1024*1024));assert.equal(htmlResult.status,201);htmlPreview=htmlResult.data;
+  const limitHtml=htmlBytes(25*1024*1024);assert.equal(limitHtml.length,25*1024*1024);
+  htmlResult=await htmlUpload(limitHtml,true);assert.equal(htmlResult.status,200);htmlPreview=htmlResult.data;
+  assert.equal(htmlPreview.options[0].size,limitHtml.length);
+  const overLimit=Buffer.concat([limitHtml,Buffer.from(' ')]);
+  for(const replace of [false,true]){
+    htmlResult=await htmlUpload(overLimit,replace);assert.equal(htmlResult.status,400);assert.match(htmlResult.data.message,/25 MB/);
+  }
+  const afterRejected=(await api(`/api/customer-previews/${htmlPreview.id}`,'GET',undefined,owner)).data;
+  assert.equal(afterRejected.version,htmlPreview.version);assert.equal(afterRejected.options.length,1);assert.equal(afterRejected.options[0].size,limitHtml.length);
   assert.equal((await api('/api/customer-previews')).status,401);
   assert.equal((await api('/api/users','POST',{name:'Preview Worker',pin:'1111',role:'worker'},owner)).status,201);
   const worker=await api('/api/auth/login','POST',{name:'Preview Worker',pin:'1111'});assert.equal(worker.status,200);
