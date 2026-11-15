@@ -32,6 +32,8 @@ try {
     crm_lead_files: {id:crypto.randomUUID(),name:'plan.pdf',size:10,created_at:Date.now()},
   };
   for (const [table, values] of Object.entries(refs)) insert(table, { lead_id: source, ...values });
+  const poolReceipt={submission_id:crypto.randomUUID(),payload_hash:'unchanged-pool-hash',reference:'CJM-POOL-MERGE',quote_id:sqlite.prepare("SELECT id FROM quotes WHERE number='Q-MERGE'").get().id,total_cents:120000,catalog_version:'merge-test',created_at:Date.now()};
+  insert('pool_requests',{lead_id:source,...poolReceipt});
   insert('crm_activities', { entity_type: 'lead', entity_id: source, kind: 'call', notes: 'Spoke about fence', user_id: 1 });
   insert('crm_activities', { entity_type: 'lead', entity_id: target, kind: 'note', notes: 'Quoted fence', user_id: 1 });
   insert('crm_lead_intake', { lead_id: source, context: '{"contact":"Text","qualification":{"dimensions":"20 feet","budget":"1000"}}', first_contact_at: 30000, survey_at: 80000, updated_at: 30000 });
@@ -103,6 +105,7 @@ try {
   const nextPreview = await preview(target, next);
   assert.equal((await merge(body(target, next, nextPreview.data.version))).status, 200);
   assert.equal((await api(`/api/crm/leads/${source}`, 'GET', undefined, owner)).data.id, next, 'Chains of merges retain old links');
+  assert.deepEqual(sqlite.prepare('SELECT * FROM pool_requests WHERE submission_id=?').get(poolReceipt.submission_id),{...poolReceipt,lead_id:next},'Pool retry receipt follows merged leads without changing its quote, amount or original payload');
   assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM mk_lead_attribution WHERE lead_id=?').get(next).n, 1, 'Original attribution moves when survivor has none');
   const a = lead({ client_id: insert('crm_clients', { name: 'Customer A' }) }), c = lead({ client_id: insert('crm_clients', { name: 'Customer B' }) });
   assert.equal((await preview(a, c)).status, 400, 'Do not silently join different customer accounts');
