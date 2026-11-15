@@ -247,6 +247,7 @@ function appendLeadPhoto(leadId: number, url: string): void {
 // screen expects — served by the authenticated lookup in quotes.ts.
 export function webDesignRowToLead(d: any) {
   return {
+    ...(d.source_tool==='configurator-pool'?{poolQuoteId:(sqlite.prepare('SELECT id FROM quotes WHERE design_ref=? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1').get(d.ref) as {id:number}|undefined)?.id??null}:{}),
     time: new Date(d.created_at).toISOString(),
     type: "lead",
     ref: d.ref,

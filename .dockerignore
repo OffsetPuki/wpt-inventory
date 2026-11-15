@@ -15,3 +15,4 @@ scripts/connect-bing-local.mjs
 scripts/preview-search-report.mjs
 scripts/preview-ai-report.mjs
 scripts/check-marketing-preview.mjs
+scripts/prepare-pool-review.mjs

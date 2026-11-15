@@ -88,6 +88,18 @@ export const quoteSettings = sqliteTable("quote_settings", {
   updatedAt: integer("updated_at"), // unix ms
 });
 
+// Website intake receipt; declared here so schema tooling preserves retry history.
+export const poolRequests = sqliteTable('pool_requests', {
+  submissionId: text('submission_id').primaryKey(),
+  payloadHash: text('payload_hash').notNull(),
+  reference: text('reference').notNull().unique(),
+  leadId: integer('lead_id').notNull(),
+  quoteId: integer('quote_id').notNull(),
+  totalCents: integer('total_cents').notNull(),
+  catalogVersion: text('catalog_version').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
 export const insertQuoteSchema = createInsertSchema(quotes).extend({type: z.enum(QUOTE_TYPES)}).omit({

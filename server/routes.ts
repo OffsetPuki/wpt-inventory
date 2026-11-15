@@ -44,6 +44,7 @@ import { registerPayRoutes } from "./pay";
 // Quote builder (ported CJM Quote app). Imports public-api's web_designs row
 // mapper, so it loads after public-api's DDL has created that table.
 import { registerQuoteRoutes } from "./quotes";
+import { registerPoolRequestRoutes } from "./pool-requests";
 // DB snapshot download + status (Phase E) — owner-only.
 import { registerBackupRoutes } from "./backup";
 import { registerEmailTemplateRoutes } from "./email-templates-routes";
@@ -852,6 +853,7 @@ export function registerRoutes(app: Express): void {
   registerSearchRoutes(app);
   registerPublicRoutes(app);
   registerQuoteRoutes(app);
+  registerPoolRequestRoutes(app);
   registerPublicPortalRoutes(app);
   registerPayRoutes(app);
   registerBackupRoutes(app);

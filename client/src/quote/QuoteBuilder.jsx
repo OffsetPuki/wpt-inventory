@@ -44,6 +44,8 @@ import {scopeIssues} from './lib/barndoQuote.js';
 import Home from "./components/Home.jsx";
 import Configurator from "./components/Configurator.jsx";
 import {QuoteTools} from './components/QuoteTools.jsx';
+import PoolRequestSummary from './components/PoolRequestSummary.jsx';
+import PoolQuoteEditor from './components/PoolQuoteEditor.jsx';
 const QuoteForm = lazy(() => import("./components/QuoteForm.jsx"));
 const QuoteOptions = lazy(() => import('./components/QuoteOptions.jsx'));
 const PriceBookPanel = lazy(() => import("./components/PriceBookPanel.jsx"));
@@ -103,6 +105,7 @@ function migrateSession(sess, priceBook) {
   const legacy = sess.markupPct;
   return {
     ...sess,
+    ...(sess.pool?{overrides:{...sess.overrides,items:{...sess.overrides?.items,consumables:{removed:true}}}}:{}),
     state: sess.type === 'table'
       ? { includeTop: 'no', topMaterial: '', topCost: '', ...sess.state }
       : sess.state,
@@ -258,7 +261,7 @@ export default function QuoteBuilder({ initialSettings }) {
   // "Did you forget?" checklist + the per-material purchase totals (cut list).
   const warnings = useMemo(
     () =>
-      session && lineState
+      session && lineState && !session.pool
         ? [...deriveWarnings(session.type, session.state, lineState, {
             pricingRulesVersion: session.pricingRulesVersion,
             materialMarkupPct: session.materialMarkupPct,
@@ -681,8 +684,10 @@ export default function QuoteBuilder({ initialSettings }) {
           <Costing priceBook={priceBook} onChangePriceBook={updatePriceBook} />
         )}
         {activeView==='options'&&session?.quoteId&&<QuoteOptions quoteId={session.quoteId} onBack={()=>setView('configure')} onShared={()=>setSession(s=>({...s,quoteStatus:'sent'}))} onDone={issued} />}
+        {session && ['configure','price','details'].includes(activeView) && <PoolRequestSummary pool={session.pool}/>}
         {session && ['configure','price','details'].includes(activeView) && <QuoteTools key={`tools-${session.sid}`} session={session} onDuplicate={duplicateCurrent} onAlternative={createAlternative} onCompare={compareOptions} busy={copyBusy} />}
-        {["configure","price"].includes(activeView) && session && (
+        {["configure","price"].includes(activeView) && session?.pool && <PoolQuoteEditor lineState={lineState} totals={totals} taxPct={session.taxPct} discountPct={session.discountPct} onEditItem={editItem} onChangeTax={v=>patchSession({taxPct:v})} onChangeDiscount={v=>patchSession({discountPct:v})} onContinue={reviewQuote}/>}
+        {["configure","price"].includes(activeView) && session && !session.pool && (
           <Configurator
             estimate={session.costEstimate} onChangeEstimate={costEstimate=>setSession(s=>({...s,costEstimate}))}
             key={`configure-${session.sid}-${activeView}`}

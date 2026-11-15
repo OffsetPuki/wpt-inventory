@@ -185,7 +185,7 @@ const NUMBER_START = 631;
 // at 631, and a number a customer is holding must never be handed out twice.
 // One continuous ledger across years (the tail always starts at offset 8), so
 // January doesn't reset the count.
-function insertQuoteWithNumber(
+export function insertQuoteWithNumber(
   values: Omit<typeof quotes.$inferInsert, "number">,
 ): typeof quotes.$inferSelect {
   return insertNumbered(
@@ -404,7 +404,8 @@ export function registerQuoteRoutes(app: Express): void {
           totalCents: q.totalCents,
           projectId: project?.id ?? null,
           projectStatus: project?.status ?? null,
-          quoted: { materialCents, shopHours, installHours, laborCents },
+          // A website pool import contains selling prices, not a costed BOM.
+          quoted: sess.pool ? {materialCents:null,shopHours:null,installHours:null,laborCents:null,missing:true} : { materialCents, shopHours, installHours, laborCents },
           actual,
         });
       } catch {

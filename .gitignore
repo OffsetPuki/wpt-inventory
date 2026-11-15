@@ -8,6 +8,8 @@ dist/
 *.db-wal
 .env
 .env.*
+# Disposable local review account; never part of a release.
+/scripts/prepare-pool-review.mjs
 *.log
 .DS_Store
 

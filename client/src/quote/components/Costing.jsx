@@ -47,7 +47,7 @@ function Variance({ quoted, actual }) {
 
 function Row({ r }) {
   const actualHours = r.actual ? round2(r.actual.laborMinutes / 60) : null;
-  const quotedHours = round2((r.quoted.shopHours || 0) + (r.quoted.installHours || 0));
+  const quotedHours = r.quoted.missing ? null : round2((r.quoted.shopHours || 0) + (r.quoted.installHours || 0));
   return (
     <div className="line">
       <div className="line-name">
@@ -61,7 +61,7 @@ function Row({ r }) {
         <span className="line-field">
           <label>Materials — quoted / actual</label>
           <span>
-            ${fmtMoney(r.quoted.materialCents / 100)}
+            {r.quoted.missing ? 'Not costed' : '$'+fmtMoney(r.quoted.materialCents / 100)}
             {' / '}
             {r.actual ? `$${fmtMoney(r.actual.materialCents / 100)} ` : '— '}
             <Variance quoted={r.quoted.materialCents} actual={r.actual?.materialCents ?? null} />
@@ -70,7 +70,7 @@ function Row({ r }) {
         <span className="line-field">
           <label>Labor hrs — quoted / actual</label>
           <span>
-            {quotedHours}
+            {quotedHours ?? 'Not costed'}
             {' / '}
             {actualHours != null ? `${actualHours} ` : '— '}
             <Variance quoted={quotedHours} actual={actualHours} />
@@ -79,7 +79,7 @@ function Row({ r }) {
         <span className="line-field">
           <label>Labor $ — quoted / actual {r.actual?.missingRateMinutes>0 ? "(rate missing)" : ""}</label>
           <span>
-            ${fmtMoney(r.quoted.laborCents / 100)}
+            {r.quoted.missing ? 'Not costed' : '$'+fmtMoney(r.quoted.laborCents / 100)}
             {' / '}
             {r.actual ? `$${fmtMoney(r.actual.laborCostCents / 100)} ` : '— '}
             <Variance quoted={r.quoted.laborCents} actual={r.actual?.laborCostCents ?? null} />

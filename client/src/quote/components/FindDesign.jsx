@@ -57,14 +57,14 @@ function LeadCard({ lead, onStart, onDelete }) {
           )}
         </div>
 
-        {parsed && parsed.hasSpec && (
+        {parsed && parsed.hasSpec && lead.source!=='configurator-pool' && (
           <div className="lead-preview">
             <Preview type={parsed.type} state={parsed.state} />
           </div>
         )}
       </div>
 
-      {parsed ? (
+      {lead.poolQuoteId ? <a className="btn block" href={`/#/crm/quotes?quote=${lead.poolQuoteId}`}>Open saved pool quote →</a> : lead.source==='configurator-pool' ? <p className="hint">This pool quote is in Trash. Restore it from Saved quotes to review its original prices.</p> : parsed ? (
         <button className="btn block" onClick={() => onStart(lead, parsed)}>
           Start {typeLabel(parsed.type).toLowerCase()} quote from this {parsed.hasSpec ? 'design' : 'lead'} <span aria-hidden="true">→</span>
         </button>

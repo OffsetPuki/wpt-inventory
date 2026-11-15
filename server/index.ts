@@ -140,13 +140,15 @@ seedDefaults();
 startSessionReaper();
 // THE hourly sweep (Package C folded the marketing sweep into it). Safe to
 // start here: every module's DDL already ran at import time.
-startBusinessAutomations();
+if(process.env.CJM_PRIVATE_REVIEW!=='1')startBusinessAutomations();
 
 // ── Register routes ──
 registerRoutes(app);
+if(process.env.CJM_PRIVATE_REVIEW!=='1'){
   startLeadMeasurement();
   startGrowthReporting();
-startSuiteWorker();
+  startSuiteWorker();
+}
 // Dashboard "Needs attention" feed — reuses the sweep's queries (Phase D #20c).
 registerAttentionRoute(app);
 
@@ -164,7 +166,7 @@ registerLegalRoutes(app);
   }
 
   const PORT = parseInt(process.env.PORT || "5000", 10);
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, process.env.CJM_PRIVATE_REVIEW==='1'?'127.0.0.1':"0.0.0.0", () => {
     console.log(`\n  ◆ CJM Metals Business Suite`);
     console.log(`  ➜ Local:   http://localhost:${PORT}`);
     console.log(`  ➜ Mode:    ${isProd ? "production" : "development"}\n`);
