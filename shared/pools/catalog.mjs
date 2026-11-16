@@ -2,7 +2,7 @@
 // Preliminary USD planning allowances; not supplier quotes or engineering approval.
 import {courtSegments,courtOutline,planArea} from './court-plan.mjs';
 export const BRAND = { name: 'ORILLA', endorsement: 'By CJM Metals', email: 'support@cjmmetals.com', phone: '+12146039142' };
-export const VERSION = '2026-10-31.architecture';
+export const VERSION = '2026-11-15.site-included';
 export const CURRENCY = 'USD';
 export const WATER_DEPTHS = [4.5,5,6];
 export const STANDARD_DEPTH = 4.5;
@@ -22,11 +22,12 @@ export const MODELS = {
 };
 export const DEPTH_PRICES = {"patio":{"5":1600,"6":4750,"4.5":0},"terrace":{"5":2150,"6":6400,"4.5":0},"estate":{"5":2650,"6":7950,"4.5":0},"court":{"5":3450,"6":10350,"4.5":0}};
 export const HEAT_PUMP_PRICES = {"patio":4600,"terrace":4950,"estate":5950,"court":6150};
+// Standard site work is included in MODELS.base. Freight remains separate.
 export const SITE_RATES = {
-  patio:{freight:3500,crane:1250,foundation:2400,connections:1700,planning:1250},
-  terrace:{freight:4500,crane:1500,foundation:3200,connections:1900,planning:1250},
-  estate:{freight:6000,crane:2000,foundation:4200,connections:2200,planning:1500},
-  court:{freight:8000,crane:3000,foundation:5200,connections:2500,planning:1800}
+  patio:{freight:3500},
+  terrace:{freight:4500},
+  estate:{freight:6000},
+  court:{freight:8000}
 };
 export const FINISHES = {
   metal: { label: ['Painted metal', 'Metal pintado'], rate: 0, color: '#333c3a' },
@@ -89,7 +90,7 @@ export const PACKAGES = {
     side: { label: ['3 ft deck · side B', 'Terraza de 0.91 m · lado B'], byModel: {"patio":3700,"terrace":5250,"estate":6050,"court":6050}, depth: 3 }
   },
   stairs: {
-    none: { label: ['Local access · in site budget', 'Acceso local · en presupuesto de obra'], price: 0 },
+    none: { label: ['Standard exterior access · included', 'Acceso exterior estándar · incluido'], price: 0 },
     access: { label: ['Linear · wood-look treads', 'Linear · peldaños efecto madera'], detail:['Straight steel frame · 6 horizontal slats','Estructura recta de acero · 6 lamas horizontales'], fixed:1774.2, perRiser:282.26 },
     fold: { label: ['Fold · folded steel', 'Fold · acero plegado'], detail:['Closed metal treads and risers','Peldaños y contrahuellas de metal'], fixed:2177.42, perRiser:362.91 },
     turn: { label: ['Turn · L-shaped stair', 'Turn · escalera en L'], detail:['Corner landing · wood-look treads','Descanso en esquina · efecto madera'], fixed:2822.59, perRiser:322.59 },
@@ -166,24 +167,25 @@ export function groundPrice(c){
   return roundUp50(3548.39+yards*120.97+poolPerimeter(c)*40.33+(c.installation==='inground'?806.46:0));
 }
 export function siteBudget(c,lang='en'){
-  const r=SITE_RATES[c.model],m=MODELS[c.model],es=lang==='es',lines=[];
+  const r=SITE_RATES[c.model],es=lang==='es',lines=[];
   const add=(id,en,sp,total)=>{if(total>0)lines.push({id,label:es?sp:en,qty:1,unit:total,total,allowance:true});};
   add('freight','US freight allowance','Provisión para flete en EE. UU.',r.freight);
-  add('crane','Crane & unloading allowance','Provisión para grúa y descarga',r.crane);
-  add('foundation','Foundation & equipment pad','Cimentación y base de equipo',r.foundation+(c.decking==='side'?450:0)+(c.stairs!=='none'?250:0)+(c.stairs==='turn'&&stairRisers(c)>=4?250:0));
+  // Charge only work beyond the standard above-ground installation. The base
+  // already covers unloading, foundation/pad, basic connections, planning,
+  // standard barrier/access and their contingency. Do not add them again.
+  add('foundation','Extra deck & stair footings','Apoyos adicionales para terraza y escalera',(c.decking==='side'?450:0)+(c.stairs!=='none'?250:0)+(c.stairs==='turn'&&stairRisers(c)>=4?250:0));
   add('ground','Excavation, drainage & below-grade work','Excavación, drenaje y obra bajo terreno',groundPrice(c));
-  add('connections','Utility connections & commissioning','Conexiones y puesta en marcha',r.connections+(c.heating==='gas'?800:c.heating==='heatpump'?600:0));
-  add('planning','Site planning & permit allowance','Provisión para proyecto y permisos',r.planning);
-  add('barrier','Pool barrier & gate allowance','Provisión para barrera y puerta',round50((2*(m.length+m.width)+40)*30+500));
-  if(c.stairs==='none'&&c.installation!=='inground')add('local-access','Local exterior access allowance','Provisión para acceso exterior local',900+stairRisers(c)*200);
+  add('connections','Additional heater connections','Conexiones adicionales para calentador',c.heating==='gas'?800:c.heating==='heatpump'?600:0);
+  const standardRisers=stairRisers({...c,depth:STANDARD_DEPTH,installation:'above'});
+  if(c.stairs==='none'&&c.installation!=='inground')add('local-access','Extra access height','Altura adicional de acceso',Math.max(0,stairRisers(c)-standardRisers)*200);
   add('landscape','Patio & planting allowance','Provisión para patio y plantas',optionPrice('landscape',c.landscape,c));
-  const subtotal=lines.reduce((sum,l)=>sum+l.total,0);
-  add('site-reserve','Site contingency · 10%','Reserva para obra · 10%',round50(subtotal*.1));
+  const upgrades=lines.filter(l=>l.id!=='freight').reduce((sum,l)=>sum+l.total,0);
+  add('site-reserve','Site upgrades contingency · 10%','Reserva para mejoras de obra · 10%',round50(upgrades*.1));
   return lines;
 }
 export function quote(input,lang='en') {
   const c=normalize(input).config;const m=MODELS[c.model];const es=lang==='es';
-  const lines=[{id:'base',label:m.name+(es?' · paquete base':' · base package'),qty:1,unit:m.base,total:m.base}];
+  const lines=[{id:'base',label:m.name+(es?' · obra estándar incluida':' · standard site work included'),qty:1,unit:m.base,total:m.base}];
   const add=(id,label,price,qty=1)=>{if(price)lines.push({id,label,qty,unit:price,total:price*qty});};
   add('depth',es?'Profundidad de agua '+depthLabel(c.depth,lang):depthLabel(c.depth,lang)+' water depth',depthPrice(c));
   add('finish',localLabel(FINISHES[c.finish],lang),finishPrice(c.finish,c));
