@@ -17,6 +17,16 @@ const contact={name:'Pool integration test',email:'pool-review@example.invalid',
 const body=config=>({submissionId:crypto.randomUUID(),config,contact,lang:'en',consent:true,catalogVersion:VERSION,expectedTotal:quote(config).projectTotal});
 try{
  let combinations=0;
+ for(const model of Object.keys(MODELS)){
+  const config={...copyDefault(),model},estimate=quote(config);
+  assert.deepEqual(estimate.siteLines.map(l=>l.id),['freight'],'Standard site work must not be billed again');
+  assert.equal(estimate.total,MODELS[model].base);
+  const saved=createPoolRequest(body(config)),row=sqlite.prepare('SELECT * FROM quotes WHERE id=?').get(saved.quoteId),payload=JSON.parse(row.payload);
+  assert.equal(row.status,'draft');assert.equal(row.share_token,null);
+  assert.match(payload.notes,/Standard site work is included/);
+  const totals=computeTotals(buildLineState('custom',payload.state,payload.priceBookSnapshot,payload.overrides),{...payload,minJobCharge:0});
+  assert.equal(Math.round(totals.total*100),Math.round(estimate.projectTotal*100),'Draft must preserve site-inclusive starting price plus delivery');
+ }
  for(const model of Object.keys(MODELS))for(const [key,options] of Object.entries({finish:FINISHES,...PACKAGES}))for(const option of Object.keys(options)){
   const config=normalize({...copyDefault(),model,[key]:option}).config;
   assert.equal(preparePoolRequest(body(config)).estimate.projectTotal,quote(config).projectTotal);combinations++;
